@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { motion } from 'motion/react';
 import {
   DropdownMenu,
@@ -20,6 +21,7 @@ import { useReduceMotion } from './hooks';
  * visibility menu; when only one layout is enabled the control disappears.
  */
 export function LayoutModeSwitch({ className }: { className?: string }) {
+  const { t } = useTranslation('common');
   const layoutMode = useUiStore((state) => state.layoutMode);
   const enabledLayouts = useUiStore((state) => state.enabledLayouts);
   const setLayoutMode = useUiStore((state) => state.setLayoutMode);
@@ -41,7 +43,7 @@ export function LayoutModeSwitch({ className }: { className?: string }) {
     >
       <div
         role="group"
-        aria-label="Modo do aplicativo"
+        aria-label={t('layouts.groupAria')}
         onContextMenu={(event) => {
           event.preventDefault();
           setMenuPoint({ x: event.clientX, y: event.clientY });
@@ -51,13 +53,14 @@ export function LayoutModeSwitch({ className }: { className?: string }) {
           className,
         )}
       >
-        {visibleModes.map(({ value, label, title, icon: Icon }) => {
+        {visibleModes.map(({ value, labelKey, titleKey, icon: Icon }) => {
           const active = layoutMode === value;
+          const label = t(labelKey);
           return (
             <button
               key={value}
               type="button"
-              title={title}
+              title={t(titleKey)}
               aria-label={label}
               aria-pressed={active}
               onClick={() => setLayoutMode(value)}
@@ -87,7 +90,7 @@ export function LayoutModeSwitch({ className }: { className?: string }) {
             className="pointer-events-none fixed size-px overflow-hidden opacity-0"
             style={{ left: menuPoint?.x ?? 0, top: menuPoint?.y ?? 0 }}
           >
-            Layouts
+            {t('layouts.menuLabel')}
           </span>
         </DropdownMenuTrigger>
       </div>
@@ -97,14 +100,14 @@ export function LayoutModeSwitch({ className }: { className?: string }) {
         sideOffset={4}
         onCloseAutoFocus={(event) => event.preventDefault()}
       >
-        <DropdownMenuLabel>Layouts</DropdownMenuLabel>
-        {LAYOUT_MODES.map(({ value, label }) => (
+        <DropdownMenuLabel>{t('layouts.menuLabel')}</DropdownMenuLabel>
+        {LAYOUT_MODES.map(({ value, labelKey }) => (
           <DropdownMenuCheckboxItem
             key={value}
             checked={enabledLayouts[value]}
             onCheckedChange={(checked) => setLayoutEnabled(value, checked === true)}
           >
-            {label}
+            {t(labelKey)}
           </DropdownMenuCheckboxItem>
         ))}
       </DropdownMenuContent>

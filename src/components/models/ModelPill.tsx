@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ChevronDown, Lock, Search, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   defaultReasoningFor,
@@ -72,8 +73,6 @@ function domId(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
-const NO_REASONING_HINT = 'Este modelo não expõe controle de raciocínio';
-
 /** ChatGPT usage dashboard (same URL exposed by the provider console). */
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
@@ -129,16 +128,17 @@ interface KeyboardHintProps {
 
 /** Discreet keyboard legend shown in the popover footer. */
 function KeyboardHint({ commitLabel, dense = false }: KeyboardHintProps) {
+  const { t } = useTranslation('models');
   if (dense) {
     return (
       <span aria-hidden className="flex items-center gap-1 text-[10px] leading-none text-foreground-subtle">
-        <Kbd className="h-4 min-w-4 px-1 text-[10px]" title="Navegar">
+        <Kbd className="h-4 min-w-4 px-1 text-[10px]" title={t('picker.kbdNavigate')}>
           ↑↓
         </Kbd>
-        <Kbd className="h-4 min-w-4 px-1 text-[10px]" title="Aplicar">
+        <Kbd className="h-4 min-w-4 px-1 text-[10px]" title={t('picker.kbdApply')}>
           ↵
         </Kbd>
-        <Kbd className="h-4 min-w-4 px-1 text-[10px]" title="Fechar">
+        <Kbd className="h-4 min-w-4 px-1 text-[10px]" title={t('picker.kbdClose')}>
           Esc
         </Kbd>
       </span>
@@ -148,13 +148,13 @@ function KeyboardHint({ commitLabel, dense = false }: KeyboardHintProps) {
   return (
     <span aria-hidden className="flex items-center gap-1 text-[10px] text-foreground-subtle">
       <Kbd>↑↓</Kbd>
-      <span>navegar</span>
+      <span>{t('picker.footerNavigate')}</span>
       <span aria-hidden>·</span>
       <Kbd>↵</Kbd>
       <span>{commitLabel}</span>
       <span aria-hidden>·</span>
       <Kbd>Esc</Kbd>
-      <span>fechar</span>
+      <span>{t('picker.footerClose')}</span>
     </span>
   );
 }
@@ -165,11 +165,12 @@ interface PillEmptyStateProps {
 }
 
 function PillEmptyState({ query, onClear }: PillEmptyStateProps) {
+  const { t } = useTranslation('models');
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
       <Search aria-hidden className="size-5 text-foreground-subtle" />
-      <p className="text-[13px] font-medium text-foreground">Nenhum modelo encontrado</p>
-      <p className="text-xs text-foreground-muted">Tente outro termo ou busque pelo provedor.</p>
+      <p className="text-[13px] font-medium text-foreground">{t('picker.noResultsTitle')}</p>
+      <p className="text-xs text-foreground-muted">{t('picker.emptyPillHint')}</p>
       {query ? (
         <button
           type="button"
@@ -181,7 +182,7 @@ function PillEmptyState({ query, onClear }: PillEmptyStateProps) {
             'motion-reduce:transition-none',
           )}
         >
-          Limpar busca
+          {t('picker.clearSearch')}
         </button>
       ) : null}
     </div>
@@ -210,6 +211,7 @@ export function ModelPill({
   className,
   onClick,
 }: ModelPillProps) {
+  const { t, i18n: i18nInstance } = useTranslation('models');
   const selection = useAppStore((state) => state.selection);
   const favorites = useAppStore((state) => state.favorites);
   const keys = useAppStore((state) => state.keys);
@@ -261,18 +263,16 @@ export function ModelPill({
         ? defaultReasoningFor(model)
         : selection.reasoning;
 
-  const name = model?.name ?? mid ?? 'Selecionar modelo';
+  const name = model?.name ?? mid ?? t('picker.selectModel');
   const reasoningSupported = Boolean(model && reasoningUi(model).supported);
   const effortText = effortSegmentLabel(model, effectiveReasoning);
   const currentKey = mid ? modelKey(pid, mid) : null;
   // The lock explanation changes with the reason: a started Chat conversation
   // keeps the original copy, a running turn explains that it must finish first.
   const lockAriaLabel = locked
-    ? `${
-        lockReason === 'streaming'
-          ? 'Troca de modelo indisponível durante a resposta'
-          : 'Modelo bloqueado nesta conversa'
-      }. Atual: ${name}`
+    ? lockReason === 'streaming'
+      ? t('picker.lockedStreamingAria', { name })
+      : t('picker.lockedConversationAria', { name })
     : null;
 
   const searching = normalizeSearch(query).length > 0;
@@ -285,7 +285,7 @@ export function ModelPill({
         favorites,
         favoriteMatch: (pid, modelId) => favoriteEntryMatches(favorites, pid, modelId),
       }),
-    [providerList, searching, query, favorites, listProviderId],
+    [providerList, searching, query, favorites, listProviderId, i18nInstance.language],
   );
 
   const entries = useMemo(() => flattenGroups(groups), [groups]);
@@ -710,7 +710,7 @@ export function ModelPill({
             aria-haspopup={locked ? undefined : 'dialog'}
             aria-expanded={locked ? undefined : open && stage === 'model'}
             aria-disabled={locked || undefined}
-            aria-label={lockAriaLabel ?? `Selecionar modelo. Atual: ${name}`}
+            aria-label={lockAriaLabel ?? t('picker.selectModelCurrent', { name })}
             title={locked ? lockCopy?.description : name}
             onClick={handleModelSegment}
             className={cn(
@@ -758,8 +758,8 @@ export function ModelPill({
             disabled={disabled || !reasoningSupported}
             aria-haspopup="dialog"
             aria-expanded={open && stage === 'thinking'}
-            aria-label={`Selecionar modo de pensamento. Atual: ${effortText}`}
-            title={reasoningSupported ? effortText : NO_REASONING_HINT}
+            aria-label={t('picker.selectThinking', { value: effortText })}
+            title={reasoningSupported ? effortText : t('thinking.noReasoningHint')}
             onClick={handleThinkingSegment}
             className={cn(
               'flex min-w-0 items-center gap-1 rounded-r-full px-1.5',
@@ -796,7 +796,7 @@ export function ModelPill({
       <PopoverContent
         ref={contentRef}
         role="dialog"
-        aria-label="Selecionar modelo"
+        aria-label={t('picker.selectModel')}
         align="end"
         className={cn(
           'p-0',
@@ -824,7 +824,7 @@ export function ModelPill({
               />
             </div>
             <div className="flex shrink-0 items-center justify-end border-t border-border px-2 py-1">
-              <KeyboardHint commitLabel="aplicar" dense />
+              <KeyboardHint commitLabel={t('picker.thinkingStep')} dense />
             </div>
           </div>
         ) : (
@@ -833,19 +833,19 @@ export function ModelPill({
               <ModelSearchField
                 value={query}
                 onChange={handleQueryChange}
-                ariaLabel="Buscar modelos"
+                ariaLabel={t('picker.searchAria')}
                 controls={entries.length ? listId : undefined}
                 activeDescendant={activeDescendant}
                 expanded={open}
                 autoFocus={open}
-                placeholder="Buscar modelos…"
+                placeholder={t('search.placeholder')}
                 onKeyDown={handleSearchKeyDown}
               />
               <div className="flex items-center justify-between gap-2">
                 {searching ? (
                   <span
                     className="text-[11px] font-medium text-foreground-muted"
-                    title="Busca em todos os provedores"
+                    title={t('picker.allProvidersTitle')}
                   >
                     {allProvidersLabel}
                   </span>
@@ -855,11 +855,13 @@ export function ModelPill({
                     options={providerOptions}
                     value={listProviderId}
                     onChange={handleProviderChange}
-                    ariaLabel="Provedor"
+                    ariaLabel={t('picker.providerAria')}
                   />
                 )}
                 <span className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
-                  {entries.length} {entries.length === 1 ? 'modelo' : 'modelos'}
+                  {entries.length === 1
+                    ? t('picker.countOne', { count: entries.length })
+                    : t('picker.countOther', { count: entries.length })}
                 </span>
               </div>
             </div>
@@ -872,7 +874,7 @@ export function ModelPill({
               <ModelList
                 groups={groups}
                 listId={listId}
-                ariaLabel="Modelos"
+                ariaLabel={t('picker.modelsAria')}
                 activeKey={activeKey}
                 selectedKey={selectionKey({ providerId: pid, modelId: mid, reasoning: null })}
                 onActivate={handleActivate}
@@ -891,7 +893,7 @@ export function ModelPill({
               <div
                 ref={detailsRef}
                 role="group"
-                aria-label="Detalhes do modelo"
+                aria-label={t('picker.detailsGroupAria')}
                 style={detailsPosition ?? undefined}
                 onMouseEnter={cancelPendingDetailsHide}
                 onMouseLeave={scheduleDetailsHide}
@@ -947,9 +949,9 @@ export function ModelPill({
                 )}
               >
                 <SlidersHorizontal aria-hidden className="size-3.5" />
-                Ver todos os modelos…
+                {t('picker.viewAllModels')}
               </button>
-              <KeyboardHint commitLabel="escolher" />
+              <KeyboardHint commitLabel={t('picker.chooseStep')} />
             </div>
           </div>
         )}

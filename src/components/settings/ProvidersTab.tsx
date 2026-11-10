@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   AlertCircle,
   AlertTriangle,
@@ -17,6 +19,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { providerAuth, providerSupportsPlan, providers as catalogProviders } from '@/lib/catalog';
 import { openExternal } from '@/lib/genui/open-external';
+import { formatDate } from '@/lib/i18n/format';
 import { copyText } from '@/lib/utils';
 import type {
   LoginChallenge,
@@ -43,14 +46,6 @@ type TestState =
   | { status: 'ok'; latencyMs: number | null; models: number }
   | { status: 'error'; message: string };
 
-const KEY_SOURCE_LABEL: Record<ProviderKeyStatus['source'], string> = {
-  settings: 'Configurada',
-  env: 'Variável de ambiente',
-  'opencode-cli': 'OpenCode CLI',
-  chatgpt: 'Conta ChatGPT',
-  none: 'Ausente',
-};
-
 /** ChatGPT usage dashboard (also the OpenAI provider console URL). */
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
@@ -76,9 +71,7 @@ function persistPlanNoticeShown(): void {
 
 function formatExpiry(value?: number | null): string {
   if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
+  return formatDate(value, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function errorMessage(error: unknown): string {
@@ -95,12 +88,16 @@ function planUsageUrl(provider: ProviderInfo): string {
  * share a console, so the placeholder must name the right one (Anthropic keys
  * start with `sk-ant-`); unknown providers fall back to a generic label.
  */
-function apiKeyPlaceholder(provider: ProviderInfo, hasKey: boolean): string {
-  if (hasKey) return 'Colar nova chave para substituir…';
-  if (provider.id === 'openai') return 'Colar API key da OpenAI…';
-  if (provider.id === 'anthropic') return 'Colar API key da Anthropic (sk-ant-…)…';
-  if (provider.id.startsWith('opencode-')) return 'Colar API key do OpenCode Console…';
-  return `Colar API key de ${provider.name}…`;
+function apiKeyPlaceholder(
+  provider: ProviderInfo,
+  hasKey: boolean,
+  t: TFunction<'settings'>,
+): string {
+  if (hasKey) return t('providers.keyPlaceholder.replace');
+  if (provider.id === 'openai') return t('providers.keyPlaceholder.openai');
+  if (provider.id === 'anthropic') return t('providers.keyPlaceholder.anthropic');
+  if (provider.id.startsWith('opencode-')) return t('providers.keyPlaceholder.opencode');
+  return t('providers.keyPlaceholder.generic', { name: provider.name });
 }
 
 /**
@@ -108,6 +105,7 @@ function apiKeyPlaceholder(provider: ProviderInfo, hasKey: boolean): string {
  * Persisted in localStorage so it never blocks the flow again.
  */
 function PlanNoticeDialog({ open, onDismiss }: { open: boolean; onDismiss: () => void }) {
+  const { t } = useTranslation('settings');
   return (
     <Dialog
       open={open}
@@ -119,17 +117,13 @@ function PlanNoticeDialog({ open, onDismiss }: { open: boolean; onDismiss: () =>
         <DialogHeader className="gap-1.5 px-5 pb-0 pt-5">
           <DialogTitle className="flex items-center gap-2">
             <Sparkles aria-hidden className="size-4 text-accent" />
-            Você está usando seu plano ChatGPT
+            {t('providers.planNotice.title')}
           </DialogTitle>
-          <DialogDescription>
-            Os pedidos elegíveis consomem o limite compartilhado do seu plano ChatGPT — o mesmo pool
-            usado pelo ChatGPT e por outros apps. Você pode acompanhar o uso no ChatGPT a qualquer
-            momento.
-          </DialogDescription>
+          <DialogDescription>{t('providers.planNotice.body')}</DialogDescription>
         </DialogHeader>
         <DialogFooter className="justify-end border-0 px-5 py-4">
           <Button variant="primary" onClick={onDismiss} autoFocus>
-            Entendi
+            {t('providers.planNotice.dismiss')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -143,12 +137,13 @@ interface AccountState {
 }
 
 /** Badge describing the ChatGPT account state of an OAuth provider. */
-function accountBadge({ auth, pending }: AccountState) {
+function AccountBadge({ auth, pending }: AccountState) {
+  const { t } = useTranslation('settings');
   if (pending) {
     return (
       <Badge tone="accent" size="md" className="gap-1.5">
         <Spinner size="xs" />
-        Aguardando…
+        {t('providers.account.pending')}
       </Badge>
     );
   }
@@ -156,31 +151,33 @@ function accountBadge({ auth, pending }: AccountState) {
     case 'signed-in':
       return (
         <Badge tone={auth.planUsage ? 'accent' : 'warning'} size="md">
-          {auth.planUsage ? 'Plano ChatGPT' : 'Conta conectada'}
+          {auth.planUsage ? t('providers.account.plan') : t('providers.account.connected')}
         </Badge>
       );
     case 'plan-disabled':
       return (
         <Badge tone="warning" size="md">
-          Plano não ativado
+          {t('providers.account.planDisabled')}
         </Badge>
       );
     case 'reauth-required':
       return (
         <Badge tone="danger" size="md">
-          Sessão expirada
+          {t('providers.account.reauth')}
         </Badge>
       );
     default:
       return (
         <Badge tone="warning" size="md">
-          Sem conta
+          {t('providers.account.none')}
         </Badge>
       );
   }
 }
 
 export function ProvidersTab() {
+  const { t } = useTranslation('settings');
+  const { t: common } = useTranslation('common');
   const storeProviders = useAppStore((state) => state.providers);
   const keys = useAppStore((state) => state.keys);
   const auth = useAppStore((state) => state.auth);
@@ -219,6 +216,62 @@ export function ProvidersTab() {
   const authStatusOf = (providerId: string): ProviderAuthStatus | undefined =>
     auth.find((entry) => entry.providerId === providerId);
 
+  const keySourceLabel = (source: ProviderKeyStatus['source']): string => {
+    switch (source) {
+      case 'settings':
+        return t('providers.keySource.settings');
+      case 'env':
+        return t('providers.keySource.env');
+      case 'opencode-cli':
+        return t('providers.keySource.opencode-cli');
+      case 'chatgpt':
+        return t('providers.keySource.chatgpt');
+      default:
+        return t('providers.keySource.none');
+    }
+  };
+
+  /** Curated catalog copy: known provider ids use localized keys. */
+  const descriptionOf = (provider: ProviderInfo): string => {
+    switch (provider.id) {
+      case 'opencode-go':
+        return t('providers.description.opencode-go');
+      case 'opencode-zen':
+        return t('providers.description.opencode-zen');
+      case 'openai':
+        return t('providers.description.openai');
+      case 'anthropic':
+        return t('providers.description.anthropic');
+      default:
+        return provider.description;
+    }
+  };
+
+  /** Curated catalog notes: unknown providers keep the catalog data as-is. */
+  const notesOf = (provider: ProviderInfo): string[] => {
+    switch (provider.id) {
+      case 'opencode-go':
+        return [t('providers.notes.opencode-go.0'), t('providers.notes.opencode-go.1')];
+      case 'opencode-zen':
+        return [t('providers.notes.opencode-zen.0'), t('providers.notes.opencode-zen.1')];
+      case 'openai':
+        return [
+          t('providers.notes.openai.0'),
+          t('providers.notes.openai.1'),
+          t('providers.notes.openai.2'),
+        ];
+      case 'anthropic':
+        return [
+          t('providers.notes.anthropic.0'),
+          t('providers.notes.anthropic.1'),
+          t('providers.notes.anthropic.2'),
+          t('providers.notes.anthropic.3'),
+        ];
+      default:
+        return provider.notes;
+    }
+  };
+
   // Reopening Settings while a login is in flight must keep showing the pending
   // state (the store keeps the challenge so the URL can be reopened).
   useEffect(() => {
@@ -249,13 +302,13 @@ export function ProvidersTab() {
   const copyLoginLink = async (url: string) => {
     const copied = await copyText(url);
     if (!copied) {
-      toast.error('Não foi possível copiar o link', {
-        description: 'Abra "Mostrar link de login" e copie o endereço manualmente.',
+      toast.error(t('providers.toasts.copyFailed'), {
+        description: t('providers.toasts.copyFailedBody'),
       });
       return;
     }
     setCopiedLink(true);
-    toast.success('Link de login copiado');
+    toast.success(t('providers.toasts.copiedTitle'));
     if (copiedLinkTimerRef.current != null) {
       window.clearTimeout(copiedLinkTimerRef.current);
     }
@@ -289,16 +342,13 @@ export function ProvidersTab() {
       setPendingProviderId(null);
       if (status.state === 'signed-in') {
         showPlanNoticeOnce();
-        toast.success('Conta ChatGPT conectada', {
+        toast.success(t('providers.toasts.successTitle'), {
           description: status.planUsage
-            ? 'Os pedidos elegíveis usam o seu plano ChatGPT.'
-            : 'O uso do plano não está ativado para esta conta.',
+            ? t('providers.toasts.successPlan')
+            : t('providers.toasts.successNoPlan'),
         });
       } else if (status.state === 'plan-disabled') {
-        setLoginError(
-          providerId,
-          'A conta foi conectada, mas o uso do plano não está ativado. Use "Ativar uso do plano".',
-        );
+        setLoginError(providerId, t('providers.toasts.planDisabled'));
       }
     } catch (error) {
       setPendingProviderId(null);
@@ -319,7 +369,7 @@ export function ProvidersTab() {
       const challenge: LoginChallenge = await startChatGptLogin(provider.id, forceConsent);
       setPendingProviderId(provider.id);
       // Two-phase flow: the backend already opened the browser; wait for the
-      // loopback callback (the URL stays visible for "Abrir novamente").
+      // loopback callback (the URL stays visible for "Open again").
       void finishLogin(challenge.attemptId, provider.id);
     } catch (error) {
       setLoginError(provider.id, errorMessage(error));
@@ -347,9 +397,8 @@ export function ProvidersTab() {
     setSigningOutId(providerId);
     try {
       await signOutProvider(providerId);
-      toast.success('Conta desconectada', {
-        description:
-          'Os tokens foram revogados. A próxima conexão reutiliza o mesmo registro de cliente.',
+      toast.success(t('providers.toasts.signOutTitle'), {
+        description: t('providers.toasts.signOutBody'),
       });
     } catch (error) {
       setLoginError(providerId, errorMessage(error));
@@ -367,9 +416,11 @@ export function ProvidersTab() {
       const key = useAppStore.getState().keys.find((entry) => entry.providerId === providerId);
       if (key?.hasKey) {
         setDrafts((current) => ({ ...current, [providerId]: '' }));
-        toast.success('Chave salva', { description: KEY_SOURCE_LABEL[key.source] });
+        toast.success(t('providers.toasts.keySaved'), {
+          description: keySourceLabel(key.source),
+        });
       } else {
-        toast.error('Não foi possível salvar a chave');
+        toast.error(t('providers.toasts.keySaveFailed'));
       }
     } finally {
       setSavingId(null);
@@ -382,10 +433,12 @@ export function ProvidersTab() {
       await setProviderKey(providerId, null);
       const key = useAppStore.getState().keys.find((entry) => entry.providerId === providerId);
       if (!key?.hasKey) {
-        toast.success('Chave removida');
+        toast.success(t('providers.toasts.keyRemoved'));
       } else {
-        toast.info('Chave salva removida', {
-          description: `Ainda há uma chave detectada via ${KEY_SOURCE_LABEL[key.source]}.`,
+        toast.info(t('providers.toasts.keyStillDetected'), {
+          description: t('providers.toasts.keyStillDetectedBody', {
+            source: keySourceLabel(key.source),
+          }),
         });
       }
     } finally {
@@ -406,7 +459,7 @@ export function ProvidersTab() {
         ...current,
         [providerId]: result.ok
           ? { status: 'ok', latencyMs: result.latencyMs ?? null, models: result.models }
-          : { status: 'error', message: result.message ?? 'Falha na conexão com o provedor.' },
+          : { status: 'error', message: result.message ?? t('providers.testFailed') },
       }));
     } catch (error) {
       setTests((current) => ({
@@ -425,9 +478,12 @@ export function ProvidersTab() {
       return (
         <span className="inline-flex items-center gap-1.5 text-[11px] text-success">
           <CheckCircle2 aria-hidden className="size-3.5" />
-          Conectado
-          {test.latencyMs != null ? ` · ${Math.round(test.latencyMs)} ms` : ''}
-          {` · ${test.models} modelos`}
+          {test.latencyMs != null
+            ? t('providers.testOkLatency', {
+                latency: Math.round(test.latencyMs),
+                count: test.models,
+              })
+            : t('providers.testOkNoLatency', { count: test.models })}
         </span>
       );
     }
@@ -450,7 +506,7 @@ export function ProvidersTab() {
         loading={testingId === providerId}
         leftIcon={<KeyRound className="size-3.5" />}
       >
-        Testar conexão
+        {t('providers.test')}
       </Button>
     );
   };
@@ -463,7 +519,7 @@ export function ProvidersTab() {
     try {
       await api.openDataDir();
     } catch (error) {
-      toast.error('Não foi possível abrir a pasta', { description: errorMessage(error) });
+      toast.error(t('toasts.openFolderFailed'), { description: errorMessage(error) });
     }
   };
 
@@ -486,8 +542,8 @@ export function ProvidersTab() {
                 void saveKey(provider.id);
               }
             }}
-            placeholder={apiKeyPlaceholder(provider, Boolean(key?.hasKey))}
-            aria-label={`API key de ${provider.name}`}
+            placeholder={apiKeyPlaceholder(provider, Boolean(key?.hasKey), t)}
+            aria-label={t('providers.apiKeyAria', { name: provider.name })}
             autoComplete="off"
             spellCheck={false}
             className="min-w-[200px] flex-1"
@@ -498,11 +554,11 @@ export function ProvidersTab() {
             loading={isSaving}
             disabled={!draft.trim() || isSaving}
           >
-            Salvar
+            {common('actions.save')}
           </Button>
           {key?.hasKey ? (
             <Button variant="ghost" onClick={() => void removeKey(provider.id)} disabled={isSaving}>
-              Remover
+              {common('actions.remove')}
             </Button>
           ) : null}
         </div>
@@ -514,7 +570,7 @@ export function ProvidersTab() {
             loading={testingId === provider.id}
             leftIcon={<KeyRound className="size-3.5" />}
           >
-            Testar conexão
+            {t('providers.test')}
           </Button>
           {testBadge(provider.id)}
         </div>
@@ -528,7 +584,7 @@ export function ProvidersTab() {
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={hasKey ? 'success' : 'warning'} size="md">
-          {hasKey ? KEY_SOURCE_LABEL[key?.source ?? 'none'] : 'Chave ausente'}
+          {hasKey ? keySourceLabel(key?.source ?? 'none') : t('providers.keyMissing')}
         </Badge>
         {key?.masked ? (
           <code className="rounded bg-surface px-1.5 py-0.5 font-mono text-[11px] text-foreground-subtle">
@@ -553,12 +609,17 @@ export function ProvidersTab() {
     const signedIn = state === 'signed-in';
     const error = loginErrors[provider.id];
     const showKeyForm = keyFormOpen[provider.id] ?? Boolean(key?.hasKey && !signedIn);
+    const notes = notesOf(provider);
 
     return (
-      <SettingsSection key={provider.id} title={provider.name} description={provider.description}>
+      <SettingsSection
+        key={provider.id}
+        title={provider.name}
+        description={descriptionOf(provider)}
+      >
         <SettingsBlock>
           <div className="flex flex-wrap items-center gap-2">
-            {accountBadge({ auth: authStatus, pending })}
+            <AccountBadge auth={authStatus} pending={pending} />
             {authStatus?.accountLabel ? (
               <span className="truncate text-xs font-medium text-foreground">
                 {authStatus.accountLabel}
@@ -571,19 +632,18 @@ export function ProvidersTab() {
               onClick={() => openUsage(provider)}
               rightIcon={<ExternalLink className="size-3.5" />}
             >
-              {signedIn ? 'Gerenciar uso' : 'Console'}
+              {signedIn ? t('providers.manageUsage') : t('providers.console')}
             </Button>
           </div>
 
           {pending ? (
             <div className="mt-3 rounded-xl border border-border bg-surface px-3 py-3">
               <p className="flex items-center gap-2 text-[13px] font-medium text-foreground">
-                <Spinner size="sm" label="Aguardando o navegador" />
-                Aguardando o navegador…
+                <Spinner size="sm" label={t('providers.login.pendingSpinner')} />
+                {t('providers.login.pendingTitle')}
               </p>
               <p className="mt-1 text-[11.5px] leading-relaxed text-foreground-muted">
-                Conclua o login no ChatGPT. Esta janela é atualizada automaticamente quando você
-                volta ao Zylara.
+                {t('providers.login.pendingBody')}
               </p>
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <Button
@@ -599,7 +659,7 @@ export function ProvidersTab() {
                     )
                   }
                 >
-                  {copiedLink ? 'Link copiado' : 'Copiar link'}
+                  {copiedLink ? t('providers.login.copiedLink') : t('providers.login.copyLink')}
                 </Button>
                 <Button
                   size="sm"
@@ -608,7 +668,7 @@ export function ProvidersTab() {
                   disabled={!challenge}
                   rightIcon={<ExternalLink className="size-3.5" />}
                 >
-                  Abrir novamente
+                  {t('providers.login.openAgain')}
                 </Button>
                 <Button
                   size="sm"
@@ -616,21 +676,22 @@ export function ProvidersTab() {
                   onClick={() => void cancelLogin()}
                   loading={canceling}
                 >
-                  Cancelar
+                  {common('actions.cancel')}
                 </Button>
               </div>
               {challenge?.browserOpened === false ? (
                 <div className="mt-2.5 flex gap-2.5 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-warning">
                   <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="font-medium">O navegador não abriu automaticamente</p>
+                    <p className="font-medium">{t('providers.login.browserNotOpenedTitle')}</p>
                     <p className="mt-0.5 text-foreground-muted">
-                      Copie o link e cole no seu navegador. Esta janela continua aguardando a
-                      confirmação do login.
+                      {t('providers.login.browserNotOpenedBody')}
                     </p>
                     {challenge.browserError ? (
                       <details className="mt-1.5 text-[11px] text-foreground-subtle">
-                        <summary className="cursor-pointer select-none">Detalhes do erro</summary>
+                        <summary className="cursor-pointer select-none">
+                          {t('providers.login.errorDetails')}
+                        </summary>
                         <code className="mt-1 block break-all font-mono">
                           {challenge.browserError}
                         </code>
@@ -640,12 +701,11 @@ export function ProvidersTab() {
                 </div>
               ) : null}
               <p className="mt-2 text-[11px] leading-relaxed text-foreground-subtle">
-                Se o navegador não abrir, use <span className="font-medium">Copiar link</span> e
-                cole o endereço no seu navegador.
+                <Trans ns="settings" i18nKey="providers.login.browserHint" components={{ b: <span className="font-medium" /> }} />
               </p>
               {challenge ? (
                 <details className="mt-1.5 text-[11px] text-foreground-subtle">
-                  <summary className="cursor-pointer select-none">Mostrar link de login</summary>
+                  <summary className="cursor-pointer select-none">{t('providers.login.showLink')}</summary>
                   <code className="mt-1 block max-h-24 select-all overflow-auto break-all rounded-md bg-surface-raised px-2 py-1.5 font-mono text-[10.5px] leading-relaxed">
                     {challenge.authUrl}
                   </code>
@@ -658,11 +718,8 @@ export function ProvidersTab() {
             <div className="mt-3 flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-warning">
               <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="font-medium">O uso do plano ChatGPT não está ativado</p>
-                <p className="mt-0.5 text-foreground-muted">
-                  Sua conta está conectada, mas os pedidos ainda não usam o plano. Ative o uso
-                  (consentimento) para continuar com os modelos sem custo por token.
-                </p>
+                <p className="font-medium">{t('providers.planDisabled.title')}</p>
+                <p className="mt-0.5 text-foreground-muted">{t('providers.planDisabled.body')}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Button
                     size="sm"
@@ -670,7 +727,7 @@ export function ProvidersTab() {
                     loading={starting}
                     onClick={() => void beginLogin(provider, true)}
                   >
-                    Ativar uso do plano
+                    {t('providers.planDisabled.activate')}
                   </Button>
                   <Button
                     size="sm"
@@ -682,7 +739,9 @@ export function ProvidersTab() {
                       }))
                     }
                   >
-                    {showKeyForm ? 'Ocultar API key' : 'Usar API key'}
+                    {showKeyForm
+                      ? t('providers.planDisabled.hideKey')
+                      : t('providers.planDisabled.useKey')}
                   </Button>
                   <Button
                     size="sm"
@@ -691,7 +750,7 @@ export function ProvidersTab() {
                     onClick={() => void signOut(provider.id)}
                     leftIcon={<LogOut className="size-3.5" />}
                   >
-                    Sair
+                    {t('providers.signedIn.signOut')}
                   </Button>
                 </div>
               </div>
@@ -702,10 +761,9 @@ export function ProvidersTab() {
             <div className="mt-3 flex gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-danger">
               <AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="font-medium">Sessão do ChatGPT expirada</p>
+                <p className="font-medium">{t('providers.reauth.title')}</p>
                 <p className="mt-0.5 text-foreground-muted">
-                  {authStatus?.hint?.trim() ||
-                    'Entre novamente para renovar a credencial. O registro da conta é reutilizado.'}
+                  {authStatus?.hint?.trim() || t('providers.reauth.hintFallback')}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Button
@@ -715,7 +773,7 @@ export function ProvidersTab() {
                     onClick={() => void beginLogin(provider)}
                     leftIcon={<LogIn className="size-3.5" />}
                   >
-                    Conectar novamente
+                    {t('providers.reauth.reconnect')}
                   </Button>
                   <Button
                     size="sm"
@@ -727,7 +785,9 @@ export function ProvidersTab() {
                       }))
                     }
                   >
-                    {showKeyForm ? 'Ocultar API key' : 'Usar API key'}
+                    {showKeyForm
+                      ? t('providers.planDisabled.hideKey')
+                      : t('providers.planDisabled.useKey')}
                   </Button>
                 </div>
               </div>
@@ -743,16 +803,20 @@ export function ProvidersTab() {
                   onClick={() => void beginLogin(provider)}
                   leftIcon={<LogIn className="size-4" />}
                 >
-                  Continuar com ChatGPT
+                  {t('providers.signedOut.continue')}
                 </Button>
                 <Button variant="secondary" onClick={() => setKeyFormOpen((current) => ({ ...current, [provider.id]: !showKeyForm }))}>
-                  {showKeyForm ? 'Ocultar API key' : 'Usar API key'}
+                  {showKeyForm
+                    ? t('providers.planDisabled.hideKey')
+                    : t('providers.planDisabled.useKey')}
                 </Button>
               </div>
               <p className="mt-2 text-[11.5px] leading-relaxed text-foreground-muted">
-                Pedidos elegíveis usam o seu plano ChatGPT — o limite é compartilhado entre apps,
-                Codex e ChatGPT Work. Sem plano, o mesmo provedor aceita uma API key{' '}
-                <code className="font-mono">sk-…</code> da plataforma.
+                <Trans
+                  ns="settings"
+                  i18nKey="providers.signedOut.body"
+                  components={{ code: <code className="font-mono" /> }}
+                />
               </p>
             </div>
           ) : null}
@@ -766,14 +830,16 @@ export function ProvidersTab() {
                 onClick={() => void signOut(provider.id)}
                 leftIcon={<LogOut className="size-3.5" />}
               >
-                Sair
+                {t('providers.signedIn.signOut')}
               </Button>
               <Button
                 size="sm"
                 variant="secondary"
                 onClick={() => setKeyFormOpen((current) => ({ ...current, [provider.id]: !showKeyForm }))}
               >
-                {showKeyForm ? 'Ocultar API key' : 'Usar API key como alternativa'}
+                {showKeyForm
+                  ? t('providers.planDisabled.hideKey')
+                  : t('providers.signedIn.useKeyAlternative')}
               </Button>
             </div>
           ) : null}
@@ -781,27 +847,26 @@ export function ProvidersTab() {
           {!pending && signedIn ? (
             <details className="mt-3 rounded-xl border border-border bg-surface px-3 py-2 text-[11px] text-foreground-muted">
               <summary className="cursor-pointer select-none font-medium text-foreground">
-                Detalhes da conta
+                {t('providers.accountDetails.summary')}
               </summary>
               <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                <dt className="text-foreground-subtle">ID do cliente</dt>
+                <dt className="text-foreground-subtle">{t('providers.accountDetails.clientId')}</dt>
                 <dd className="truncate font-mono" title={authStatus?.clientIdMasked ?? undefined}>
                   {authStatus?.clientIdMasked ?? '—'}
                 </dd>
-                <dt className="text-foreground-subtle">ID do host</dt>
+                <dt className="text-foreground-subtle">{t('providers.accountDetails.hostId')}</dt>
                 <dd className="truncate font-mono" title={authStatus?.hostIdMasked ?? undefined}>
                   {authStatus?.hostIdMasked ?? '—'}
                 </dd>
-                <dt className="text-foreground-subtle">Escopos</dt>
+                <dt className="text-foreground-subtle">{t('providers.accountDetails.scopes')}</dt>
                 <dd className="break-words font-mono">
                   {authStatus?.scopes?.length ? authStatus.scopes.join(', ') : '—'}
                 </dd>
-                <dt className="text-foreground-subtle">Expira em</dt>
+                <dt className="text-foreground-subtle">{t('providers.accountDetails.expires')}</dt>
                 <dd>{formatExpiry(authStatus?.expiresAt)}</dd>
               </dl>
               <p className="mt-2 text-[10.5px] leading-relaxed text-foreground-subtle">
-                Os tokens de acesso e de atualização ficam somente no backend e nunca são enviados à
-                interface.
+                {t('providers.accountDetails.tokensNote')}
               </p>
             </details>
           ) : null}
@@ -830,9 +895,9 @@ export function ProvidersTab() {
             </div>
           )}
 
-          {provider.notes.length ? (
+          {notes.length ? (
             <ul className="mt-3 flex flex-col gap-1 text-[11px] leading-relaxed text-foreground-subtle">
-              {provider.notes.map((note) => (
+              {notes.map((note) => (
                 <li key={note}>• {note}</li>
               ))}
             </ul>
@@ -844,8 +909,13 @@ export function ProvidersTab() {
 
   const renderApiKeyCard = (provider: ProviderInfo) => {
     const key = keys.find((entry) => entry.providerId === provider.id);
+    const notes = notesOf(provider);
     return (
-      <SettingsSection key={provider.id} title={provider.name} description={provider.description}>
+      <SettingsSection
+        key={provider.id}
+        title={provider.name}
+        description={descriptionOf(provider)}
+      >
         <SettingsBlock>
           <div className="flex flex-wrap items-center gap-2">
             {renderKeySummary(provider, key)}
@@ -856,13 +926,13 @@ export function ProvidersTab() {
               onClick={() => void openExternal(provider.consoleUrl)}
               rightIcon={<ExternalLink className="size-3.5" />}
             >
-              Console
+              {t('providers.console')}
             </Button>
           </div>
           <div className="mt-3">{renderKeyControls(provider, key)}</div>
-          {provider.notes.length ? (
+          {notes.length ? (
             <ul className="mt-3 flex flex-col gap-1 text-[11px] leading-relaxed text-foreground-subtle">
-              {provider.notes.map((note) => (
+              {notes.map((note) => (
                 <li key={note}>• {note}</li>
               ))}
             </ul>
@@ -877,10 +947,11 @@ export function ProvidersTab() {
       <div className="flex gap-2.5 rounded-xl border border-border bg-surface px-4 py-3">
         <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
         <p className="text-[11px] leading-relaxed text-foreground-muted">
-          As chaves de API (OpenCode/Anthropic) e a sessão do ChatGPT são gravadas apenas no backend
-          (<code className="font-mono">secrets.json</code> no app-data) e nunca são expostas à
-          interface. Também detectamos as variáveis de ambiente dos provedores e o login existente
-          do OpenCode CLI.
+          <Trans
+            ns="settings"
+            i18nKey="providers.securityNote"
+            components={{ code: <code className="font-mono" /> }}
+          />
         </p>
       </div>
 
@@ -888,11 +959,11 @@ export function ProvidersTab() {
         <div className="flex gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3">
           <AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
-            <p className="font-medium text-foreground">A última ação falhou</p>
+            <p className="font-medium text-foreground">{t('providers.storeErrorTitle')}</p>
             <p className="mt-0.5 text-foreground-muted">{storeError}</p>
           </div>
           <Button size="sm" variant="ghost" onClick={() => setStoreError(null)}>
-            Dispensar
+            {t('providers.dismiss')}
           </Button>
         </div>
       ) : null}
@@ -901,13 +972,9 @@ export function ProvidersTab() {
         <div className="flex gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3">
           <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
-            <p className="font-medium text-foreground">
-              Não foi possível ler o arquivo de segredos
-            </p>
+            <p className="font-medium text-foreground">{t('providers.secretsErrorTitle')}</p>
             <p className="mt-0.5 text-foreground-muted">
-              Nenhuma chave foi alterada. O arquivo original foi preservado; corrija ou apague o
-              conteúdo inválido pela pasta de dados antes de salvar novas credenciais. Detalhe:{' '}
-              <span className="font-mono">{secretsError}</span>
+              {t('providers.secretsErrorBody', { error: secretsError })}
             </p>
             <Button
               size="sm"
@@ -916,7 +983,7 @@ export function ProvidersTab() {
               onClick={() => void openDataDir()}
               leftIcon={<FolderOpen className="size-3.5" />}
             >
-              Abrir pasta de dados
+              {t('providers.openDataDir')}
             </Button>
           </div>
         </div>
@@ -929,10 +996,7 @@ export function ProvidersTab() {
       )}
 
       <p className="text-[11px] leading-relaxed text-foreground-subtle">
-        O Zylara não envia suas credenciais para nenhum servidor próprio: as requisições vão direto
-        para o provedor escolhido. Ao remover uma chave salva nas configurações, a detecção por
-        ambiente/CLI volta a valer, se existir. Sair do ChatGPT revoga o token de atualização e
-        mantém apenas o registro da conta para a próxima conexão.
+        {t('providers.privacyFooter')}
       </p>
 
       <PlanNoticeDialog

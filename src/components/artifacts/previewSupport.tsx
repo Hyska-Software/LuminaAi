@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
 import type { ArtifactContent, ArtifactPreview } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -85,7 +86,7 @@ export function PreviewLoading({ label, className }: { label: string; className?
 }
 
 export function PreviewError({
-  title = 'Não foi possível carregar a prévia',
+  title,
   message,
   onRetry,
   className,
@@ -95,13 +96,16 @@ export function PreviewError({
   onRetry: () => void;
   className?: string;
 }) {
+  const { t } = useTranslation('artifacts');
   return (
     <div className={cn('flex h-full flex-col items-center justify-center gap-3 px-6 text-center', className)}>
       <AlertTriangle aria-hidden className="size-5 text-danger" />
-      <p className="text-[13px] font-medium text-foreground">{title}</p>
+      <p className="text-[13px] font-medium text-foreground">
+        {title ?? t('artifacts:preview.errorTitle')}
+      </p>
       <p className="max-w-sm text-xs leading-relaxed text-foreground-muted">{message}</p>
       <Button size="sm" variant="secondary" onClick={onRetry}>
-        Tentar novamente
+        {t('artifacts:panel.retry')}
       </Button>
     </div>
   );

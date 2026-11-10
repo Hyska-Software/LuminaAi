@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   ChevronDown,
   ChevronRight,
@@ -51,6 +52,7 @@ import {
 } from '@/components/ui';
 import type { SortableListApi } from '@/components/ui';
 import { api } from '@/lib/api';
+import { localeLowerCase } from '@/lib/i18n/format';
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import { filterConversationsForLayout } from '@/lib/conversations';
 import type { Conversation, Workspace } from '@/lib/types';
@@ -145,6 +147,7 @@ function SessionRow({
   onRemoveFromCode,
   onDelete,
 }: SessionRowProps) {
+  const { t } = useTranslation('code');
   return (
     <div
       {...sortable.dropProps(conversation.id)}
@@ -155,7 +158,9 @@ function SessionRow({
         {...sortable.itemProps(conversation.id)}
         onClick={onSelect}
         aria-current={active ? 'true' : undefined}
-        aria-label={shared ? `${conversation.title}, sessão compartilhada do Chat` : undefined}
+        aria-label={
+          shared ? t('code:sidebar.session.sharedAria', { title: conversation.title }) : undefined
+        }
         title={conversation.title}
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg px-2 pr-8 text-left text-[13px]',
@@ -176,11 +181,11 @@ function SessionRow({
         <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
         {shared ? (
           <span
-            title="Sessão compartilhada do Chat"
+            title={t('code:sidebar.session.sharedTitle')}
             className="ml-auto flex shrink-0 items-center gap-1 text-foreground-subtle"
           >
             <MessageSquare aria-hidden className="size-3.5" strokeWidth={1.75} />
-            <span className="text-[10px] font-medium leading-none">Do Chat</span>
+            <span className="text-[10px] font-medium leading-none">{t('code:sidebar.session.fromChat')}</span>
           </span>
         ) : null}
       </button>
@@ -189,7 +194,7 @@ function SessionRow({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label={`Opções de ${conversation.title}`}
+            aria-label={t('code:sidebar.session.options', { title: conversation.title })}
             onClick={(event) => event.stopPropagation()}
             className={cn(
               'absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md',
@@ -212,22 +217,24 @@ function SessionRow({
             }
             onSelect={onTogglePin}
           >
-            {conversation.pinned ? 'Desafixar' : 'Fixar'}
+            {conversation.pinned
+              ? t('code:sidebar.session.unpin')
+              : t('code:sidebar.session.pin')}
           </DropdownMenuItem>
           <DropdownMenuItem icon={<Pencil className="size-3.5" />} onSelect={onStartRename}>
-            Renomear
+            {t('code:sidebar.session.rename')}
           </DropdownMenuItem>
           <DropdownMenuItem icon={<Download className="size-3.5" />} onSelect={onExport}>
-            Exportar
+            {t('code:sidebar.session.export')}
           </DropdownMenuItem>
           {shared ? (
             <DropdownMenuItem icon={<Unlink className="size-3.5" />} onSelect={onRemoveFromCode}>
-              Remover do Code
+              {t('code:sidebar.session.removeFromCode')}
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="danger" icon={<Trash2 className="size-3.5" />} onSelect={onDelete}>
-            Excluir
+            {t('code:sidebar.session.delete')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -259,13 +266,14 @@ function WorkspaceMenu({
   onRefresh,
   onRemove,
 }: WorkspaceMenuProps) {
+  const { t } = useTranslation('code');
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={`Opções do workspace ${workspace.name}`}
-          title="Opções do workspace"
+          aria-label={t('code:sidebar.workspace.optionsAria', { name: workspace.name })}
+          title={t('code:sidebar.workspace.optionsTitle')}
           className={cn(
             'flex size-6 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
             'transition-colors duration-150 hover:bg-surface-active hover:text-foreground',
@@ -281,23 +289,23 @@ function WorkspaceMenu({
           {workspace.name}
         </DropdownMenuLabel>
         <DropdownMenuItem icon={<SquarePen className="size-4" />} onSelect={onNewSession}>
-          Nova sessão
+          {t('code:sidebar.workspace.newSession')}
         </DropdownMenuItem>
         <DropdownMenuItem icon={<RefreshCw className="size-4" />} onSelect={onRefresh}>
-          Atualizar
+          {t('code:sidebar.workspace.refresh')}
         </DropdownMenuItem>
         <DropdownMenuItem icon={<ExternalLink className="size-4" />} onSelect={onOpenExplorer}>
-          Abrir no Explorer
+          {t('code:sidebar.workspace.openExplorer')}
         </DropdownMenuItem>
         <DropdownMenuItem icon={<Copy className="size-4" />} onSelect={onCopyPath}>
-          Copiar caminho
+          {t('code:sidebar.workspace.copyPath')}
         </DropdownMenuItem>
         <DropdownMenuItem icon={<Folder className="size-4" />} onSelect={onRename}>
-          Renomear
+          {t('code:sidebar.workspace.rename')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="danger" icon={<Trash2 className="size-4" />} onSelect={onRemove}>
-          Remover do Zylara
+          {t('code:sidebar.workspace.remove')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -353,6 +361,7 @@ function WorkspaceRow({
   onSessionRemoveFromCode,
   onSessionDelete,
 }: WorkspaceRowProps) {
+  const { t } = useTranslation('code');
   const Icon = workspaceIcon(workspace);
   const branch = workspace.git?.branch;
   const canExpand = sessions.length > 0;
@@ -368,9 +377,9 @@ function WorkspaceRow({
           aria-label={
             canExpand
               ? expanded
-                ? `Recolher sessões de ${workspace.name}`
-                : `Expandir sessões de ${workspace.name}`
-              : `Workspace ${workspace.name} sem sessões`
+                ? t('code:sidebar.workspace.collapse', { name: workspace.name })
+                : t('code:sidebar.workspace.expand', { name: workspace.name })
+              : t('code:sidebar.workspace.noSessions', { name: workspace.name })
           }
           aria-expanded={canExpand ? expanded : undefined}
           disabled={!canExpand}
@@ -414,7 +423,7 @@ function WorkspaceRow({
               {workspace.git?.dirty ? (
                 <span
                   aria-hidden
-                  title="Alterações não commitadas"
+                  title={t('code:sidebar.workspace.dirty')}
                   className="size-1 shrink-0 rounded-full bg-warning"
                 />
               ) : null}
@@ -422,15 +431,15 @@ function WorkspaceRow({
           ) : null}
           {workspace.trusted === false ? (
             <span
-              title="Pasta não confiável — o agente está em modo leitura"
+              title={t('code:sidebar.workspace.untrustedTitle')}
               className="shrink-0 rounded border border-warning/30 bg-warning-soft px-1 text-[9.5px] font-medium uppercase tracking-wide text-warning"
             >
-              Leitura
+              {t('code:sidebar.workspace.readOnlyBadge')}
             </span>
           ) : null}
           <span
             aria-hidden
-            title={sessions.length === 1 ? '1 sessão' : `${sessions.length} sessões`}
+            title={t('code:sidebar.sessions', { count: sessions.length })}
             className="ml-auto shrink-0 text-[10px] tabular-nums text-foreground-subtle"
           >
             {sessions.length}
@@ -451,7 +460,7 @@ function WorkspaceRow({
       {expanded && canExpand ? (
         <SortableList
           ids={sessions.map((conversation) => conversation.id)}
-          label={`Sessões de ${workspace.name}`}
+          label={t('code:sidebar.workspace.sessionsAria', { name: workspace.name })}
           itemLabel={(id) => sessions.find((conversation) => conversation.id === id)?.title ?? id}
           disabled={sessionsDisabled}
           onReorder={onReorderSessions}
@@ -483,7 +492,7 @@ function WorkspaceRow({
 
       {expanded && !canExpand ? (
         <p className="mb-1 ml-6 text-[11px] leading-relaxed text-foreground-subtle">
-          Nenhuma sessão ainda — use “Nova sessão” no menu do workspace.
+          {t('code:sidebar.workspace.emptySessions')}
         </p>
       ) : null}
     </div>
@@ -507,20 +516,21 @@ function RenameWorkspaceDialog({
   onCancel,
   onConfirm,
 }: RenameWorkspaceDialogProps) {
+  const { t } = useTranslation('code');
   if (!workspace) return null;
   return (
     <Dialog open onOpenChange={(next) => (!next && !busy ? onCancel() : undefined)}>
       <DialogContent size="sm" className="gap-0">
         <DialogHeader>
-          <DialogTitle>Renomear workspace</DialogTitle>
+          <DialogTitle>{t('code:sidebar.renameWorkspace.title')}</DialogTitle>
           <DialogDescription>
-            O novo nome vale só no Zylara; a pasta no disco continua com o mesmo caminho.
+            {t('code:sidebar.renameWorkspace.description')}
           </DialogDescription>
         </DialogHeader>
         <div className="px-6 pb-4">
           <Input
             autoFocus
-            aria-label="Nome do workspace"
+            aria-label={t('code:sidebar.renameWorkspace.nameAria')}
             value={value}
             disabled={busy}
             onChange={(event) => onChange(event.target.value)}
@@ -537,7 +547,7 @@ function RenameWorkspaceDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -546,7 +556,7 @@ function RenameWorkspaceDialog({
             loading={busy}
             onClick={onConfirm}
           >
-            Salvar
+            {t('common:actions.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -557,21 +567,17 @@ function RenameWorkspaceDialog({
 /** Filtros do cabeçalho da lista de workspaces (WORKBENCH §3). */
 type WorkspaceFilter = 'all' | 'git' | 'no-git' | 'untrusted' | 'with-sessions' | 'empty';
 
-const WORKSPACE_FILTERS: ReadonlyArray<{ id: WorkspaceFilter; label: string }> = [
-  { id: 'all', label: 'Todos' },
-  { id: 'git', label: 'Com git' },
-  { id: 'no-git', label: 'Sem git' },
-  { id: 'untrusted', label: 'Não confiáveis' },
-  { id: 'with-sessions', label: 'Com sessões' },
-  { id: 'empty', label: 'Sem sessões' },
-];
+const WORKSPACE_FILTERS = [
+  { id: 'all', labelKey: 'code:sidebar.filters.all' },
+  { id: 'git', labelKey: 'code:sidebar.filters.git' },
+  { id: 'no-git', labelKey: 'code:sidebar.filters.noGit' },
+  { id: 'untrusted', labelKey: 'code:sidebar.filters.untrusted' },
+  { id: 'with-sessions', labelKey: 'code:sidebar.filters.withSessions' },
+  { id: 'empty', labelKey: 'code:sidebar.filters.empty' },
+] as const;
 
 function normalizeSearch(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLocaleLowerCase('pt-BR')
-    .trim();
+  return localeLowerCase(value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')).trim();
 }
 
 /** Botão de ícone compacto do cabeçalho da seção (32px de área de toque via padding). */
@@ -617,23 +623,28 @@ interface RemoveWorkspaceDialogProps {
 }
 
 function RemoveWorkspaceDialog({ workspace, busy, onCancel, onConfirm }: RemoveWorkspaceDialogProps) {
+  const { t } = useTranslation('code');
   if (!workspace) return null;
   return (
     <Dialog open onOpenChange={(next) => (!next && !busy ? onCancel() : undefined)}>
       <DialogContent size="sm" className="gap-0">
         <DialogHeader>
-          <DialogTitle>Remover workspace do Zylara?</DialogTitle>
+          <DialogTitle>{t('code:sidebar.removeWorkspace.title')}</DialogTitle>
           <DialogDescription>
-            A pasta <span className="font-mono text-[11.5px]">{workspace.path}</span> não será apagada.
-            As sessões continuam no histórico, mas deixam de aparecer agrupadas neste workspace.
+            <Trans
+              ns="code"
+              i18nKey="sidebar.removeWorkspace.description"
+              values={{ path: workspace.path }}
+              components={{ path: <span className="font-mono text-[11.5px]" /> }}
+            />
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <Button variant="danger" size="sm" loading={busy} onClick={onConfirm}>
-            Remover
+            {t('code:sidebar.removeWorkspace.remove')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -651,6 +662,7 @@ function RemoveWorkspaceDialog({ workspace, busy, onCancel, onConfirm }: RemoveW
  * apagar a pasta, abrir no Explorer, copiar caminho).
  */
 export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
+  const { t } = useTranslation('code');
   const conversations = useChatStore((state) => state.conversations);
   const activeId = useChatStore((state) => state.activeId);
   const codeView = useUiStore((state) => state.codeView);
@@ -722,21 +734,21 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
   const handleSessionExport = async (conversation: Conversation) => {
     try {
       const path = await api.exportConversation(conversation.id, 'markdown');
-      if (path) toast.success('Conversa exportada', { description: path });
+      if (path) toast.success(t('code:sidebar.toast.exportSuccess'), { description: path });
     } catch (error) {
-      toast.error('Não foi possível exportar', { description: String(error) });
+      toast.error(t('code:sidebar.toast.exportError'), { description: String(error) });
     }
   };
 
   const handleSessionRemoveFromCode = async (conversation: Conversation) => {
     const ok = await useChatStore.getState().setConversationCodeLinked(conversation.id, false);
     if (!ok) {
-      toast.error('Não foi possível remover a sessão do Code');
+      toast.error(t('code:sidebar.toast.removeFromCodeError'));
       return;
     }
     await terminalManager.closeConversation(conversation.id);
-    toast.success('Sessão removida do Code', {
-      description: 'Ela continua disponível no Chat.',
+    toast.success(t('code:sidebar.toast.removeFromCodeSuccess'), {
+      description: t('code:sidebar.toast.removeFromCodeDescription'),
     });
   };
 
@@ -906,15 +918,15 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
     try {
       await api.openWorkspaceInExplorer(workspace.id);
     } catch (error) {
-      toast.error('Não foi possível abrir a pasta no Explorer', {
+      toast.error(t('code:sidebar.toast.explorerError'), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
   };
 
   const handleCopyPath = async (workspace: Workspace) => {
-    if (await copyText(workspace.path)) toast.success('Caminho copiado');
-    else toast.error('Não foi possível copiar o caminho');
+    if (await copyText(workspace.path)) toast.success(t('code:sidebar.toast.pathCopied'));
+    else toast.error(t('code:sidebar.toast.copyPathError'));
   };
 
   const handleStartRename = (workspace: Workspace) => {
@@ -964,7 +976,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
 
   return (
     <aside
-      aria-label="Sessões"
+      aria-label={t('code:sidebar.aria')}
       className={cn('flex h-full w-full min-w-0 flex-col bg-surface', className)}
     >
       <div className="flex items-center gap-1.5 px-3 pb-1.5 pt-3">
@@ -976,10 +988,10 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
           leftIcon={<SquarePen className="size-4" />}
           className="h-9 flex-1 justify-start rounded-xl px-3 text-[13px] font-medium"
         >
-          Nova sessão
+          {t('code:sidebar.newSession')}
         </Button>
         {onClose ? (
-          <IconButton label="Fechar barra lateral" size="sm" onClick={onClose}>
+          <IconButton label={t('code:sidebar.close')} size="sm" onClick={onClose}>
             <X className="size-4" />
           </IconButton>
         ) : null}
@@ -987,19 +999,19 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
 
       <SidebarAction
         icon={<FolderPlus className="size-4" />}
-        label="Abrir pasta"
+        label={t('code:sidebar.openFolder')}
         disabled={openingFolder}
         onSelect={() => void handleOpenFolder()}
       />
       <SidebarAction
         icon={<MessageSquarePlus className="size-4" />}
-        label="Adicionar sessão do Chat"
-        ariaLabel="Adicionar sessão do Chat"
+        label={t('code:sidebar.addChat')}
+        ariaLabel={t('code:sidebar.addChat')}
         onSelect={handleAddSession}
       />
       <SidebarAction
         icon={<Search className="size-4" />}
-        label="Buscar"
+        label={t('code:sidebar.searchAction')}
         trailing={
           <>
             <Kbd>{modKey}</Kbd>
@@ -1011,8 +1023,8 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
       {skillsPanelEnabled ? (
         <SidebarAction
           icon={<Sparkles className="size-4" />}
-          label="Skills"
-          ariaLabel="Skills"
+          label={t('code:sidebar.skills')}
+          ariaLabel={t('code:sidebar.skills')}
           current={codeView === 'skills'}
           onSelect={handleSkills}
         />
@@ -1028,11 +1040,11 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
               id="code-workspaces-heading"
               className="px-1 text-[11px] font-medium tracking-tight text-foreground-subtle"
             >
-              Workspaces
+              {t('code:sidebar.workspacesHeading')}
             </h2>
             <div className="flex items-center gap-0.5">
               <SectionIconButton
-                label="Pesquisar workspaces"
+                label={t('code:sidebar.searchWorkspaces')}
                 active={workspaceSearchOpen || normalizedQuery.length > 0}
                 onClick={() => {
                   if (workspaceSearchOpen) {
@@ -1049,8 +1061,8 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    aria-label="Filtrar workspaces"
-                    title="Filtrar workspaces"
+                    aria-label={t('code:sidebar.filter')}
+                    title={t('code:sidebar.filter')}
                     aria-pressed={workspaceFilter !== 'all' ? true : undefined}
                     className={cn(
                       'flex size-6 items-center justify-center rounded-md transition-colors duration-150',
@@ -1063,14 +1075,14 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-44">
-                  <DropdownMenuLabel>Filtrar workspaces</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('code:sidebar.filter')}</DropdownMenuLabel>
                   <DropdownMenuRadioGroup
                     value={workspaceFilter}
                     onValueChange={(value) => setWorkspaceFilter(value as WorkspaceFilter)}
                   >
                     {WORKSPACE_FILTERS.map((filter) => (
                       <DropdownMenuRadioItem key={filter.id} value={filter.id}>
-                        {filter.label}
+                        {t(filter.labelKey)}
                       </DropdownMenuRadioItem>
                     ))}
                   </DropdownMenuRadioGroup>
@@ -1078,14 +1090,14 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem icon={<X className="size-4" />} onSelect={clearWorkspaceFilters}>
-                        Limpar filtros
+                        {t('code:sidebar.clearFilters')}
                       </DropdownMenuItem>
                     </>
                   ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
               <SectionIconButton
-                label="Adicionar workspace"
+                label={t('code:sidebar.addWorkspace')}
                 disabled={openingFolder}
                 onClick={() => void handleOpenFolder()}
               >
@@ -1106,14 +1118,14 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                     setWorkspaceSearchOpen(false);
                   }
                 }}
-                aria-label="Pesquisar workspaces por nome, caminho ou sessão"
-                placeholder="Pesquisar workspaces…"
+                aria-label={t('code:sidebar.searchAria')}
+                placeholder={t('code:sidebar.searchPlaceholder')}
                 className="h-7 rounded-md pr-7 text-[12px]"
               />
               {workspaceQuery ? (
                 <button
                   type="button"
-                  aria-label="Limpar pesquisa"
+                  aria-label={t('code:sidebar.clearSearch')}
                   onClick={() => setWorkspaceQuery('')}
                   className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-foreground-subtle hover:text-foreground"
                 >
@@ -1125,7 +1137,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
 
           {hasWorkspaceFilters ? (
             <p className="mt-1 px-1 text-[10.5px] tabular-nums text-foreground-subtle">
-              {visibleWorkspaces.length} de {workspaces.length} workspaces
+              {t('code:sidebar.count', { visible: visibleWorkspaces.length, total: workspaces.length })}
             </p>
           ) : null}
 
@@ -1133,7 +1145,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
             {workspacesLoading && !workspacesLoaded ? (
               <div
                 role="status"
-                aria-label="Carregando workspaces"
+                aria-label={t('code:sidebar.loading')}
                 className="flex flex-col gap-2 px-1 py-2"
               >
                 {[0, 1].map((index) => (
@@ -1146,7 +1158,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
             ) : workspacesError ? (
               <div role="alert" className="px-1 py-2">
                 <p className="text-[12px] leading-relaxed text-danger">
-                  Não foi possível carregar os workspaces.
+                  {t('code:sidebar.loadError')}
                 </p>
                 <p className="mt-1 break-words text-[11px] leading-relaxed text-foreground-subtle">
                   {workspacesError}
@@ -1158,16 +1170,16 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                   leftIcon={<RefreshCw className="size-3.5" />}
                   onClick={() => void reload()}
                 >
-                  Tentar novamente
+                  {t('common:actions.retry')}
                 </Button>
               </div>
             ) : workspaces.length === 0 ? (
               <div className="px-1 py-2">
                 <p className="text-[12.5px] font-medium text-foreground-muted">
-                  Nenhum workspace aberto
+                  {t('code:sidebar.empty.title')}
                 </p>
                 <p className="mt-1 text-[11.5px] leading-relaxed text-foreground-subtle">
-                  Abra uma pasta para o agente ler, editar e rodar comandos.
+                  {t('code:sidebar.empty.description')}
                 </p>
                 <Button
                   variant="secondary"
@@ -1178,16 +1190,16 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                   leftIcon={<FolderOpen className="size-3.5" />}
                   onClick={() => void handleOpenFolder()}
                 >
-                  Abrir pasta…
+                  {t('code:sidebar.openFolderCta')}
                 </Button>
               </div>
             ) : visibleWorkspaces.length === 0 ? (
               <div className="px-1 py-2">
                 <p className="text-[12.5px] font-medium text-foreground-muted">
-                  Nenhum workspace encontrado
+                  {t('code:sidebar.noResults.title')}
                 </p>
                 <p className="mt-1 text-[11.5px] leading-relaxed text-foreground-subtle">
-                  Ajuste a pesquisa ou os filtros para ver outros workspaces.
+                  {t('code:sidebar.noResults.description')}
                 </p>
                 <Button
                   variant="ghost"
@@ -1196,13 +1208,13 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                   leftIcon={<X className="size-3.5" />}
                   onClick={clearWorkspaceFilters}
                 >
-                  Limpar filtros
+                  {t('code:sidebar.clearFilters')}
                 </Button>
               </div>
             ) : (
               <SortableList
                 ids={visibleWorkspaces.map((workspace) => workspace.id)}
-                label="Workspaces"
+                label={t('code:sidebar.workspacesHeading')}
                 itemLabel={(id) => workspaces.find((workspace) => workspace.id === id)?.name ?? id}
                 disabled={hasWorkspaceFilters}
                 onReorder={(ids) => void reorder(ids)}
@@ -1257,8 +1269,8 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                 type="button"
                 aria-label={
                   unassignedCollapsed
-                    ? 'Expandir sessões sem workspace'
-                    : 'Recolher sessões sem workspace'
+                    ? t('code:sidebar.expandUnassigned')
+                    : t('code:sidebar.collapseUnassigned')
                 }
                 aria-expanded={!unassignedCollapsed}
                 aria-controls="code-unassigned-sessions"
@@ -1279,7 +1291,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                 id="code-unassigned-heading"
                 className="min-w-0 truncate text-[11px] font-medium tracking-tight text-foreground-subtle"
               >
-                Sem workspace
+                {t('code:sidebar.unassigned')}
               </h2>
             </div>
             <div
@@ -1289,7 +1301,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
             >
               <SortableList
                 ids={visibleUnassignedSessions.map((conversation) => conversation.id)}
-                label="Sem workspace"
+                label={t('code:sidebar.unassigned')}
                 itemLabel={(id) =>
                   visibleUnassignedSessions.find((conversation) => conversation.id === id)?.title ?? id
                 }
@@ -1332,7 +1344,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
           )}
         >
           <Settings className="size-4" />
-          <span>Configurações</span>
+          <span>{t('code:sidebar.settings')}</span>
           <span className="ml-auto text-[11px] tabular-nums text-foreground-subtle">
             {appInfo?.version ? `v${appInfo.version}` : ''}
           </span>
@@ -1370,7 +1382,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
       >
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Renomear sessão</DialogTitle>
+            <DialogTitle>{t('code:sidebar.renameSession.title')}</DialogTitle>
           </DialogHeader>
           <div className="px-6 py-2">
             <Input
@@ -1386,8 +1398,8 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                   if (!renameSessionBusy) setRenameSessionTarget(null);
                 }
               }}
-              aria-label="Renomear sessão"
-              placeholder="Título da sessão"
+              aria-label={t('code:sidebar.renameSession.aria')}
+              placeholder={t('code:sidebar.renameSession.placeholder')}
             />
           </div>
           <DialogFooter>
@@ -1397,7 +1409,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
               disabled={renameSessionBusy}
               onClick={() => setRenameSessionTarget(null)}
             >
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button
               variant="primary"
@@ -1406,7 +1418,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
               loading={renameSessionBusy}
               onClick={() => void handleSessionRenameConfirm()}
             >
-              Salvar
+              {t('common:actions.save')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1419,11 +1431,12 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
       >
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Excluir conversa</DialogTitle>
+            <DialogTitle>{t('code:sidebar.deleteSession.title')}</DialogTitle>
           </DialogHeader>
           <DialogDescription className="px-6 pb-4">
-            {deleteSessionTarget ? `“${deleteSessionTarget.title}” será removida permanentemente.` : ''} Esta
-            ação não pode ser desfeita.
+            {deleteSessionTarget
+              ? t('code:sidebar.deleteSession.description', { title: deleteSessionTarget.title })
+              : t('code:sidebar.deleteSession.descriptionNoTitle')}
           </DialogDescription>
           <DialogFooter>
             <Button
@@ -1432,7 +1445,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
               disabled={deleteSessionBusy}
               onClick={() => setDeleteSessionTarget(null)}
             >
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button
               variant="danger"
@@ -1440,7 +1453,7 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
               loading={deleteSessionBusy}
               onClick={() => void handleSessionDeleteConfirm()}
             >
-              Excluir
+              {t('common:actions.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

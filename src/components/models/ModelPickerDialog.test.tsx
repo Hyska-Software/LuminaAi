@@ -16,6 +16,7 @@ import {
   useChatStore,
   useUiStore,
 } from '@/lib/store';
+import { i18n } from '@/lib/i18n';
 
 // No Tauri IPC in jsdom: the settings write stays pending (fire-and-forget) and
 // the per-session model persistence is asserted through its mock.
@@ -457,8 +458,8 @@ describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => 
     lockConversation();
     await renderDialog();
 
-    expect(screen.getByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeTruthy();
-    expect(screen.getByText(MODEL_LOCKED_DESCRIPTION)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: i18n.t(MODEL_LOCKED_TITLE) })).toBeTruthy();
+    expect(screen.getByText(i18n.t(MODEL_LOCKED_DESCRIPTION))).toBeTruthy();
     // Resumo do modelo em uso (avatar + nome + provedor).
     expect(screen.getByText('DeepSeek V4.1 Flash')).toBeTruthy();
     expect(screen.getByText('OpenCode Go')).toBeTruthy();
@@ -508,8 +509,8 @@ describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => 
     });
     await renderDialog();
 
-    expect(screen.getByRole('heading', { name: MODEL_STREAMING_LOCKED_TITLE })).toBeTruthy();
-    expect(screen.getByText(MODEL_STREAMING_LOCKED_DESCRIPTION)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: i18n.t(MODEL_STREAMING_LOCKED_TITLE) })).toBeTruthy();
+    expect(screen.getByText(i18n.t(MODEL_STREAMING_LOCKED_DESCRIPTION))).toBeTruthy();
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 
@@ -531,7 +532,7 @@ describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => 
 
     await renderDialog();
 
-    expect(screen.getByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: i18n.t(MODEL_LOCKED_TITLE) })).toBeTruthy();
     expect(screen.getByText('fantasma')).toBeTruthy();
     expect(screen.getByText('desaparecido')).toBeTruthy();
   });
@@ -544,7 +545,7 @@ describe('ModelPickerDialog (troca de modelo na sessão do Code)', () => {
     const user = userEvent.setup();
 
     expect(screen.getByRole('heading', { name: 'Selecionar modelo' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: MODEL_LOCKED_TITLE })).toBeNull();
+    expect(screen.queryByRole('heading', { name: i18n.t(MODEL_LOCKED_TITLE) })).toBeNull();
     expect(searchField()).toBeTruthy();
 
     await user.click(screen.getByRole('option', { name: /GLM-5\.3-Flash/ }));
@@ -636,8 +637,8 @@ describe('ModelPickerDialog (troca de modelo na sessão do Code)', () => {
     await renderDialog();
     const user = userEvent.setup();
 
-    expect(screen.getByRole('heading', { name: MODEL_STREAMING_LOCKED_TITLE })).toBeTruthy();
-    expect(screen.getByText(MODEL_STREAMING_LOCKED_DESCRIPTION)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: i18n.t(MODEL_STREAMING_LOCKED_TITLE) })).toBeTruthy();
+    expect(screen.getByText(i18n.t(MODEL_STREAMING_LOCKED_DESCRIPTION))).toBeTruthy();
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Usar este modelo' })).toBeNull();
 

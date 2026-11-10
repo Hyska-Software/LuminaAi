@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
 import type { ArtifactThumbnail, LibraryArtifact } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -22,6 +23,7 @@ export interface LibraryThumbnailProps {
  * preview surface.
  */
 export function LibraryThumbnail({ artifact, className }: LibraryThumbnailProps) {
+  const { t } = useTranslation('library');
   const meta = artifactKindMeta(artifact.kind);
   const Icon = meta.icon;
   const isImage = artifact.kind === 'image';
@@ -53,7 +55,7 @@ export function LibraryThumbnail({ artifact, className }: LibraryThumbnailProps)
     return (
       <img
         src={`data:${mime};base64,${dataBase64}`}
-        alt={`Miniatura de ${artifact.name}`}
+        alt={t('library:card.thumbnailAlt', { name: artifact.name })}
         draggable={false}
         className={cn('size-full object-cover', className)}
       />

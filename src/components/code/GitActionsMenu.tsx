@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowDownToLine, ArrowUpFromLine, GitBranch, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -28,29 +29,29 @@ export interface GitActionsMenuProps {
   className?: string;
 }
 
-const ACTION_LABELS: Record<GitRemoteAction, string> = {
-  fetch: 'Buscar (fetch)',
-  pull: 'Puxar (pull)',
-  push: 'Enviar (push)',
-};
+const ACTION_KEYS = {
+  fetch: 'code:git.fetch',
+  pull: 'code:git.pull',
+  push: 'code:git.push',
+} as const;
 
-const BUSY_LABELS: Record<GitRemoteAction, string> = {
-  fetch: 'Buscando…',
-  pull: 'Puxando…',
-  push: 'Enviando…',
-};
+const BUSY_KEYS = {
+  fetch: 'code:git.fetchBusy',
+  pull: 'code:git.pullBusy',
+  push: 'code:git.pushBusy',
+} as const;
 
-const SUCCESS_LABELS: Record<GitRemoteAction, string> = {
-  fetch: 'Atualizações buscadas',
-  pull: 'Pull concluído',
-  push: 'Push concluído',
-};
+const SUCCESS_KEYS = {
+  fetch: 'code:git.fetchSuccess',
+  pull: 'code:git.pullSuccess',
+  push: 'code:git.pushSuccess',
+} as const;
 
-const ERROR_LABELS: Record<GitRemoteAction, string> = {
-  fetch: 'Não foi possível buscar atualizações',
-  pull: 'Não foi possível fazer pull',
-  push: 'Não foi possível fazer push',
-};
+const ERROR_KEYS = {
+  fetch: 'code:git.fetchError',
+  pull: 'code:git.pullError',
+  push: 'code:git.pushError',
+} as const;
 
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
@@ -72,6 +73,7 @@ export function GitActionsMenu({
   onRefresh,
   className,
 }: GitActionsMenuProps) {
+  const { t } = useTranslation('code');
   const [busy, setBusy] = useState<GitRemoteAction | null>(null);
 
   const run = async (action: GitRemoteAction) => {
@@ -81,11 +83,11 @@ export function GitActionsMenu({
       if (action === 'fetch') await api.gitFetch(workspaceId);
       else if (action === 'pull') await api.gitPull(workspaceId);
       else await api.gitPush(workspaceId);
-      toast.success(SUCCESS_LABELS[action]);
+      toast.success(t(SUCCESS_KEYS[action]));
       onRefresh?.();
     } catch (error) {
-      toast.error(ERROR_LABELS[action], {
-        description: describeError(error, 'Verifique a conexão e o remoto configurado.'),
+      toast.error(t(ERROR_KEYS[action]), {
+        description: describeError(error, t('code:git.connectionHint')),
       });
     } finally {
       setBusy(null);
@@ -93,12 +95,12 @@ export function GitActionsMenu({
   };
 
   const disabledReason = !workspaceId
-    ? 'Abra um workspace para sincronizar'
+    ? t('code:git.openWorkspace')
     : !isRepo
-      ? 'Não é um repositório Git'
+      ? t('code:git.notRepo')
       : busy
-        ? BUSY_LABELS[busy]
-        : 'Ações do git (fetch, pull, push)';
+        ? t(BUSY_KEYS[busy])
+        : t('code:git.actionsHint');
 
   return (
     <DropdownMenu>
@@ -111,20 +113,20 @@ export function GitActionsMenu({
           loading={busy !== null}
           disabled={!workspaceId || !isRepo}
           leftIcon={<GitBranch aria-hidden className="size-3.5" strokeWidth={1.75} />}
-          aria-label="Ações do git"
+          aria-label={t('code:git.aria')}
           title={disabledReason}
         >
-          {busy ? BUSY_LABELS[busy] : 'Git'}
+          {busy ? t(BUSY_KEYS[busy]) : 'Git'}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-52">
-        <DropdownMenuLabel>Sincronizar</DropdownMenuLabel>
+        <DropdownMenuLabel>{t('code:git.sync')}</DropdownMenuLabel>
         <DropdownMenuItem
           icon={<RefreshCw aria-hidden className="size-4" strokeWidth={1.75} />}
           disabled={busy !== null}
           onSelect={() => void run('fetch')}
         >
-          {ACTION_LABELS.fetch}
+          {t(ACTION_KEYS.fetch)}
         </DropdownMenuItem>
         <DropdownMenuItem
           icon={<ArrowDownToLine aria-hidden className="size-4" strokeWidth={1.75} />}
@@ -132,7 +134,7 @@ export function GitActionsMenu({
           disabled={busy !== null}
           onSelect={() => void run('pull')}
         >
-          {ACTION_LABELS.pull}
+          {t(ACTION_KEYS.pull)}
         </DropdownMenuItem>
         <DropdownMenuItem
           icon={<ArrowUpFromLine aria-hidden className="size-4" strokeWidth={1.75} />}
@@ -140,14 +142,14 @@ export function GitActionsMenu({
           disabled={busy !== null}
           onSelect={() => void run('push')}
         >
-          {ACTION_LABELS.push}
+          {t(ACTION_KEYS.push)}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           icon={<RefreshCw aria-hidden className="size-4" strokeWidth={1.75} />}
           onSelect={() => onRefresh?.()}
         >
-          Atualizar status
+          {t('code:git.refresh')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

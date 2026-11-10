@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::domain::SkillSummary;
+use crate::i18n::{t, t_args};
 use crate::providers::ToolDefinition;
 
 use super::{json_str, ToolOutcome, ToolRuntime};
@@ -283,17 +284,13 @@ pub fn materialize_bundled(data_dir: &Path) -> anyhow::Result<PathBuf> {
     let target = data_dir.join(BUNDLED_DIR);
     if target.exists() {
         std::fs::remove_dir_all(&target).with_context(|| {
-            format!(
-                "não foi possível limpar as skills embutidas em {}",
-                target.display()
-            )
+            let path = target.display().to_string();
+            t_args("tools.skills.materializeCleanFailed", &[("path", &path)])
         })?;
     }
     std::fs::create_dir_all(&target).with_context(|| {
-        format!(
-            "não foi possível criar o diretório das skills embutidas em {}",
-            target.display()
-        )
+        let path = target.display().to_string();
+        t_args("tools.skills.materializeCreateFailed", &[("path", &path)])
     })?;
     extract_embedded(&BUNDLED_SKILLS, &target)?;
     Ok(target)
@@ -304,11 +301,14 @@ fn extract_embedded(dir: &Dir<'_>, target: &Path) -> anyhow::Result<()> {
         let path = target.join(file.path());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
-                format!("não foi possível criar {}", parent.display())
+                let parent = parent.display().to_string();
+                t_args("tools.skills.extractCreateFailed", &[("path", &parent)])
             })?;
         }
-        std::fs::write(&path, file.contents())
-            .with_context(|| format!("não foi possível gravar {}", path.display()))?;
+        std::fs::write(&path, file.contents()).with_context(|| {
+            let path = path.display().to_string();
+            t_args("tools.skills.extractWriteFailed", &[("path", &path)])
+        })?;
     }
     for sub in dir.dirs() {
         extract_embedded(sub, target)?;
@@ -444,24 +444,42 @@ fn scan_skills(root: &Path, source: SkillSource) -> Vec<Skill> {
 
 fn load_skill(dir: &Path, source: SkillSource) -> anyhow::Result<Skill> {
     let path = dir.join(SKILL_FILE);
-    let raw = std::fs::read_to_string(&path)
-        .with_context(|| format!("não foi possível ler {}", path.display()))?;
+    let raw = std::fs::read_to_string(&path).with_context(|| {
+        let path = path.display().to_string();
+        t_args("tools.skills.loadReadFailed", &[("path", &path)])
+    })?;
     let (name, description, body) = parse_frontmatter(&raw)?;
     if !is_valid_skill_name(&name) {
+        let max = MAX_NAME_CHARS.to_string();
         bail!(
-            "nome de skill inválido: `{name}` (use [a-z0-9] e hífens, até {MAX_NAME_CHARS} caracteres)"
+            "{}",
+            t_args(
+                "tools.skills.invalidName",
+                &[("name", name.as_str()), ("max", &max)]
+            )
         );
     }
     if description.is_empty() {
-        bail!("a skill `{name}` precisa de uma `description`");
+        bail!(
+            "{}",
+            t_args("tools.skills.missingDescription", &[("name", name.as_str())])
+        );
     }
     if description.chars().count() > MAX_DESCRIPTION_CHARS {
+        let max = MAX_DESCRIPTION_CHARS.to_string();
         bail!(
-            "a `description` da skill `{name}` excede {MAX_DESCRIPTION_CHARS} caracteres"
+            "{}",
+            t_args(
+                "tools.skills.descriptionTooLong",
+                &[("name", name.as_str()), ("max", &max)]
+            )
         );
     }
     if body.len() > MAX_BODY_BYTES {
-        bail!("o corpo da skill `{name}` excede 512 KB");
+        bail!(
+            "{}",
+            t_args("tools.skills.bodyTooLarge", &[("name", name.as_str())])
+        );
     }
     Ok(Skill {
         name,
@@ -491,7 +509,7 @@ fn parse_frontmatter(raw: &str) -> anyhow::Result<(String, String, String)> {
     let lines: Vec<&str> = raw.lines().collect();
     match lines.first() {
         Some(line) if line.trim() == "---" => {}
-        _ => bail!("frontmatter ausente: a primeira linha de SKILL.md deve ser `---`"),
+        _ => bail!("{}", t("tools.skills.frontmatterMissing")),
     }
     let mut index = 1usize;
 
@@ -538,13 +556,14 @@ fn parse_frontmatter(raw: &str) -> anyhow::Result<(String, String, String)> {
         }
     }
     if !closed {
-        bail!("frontmatter não fechado: falta uma linha `---` após os metadados");
+        bail!("{}", t("tools.skills.frontmatterUnclosed"));
     }
 
     let body = lines[index..].join("\n").trim().to_string();
 
-    let name = name.ok_or_else(|| anyhow!("frontmatter sem `name`"))?;
-    let description = description.ok_or_else(|| anyhow!("frontmatter sem `description`"))?;
+    let name = name.ok_or_else(|| anyhow!(t("tools.skills.frontmatterNoName")))?;
+    let description =
+        description.ok_or_else(|| anyhow!(t("tools.skills.frontmatterNoDescription")))?;
     Ok((name, description, body))
 }
 
@@ -708,17 +727,23 @@ fn collect_files(dir: &Path, out: &mut Vec<String>, depth: usize) -> anyhow::Res
     if depth > MAX_FILE_DEPTH || out.len() >= MAX_SKILL_FILES {
         return Ok(());
     }
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("não foi possível listar {}", dir.display()))?;
+    let entries = std::fs::read_dir(dir).with_context(|| {
+        let dir = dir.display().to_string();
+        t_args("tools.skills.listDirFailed", &[("path", &dir)])
+    })?;
     for entry in entries {
         if out.len() >= MAX_SKILL_FILES {
             break;
         }
-        let entry = entry.with_context(|| format!("falha ao ler {}", dir.display()))?;
+        let entry = entry.with_context(|| {
+            let dir = dir.display().to_string();
+            t_args("tools.skills.readDirEntryFailed", &[("path", &dir)])
+        })?;
         let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .with_context(|| format!("falha ao inspecionar {}", path.display()))?;
+        let file_type = entry.file_type().with_context(|| {
+            let path = path.display().to_string();
+            t_args("tools.skills.inspectEntryFailed", &[("path", &path)])
+        })?;
         if file_type.is_dir() {
             collect_files(&path, out, depth + 1)?;
         } else if file_type.is_file() {
@@ -742,35 +767,52 @@ pub fn save_user_skill(data_dir: &Path, draft: &SkillDraft, now: i64) -> anyhow:
     let description = draft.description.trim().to_string();
     let content = draft.content.trim_end().to_string();
     if !is_valid_skill_name(&name) {
-        bail!("SKILL_INVALID: nome inválido (use [a-z0-9] e hífens, até {MAX_NAME_CHARS} caracteres)");
+        let max = MAX_NAME_CHARS.to_string();
+        bail!(
+            "SKILL_INVALID: {}",
+            t_args("tools.skills.saveInvalidName", &[("max", &max)])
+        );
     }
     if description.is_empty() || description.chars().count() > MAX_DESCRIPTION_CHARS {
-        bail!("SKILL_INVALID: a descrição deve ter de 1 a {MAX_DESCRIPTION_CHARS} caracteres");
+        let max = MAX_DESCRIPTION_CHARS.to_string();
+        bail!(
+            "SKILL_INVALID: {}",
+            t_args("tools.skills.saveInvalidDescriptionLength", &[("max", &max)])
+        );
     }
     if description.contains('\n') || description.contains('\r') {
-        bail!("SKILL_INVALID: a descrição deve ocupar uma única linha");
+        bail!(
+            "SKILL_INVALID: {}",
+            t("tools.skills.saveDescriptionSingleLine")
+        );
     }
     if content.is_empty() || content.len() > MAX_BODY_BYTES {
-        bail!("SKILL_INVALID: o conteúdo deve ter de 1 byte a 512 KB");
+        bail!("SKILL_INVALID: {}", t("tools.skills.saveContentLength"));
     }
     let root = data_dir.join(USER_DIR);
     let history_root = data_dir.join("skill-history").join(&name);
-    std::fs::create_dir_all(&root).context("criar pasta de skills do usuário")?;
-    std::fs::create_dir_all(&history_root).context("criar histórico de skills")?;
-    let root = root.canonicalize().context("resolver pasta de skills")?;
+    std::fs::create_dir_all(&root).context(t("tools.skills.createUserDirFailed"))?;
+    std::fs::create_dir_all(&history_root).context(t("tools.skills.createHistoryDirFailed"))?;
+    let root = root.canonicalize().context(t("tools.skills.resolveRootFailed"))?;
     let target = root.join(&name);
     let raw = format!("---\nname: {name}\ndescription: {description}\n---\n{content}\n");
     if target.exists() {
         if !draft.overwrite {
-            bail!("SKILL_EXISTS: a skill `{name}` já existe; use overwrite para substituir");
+            bail!(
+                "SKILL_EXISTS: {}",
+                t_args("tools.skills.exists", &[("name", name.as_str())])
+            );
         }
-        let metadata = std::fs::symlink_metadata(&target).context("inspecionar skill existente")?;
+        let metadata = std::fs::symlink_metadata(&target)
+            .context(t("tools.skills.inspectExistingFailed"))?;
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            bail!("SKILL_UNSAFE: o destino da skill não é um diretório regular");
+            bail!("SKILL_UNSAFE: {}", t("tools.skills.unsafeNotDirectory"));
         }
-        let canonical_target = target.canonicalize().context("resolver skill existente")?;
+        let canonical_target = target
+            .canonicalize()
+            .context(t("tools.skills.resolveExistingFailed"))?;
         if canonical_target.parent() != Some(root.as_path()) {
-            bail!("SKILL_UNSAFE: a skill escapa da pasta do usuário");
+            bail!("SKILL_UNSAFE: {}", t("tools.skills.unsafeEscapes"));
         }
         let current = canonical_target.join(SKILL_FILE);
         if current.is_file() {
@@ -778,43 +820,47 @@ pub fn save_user_skill(data_dir: &Path, draft: &SkillDraft, now: i64) -> anyhow:
                 "{now}-{}.md",
                 uuid::Uuid::new_v4().simple()
             ));
-            std::fs::copy(&current, &history_file).context("arquivar versão anterior da skill")?;
+            std::fs::copy(&current, &history_file).context(t("tools.skills.archiveFailed"))?;
         }
         let tmp = canonical_target.join(format!(".SKILL.md.{}.tmp", uuid::Uuid::new_v4().simple()));
         {
-            let mut file = std::fs::File::create(&tmp).context("criar arquivo temporário da skill")?;
+            let mut file =
+                std::fs::File::create(&tmp).context(t("tools.skills.createTempFileFailed"))?;
             std::io::Write::write_all(&mut file, raw.as_bytes())
-                .context("escrever skill temporária")?;
-            file.sync_all().context("sincronizar skill temporária")?;
+                .context(t("tools.skills.writeTempFailed"))?;
+            file.sync_all().context(t("tools.skills.syncTempFailed"))?;
         }
         if current.exists() {
-            std::fs::remove_file(&current).context("remover versão anterior da skill")?;
+            std::fs::remove_file(&current).context(t("tools.skills.removeOldFailed"))?;
         }
-        std::fs::rename(&tmp, &current).context("instalar skill atualizada")?;
+        std::fs::rename(&tmp, &current).context(t("tools.skills.installUpdateFailed"))?;
         return load_skill(&canonical_target, SkillSource::User);
     }
     let tmp = root.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
-    std::fs::create_dir(&tmp).context("criar diretório temporário da skill")?;
+    std::fs::create_dir(&tmp).context(t("tools.skills.createTempDirFailed"))?;
     let tmp_file = tmp.join(SKILL_FILE);
     {
-        let mut file = std::fs::File::create(&tmp_file).context("criar SKILL.md temporário")?;
-        std::io::Write::write_all(&mut file, raw.as_bytes()).context("escrever SKILL.md temporário")?;
-        file.sync_all().context("sincronizar SKILL.md temporário")?;
+        let mut file =
+            std::fs::File::create(&tmp_file).context(t("tools.skills.createTempSkillFileFailed"))?;
+        std::io::Write::write_all(&mut file, raw.as_bytes())
+            .context(t("tools.skills.writeTempSkillFileFailed"))?;
+        file.sync_all()
+            .context(t("tools.skills.syncTempSkillFileFailed"))?;
     }
-    std::fs::rename(&tmp, &target).context("instalar nova skill")?;
+    std::fs::rename(&tmp, &target).context(t("tools.skills.installNewFailed"))?;
     load_skill(&target, SkillSource::User)
 }
 
 /// Lists archived versions of one user skill, newest first.
 pub fn list_skill_versions(data_dir: &Path, name: &str) -> anyhow::Result<Vec<SkillVersion>> {
     if !is_valid_skill_name(name) {
-        bail!("SKILL_INVALID: nome inválido");
+        bail!("SKILL_INVALID: {}", t("tools.skills.invalidNameShort"));
     }
     let dir = data_dir.join("skill-history").join(name);
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error).context("ler histórico de skills"),
+        Err(error) => return Err(error).context(t("tools.skills.readHistoryFailed")),
     };
     let mut versions = Vec::new();
     for entry in entries.flatten() {
@@ -869,13 +915,13 @@ pub fn run_save(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
 /// Shared implementation for Chat (ToolRuntime) and Code (ToolCtx).
 pub fn run_save_with(data_dir: &Path, args: &Value) -> ToolOutcome {
     let Some(name) = json_str(args, "name") else {
-        return ToolOutcome::error("o argumento `name` é obrigatório");
+        return ToolOutcome::error(t("tools.skills.argNameRequired"));
     };
     let Some(description) = json_str(args, "description") else {
-        return ToolOutcome::error("o argumento `description` é obrigatório");
+        return ToolOutcome::error(t("tools.skills.argDescriptionRequired"));
     };
     let Some(content) = json_str(args, "content") else {
-        return ToolOutcome::error("o argumento `content` é obrigatório");
+        return ToolOutcome::error(t("tools.skills.argContentRequired"));
     };
     let draft = SkillDraft {
         name,
@@ -895,7 +941,7 @@ pub fn run_save_with(data_dir: &Path, args: &Value) -> ToolOutcome {
                 "overwritten": draft.overwrite,
             })
             .to_string(),
-            summary: Some(format!("Skill salva: {}", skill.name)),
+            summary: Some(t_args("tools.skills.savedSummary", &[("name", &skill.name)])),
             ..Default::default()
         },
         Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -970,31 +1016,36 @@ pub fn run_list(rt: &ToolRuntime) -> ToolOutcome {
                 ..Default::default()
             }
         }
-        Err(error) => ToolOutcome::error(format!(
-            "não foi possível carregar as skills: {error:#}"
-        )),
+        Err(error) => {
+            let error = format!("{error:#}");
+            ToolOutcome::error(t_args("tools.skills.loadFailed", &[("error", &error)]))
+        }
     }
 }
 
 /// Short tool-card summary that makes clear the agent does not see disabled
 /// skills (`2 skills ativas · 1 desativada`).
 fn list_summary(active: usize, hidden: usize) -> String {
-    let active_text = if active == 1 {
-        "1 skill ativa".to_string()
-    } else {
-        format!("{active} skills ativas")
+    let active_text = active.to_string();
+    let hidden_text = hidden.to_string();
+    let key = match (active == 1, hidden) {
+        (true, 0) => "tools.skills.listSummaryActiveOne",
+        (false, 0) => "tools.skills.listSummaryActiveMany",
+        (true, 1) => "tools.skills.listSummaryActiveOneHiddenOne",
+        (false, 1) => "tools.skills.listSummaryActiveManyHiddenOne",
+        (true, _) => "tools.skills.listSummaryActiveOneHiddenMany",
+        (false, _) => "tools.skills.listSummaryActiveManyHiddenMany",
     };
-    match hidden {
-        0 => active_text,
-        1 => format!("{active_text} · 1 desativada"),
-        total => format!("{active_text} · {total} desativadas"),
-    }
+    t_args(
+        key,
+        &[("active", &active_text), ("hidden", &hidden_text)],
+    )
 }
 
 pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let name = match json_str(args, "name") {
         Some(name) if !name.trim().is_empty() => name.trim().to_string(),
-        _ => return ToolOutcome::error("o argumento `name` é obrigatório"),
+        _ => return ToolOutcome::error(t("tools.skills.argNameRequired")),
     };
 
     let skill = match read_with_roots(&rt.data_dir, &name, &rt.skills_roots) {
@@ -1019,34 +1070,37 @@ pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
                 })
                 .unwrap_or_default();
             let available = if available.is_empty() {
-                "(nenhuma skill ativa)".to_string()
+                t("tools.skills.noneActive")
             } else {
                 available
             };
-            return ToolOutcome::error(format!(
-                "skill `{name}` não encontrada; disponíveis: {available}"
+            return ToolOutcome::error(t_args(
+                "tools.skills.notFound",
+                &[("name", &name), ("available", &available)],
             ));
         }
         Err(error) => {
-            return ToolOutcome::error(format!("não foi possível ler a skill `{name}`: {error:#}"))
+            let error = format!("{error:#}");
+            return ToolOutcome::error(t_args(
+                "tools.skills.readFailed",
+                &[("name", &name), ("error", &error)],
+            ));
         }
     };
 
     // Disabled skills are invisible to the agent: reading one is an error with
     // the exact place to enable it (the catalog stays the same file on disk).
     if !is_enabled(&skill.name, &rt.settings.disabled_skills) {
-        return ToolOutcome::error(format!(
-            "a skill `{}` está desativada. Ative-a em Configurações → Skills \
-             (Configurações → Ferramentas → Gerenciar skills) antes de usá-la; `list_skills` mostra \
-             somente as skills ativas.",
-            skill.name
+        return ToolOutcome::error(t_args(
+            "tools.skills.disabled",
+            &[("name", &skill.name)],
         ));
     }
     if let Some(allowed) = rt.options.allowed_skills.as_deref() {
         if !allowed.iter().any(|name| name == &skill.name) {
-            return ToolOutcome::error(format!(
-                "a skill `{}` não está autorizada para este agente",
-                skill.name
+            return ToolOutcome::error(t_args(
+                "tools.skills.unauthorized",
+                &[("name", &skill.name)],
             ));
         }
     }
@@ -1054,9 +1108,11 @@ pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let files = match skill.files() {
         Ok(files) => files,
         Err(error) => {
-            return ToolOutcome::error(format!(
-                "não foi possível listar os arquivos da skill `{name}`: {error:#}"
-            ))
+            let error = format!("{error:#}");
+            return ToolOutcome::error(t_args(
+                "tools.skills.listFilesFailed",
+                &[("name", &name), ("error", &error)],
+            ));
         }
     };
     let payload = json!({
@@ -1068,8 +1124,12 @@ pub fn run_read(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     });
     let content = serde_json::to_string_pretty(&payload)
         .unwrap_or_else(|_| String::from("{}"));
+    let count = files.len().to_string();
     ToolOutcome {
-        summary: Some(format!("{} · {} arquivo(s)", skill.name, files.len())),
+        summary: Some(t_args(
+            "tools.skills.readSummary",
+            &[("name", &skill.name), ("count", &count)],
+        )),
         content,
         ..Default::default()
     }

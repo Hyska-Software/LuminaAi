@@ -10,13 +10,16 @@
  * uma linha curta em vez de derrubar a App (`PresentationBoundary`).
  */
 import { Component, useState, type ErrorInfo, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 
 import { GoalCard } from './GoalCard';
 import { JobsBar } from './JobsBar';
 import { PlanCard } from './PlanCard';
 import { TodoCard } from './TodoCard';
+import { subagentTypeLabel } from '@/components/agents/agentUtils';
 import { DiffView } from '@/components/code/DiffView';
+import { t as globalT } from '@/lib/i18n';
 import type {
   AskUserAnswer,
   FileChangeKind,
@@ -124,7 +127,7 @@ export function normalizeGoalPresentation(raw: unknown): GoalView | null {
   const maxRounds = Math.min(Math.max(finiteInteger(source.maxRounds, 25), 1), 100);
 
   return {
-    title: nonEmptyString(source.title) ?? 'Objetivo',
+    title: nonEmptyString(source.title) ?? globalT('agents:goal.fallbackTitle'),
     objective: typeof source.objective === 'string' ? source.objective : '',
     status: status as GoalStatus,
     autoContinue: source.autoContinue === true,
@@ -203,35 +206,34 @@ function normalizeAnswers(raw: unknown): AskUserAnswer[] | null {
   });
 }
 
-function plural(count: number, singular: string, pluralForm: string): string {
-  return count === 1 ? singular : pluralForm;
+/** Verbo da mudança de arquivo, resolvido no render (nunca congelado no import). */
+function changeVerb(change: string): string {
+  switch (change as FileChangeKind) {
+    case 'created':
+      return globalT('agents:presentation.change.created');
+    case 'deleted':
+      return globalT('agents:presentation.change.deleted');
+    case 'renamed':
+      return globalT('agents:presentation.change.renamed');
+    case 'modified':
+    default:
+      return globalT('agents:presentation.change.modified');
+  }
 }
-
-const CHANGE_VERBS: Record<string, string> = {
-  created: 'Criou',
-  modified: 'Alterou',
-  deleted: 'Removeu',
-  renamed: 'Renomeou',
-};
-
-const SUBAGENT_LABELS: Record<string, string> = {
-  explore: 'exploração',
-  review: 'revisão',
-  general: 'geral',
-};
 
 /** Linha degradada usada por payload inválido e pelo boundary de render. */
 function DegradedPresentation({ kind }: { kind?: string }) {
+  const { t } = useTranslation('agents');
   return (
     <p
       role="status"
       className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-relaxed text-foreground-muted"
     >
       {kind === 'plan'
-        ? 'Plano indisponível nesta versão.'
+        ? t('presentation.degraded.plan')
         : kind === 'goal'
-          ? 'Objetivo indisponível nesta versão.'
-          : 'Não foi possível mostrar esta apresentação.'}
+          ? t('presentation.degraded.goal')
+          : t('presentation.degraded.default')}
     </p>
   );
 }
@@ -256,7 +258,7 @@ export class PresentationBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Falha ao renderizar apresentação de tool', this.props.kind, error, info);
+    console.error('Failed to render tool presentation', this.props.kind, error, info);
   }
 
   render() {
@@ -275,6 +277,7 @@ export function ToolPresentationCard({ presentation, className }: ToolPresentati
 }
 
 function PresentationContent({ presentation, className }: ToolPresentationCardProps) {
+  const { t } = useTranslation('agents');
   const kind = asRecord(presentation)?.kind;
   switch (kind) {
     case 'file_change': {
@@ -314,7 +317,7 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       if (skipped) {
         return (
           <p className={cn('text-[12px] text-foreground-muted', className)}>
-            Você preferiu não responder agora.
+            {t('presentation.answers.skipped')}
           </p>
         );
       }
@@ -326,7 +329,7 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
             className,
           )}
         >
-          <p className="font-medium text-foreground">Respostas do usuário</p>
+          <p className="font-medium text-foreground">{t('presentation.answers.title')}</p>
           <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-4">
             {answers.map((answer) => (
               <li key={answer.questionId}>
@@ -347,7 +350,7 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
           className={cn('rounded-lg border border-border bg-surface px-3 py-2 text-[12px]', className)}
         >
           <p className="font-medium text-foreground">
-            {count} {plural(count, 'arquivo alterado', 'arquivos alterados')}
+            {t('presentation.changes.count', { count })}
           </p>
           <p className="mt-0.5 tabular-nums text-foreground-muted">
             <span className="text-success">+{finiteNumber(value.added)}</span>{' '}
@@ -361,7 +364,7 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       const type = nonEmptyString(value.subagentType);
       const description = nonEmptyString(value.description);
       if (!type || !description) return <DegradedPresentation kind={kind} />;
-      const label = SUBAGENT_LABELS[type] ?? type;
+      const label = subagentTypeLabel(type);
       const steps = typeof value.steps === 'number' ? value.steps : null;
       const durationMs = typeof value.durationMs === 'number' ? value.durationMs : null;
       const usage = asRecord(value.usage);
@@ -370,17 +373,19 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       const modelId = nonEmptyString(value.modelId);
       const effort = nonEmptyString(value.effort);
       const meta = [
-        steps != null ? `${steps} ${steps === 1 ? 'passo' : 'passos'}` : null,
+        steps != null ? t('presentation.subagent.steps', { count: steps }) : null,
         durationMs != null ? `${(durationMs / 1000).toFixed(1)} s` : null,
-        totalTokens != null ? `${totalTokens} tokens` : null,
+        totalTokens != null ? t('presentation.subagent.tokens', { tokens: totalTokens }) : null,
         modelId,
-        effort ? `esforço ${effort}` : null,
+        effort ? t('presentation.subagent.effort', { effort }) : null,
       ].filter(Boolean);
       return (
         <div
           className={cn('rounded-lg border border-border bg-surface px-3 py-2 text-[12px]', className)}
         >
-          <p className="font-medium text-foreground">Subagente de {label}</p>
+          <p className="font-medium text-foreground">
+            {t('presentation.subagent.title', { type: label })}
+          </p>
           <p className="mt-0.5 text-foreground-muted">{description}</p>
           {meta.length > 0 ? (
             <p className="mt-1 text-[11px] tabular-nums text-foreground-subtle">
@@ -406,10 +411,10 @@ function FileChangeCard({
   const [open, setOpen] = useState(false);
   const value = asRecord(presentation) ?? {};
   const path = nonEmptyString(value.path) ?? '';
-  const change = typeof value.change === 'string' ? (value.change as FileChangeKind) : 'modified';
+  const change = typeof value.change === 'string' ? value.change : 'modified';
   const diff = typeof value.diff === 'string' ? value.diff : '';
   const hasDiff = Boolean(diff.trim());
-  const verb = CHANGE_VERBS[change as unknown as string] ?? 'Alterou';
+  const verb = changeVerb(change);
   return (
     <div className={cn('rounded-lg border border-border bg-surface', className)}>
       <button

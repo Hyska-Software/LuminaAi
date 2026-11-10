@@ -207,20 +207,28 @@ fn terminal_cwd(db: &Db, conversation_id: &str) -> Result<PathBuf, String> {
         .get_conversation(conversation_id)
         .map_err(|error| format!("TERMINAL_CONVERSATION: {error}"))?
         .ok_or_else(|| {
-            format!("TERMINAL_CONVERSATION_NOT_FOUND: conversa {conversation_id} não encontrada")
+            crate::i18n::t_args(
+                "terminal.errors.conversationNotFound",
+                &[("conversation_id", conversation_id)],
+            )
         })?;
     let workspace_id = conversation
         .workspace_id
-        .ok_or_else(|| "TERMINAL_NO_WORKSPACE: abra uma pasta para usar o terminal".to_string())?;
+        .ok_or_else(|| crate::i18n::t("terminal.errors.noWorkspace"))?;
     let workspace = db
         .get_workspace(&workspace_id)
         .map_err(|error| format!("TERMINAL_CONVERSATION: {error}"))?
-        .ok_or_else(|| format!("TERMINAL_WORKSPACE_MISSING: workspace {workspace_id} não encontrado"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args(
+                "terminal.errors.workspaceMissing",
+                &[("workspace_id", &workspace_id)],
+            )
+        })?;
     let path = PathBuf::from(workspace.path);
     if !path.is_dir() {
-        return Err(format!(
-            "TERMINAL_WORKSPACE_MISSING: a pasta {} não está disponível",
-            path.display()
+        return Err(crate::i18n::t_args(
+            "terminal.errors.folderUnavailable",
+            &[("path", &path.display().to_string())],
         ));
     }
     Ok(path)
@@ -306,8 +314,9 @@ impl TerminalRegistry {
             .filter(|session| session.is_running())
             .count();
         if running_count >= MAX_TERMINALS_PER_CONVERSATION {
-            return Err(format!(
-                "TERMINAL_LIMIT: máximo de {MAX_TERMINALS_PER_CONVERSATION} terminais por sessão"
+            return Err(crate::i18n::t_args(
+                "terminal.errors.limit",
+                &[("limit", &MAX_TERMINALS_PER_CONVERSATION.to_string())],
             ));
         }
 

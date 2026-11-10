@@ -15,6 +15,7 @@
  * `WorkspaceCenter`/aba do header).
  */
 import { useCallback, useEffect, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Copy, RefreshCw, Target, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { GoalCard, type GoalCardAction } from '@/components/agent';
@@ -28,6 +29,8 @@ import {
   goalStatusLabel,
 } from '@/lib/goalRunner';
 import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
+import { t } from '@/lib/i18n';
+import { localeLowerCase } from '@/lib/i18n/format';
 import type { GoalRound, GoalStatus, GoalView } from '@/lib/types';
 import { cn, copyText, formatCost, formatDuration, formatTokens, relativeTime } from '@/lib/utils';
 
@@ -50,16 +53,16 @@ const STATUS_TONE_CLASS: Record<GoalStatus, string> = {
 function roundOutcomeLabel(outcome?: string | null): string {
   switch (outcome) {
     case 'done':
-      return 'Concluída';
+      return t('code:goal.outcome.done');
     case 'cancelled':
-      return 'Cancelada';
+      return t('code:goal.outcome.cancelled');
     case 'error':
-      return 'Erro';
+      return t('code:goal.outcome.error');
     case 'interrupted':
-      return 'Interrompida';
+      return t('code:goal.outcome.interrupted');
     case null:
     case undefined:
-      return 'Em andamento';
+      return t('code:goal.outcome.running');
     default:
       return outcome;
   }
@@ -83,13 +86,16 @@ function roundOutcomeTone(outcome?: string | null): BadgeVariant {
 }
 
 function filesLabel(count: number): string {
-  return `${count} ${count === 1 ? 'arquivo' : 'arquivos'}`;
+  return t('code:goal.panel.roundFiles', { count });
 }
 
 /** Ações do card que são mutações simples do `update_goal`. */
 type GoalMutationAction = 'pause' | 'resume' | 'arm' | 'disarm' | 'complete' | 'reopen';
 
-function summaryRows(goal: GoalView, rounds: GoalRound[]): Array<{ label: string; value: string }> {
+function summaryRows(
+  goal: GoalView,
+  rounds: GoalRound[],
+): Array<{ id: string; label: string; value: string }> {
   const totalMs = rounds.reduce(
     (total, round) =>
       total +
@@ -99,13 +105,29 @@ function summaryRows(goal: GoalView, rounds: GoalRound[]): Array<{ label: string
     0,
   );
   const lastActivity = goal.lastRoundAt ?? goal.updatedAt;
-  const rows: Array<{ label: string; value: string }> = [
-    { label: 'Rodadas', value: `${goal.rounds} de ${goal.maxRounds}` },
-    { label: 'Tempo total', value: totalMs > 0 ? formatDuration(totalMs) : '—' },
-    { label: 'Tokens', value: goal.tokens != null ? `~${formatTokens(goal.tokens)}` : '—' },
-    { label: 'Custo', value: formatCost(goal.cost) },
+  const rows: Array<{ id: string; label: string; value: string }> = [
     {
-      label: 'Última atividade',
+      id: 'rounds',
+      label: t('code:goal.panel.summary.rounds'),
+      value: t('code:goal.panel.summary.roundsValue', {
+        current: goal.rounds,
+        max: goal.maxRounds,
+      }),
+    },
+    {
+      id: 'time',
+      label: t('code:goal.panel.summary.totalTime'),
+      value: totalMs > 0 ? formatDuration(totalMs) : '—',
+    },
+    {
+      id: 'tokens',
+      label: t('code:goal.panel.summary.tokens'),
+      value: goal.tokens != null ? `~${formatTokens(goal.tokens)}` : '—',
+    },
+    { id: 'cost', label: t('code:goal.panel.summary.cost'), value: formatCost(goal.cost) },
+    {
+      id: 'activity',
+      label: t('code:goal.panel.summary.lastActivity'),
       value:
         lastActivity != null && Number.isFinite(lastActivity)
           ? relativeTime(lastActivity)
@@ -117,6 +139,7 @@ function summaryRows(goal: GoalView, rounds: GoalRound[]): Array<{ label: string
 
 /** Linha da timeline de rodadas. */
 function GoalRoundRow({ round }: { round: GoalRound }) {
+  const { t: translate } = useTranslation('code');
   const outcome = round.outcome ?? null;
   const note = round.note?.trim() ?? '';
   const filesChanged = round.filesChanged ?? 0;
@@ -124,7 +147,7 @@ function GoalRoundRow({ round }: { round: GoalRound }) {
     <li className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-2">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-[12px] font-medium text-foreground tabular-nums">
-          Rodada {round.index}
+          {translate('code:goal.panel.roundLabel', { index: round.index })}
         </span>
         <Badge variant={roundOutcomeTone(outcome)}>{roundOutcomeLabel(outcome)}</Badge>
         {typeof round.durationMs === 'number' && Number.isFinite(round.durationMs) ? (
@@ -139,7 +162,7 @@ function GoalRoundRow({ round }: { round: GoalRound }) {
         ) : null}
         {round.tokens != null && Number.isFinite(round.tokens) ? (
           <span className="text-[11px] tabular-nums text-foreground-muted">
-            ~{formatTokens(round.tokens)} tokens
+            {translate('code:goal.panel.roundTokens', { tokens: formatTokens(round.tokens) })}
           </span>
         ) : null}
         <span className="ml-auto shrink-0 text-[11px] text-foreground-subtle">
@@ -152,7 +175,7 @@ function GoalRoundRow({ round }: { round: GoalRound }) {
         </p>
       ) : outcome != null ? (
         <p className="text-[11px] leading-relaxed text-foreground-subtle">
-          Sem resumo nesta rodada
+          {translate('code:goal.panel.roundNoSummary')}
         </p>
       ) : null}
     </li>
@@ -163,6 +186,7 @@ function GoalRoundRow({ round }: { round: GoalRound }) {
  * Painel central do objetivo. Ver `GoalPanelProps`.
  */
 export function GoalPanel({ conversationId, className }: GoalPanelProps) {
+  const { t } = useTranslation('code');
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const goal = session?.goal ?? null;
   const goalRounds = session?.goalRounds ?? [];
@@ -220,9 +244,8 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
     try {
       const started = await runGoalRound(conversationId);
       if (!started) {
-        toast.error('Não foi possível iniciar a rodada', {
-          description:
-            'Verifique se a sessão está ativa no Code, sem aprovações pendentes ou modo Plano.',
+        toast.error(t('code:goal.toast.startRoundFailed'), {
+          description: t('code:goal.toast.startRoundFailedDescription'),
         });
       }
     } finally {
@@ -254,8 +277,8 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
 
   const copyObjective = async () => {
     if (!goal) return;
-    if (await copyText(goal.objective)) toast.success('Objetivo copiado');
-    else toast.error('Não foi possível copiar o objetivo');
+    if (await copyText(goal.objective)) toast.success(t('code:goal.toast.copied'));
+    else toast.error(t('code:goal.toast.copyFailed'));
   };
 
   const disabled = busy || generating;
@@ -264,14 +287,14 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
     <section
       id="code-goal-panel"
       role="region"
-      aria-label="Objetivo da sessão"
+      aria-label={t('code:goal.panel.region')}
       aria-busy={disabled || undefined}
       className={cn('flex min-h-0 flex-1 flex-col overflow-y-auto', className)}
     >
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
         {sessionLoading && !goal ? (
           <p role="status" className="rounded-xl border border-border bg-surface p-4 text-[12.5px] text-foreground-muted">
-            Carregando objetivo…
+            {t('code:goal.panel.loading')}
           </p>
         ) : null}
 
@@ -282,12 +305,14 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
             </span>
             <div className="flex max-w-md flex-col gap-1">
               <h2 className="text-[14px] font-semibold text-foreground">
-                Nenhum objetivo nesta sessão
+                {t('code:goal.panel.empty.title')}
               </h2>
               <p className="text-[12px] leading-relaxed text-foreground-muted">
-                Defina um resultado de longo prazo. O agente trabalha nele em rodadas e continua
-                sozinho até concluir, bloquear ou atingir o limite. Use <strong>/goal</strong> no
-                composer e descreva a tarefa na mensagem seguinte.
+                <Trans
+                  ns="code"
+                  i18nKey="goal.panel.empty.description"
+                  components={{ strong: <strong /> }}
+                />
               </p>
             </div>
             <Button
@@ -296,7 +321,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
               leftIcon={<Target aria-hidden className="size-4" />}
               onClick={startGoalCreation}
             >
-              Criar com /goal
+              {t('code:goal.panel.createWithGoal')}
             </Button>
           </div>
         ) : null}
@@ -313,7 +338,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <dl className="flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1">
                 {summaryRows(goal, goalRounds).map((row) => (
-                  <div key={row.label} className="flex items-baseline gap-1">
+                  <div key={row.id} className="flex items-baseline gap-1">
                     <dt className="text-[11px] text-foreground-subtle">{row.label}</dt>
                     <dd className="text-[11.5px] font-medium tabular-nums text-foreground-muted">
                       {row.value}
@@ -324,7 +349,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
               <div className="flex flex-wrap items-center gap-2">
                 {goal.status === 'completed' ? (
                   <Button size="sm" variant="secondary" onClick={startGoalCreation}>
-                    Novo objetivo (/goal)
+                    {t('code:goal.panel.newGoal')}
                   </Button>
                 ) : null}
                 <Button
@@ -334,7 +359,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
                   disabled={disabled}
                   onClick={openEditDialog}
                 >
-                  Encerrar objetivo
+                  {t('code:goal.panel.closeGoal')}
                 </Button>
               </div>
             </div>
@@ -351,8 +376,8 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
                 />
                 <span>
                   {goal.status === 'paused'
-                    ? goalPauseReasonLabel(goal.pauseReason) ?? 'Objetivo pausado.'
-                    : 'Objetivo bloqueado — resolva o impedimento e retome.'}
+                    ? (goalPauseReasonLabel(goal.pauseReason) ?? t('code:goal.panel.pausedFallback'))
+                    : t('code:goal.panel.blocked')}
                   {goal.status === 'paused' && goal.pauseDetail?.trim()
                     ? ` ${goal.pauseDetail.trim()}`
                     : ''}
@@ -369,10 +394,10 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
                   id="code-goal-objective-heading"
                   className="text-[12px] font-semibold tracking-tight text-foreground"
                 >
-                  Objetivo
+                  {t('code:goal.panel.objectiveHeading')}
                 </h3>
                 <IconButton
-                  label="Copiar objetivo"
+                  label={t('code:goal.panel.copyObjective')}
                   size="sm"
                   disabled={!goal.objective.trim()}
                   onClick={() => void copyObjective()}
@@ -382,7 +407,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
               </div>
               <div
                 role="region"
-                aria-label="Objetivo completo"
+                aria-label={t('code:goal.panel.objectiveRegion')}
                 tabIndex={0}
                 className={cn(
                   'max-h-72 min-w-0 overflow-y-auto break-words pr-1 text-[13px]',
@@ -392,7 +417,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
                 {goal.objective.trim() ? (
                   <Markdown content={goal.objective} />
                 ) : (
-                  <p className="text-[12px] text-foreground-subtle">Objetivo sem descrição.</p>
+                  <p className="text-[12px] text-foreground-subtle">{t('code:goal.panel.noDescription')}</p>
                 )}
               </div>
             </section>
@@ -403,7 +428,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
                   id="code-goal-rounds-heading"
                   className="text-[12px] font-semibold tracking-tight text-foreground"
                 >
-                  Histórico de rodadas
+                  {t('code:goal.panel.roundsHeading')}
                 </h3>
                 <span className="text-[11px] tabular-nums text-foreground-subtle">
                   {goalRoundLabel(goal)} · {goalStatusLabel(goal)}
@@ -412,7 +437,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
 
               {goalRoundsLoading ? (
                 <p role="status" className="rounded-lg border border-border bg-surface px-3 py-2 text-[11.5px] text-foreground-muted">
-                  Carregando rodadas…
+                  {t('code:goal.panel.roundsLoading')}
                 </p>
               ) : null}
 
@@ -422,7 +447,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
                   className="flex flex-col gap-2 rounded-lg border border-border bg-danger-soft px-3 py-2.5"
                 >
                   <p className="min-w-0 break-words text-[11.5px] leading-relaxed text-danger">
-                    Não foi possível carregar o histórico de rodadas.
+                    {t('code:goal.panel.roundsError')}
                   </p>
                   <div>
                     <Button
@@ -431,7 +456,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
                       leftIcon={<RefreshCw aria-hidden className="size-3.5" />}
                       onClick={reloadRounds}
                     >
-                      Tentar novamente
+                      {t('common:actions.retry')}
                     </Button>
                   </div>
                 </div>
@@ -439,7 +464,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
 
               {!goalRoundsLoading && !goalRoundsError && goalRounds.length === 0 ? (
                 <p className="rounded-lg border border-border bg-surface px-3 py-2 text-[11.5px] text-foreground-subtle">
-                  Nenhuma rodada ainda — as rodadas do objetivo aparecem aqui.
+                  {t('code:goal.panel.roundsEmpty')}
                 </p>
               ) : null}
 
@@ -453,8 +478,10 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
             </section>
 
             <p className="text-[11px] leading-relaxed text-foreground-subtle">
-              O status é definido pelo backend e reflete o que está persistido na sessão. Objetivo{' '}
-              {goalStatusLabel(goal).toLowerCase()} · revisão {goal.revision}.
+              {t('code:goal.panel.footer', {
+                status: localeLowerCase(goalStatusLabel(goal)),
+                revision: goal.revision,
+              })}
             </p>
           </>
         ) : null}

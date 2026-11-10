@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import type { CodeFileTab } from '@/lib/store';
 import type { WorkspaceFileContent } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -15,7 +16,7 @@ export interface CodeFileViewProps {
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error.trim()) return error;
-  return 'Não foi possível ler o arquivo.';
+  return t('code:codeFile.readError');
 }
 
 /**

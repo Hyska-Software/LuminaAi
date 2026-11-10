@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ close: vi.fn() }),
@@ -9,6 +9,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn(async () => null),
 }));
 
+import { setLanguage } from '@/lib/i18n';
 import { InstallerApp } from './InstallerApp';
 import type { InstallerApi, InstallerContext } from './types';
 
@@ -37,6 +38,7 @@ function context(overrides: Partial<InstallerContext> = {}): InstallerContext {
 function api(value: InstallerContext): InstallerApi {
   return {
     context: vi.fn(async () => value),
+    setLanguage: vi.fn(async () => undefined),
     start: vi.fn(async () => undefined),
     uninstall: vi.fn(async () => undefined),
     cancel: vi.fn(async () => undefined),
@@ -84,5 +86,31 @@ describe('InstallerApp', () => {
       screen.getByRole('checkbox', { name: /remover também meus dados/i }).getAttribute('aria-checked'),
     ).toBe('false');
     expect(screen.getByRole('button', { name: /remover zylara/i })).toBeTruthy();
+  });
+
+  it('renders in English and switches language from the header', async () => {
+    await setLanguage('en', { persist: false });
+    const user = userEvent.setup();
+    const installerApi = api(context());
+    render(<InstallerApp api={installerApi} />);
+
+    expect(await screen.findByText('Install Zylara')).toBeTruthy();
+    expect(document.documentElement.lang).toBe('en');
+    expect(installerApi.setLanguage).toHaveBeenCalledWith('en');
+
+    expect(screen.getByRole('option', { name: 'English' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Português (Brasil)' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'Español' })).toBeTruthy();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Language' }), 'es');
+
+    expect(await screen.findByText('Instala Zylara')).toBeTruthy();
+    expect(document.documentElement.lang).toBe('es');
+    expect(installerApi.setLanguage).toHaveBeenCalledWith('es');
+  });
+
+  afterEach(async () => {
+    cleanup();
+    await setLanguage('pt-BR', { persist: false });
   });
 });

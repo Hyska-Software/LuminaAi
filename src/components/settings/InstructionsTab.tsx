@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/lib/store';
+import { formatNumber } from '@/lib/i18n/format';
 import { Textarea } from '@/components/ui';
 import { SettingsBlock, SettingsSection } from './shared';
 
@@ -9,6 +11,7 @@ const MAX_LENGTH = 8000;
 const DEBOUNCE_MS = 600;
 
 export function InstructionsTab() {
+  const { t } = useTranslation('settings');
   const systemPrompt = useAppStore((state) => state.settings.systemPrompt);
   const saveSettings = useAppStore((state) => state.saveSettings);
   const [value, setValue] = useState(systemPrompt);
@@ -67,42 +70,46 @@ export function InstructionsTab() {
     timerRef.current = null;
     persist(value);
   };
+
+  const statusLabel =
+    status === 'saving'
+      ? t('instructions.saving')
+      : status === 'saved'
+        ? t('instructions.saved')
+        : t('instructions.autoSave');
+
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection
-        title="Instruções do sistema"
-        description="Um prompt personalizado anexado a todas as conversas, além das instruções padrão da Zylara."
-      >
+      <SettingsSection title={t('instructions.title')} description={t('instructions.description')}>
         <SettingsBlock>
           <Textarea
             value={value}
             onChange={(event) => handleChange(event.target.value)}
             onBlur={flush}
             rows={12}
-            aria-label="Instruções do sistema"
-            placeholder={
-              'Ex.: “Responda em português brasileiro, com objetividade. Use tabelas quando fizer sentido e cite fontes ao usar a busca.”\n\nDeixe em branco para usar apenas as instruções padrão da Zylara (idioma, ferramentas, formato de UI generativa e segurança).'
-            }
+            aria-label={t('instructions.aria')}
+            placeholder={t('instructions.placeholder')}
             className="min-h-[240px] resize-y font-normal"
           />
           <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-foreground-subtle">
             <span>
-              {value.length.toLocaleString('pt-BR')} / {MAX_LENGTH.toLocaleString('pt-BR')}{' '}
-              caracteres
+              {t('instructions.counter', {
+                value: formatNumber(value.length),
+                max: formatNumber(MAX_LENGTH),
+              })}
             </span>
             <span
               aria-live="polite"
               className={status === 'saved' ? 'text-success' : 'text-foreground-subtle'}
             >
-              {status === 'saving' ? 'Salvando…' : status === 'saved' ? 'Salvo' : 'Salvamento automático'}
+              {statusLabel}
             </span>
           </div>
         </SettingsBlock>
       </SettingsSection>
 
       <p className="rounded-xl border border-border bg-surface px-4 py-3 text-[11px] leading-relaxed text-foreground-muted">
-        As instruções personalizadas não substituem as regras internas de segurança, o formato de UI
-        generativa nem a política de artefatos — elas apenas orientam tom e estilo das respostas.
+        {t('instructions.footer')}
       </p>
     </div>
   );

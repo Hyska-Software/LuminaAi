@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 import { ArtifactCard } from '@/components/artifacts/ArtifactCard';
 import { Button } from '@/components/ui';
+import { compareText } from '@/lib/i18n/format';
 import { useUiStore } from '@/lib/store';
 import type { Artifact } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -24,10 +26,11 @@ export interface MessageArtifactsProps {
  * cut is stable no matter how the events arrived.
  */
 export function MessageArtifacts({ artifacts, className }: MessageArtifactsProps) {
+  const { t } = useTranslation('chat');
   const ordered = useMemo(
     () =>
       [...artifacts].sort(
-        (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+        (left, right) => left.createdAt - right.createdAt || compareText(left.id, right.id),
       ),
     [artifacts],
   );
@@ -50,11 +53,11 @@ export function MessageArtifacts({ artifacts, className }: MessageArtifactsProps
           size="sm"
           variant="secondary"
           className="mt-2 justify-self-start"
-          aria-label={`Ver todos os ${total} artefatos gerados`}
+          aria-label={t('artifacts.viewAllAria', { count: total })}
           onClick={() => useUiStore.getState().openArtifactList()}
         >
           <Plus aria-hidden className="size-3.5" />
-          Ver todos ({total})
+          {t('artifacts.viewAll', { count: total })}
         </Button>
       ) : null}
     </div>

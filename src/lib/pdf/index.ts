@@ -8,6 +8,7 @@
  */
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
+import { t } from '@/lib/i18n';
 import { ensurePdfJsByteHelpers } from './shims';
 
 export type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
@@ -43,7 +44,7 @@ export interface RenderPdfPageHandle {
 /** Internal marker used when a render is cancelled before/after pdf.js starts. */
 export class PdfRenderCancelledError extends Error {
   constructor() {
-    super('Renderização do PDF cancelada.');
+    super(t('artifacts:pdf.cancelled'));
     this.name = 'PdfRenderCancelledError';
   }
 }
@@ -72,7 +73,7 @@ async function loadPdfJs(): Promise<typeof import('pdfjs-dist')> {
 /** Decodes a base64 payload (optionally a `data:` URL) into raw bytes. */
 export function decodeBase64(dataBase64: string): Uint8Array {
   const payload = dataBase64.replace(/^\s*data:[^,]*,\s*/i, '').replace(/\s+/g, '');
-  if (!payload) throw new Error('PDF sem dados para visualização.');
+  if (!payload) throw new Error(t('artifacts:pdf.decodeEmpty'));
   const binary = atob(payload);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {

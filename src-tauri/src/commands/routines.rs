@@ -130,15 +130,25 @@ pub fn run_agent_routine_now(
         .db
         .get_agent_routine(&routine_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_ROUTINE_NOT_FOUND: rotina `{routine_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args(
+                "routines.errors.notFound",
+                &[("routine_id", &routine_id)],
+            )
+        })?;
     let agent = state
         .db
         .get_agent(&routine.agent_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_NOT_FOUND: agente `{}` não existe", routine.agent_id))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args(
+                "routines.errors.agentMissing",
+                &[("agent_id", &routine.agent_id)],
+            )
+        })?;
     if agent.is_archived() {
         return Err(
-            "AGENT_ARCHIVED: restaure o agente antes de executar a rotina".to_string(),
+            crate::i18n::t("routines.errors.agentArchived"),
         );
     }
     let main = state
@@ -385,13 +395,13 @@ async fn execute_routine_inner(
         .get_agent(&routine.agent_id)
         .map_err(to_error)?
         .ok_or_else(|| {
-            format!(
-                "AGENT_NOT_FOUND: agente `{}` não existe",
-                routine.agent_id
+            crate::i18n::t_args(
+                "routines.errors.agentMissing",
+                &[("agent_id", &routine.agent_id)],
             )
         })?;
     if agent.is_archived() {
-        let error = "AGENT_ARCHIVED: restaure o agente antes de executar a rotina".to_string();
+        let error = crate::i18n::t("routines.errors.agentArchived");
         let next = if routine.trigger_kind == "event" {
             0
         } else {
@@ -420,7 +430,7 @@ async fn execute_routine_inner(
         Some(conversation) => conversation,
         None => {
             let error =
-                "AGENT_ROUTINE_CONVERSATION_NOT_FOUND: conversa principal não encontrada"
+                "routines.errors.mainConversationMissing"
                     .to_string();
             let next = if routine.trigger_kind == "event" {
                 0

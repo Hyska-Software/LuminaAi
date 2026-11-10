@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import {
   defaultReasoningFor,
@@ -122,20 +123,19 @@ function initialPreview(providerList: ProviderInfo[], selection: ModelSelection)
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
 function EmptyResults({ onClear, canClear }: { onClear: () => void; canClear: boolean }) {
+  const { t } = useTranslation('models');
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
       <Search aria-hidden className="size-5 text-foreground-subtle" />
       <p className="text-[13px] font-medium text-foreground">
-        {canClear ? 'Nenhum modelo encontrado' : 'Nenhum modelo disponível'}
+        {canClear ? t('picker.noResultsTitle') : t('picker.noModelsTitle')}
       </p>
       <p className="text-xs text-foreground-muted">
-        {canClear
-          ? 'Tente outro termo ou ajuste os filtros.'
-          : 'O catálogo deste provedor está vazio no momento.'}
+        {canClear ? t('picker.noResultsHint') : t('picker.noModelsHint')}
       </p>
       {canClear ? (
         <Button variant="secondary" size="sm" onClick={onClear} className="mt-1">
-          Limpar busca e filtros
+          {t('picker.clearSearchAndFilters')}
         </Button>
       ) : null}
     </div>
@@ -152,6 +152,7 @@ interface ModelPickerDialogBodyProps {
  * by effects during render (the old `wasOpen` hack).
  */
 function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
+  const { t, i18n: i18nInstance } = useTranslation('models');
   const globalSelection = useAppStore((state) => state.selection);
   const layoutMode = useUiStore((state) => state.layoutMode);
   // Agents own their route; the dialog must open on the pair the next turn
@@ -196,7 +197,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
         favorites,
         favoriteMatch: (pid, modelId) => favoriteEntryMatches(favorites, pid, modelId),
       }),
-    [providerList, providerId, query, filters, favorites, searching],
+    [providerList, providerId, query, filters, favorites, searching, i18nInstance.language],
   );
   const entries = useMemo(() => flattenGroups(groups), [groups]);
   const entryCount = entries.length;
@@ -409,18 +410,15 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
     >
       <DialogHeader className="shrink-0 gap-2.5 px-4 pb-3 pr-12 pt-4">
         <div className="flex flex-col gap-1">
-          <DialogTitle>Selecionar modelo</DialogTitle>
-          <DialogDescription>
-            Busque por nome, família, identificador ou capacidade e ajuste o pensamento antes de
-            confirmar.
-          </DialogDescription>
+          <DialogTitle>{t('picker.title')}</DialogTitle>
+          <DialogDescription>{t('picker.description')}</DialogDescription>
         </div>
 
         <ModelSearchField
           ref={searchRef}
           value={query}
           onChange={setQuery}
-          ariaLabel="Buscar modelos"
+          ariaLabel={t('picker.searchAria')}
           controls={entries.length ? listId : undefined}
           activeDescendant={activeEntry ? modelOptionId(listId, activeEntry) : undefined}
           expanded
@@ -432,7 +430,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
         <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div
             role="group"
-            aria-label="Filtros de modelos"
+            aria-label={t('picker.filtersAria')}
             className="flex flex-wrap items-center gap-1.5"
           >
             {modelFilterOptions().map((option) => {
@@ -460,12 +458,14 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {previewAuthStatus?.planUsage ? (
-              <Badge tone="accent" title="Modelos inclusos no seu plano ChatGPT">
-                Plano ChatGPT
+              <Badge tone="accent" title={t('picker.planBadgeTitle')}>
+                {t('picker.planBadge')}
               </Badge>
             ) : null}
             <span className="text-[11px] tabular-nums text-foreground-subtle">
-              {`${entryCount} ${entryCount === 1 ? 'modelo' : 'modelos'}`}
+              {entryCount === 1
+                ? t('picker.countOne', { count: entryCount })
+                : t('picker.countOther', { count: entryCount })}
             </span>
           </div>
         </div>
@@ -480,10 +480,10 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
           <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
             {searching ? (
               <span className="px-1 text-[11px] font-medium uppercase tracking-wider text-foreground-subtle">
-                Todos os provedores
+                {t('picker.allProviders')}
               </span>
             ) : (
-              <TabsList aria-label="Provedores" className="h-8 gap-0.5 bg-transparent p-0">
+              <TabsList aria-label={t('picker.providersAria')} className="h-8 gap-0.5 bg-transparent p-0">
                 {providerList.map((provider) => {
                   const providerKey = keyStatusFor(keys, provider.id);
                   const providerAuthStatus = authStatusFor(auth, provider.id);
@@ -516,7 +516,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
             <ModelList
               groups={groups}
               listId={listId}
-              ariaLabel={searching ? 'Resultados da busca de modelos' : 'Modelos do provedor'}
+              ariaLabel={searching ? t('picker.resultsAria') : t('picker.providerModelsAria')}
               activeKey={activeEntry ? entryKey(activeEntry) : null}
               selectedKey={selectedKey}
               onActivate={(key) => {
@@ -539,7 +539,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
         </Tabs>
 
         <aside
-          aria-label="Detalhes do modelo"
+          aria-label={t('picker.detailsAria')}
           className="w-[300px] shrink-0 border-l border-border bg-surface/40"
         >
           <ModelDetailPanel
@@ -574,25 +574,25 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
         <div className="flex min-w-0 items-center gap-3 text-[11px] text-foreground-subtle">
           <span className="inline-flex items-center gap-1">
             <Kbd>↑↓</Kbd>
-            navegar
+            {t('picker.footerNavigate')}
           </span>
           <span className="inline-flex items-center gap-1">
             <Kbd>↵</Kbd>
-            usar
+            {t('picker.footerUse')}
           </span>
           <span className="inline-flex items-center gap-1">
             <Kbd>Esc</Kbd>
-            fechar
+            {t('picker.footerClose')}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {isCurrent ? <Badge tone="accent">Em uso</Badge> : null}
+          {isCurrent ? <Badge tone="accent">{t('picker.inUse')}</Badge> : null}
           <Button
             variant="primary"
             onClick={commitPreview}
             disabled={!previewModel || previewUnavailable || entries.length === 0}
           >
-            Usar este modelo
+            {t('picker.useModel')}
           </Button>
         </div>
       </DialogFooter>
@@ -613,6 +613,7 @@ function ModelLockedDialog({
   reason: ModelLockReason;
   onClose: () => void;
 }) {
+  const { t } = useTranslation('models');
   const copy = modelLockCopy(reason);
   const selection = useAppStore((state) => state.selection);
   const storeProviders = useAppStore((state) => state.providers);
@@ -650,13 +651,13 @@ function ModelLockedDialog({
         </div>
 
         <p className="text-[12px] leading-relaxed text-foreground-muted">
-          Você pode ajustar o modo de pensamento pelo botão ✦ no composer.
+          {t('picker.lockedHint')}
         </p>
       </DialogHeader>
 
       <DialogFooter className="justify-end px-5 py-3">
         <Button variant="secondary" onClick={onClose} autoFocus>
-          Fechar
+          {t('common:actions.close')}
         </Button>
       </DialogFooter>
     </DialogContent>

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { HtmlPreview } from '@/components/genui';
 import { BinaryPreview } from './BinaryPreview';
@@ -13,10 +14,11 @@ import {
  * the panel renders it in the existing sandboxed `HtmlPreview` iframe.
  */
 export function DocxPreview({ content, className }: ArtifactViewProps) {
+  const { t } = useTranslation('artifacts');
   const { state, retry } = useArtifactPreview(content.artifact.id);
 
   if (state.status === 'loading') {
-    return <PreviewLoading label="Carregando documento…" className={className} />;
+    return <PreviewLoading label={t('artifacts:docx.loading')} className={className} />;
   }
   if (state.status === 'error') {
     return <PreviewError message={state.message} onRetry={retry} className={className} />;

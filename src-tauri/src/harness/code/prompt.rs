@@ -26,7 +26,7 @@ use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
-pub const PROMPT_VERSION: u32 = 6;
+pub const PROMPT_VERSION: u32 = 7;
 
 /// Orientação de uma ferramenta habilitada no turno (gerada pelo registry).
 #[derive(Debug, Clone, Copy)]
@@ -546,7 +546,7 @@ fn editing_section() -> &'static str {
        (`run_in_background`); collect the output with `job_output`.\n"
 }
 
-fn response_section(subagent: bool) -> &'static str {
+fn response_section(subagent: bool, locale: &str) -> String {
     if subagent {
         return "# Response format\n\n\
              - You are reporting to the parent agent, not directly to the user. Return a concise, \
@@ -556,17 +556,21 @@ fn response_section(subagent: bool) -> &'static str {
              - Lead with the answer/findings, then supporting evidence. Include only the code \
                snippets needed to explain.\n\
              - Do not ask the user, request approval or propose tool calls in the final answer. If \
-               something is blocked, state exactly what is missing.\n";
+               something is blocked, state exactly what is missing.\n"
+            .to_string();
     }
-    "# Response format\n\n\
-     - Respond in Brazilian Portuguese, direct and technical; no preamble.\n\
-     - Use Markdown (short headings, lists, fenced code blocks with a language). Prefer one `ui` \
-       block over a table/list whenever the answer has structured, comparable or actionable \
-       evidence and you judge it viable (see **Generative UI in this session** below).\n\
-     - Reference files as `relative/path.ext:line` (relative to the workspace).\n\
-     - Quote only the code snippet needed to explain; the rest stays in the file.\n\
-     - When you need a decision from the user, use `ask_user` with clear options instead of \
-       asking in prose.\n"
+    let language = crate::i18n::language_meta(locale).prompt_name;
+    format!(
+        "# Response format\n\n\
+         - Respond in {language}, direct and technical; no preamble.\n\
+         - Use Markdown (short headings, lists, fenced code blocks with a language). Prefer one `ui` \
+           block over a table/list whenever the answer has structured, comparable or actionable \
+           evidence and you judge it viable (see **Generative UI in this session** below).\n\
+         - Reference files as `relative/path.ext:line` (relative to the workspace).\n\
+         - Quote only the code snippet needed to explain; the rest stays in the file.\n\
+         - When you need a decision from the user, use `ask_user` with clear options instead of \
+           asking in prose.\n"
+    )
 }
 
 /// Generative UI guidance specific to the Code profile, followed by the shared
@@ -575,8 +579,9 @@ fn response_section(subagent: bool) -> &'static str {
 /// The shared section carries the catalog/rules/limits/examples; these notes
 /// only say when the Code agent should use it and what it must not duplicate
 /// (the turn summary card, the Changes panel, the plan and blocking decisions).
-fn generative_ui_section() -> String {
-    let mut out = String::from(
+fn generative_ui_section(locale: &str) -> String {
+    let language = crate::i18n::language_meta(locale).prompt_name;
+    let mut out = format!(
         "# Generative UI in this session\n\n\
          The `ui` block contract below is the same one used by the Chat layout; the Code and Agents \
          layouts render it inline in the transcript. **Default to a `ui` block whenever you judge it \
@@ -600,7 +605,7 @@ fn generative_ui_section() -> String {
            status when useful.\n\
          - Validate the block with `validate_ui` before emitting it (always available; it does not \
            count toward the data-tool budget) and emit only after `ok: true`. At most 1 block per \
-           response (2 max), in Brazilian Portuguese, with plain text in props.\n\n",
+           response (2 max), in {language}, with plain text in props.\n\n",
     );
     out.push_str(&crate::harness::prompt::generative_ui_section_with_budget(
         contract::contract(),
@@ -620,6 +625,7 @@ pub fn build_system_prompt(
     tools: &[ToolPrompt],
     platform: &str,
     session_date: &str,
+    locale: &str,
 ) -> String {
     let mut out = String::new();
     if ctx.subagent {
@@ -661,9 +667,9 @@ pub fn build_system_prompt(
         out.push_str(&project);
         out.push('\n');
     }
-    out.push_str(response_section(ctx.subagent));
+    out.push_str(&response_section(ctx.subagent, locale));
     if !ctx.subagent {
-        out.push_str(&generative_ui_section());
+        out.push_str(&generative_ui_section(locale));
     }
     out
 }
@@ -770,7 +776,7 @@ mod tests {
     fn subagent_prompt_is_read_only_and_omits_editing_and_ask_user() {
         let mut context = ctx();
         context.subagent = true;
-        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(prompt.contains("read-only subagent"));
         assert!(prompt.contains("Files matching secret patterns"));
         assert!(!prompt.contains("# How to edit and verify"));
@@ -786,7 +792,7 @@ mod tests {
         context.workspace_name = Some("Pasta do agente".into());
         context.workspace_path = Some("C:/zylara/agent-workspaces/abc".into());
         context.project = None;
-        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(prompt.contains("absolute paths anywhere on this PC"));
         assert!(prompt.contains("Writes/edits are confined"));
         assert!(prompt.contains("Select a project folder"));
@@ -804,6 +810,7 @@ mod tests {
             }],
             "Windows 11",
             "2026-10-27",
+            "pt-BR",
         );
         for needle in [
             "# Environment",
@@ -840,7 +847,7 @@ mod tests {
 
     #[test]
     fn code_prompt_includes_the_generated_genui_contract() {
-        let prompt = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27");
+        let prompt = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27", "pt-BR");
         let contract = contract::contract();
         for needle in [
             "# Generative UI in this session",
@@ -882,8 +889,8 @@ mod tests {
 
     #[test]
     fn stable_prompt_is_identical_for_the_same_session() {
-        let first = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27");
-        let second = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27");
+        let first = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27", "pt-BR");
+        let second = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27", "pt-BR");
         assert_eq!(first, second, "system prompt byte-a-byte entre turnos");
         assert!(!first.contains("Date: 2026-10-27 14:05"));
         assert!(first.contains("Session date: 2026-10-27"));
@@ -904,7 +911,7 @@ mod tests {
         assert!(runtime.contains("Structure (summary)"), "{runtime}");
         assert!(runtime.contains("[~] Corrigir cálculo"), "{runtime}");
         // O system prompt estável do mesmo contexto não carrega nada disso.
-        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(!stable.contains("Autonomous"));
         assert!(!stable.contains("Plan mode is active"));
         assert!(!stable.contains("Corrigir cálculo"));
@@ -994,7 +1001,7 @@ mod tests {
     #[test]
     fn session_without_workspace_explains_the_limit() {
         let context = CodeContext::default();
-        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(prompt.contains("No workspace is open"));
         assert!(!prompt.contains("# Project instructions"));
     }
@@ -1004,7 +1011,7 @@ mod tests {
         let mut context = ctx();
         context.agents_md = Some("x".repeat(MAX_AGENTS_MD_CHARS + 500));
         context.tree = Some("y".repeat(MAX_TREE_CHARS + 500));
-        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(prompt.contains("…[truncated]"));
         // O prompt estável não carrega a árvore (volátil) e não explode.
         assert!(!prompt.contains("yyyy"));
@@ -1046,7 +1053,7 @@ mod tests {
         let planning = runtime.find("## Plan and tasks").expect("planejamento");
         assert!(objective > planning);
         // O system prompt estável não carrega estado do objetivo.
-        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         for volatile in [
             "## Objective",
             "Migrar o módulo de pagamentos",
@@ -1074,7 +1081,7 @@ mod tests {
         assert!(!build_runtime_context(&ctx(), true).contains("## Goal request"));
 
         // A intenção é volátil: nunca no system prompt estável.
-        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(!stable.contains("## Goal request"), "{stable}");
         assert!(!stable.contains("selected `/goal`"), "{stable}");
     }
@@ -1096,7 +1103,7 @@ mod tests {
             runtime.contains("Work autonomously through the objective"),
             "{runtime}"
         );
-        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
+        let stable = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(!stable.contains("## Objective"));
     }
 

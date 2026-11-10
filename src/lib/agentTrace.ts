@@ -15,6 +15,7 @@
  * `variant="thinking"` (docs/MARKDOWN.md §4), so splitting paragraphs or
  * stripping list markers here would corrupt lists, fences, tables and math.
  */
+import { t } from './i18n';
 import type { ChatMessage, ToolCallRecord, TraceStep } from './types';
 import { hostnameOf, safeJsonParse, truncate } from './utils';
 
@@ -209,80 +210,84 @@ function toolExecutionMs(tool: ToolCallRecord): number {
   return Math.max(0, tool.finishedAt - tool.startedAt);
 }
 
-/** Short tool family names used by the live activity fallback. */
-const TOOL_FAMILY_LABELS: Record<string, string> = {
-  run_command: 'Shell',
-  run_checks: 'Verificações',
-  read_file: 'Leitura',
-  read_tool_output: 'Leitura',
-  list_dir: 'Listagem',
-  search_files: 'Busca',
-  search_text: 'Busca',
-  write_file: 'Editar',
-  edit_file: 'Editar',
-  todo_write: 'Tarefas',
-  submit_plan: 'Plano',
-  ask_user: 'Pergunta',
-  task: 'Subagente',
-  job_list: 'Jobs',
-  job_output: 'Jobs',
-  job_kill: 'Jobs',
-  git_status: 'Git',
-  git_diff: 'Git',
-  git_log: 'Git',
-  goal: 'Objetivo',
-  validate_ui: 'Interface',
-  web_search: 'Busca web',
-  fetch_url: 'Páginas',
-  create_file: 'Arquivos',
-  run_code: 'Código',
-  list_skills: 'Skills',
-  read_skill: 'Skills',
-  list_artifacts: 'Artefatos',
-  read_artifact: 'Artefatos',
+/** Short tool family keys used by the live activity fallback. */
+const TOOL_FAMILY_KEYS: Record<string, string> = {
+  run_command: 'chat:trace.families.shell',
+  run_checks: 'chat:trace.families.checks',
+  read_file: 'chat:trace.families.read',
+  read_tool_output: 'chat:trace.families.read',
+  list_dir: 'chat:trace.families.list',
+  search_files: 'chat:trace.families.search',
+  search_text: 'chat:trace.families.search',
+  write_file: 'chat:trace.families.edit',
+  edit_file: 'chat:trace.families.edit',
+  todo_write: 'chat:trace.families.tasks',
+  submit_plan: 'chat:trace.families.plan',
+  ask_user: 'chat:trace.families.question',
+  task: 'chat:trace.families.subagent',
+  job_list: 'chat:trace.families.jobs',
+  job_output: 'chat:trace.families.jobs',
+  job_kill: 'chat:trace.families.jobs',
+  git_status: 'chat:trace.families.git',
+  git_diff: 'chat:trace.families.git',
+  git_log: 'chat:trace.families.git',
+  goal: 'chat:trace.families.goal',
+  validate_ui: 'chat:trace.families.ui',
+  web_search: 'chat:trace.families.web',
+  fetch_url: 'chat:trace.families.pages',
+  create_file: 'chat:trace.families.files',
+  run_code: 'chat:trace.families.code',
+  list_skills: 'chat:trace.families.skills',
+  read_skill: 'chat:trace.families.skills',
+  list_artifacts: 'chat:trace.families.artifacts',
+  read_artifact: 'chat:trace.families.artifacts',
 };
 
 /** Human family of a tool (e.g. `run_command` → "Shell"). */
 export function toolFamilyLabel(name: string): string {
-  return TOOL_FAMILY_LABELS[name] ?? name.replace(/_/g, ' ');
+  const key = TOOL_FAMILY_KEYS[name];
+  return key ? t(key) : name.replace(/_/g, ' ');
 }
 
-/** Present-tense status phrase of a running tool call. */
-const TOOL_ACTIVITY_LABELS: Record<string, string> = {
-  run_command: 'Executando comandos',
-  run_checks: 'Rodando verificações',
-  read_file: 'Lendo arquivos',
-  read_tool_output: 'Lendo a saída da ferramenta',
-  list_dir: 'Explorando arquivos',
-  search_files: 'Buscando arquivos',
-  search_text: 'Buscando no código',
-  write_file: 'Criando arquivos',
-  edit_file: 'Editando arquivos',
-  todo_write: 'Atualizando as tarefas',
-  submit_plan: 'Enviando o plano',
-  ask_user: 'Aguardando resposta do usuário',
-  task: 'Delegando ao subagente',
-  job_list: 'Consultando os jobs',
-  job_output: 'Lendo a saída de um job',
-  job_kill: 'Parando um job',
-  git_status: 'Consultando o git',
-  git_diff: 'Lendo o diff do git',
-  git_log: 'Consultando o histórico do git',
-  goal: 'Atualizando o objetivo',
-  validate_ui: 'Validando a interface',
-  web_search: 'Pesquisando na web',
-  fetch_url: 'Lendo páginas',
-  create_file: 'Criando arquivos',
-  run_code: 'Executando código',
-  list_skills: 'Consultando as skills',
-  read_skill: 'Lendo uma skill',
-  list_artifacts: 'Consultando os artefatos',
-  read_artifact: 'Lendo um artefato',
+/** Present-tense status phrase keys of a running tool call. */
+const TOOL_ACTIVITY_KEYS: Record<string, string> = {
+  run_command: 'chat:trace.activity.run_command',
+  run_checks: 'chat:trace.activity.run_checks',
+  read_file: 'chat:trace.activity.read_file',
+  read_tool_output: 'chat:trace.activity.read_tool_output',
+  list_dir: 'chat:trace.activity.list_dir',
+  search_files: 'chat:trace.activity.search_files',
+  search_text: 'chat:trace.activity.search_text',
+  write_file: 'chat:trace.activity.write_file',
+  edit_file: 'chat:trace.activity.edit_file',
+  todo_write: 'chat:trace.activity.todo_write',
+  submit_plan: 'chat:trace.activity.submit_plan',
+  ask_user: 'chat:trace.activity.ask_user',
+  task: 'chat:trace.activity.task',
+  job_list: 'chat:trace.activity.job_list',
+  job_output: 'chat:trace.activity.job_output',
+  job_kill: 'chat:trace.activity.job_kill',
+  git_status: 'chat:trace.activity.git_status',
+  git_diff: 'chat:trace.activity.git_diff',
+  git_log: 'chat:trace.activity.git_log',
+  goal: 'chat:trace.activity.goal',
+  validate_ui: 'chat:trace.activity.validate_ui',
+  web_search: 'chat:trace.activity.web_search',
+  fetch_url: 'chat:trace.activity.fetch_url',
+  create_file: 'chat:trace.activity.create_file',
+  run_code: 'chat:trace.activity.run_code',
+  list_skills: 'chat:trace.activity.list_skills',
+  read_skill: 'chat:trace.activity.read_skill',
+  list_artifacts: 'chat:trace.activity.list_artifacts',
+  read_artifact: 'chat:trace.activity.read_artifact',
 };
 
 /** Present-tense status phrase of a tool (fallback to its family). */
 export function toolActivityLabel(name: string): string {
-  return TOOL_ACTIVITY_LABELS[name] ?? `Usando ${toolFamilyLabel(name)}`;
+  const key = TOOL_ACTIVITY_KEYS[name];
+  return key
+    ? t(key)
+    : t('chat:trace.activity.fallback', { family: toolFamilyLabel(name) });
 }
 
 /** What the agent is doing right now, for the collapsed execution line. */
@@ -309,7 +314,7 @@ export function describeTraceActivity(entries: AgentTraceEntry[]): TraceActivity
   if (last.kind === 'reasoning') {
     return {
       kind: 'reasoning',
-      label: 'Analisando a solicitação',
+      label: t('chat:trace.analyzing'),
       preview: oneLinePreview(last.text),
       running: true,
     };
@@ -443,17 +448,22 @@ function groupStatus(tools: ToolCallRecord[]): ToolGroupStatus {
 
 function searchGroup(tools: ToolCallRecord[], status: ToolGroupStatus, errors: string[]): ToolGroup {
   const pages = uniquePages(tools.flatMap(searchResults));
-  const summaryTotal = tools.reduce((sum, tool) => sum + (summaryResultCount(tool.summary) ?? 0), 0);
+  const summaryTotal = tools.reduce((sum, tool) => sum + (summaryResultCount(tool) ?? 0), 0);
   const total = pages.length || summaryTotal;
   const domains = uniqueDomains(pages);
   const base = { name: 'web_search', tools, status, total, domains, pages: [], files: [], errors };
   if (status === 'running') {
-    return { ...base, label: 'Buscando na web…' };
+    return { ...base, label: t('chat:trace.group.web_search.running') };
   }
   if (total > 0) {
-    return { ...base, label: `Encontrou ${total} ${plural(total, 'página', 'páginas')} web` };
+    return { ...base, label: t('chat:trace.group.web_search.found', { count: total }) };
   }
-  return { ...base, label: errors.length ? 'A busca web falhou' : 'Nenhum resultado encontrado' };
+  return {
+    ...base,
+    label: errors.length
+      ? t('chat:trace.group.web_search.failed')
+      : t('chat:trace.group.web_search.empty'),
+  };
 }
 
 function fetchGroup(tools: ToolCallRecord[], status: ToolGroupStatus, errors: string[]): ToolGroup {
@@ -461,15 +471,17 @@ function fetchGroup(tools: ToolCallRecord[], status: ToolGroupStatus, errors: st
   const total = pages.length || tools.length;
   const base = { name: 'fetch_url', tools, status, total, domains: [], pages, files: [], errors };
   if (status === 'running') {
-    return { ...base, label: `Lendo ${total} ${plural(total, 'página', 'páginas')}…` };
+    return { ...base, label: t('chat:trace.group.fetch_url.running', { count: total }) };
   }
   if (pages.length > 0) {
-    const noun = plural(pages.length, 'página', 'páginas');
-    return { ...base, label: `Leu ${pages.length} ${noun}` };
+    return { ...base, label: t('chat:trace.group.fetch_url.read', { count: pages.length }) };
   }
   return {
     ...base,
-    label: `Não foi possível ler ${tools.length > 1 ? 'as páginas' : 'a página'}`,
+    label:
+      tools.length > 1
+        ? t('chat:trace.group.fetch_url.failed', { count: tools.length })
+        : t('chat:trace.group.fetch_url.failed', { count: 1 }),
   };
 }
 
@@ -478,12 +490,15 @@ function fileGroup(tools: ToolCallRecord[], status: ToolGroupStatus, errors: str
   const total = files.length || tools.length;
   const base = { name: 'create_file', tools, status, total, domains: [], pages: [], files, errors };
   if (status === 'running') {
-    return { ...base, label: `Criando ${plural(total, 'arquivo', 'arquivos')}…` };
+    return { ...base, label: t('chat:trace.group.create_file.running', { count: total }) };
   }
   if (files.length > 0) {
-    return { ...base, label: `Criou ${files.length} ${plural(files.length, 'arquivo', 'arquivos')}` };
+    return {
+      ...base,
+      label: t('chat:trace.group.create_file.created', { count: files.length }),
+    };
   }
-  return { ...base, label: 'Falha ao criar arquivo' };
+  return { ...base, label: t('chat:trace.group.create_file.failed') };
 }
 
 function validationGroup(
@@ -501,12 +516,11 @@ function validationGroup(
     files: [],
     errors,
   };
-  if (status === 'running') return { ...base, label: 'Validando a interface…' };
-  if (status === 'error') return { ...base, label: 'A validação da interface falhou' };
+  if (status === 'running') return { ...base, label: t('chat:trace.group.validate_ui.running') };
+  if (status === 'error') return { ...base, label: t('chat:trace.group.validate_ui.failed') };
   return {
     ...base,
-    label:
-      tools.length > 1 ? `Validou a interface ${tools.length} vezes` : 'Validou a interface',
+    label: t('chat:trace.group.validate_ui.done', { count: tools.length }),
   };
 }
 
@@ -530,10 +544,15 @@ function codeGroup(
     files: [],
     errors,
   };
-  if (status === 'running') return { ...base, label: 'Executando código…' };
-  if (status === 'error') return { ...base, label: 'A execução de código falhou' };
+  if (status === 'running') return { ...base, label: t('chat:trace.group.run_code.running') };
+  if (status === 'error') return { ...base, label: t('chat:trace.group.run_code.failed') };
   const detail = codeSummaryDetail(tools[tools.length - 1]?.summary);
-  return { ...base, label: detail ? `Executou código · ${detail}` : 'Executou código' };
+  return {
+    ...base,
+    label: detail
+      ? t('chat:trace.group.run_code.doneWithDetail', { detail })
+      : t('chat:trace.group.run_code.done'),
+  };
 }
 
 function skillsListGroup(
@@ -551,9 +570,9 @@ function skillsListGroup(
     files: [],
     errors,
   };
-  if (status === 'running') return { ...base, label: 'Consultando skills…' };
-  if (status === 'error') return { ...base, label: 'A consulta das skills falhou' };
-  return { ...base, label: 'Consultou as skills disponíveis' };
+  if (status === 'running') return { ...base, label: t('chat:trace.group.list_skills.running') };
+  if (status === 'error') return { ...base, label: t('chat:trace.group.list_skills.failed') };
+  return { ...base, label: t('chat:trace.group.list_skills.done') };
 }
 
 function readSkillGroup(
@@ -574,15 +593,26 @@ function readSkillGroup(
     files: [],
     errors,
   };
-  if (status === 'error') return { ...base, label: 'Não foi possível ler a skill' };
+  if (status === 'error') return { ...base, label: t('chat:trace.group.read_skill.failed') };
   if (status === 'running') {
-    if (names.length === 1) return { ...base, label: `Lendo skill ${names[0]}…` };
-    if (names.length > 1) return { ...base, label: `Lendo ${names.length} skills…` };
-    return { ...base, label: 'Lendo skill…' };
+    if (names.length === 1) {
+      return { ...base, label: t('chat:trace.group.read_skill.runningNamed', { name: names[0] }) };
+    }
+    if (names.length > 1) {
+      return {
+        ...base,
+        label: t('chat:trace.group.read_skill.runningMany', { count: names.length }),
+      };
+    }
+    return { ...base, label: t('chat:trace.group.read_skill.running') };
   }
-  if (names.length === 1) return { ...base, label: `Leu a skill ${names[0]}` };
-  if (names.length > 1) return { ...base, label: `Leu ${names.length} skills` };
-  return { ...base, label: 'Leu uma skill' };
+  if (names.length === 1) {
+    return { ...base, label: t('chat:trace.group.read_skill.doneNamed', { name: names[0] }) };
+  }
+  if (names.length > 1) {
+    return { ...base, label: t('chat:trace.group.read_skill.doneMany', { count: names.length }) };
+  }
+  return { ...base, label: t('chat:trace.group.read_skill.done') };
 }
 
 /**
@@ -595,7 +625,7 @@ function artifactsListGroup(
   status: ToolGroupStatus,
   errors: string[],
 ): ToolGroup {
-  const counts = tools.map((tool) => summaryArtifactCount(tool.summary));
+  const counts = tools.map((tool) => summaryArtifactCount(tool));
   const parsed = counts.filter((count): count is number => count !== null);
   const total = parsed.length > 0 ? parsed.reduce((sum, count) => sum + count, 0) : tools.length;
   const base = {
@@ -608,11 +638,18 @@ function artifactsListGroup(
     files: [],
     errors,
   };
-  if (status === 'running') return { ...base, label: 'Pesquisando nos artefatos…' };
-  if (status === 'error') return { ...base, label: 'A pesquisa nos artefatos falhou' };
-  if (parsed.length === 0) return { ...base, label: 'Consultou os artefatos' };
-  if (total === 0) return { ...base, label: 'Nenhum artefato encontrado' };
-  return { ...base, label: `Encontrou ${total} ${plural(total, 'artefato', 'artefatos')}` };
+  if (status === 'running') {
+    return { ...base, label: t('chat:trace.group.list_artifacts.running') };
+  }
+  if (status === 'error') {
+    return { ...base, label: t('chat:trace.group.list_artifacts.failed') };
+  }
+  if (parsed.length === 0) return { ...base, label: t('chat:trace.group.list_artifacts.done') };
+  if (total === 0) return { ...base, label: t('chat:trace.group.list_artifacts.empty') };
+  return {
+    ...base,
+    label: t('chat:trace.group.list_artifacts.found', { count: total }),
+  };
 }
 
 /**
@@ -642,23 +679,48 @@ function readArtifactGroup(
     files: names,
     errors,
   };
-  if (status === 'error') return { ...base, label: 'Não foi possível ler o artefato' };
-  if (status === 'running') {
-    if (names.length === 1) return { ...base, label: `Lendo o artefato ${names[0]}…` };
-    if (names.length > 1) return { ...base, label: `Lendo ${names.length} artefatos…` };
-    return { ...base, label: 'Lendo um artefato…' };
+  if (status === 'error') {
+    return { ...base, label: t('chat:trace.group.read_artifact.failed') };
   }
-  if (names.length === 1) return { ...base, label: `Leu o artefato ${names[0]}` };
-  if (names.length > 1) return { ...base, label: `Leu ${names.length} artefatos` };
-  return { ...base, label: 'Leu um artefato' };
+  if (status === 'running') {
+    if (names.length === 1) {
+      return {
+        ...base,
+        label: t('chat:trace.group.read_artifact.runningNamed', { name: names[0] }),
+      };
+    }
+    if (names.length > 1) {
+      return {
+        ...base,
+        label: t('chat:trace.group.read_artifact.runningMany', { count: names.length }),
+      };
+    }
+    return { ...base, label: t('chat:trace.group.read_artifact.running') };
+  }
+  if (names.length === 1) {
+    return {
+      ...base,
+      label: t('chat:trace.group.read_artifact.doneNamed', { name: names[0] }),
+    };
+  }
+  if (names.length > 1) {
+    return {
+      ...base,
+      label: t('chat:trace.group.read_artifact.doneMany', { count: names.length }),
+    };
+  }
+  return { ...base, label: t('chat:trace.group.read_artifact.done') };
 }
 
 /**
- * Returned artifact count of a `list_artifacts` summary, e.g. "3 artefatos",
- * "3 de 10 artefatos" (the total after "de" is ignored) or "nenhum artefato".
+ * Returned artifact count of a `list_artifacts` call: the structured
+ * presentation is authoritative, so translated prose is never parsed. Only
+ * legacy messages (without a presentation) fall back to the summary text.
  */
-function summaryArtifactCount(summary?: string | null): number | null {
-  const raw = summary?.trim();
+function summaryArtifactCount(tool: ToolCallRecord): number | null {
+  const presentation = tool.presentation;
+  if (presentation?.kind === 'artifact_list') return presentation.returned;
+  const raw = tool.summary?.trim();
   if (!raw) return null;
   if (/^nenhum\b/i.test(raw)) return 0;
   const match = raw.match(/^(\d+)/);
@@ -703,9 +765,9 @@ function readSkillName(tool: ToolCallRecord): string | null {
 
 function defaultLabel(name: string, count: number, status: ToolGroupStatus): string {
   const readable = name.replace(/_/g, ' ');
-  if (status === 'running') return `Executando ${readable}…`;
-  if (status === 'error') return `Falha em ${readable}`;
-  return count > 1 ? `Executou ${readable} ${count} vezes` : `Executou ${readable}`;
+  if (status === 'running') return t('chat:trace.group.default.running', { name: readable });
+  if (status === 'error') return t('chat:trace.group.default.failed', { name: readable });
+  return t('chat:trace.group.default.done', { count, name: readable });
 }
 
 /* ------------------------------------------------------------------ */
@@ -757,41 +819,47 @@ function readCodeGroup(
   const paths = codePaths(tools);
   const first = paths[0] ?? null;
   const pattern = firstPattern(tools);
-  const noun = plural(paths.length, 'arquivo', 'arquivos');
   let label: string;
   if (name === 'list_dir') {
-    label =
-      status === 'running'
-        ? `Listando ${first ?? 'a pasta'}…`
-        : status === 'error'
-          ? `Não foi possível listar ${first ?? 'a pasta'}`
-          : first
-            ? `Listou ${first}`
-            : 'Listou a pasta';
+    if (status === 'running') {
+      label = first
+        ? t('chat:trace.group.list_dir.runningPath', { path: first })
+        : t('chat:trace.group.list_dir.running');
+    } else if (status === 'error') {
+      label = first
+        ? t('chat:trace.group.list_dir.failedPath', { path: first })
+        : t('chat:trace.group.list_dir.failed');
+    } else {
+      label = first
+        ? t('chat:trace.group.list_dir.donePath', { path: first })
+        : t('chat:trace.group.list_dir.done');
+    }
   } else if (name === 'search_files' || name === 'search_text') {
-    label =
-      status === 'running'
-        ? pattern
-          ? `Buscando “${pattern}”…`
-          : 'Buscando no workspace…'
-        : status === 'error'
-          ? 'A busca no workspace falhou'
-          : pattern
-            ? `Buscou “${pattern}”`
-            : 'Buscou no workspace';
+    if (status === 'running') {
+      label = pattern
+        ? t('chat:trace.group.search_text.runningPattern', { pattern })
+        : t('chat:trace.group.search_text.running');
+    } else if (status === 'error') {
+      label = t('chat:trace.group.search_text.failed');
+    } else {
+      label = pattern
+        ? t('chat:trace.group.search_text.donePattern', { pattern })
+        : t('chat:trace.group.search_text.done');
+    }
+  } else if (status === 'running') {
+    label = first
+      ? t('chat:trace.group.read_file.runningPath', { path: first })
+      : t('chat:trace.group.read_file.running');
+  } else if (status === 'error') {
+    label = first
+      ? t('chat:trace.group.read_file.failedPath', { path: first })
+      : t('chat:trace.group.read_file.failed');
+  } else if (paths.length > 1) {
+    label = t('chat:trace.group.read_file.done', { count: paths.length });
   } else {
-    label =
-      status === 'running'
-        ? `Lendo ${first ?? 'arquivos'}…`
-        : status === 'error'
-          ? first
-            ? `Não foi possível ler ${first}`
-            : 'Não foi possível ler os arquivos'
-          : paths.length > 1
-            ? `Leu ${paths.length} ${noun}`
-            : first
-              ? `Leu ${first}`
-              : 'Leu o arquivo';
+    label = first
+      ? t('chat:trace.group.read_file.done_one', { path: first })
+      : t('chat:trace.group.read_file.done');
   }
   return harnessGroup(name, tools, status, errors, label);
 }
@@ -803,19 +871,22 @@ function writeCodeGroup(
 ): ToolGroup {
   const paths = codePaths(tools);
   const first = paths[0] ?? null;
-  const noun = plural(paths.length, 'arquivo', 'arquivos');
-  const label =
-    status === 'running'
-      ? `Gravando ${first ?? 'arquivos'}…`
-      : status === 'error'
-        ? first
-          ? `Falha ao gravar ${first}`
-          : 'Falha ao gravar os arquivos'
-        : paths.length > 1
-          ? `Alterou ${paths.length} ${noun}`
-          : first
-            ? `Alterou ${first}`
-            : 'Alterou o arquivo';
+  let label: string;
+  if (status === 'running') {
+    label = first
+      ? t('chat:trace.group.write_file.runningPath', { path: first })
+      : t('chat:trace.group.write_file.running');
+  } else if (status === 'error') {
+    label = first
+      ? t('chat:trace.group.write_file.failedPath', { path: first })
+      : t('chat:trace.group.write_file.failed');
+  } else if (paths.length > 1) {
+    label = t('chat:trace.group.write_file.done', { count: paths.length });
+  } else {
+    label = first
+      ? t('chat:trace.group.write_file.done_one', { path: first })
+      : t('chat:trace.group.write_file.done');
+  }
   return harnessGroup(tools[0]?.name ?? 'write_file', tools, status, errors, label, paths);
 }
 
@@ -826,16 +897,20 @@ function commandCodeGroup(
 ): ToolGroup {
   const command = tools.map((tool) => codeArg(tool, 'command')).find(Boolean) ?? null;
   const short = command ? truncate(command, 64) : null;
-  const label =
-    status === 'running'
-      ? `Executando ${short ?? 'comando'}…`
-      : status === 'error'
-        ? short
-          ? `Comando falhou: ${short}`
-          : 'O comando falhou'
-        : short
-          ? `Executou ${short}`
-          : 'Executou o comando';
+  let label: string;
+  if (status === 'running') {
+    label = short
+      ? t('chat:trace.group.run_command.runningCommand', { command: short })
+      : t('chat:trace.group.run_command.running');
+  } else if (status === 'error') {
+    label = short
+      ? t('chat:trace.group.run_command.failedCommand', { command: short })
+      : t('chat:trace.group.run_command.failed');
+  } else {
+    label = short
+      ? t('chat:trace.group.run_command.doneCommand', { command: short })
+      : t('chat:trace.group.run_command.done');
+  }
   return harnessGroup('run_command', tools, status, errors, label);
 }
 
@@ -846,10 +921,10 @@ function checksCodeGroup(
 ): ToolGroup {
   const label =
     status === 'running'
-      ? 'Rodando as verificações…'
+      ? t('chat:trace.group.run_checks.running')
       : status === 'error'
-        ? 'As verificações falharam'
-        : 'Rodou as verificações';
+        ? t('chat:trace.group.run_checks.failed')
+        : t('chat:trace.group.run_checks.done');
   return harnessGroup('run_checks', tools, status, errors, label);
 }
 
@@ -860,10 +935,10 @@ function todoCodeGroup(
 ): ToolGroup {
   const label =
     status === 'running'
-      ? 'Atualizando as tarefas…'
+      ? t('chat:trace.group.todo_write.running')
       : status === 'error'
-        ? 'Falha ao atualizar as tarefas'
-        : 'Atualizou as tarefas';
+        ? t('chat:trace.group.todo_write.failed')
+        : t('chat:trace.group.todo_write.done');
   return harnessGroup('todo_write', tools, status, errors, label);
 }
 
@@ -884,11 +959,17 @@ function planCodeGroup(
     .map((tool) => (tool.presentation?.kind === 'plan' ? tool.presentation.feedback : null))
     .find(Boolean);
   let label: string;
-  if (status === 'running') label = 'Enviando o plano para revisão…';
-  else if (status === 'error') label = feedback ? 'Plano não aprovado' : 'Falha ao enviar o plano';
-  else if (state === 'approved') label = 'Plano aprovado';
-  else if (state === 'reviewing') label = feedback ? 'Plano revisado' : 'Plano enviado para revisão';
-  else label = 'Plano proposto';
+  if (status === 'running') label = t('chat:trace.group.submit_plan.running');
+  else if (status === 'error')
+    label = feedback
+      ? t('chat:trace.group.submit_plan.failedFeedback')
+      : t('chat:trace.group.submit_plan.failed');
+  else if (state === 'approved') label = t('chat:trace.group.submit_plan.approved');
+  else if (state === 'reviewing')
+    label = feedback
+      ? t('chat:trace.group.submit_plan.reviewingFeedback')
+      : t('chat:trace.group.submit_plan.reviewing');
+  else label = t('chat:trace.group.submit_plan.proposed');
   return harnessGroup('submit_plan', tools, status, errors, label);
 }
 
@@ -903,12 +984,12 @@ function goalCodeGroup(
     .map((tool) => (tool.presentation?.kind === 'goal' ? tool.presentation : null))
     .find(Boolean);
   let label: string;
-  if (status === 'running') label = 'Atualizando o objetivo…';
-  else if (status === 'error') label = 'Falha ao atualizar o objetivo';
-  else if (goal?.status === 'completed') label = 'Objetivo concluído';
-  else if (goal?.status === 'blocked') label = 'Objetivo bloqueado';
-  else if (goal?.status === 'paused') label = 'Objetivo pausado';
-  else label = 'Progrediu no objetivo';
+  if (status === 'running') label = t('chat:trace.group.goal.running');
+  else if (status === 'error') label = t('chat:trace.group.goal.failed');
+  else if (goal?.status === 'completed') label = t('chat:trace.group.goal.completed');
+  else if (goal?.status === 'blocked') label = t('chat:trace.group.goal.blocked');
+  else if (goal?.status === 'paused') label = t('chat:trace.group.goal.paused');
+  else label = t('chat:trace.group.goal.progressed');
   return harnessGroup('goal', tools, status, errors, label);
 }
 
@@ -920,23 +1001,23 @@ function askCodeGroup(
 ): ToolGroup {
   const label =
     status === 'running'
-      ? 'Aguardando resposta do usuário…'
+      ? t('chat:trace.group.ask_user.running')
       : status === 'error'
-        ? 'A pergunta não foi concluída'
-        : 'Perguntou ao usuário';
+        ? t('chat:trace.group.ask_user.failed')
+        : t('chat:trace.group.ask_user.done');
   return harnessGroup('ask_user', tools, status, errors, label);
 }
 
-/** pt-BR label for the subagent kind; `task` without a type uses `explore`. */
+/** Localized label for the subagent kind; `task` without a type uses `explore`. */
 function subagentKindLabel(type: string | null | undefined): string {
   switch (type) {
     case 'review':
-      return 'revisão';
+      return t('chat:trace.subagentKind.review');
     case 'general':
-      return 'geral';
+      return t('chat:trace.subagentKind.general');
     case 'explore':
     default:
-      return 'exploração';
+      return t('chat:trace.subagentKind.explore');
   }
 }
 
@@ -952,10 +1033,10 @@ function subagentCodeGroup(
   const kind = subagentKindLabel(type);
   const label =
     status === 'running'
-      ? 'Delegando a um subagente…'
+      ? t('chat:trace.group.task.running')
       : status === 'error'
-        ? 'O subagente falhou'
-        : `Delegou ${kind} a um subagente`;
+        ? t('chat:trace.group.task.failed')
+        : t('chat:trace.group.task.done', { kind });
   return harnessGroup('task', tools, status, errors, label);
 }
 
@@ -967,14 +1048,14 @@ function jobCodeGroup(
   const name = tools[0]?.name ?? 'job_list';
   const label =
     status === 'running'
-      ? 'Consultando jobs…'
+      ? t('chat:trace.group.job_list.running')
       : status === 'error'
-        ? 'Falha ao consultar o job'
+        ? t('chat:trace.group.job_list.failed')
         : name === 'job_kill'
-          ? 'Parou um job'
+          ? t('chat:trace.group.job_list.kill')
           : name === 'job_output'
-            ? 'Leu a saída de um job'
-            : 'Listou os jobs';
+            ? t('chat:trace.group.job_list.output')
+            : t('chat:trace.group.job_list.list');
   return harnessGroup(name, tools, status, errors, label);
 }
 
@@ -986,14 +1067,14 @@ function gitCodeGroup(
   const name = tools[0]?.name ?? 'git_status';
   const label =
     status === 'running'
-      ? 'Consultando o git…'
+      ? t('chat:trace.group.git_status.running')
       : status === 'error'
-        ? 'O comando do git falhou'
+        ? t('chat:trace.group.git_status.failed')
         : name === 'git_diff'
-          ? 'Viu o diff do git'
+          ? t('chat:trace.group.git_status.diff')
           : name === 'git_log'
-            ? 'Consultou o histórico do git'
-            : 'Consultou o status do git';
+            ? t('chat:trace.group.git_status.log')
+            : t('chat:trace.group.git_status.status');
   return harnessGroup(name, tools, status, errors, label);
 }
 
@@ -1004,10 +1085,10 @@ function readOutputCodeGroup(
 ): ToolGroup {
   const label =
     status === 'running'
-      ? 'Lendo a saída completa…'
+      ? t('chat:trace.group.read_tool_output.running')
       : status === 'error'
-        ? 'Não foi possível ler a saída'
-        : 'Leu a saída completa de uma ferramenta';
+        ? t('chat:trace.group.read_tool_output.failed')
+        : t('chat:trace.group.read_tool_output.done');
   return harnessGroup('read_tool_output', tools, status, errors, label);
 }
 
@@ -1026,7 +1107,9 @@ export function describeCodeTool(tool: ToolCallRecord): CodeToolLabel {
   const make = (verb: string, detail: string | null = null): CodeToolLabel => ({
     verb,
     detail,
-    label: detail ? `${verb} ${detail}` : verb,
+    label: detail
+      ? t('chat:trace.toolLabel', { verb, detail })
+      : t('chat:trace.toolLabelPlain', { verb }),
   });
   const path = codeArg(tool, 'path') ?? codeArg(tool, 'file');
   const command = codeArg(tool, 'command');
@@ -1038,92 +1121,132 @@ export function describeCodeTool(tool: ToolCallRecord): CodeToolLabel {
 
   switch (tool.name) {
     case 'read_file':
-      return make('Leu', path);
+      return make(t('chat:trace.verb.read'), path);
     case 'list_dir':
-      return make('Listou', path);
+      return make(t('chat:trace.verb.list'), path);
     case 'search_files':
     case 'search_text': {
       const term = pattern ?? query;
-      return make('Buscou', term ? `“${truncate(term, 64)}”` : null);
+      return make(
+        t('chat:trace.verb.search'),
+        term ? `“${truncate(term, 64)}”` : null,
+      );
     }
     case 'write_file':
     case 'edit_file': {
       const verb =
         fileChange?.change === 'created'
-          ? 'Criou'
+          ? t('chat:trace.verb.created')
           : fileChange?.change === 'deleted'
-            ? 'Removeu'
+            ? t('chat:trace.verb.deleted')
             : fileChange?.change === 'renamed'
-              ? 'Renomeou'
-              : 'Alterou';
+              ? t('chat:trace.verb.renamed')
+              : t('chat:trace.verb.changed');
       return make(verb, path ?? fileChange?.path ?? null);
     }
     case 'run_command':
-      return make('Executou', command ? truncate(command, 96) : null);
+      return make(
+        t('chat:trace.verb.command'),
+        command ? truncate(command, 96) : null,
+      );
     case 'run_checks':
-      return make(failed ? 'As verificações falharam' : 'Rodou as verificações');
+      return make(
+        failed ? t('chat:trace.verb.checksFailed') : t('chat:trace.verb.checksDone'),
+      );
     case 'todo_write':
-      return make(failed ? 'Falha ao atualizar as tarefas' : 'Atualizou as tarefas');
+      return make(
+        failed ? t('chat:trace.verb.todoFailed') : t('chat:trace.verb.todoDone'),
+      );
     case 'goal': {
       const goal = presentation?.kind === 'goal' ? presentation : null;
-      if (failed) return make('Falha ao atualizar o objetivo');
-      if (goal?.status === 'completed') return make('Objetivo concluído');
-      if (goal?.status === 'blocked') return make('Objetivo bloqueado');
-      if (goal?.status === 'paused') return make('Objetivo pausado');
-      return make('Progrediu no objetivo');
+      if (failed) return make(t('chat:trace.verb.goalFailed'));
+      if (goal?.status === 'completed') return make(t('chat:trace.verb.goalCompleted'));
+      if (goal?.status === 'blocked') return make(t('chat:trace.verb.goalBlocked'));
+      if (goal?.status === 'paused') return make(t('chat:trace.verb.goalPaused'));
+      return make(t('chat:trace.verb.goalProgressed'));
     }
     case 'submit_plan': {
       const plan = presentation?.kind === 'plan' ? presentation : null;
-      if (failed) return make(plan?.feedback ? 'Plano não aprovado' : 'Falha ao enviar o plano');
-      if (plan?.state === 'approved') return make('Plano aprovado');
-      if (plan?.state === 'reviewing') {
-        return make(plan.feedback ? 'Plano revisado' : 'Plano enviado para revisão');
+      if (failed) {
+        return make(
+          plan?.feedback
+            ? t('chat:trace.verb.planNotApproved')
+            : t('chat:trace.verb.planFailed'),
+        );
       }
-      return make('Plano proposto');
+      if (plan?.state === 'approved') return make(t('chat:trace.verb.planApproved'));
+      if (plan?.state === 'reviewing') {
+        return make(
+          plan.feedback
+            ? t('chat:trace.verb.planRevised')
+            : t('chat:trace.verb.planSentForReview'),
+        );
+      }
+      return make(t('chat:trace.verb.planProposed'));
     }
     case 'ask_user':
       return make(
         failed
-          ? 'A pergunta não foi concluída'
+          ? t('chat:trace.verb.askFailed')
           : tool.status === 'running'
-            ? 'Aguardando resposta do usuário'
-            : 'Perguntou ao usuário',
+            ? t('chat:trace.verb.askRunning')
+            : t('chat:trace.verb.askDone'),
       );
     case 'task': {
       const kind = subagentKindLabel(codeArg(tool, 'subagent_type'));
       return make(
-        failed ? 'O subagente falhou' : `Delegou ${kind} a um subagente`,
+        failed
+          ? t('chat:trace.verb.taskFailed')
+          : t('chat:trace.verb.taskDone', { kind }),
       );
     }
     case 'job_list':
-      return make(failed ? 'Falha ao consultar os jobs' : 'Listou os jobs');
-    case 'job_output':
-      return make(failed ? 'Falha ao ler a saída do job' : 'Leu a saída de um job');
-    case 'job_kill':
-      return make(failed ? 'Falha ao parar o job' : 'Parou um job');
-    case 'git_status':
-      return make(failed ? 'O status do git falhou' : 'Consultou o status do git');
-    case 'git_diff':
-      return make(failed ? 'O diff do git falhou' : 'Viu o diff do git');
-    case 'git_log':
-      return make(failed ? 'O histórico do git falhou' : 'Consultou o histórico do git');
-    case 'read_tool_output':
-      return make(failed ? 'Não foi possível ler a saída completa' : 'Leu a saída completa de uma ferramenta');
-    case 'validate_ui':
       return make(
-        failed ? 'A validação da interface falhou' : 'Validou a interface',
+        failed ? t('chat:trace.verb.jobsFailed') : t('chat:trace.verb.jobsDone'),
       );
-    default:
+    case 'job_output':
       return make(
         failed
-          ? `Falha em ${tool.name.replace(/_/g, ' ')}`
-          : `Executou ${tool.name.replace(/_/g, ' ')}`,
+          ? t('chat:trace.verb.jobOutputFailed')
+          : t('chat:trace.verb.jobOutputDone'),
       );
+    case 'job_kill':
+      return make(
+        failed ? t('chat:trace.verb.jobKillFailed') : t('chat:trace.verb.jobKillDone'),
+      );
+    case 'git_status':
+      return make(
+        failed
+          ? t('chat:trace.verb.gitStatusFailed')
+          : t('chat:trace.verb.gitStatusDone'),
+      );
+    case 'git_diff':
+      return make(
+        failed ? t('chat:trace.verb.gitDiffFailed') : t('chat:trace.verb.gitDiffDone'),
+      );
+    case 'git_log':
+      return make(
+        failed ? t('chat:trace.verb.gitLogFailed') : t('chat:trace.verb.gitLogDone'),
+      );
+    case 'read_tool_output':
+      return make(
+        failed
+          ? t('chat:trace.verb.readOutputFailed')
+          : t('chat:trace.verb.readOutputDone'),
+      );
+    case 'validate_ui':
+      return make(
+        failed ? t('chat:trace.verb.uiFailed') : t('chat:trace.verb.uiDone'),
+      );
+    default: {
+      const name = tool.name.replace(/_/g, ' ');
+      return make(
+        failed
+          ? t('chat:trace.verb.defaultFailed', { name })
+          : t('chat:trace.verb.defaultDone', { name }),
+      );
+    }
   }
-}
-
-function plural(count: number, singular: string, pluralForm: string): string {
-  return count === 1 ? singular : pluralForm;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1146,8 +1269,17 @@ function searchResults(tool: ToolCallRecord): PageLink[] {
     });
 }
 
-function summaryResultCount(summary?: string | null): number | null {
-  const match = summary?.match(/(\d+)\s+resultados?/i);
+/**
+ * Result count of a `web_search` call: the structured presentation is
+ * authoritative. Legacy messages (without one) fall back to the summary text.
+ */
+function summaryResultCount(tool: ToolCallRecord): number | null {
+  const presentation = tool.presentation;
+  if (presentation?.kind === 'search') return presentation.total;
+  const raw = tool.summary?.trim();
+  if (!raw) return null;
+  if (/^nenhum\b/i.test(raw)) return 0;
+  const match = raw.match(/(\d+)\s+resultados?/i) ?? raw.match(/^(\d+)/);
   return match ? Number(match[1]) : null;
 }
 

@@ -67,8 +67,7 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
     if ctx.plan_mode && facts.mutating {
         return PolicyDecision::Deny {
             code: "PLAN_MODE_ACTIVE",
-            reason: "o modo Plano é somente leitura; aprove o plano antes de executar"
-                .to_string(),
+            reason: crate::i18n::t("policy.reasons.planMode"),
         };
     }
 
@@ -87,7 +86,10 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
     if let Some(reason) = facts.destructive_reason {
         return PolicyDecision::Ask {
             risk: RiskClass::Destroy,
-            reason: format!("comando destrutivo ({reason})"),
+            reason: crate::i18n::t_args(
+                "policy.reasons.destructive",
+                &[("reason", reason)],
+            ),
         };
     }
 
@@ -96,7 +98,7 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
     if facts.risk == RiskClass::Computer {
         return PolicyDecision::Ask {
             risk: RiskClass::Computer,
-            reason: "o agente quer controlar o computador".to_string(),
+            reason: crate::i18n::t("policy.reasons.computer"),
         };
     }
 
@@ -104,7 +106,7 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
     if facts.secret {
         return PolicyDecision::Ask {
             risk: RiskClass::Secret,
-            reason: "o arquivo casa com um padrão de segredo (chaves/tokens)".to_string(),
+            reason: crate::i18n::t("policy.reasons.secret"),
         };
     }
 
@@ -113,11 +115,11 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
         return match ctx.mode {
             PermissionMode::ReadOnly => PolicyDecision::Deny {
                 code: "FS_OUTSIDE_WORKSPACE",
-                reason: "o modo Leitura só acessa arquivos dentro do workspace".to_string(),
+                reason: crate::i18n::t("policy.reasons.readOnlyOutside"),
             },
             _ => PolicyDecision::Ask {
                 risk: RiskClass::Outside,
-                reason: "o alvo está fora do workspace".to_string(),
+                reason: crate::i18n::t("policy.reasons.outsideWorkspace"),
             },
         };
     }
@@ -133,7 +135,7 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
             if facts.mutating {
                 PolicyDecision::Deny {
                     code: "POLICY_DENIED",
-                    reason: "o modo Leitura não permite alterações; mude para Editar".to_string(),
+                    reason: crate::i18n::t("policy.reasons.readOnlyMutation"),
                 }
             } else {
                 PolicyDecision::Allow
@@ -144,11 +146,11 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
             RiskClass::Write => PolicyDecision::Allow,
             RiskClass::Shell | RiskClass::Ask => PolicyDecision::Ask {
                 risk: facts.risk,
-                reason: "o modo Editar pede aprovação para executar comandos".to_string(),
+                reason: crate::i18n::t("policy.reasons.editShell"),
             },
             _ => PolicyDecision::Ask {
                 risk: facts.risk,
-                reason: "ação sensível".to_string(),
+                reason: crate::i18n::t("policy.reasons.sensitive"),
             },
         },
         // Saída do modo Plano "revisar cada edição": leitura livre, mas toda
@@ -157,7 +159,7 @@ pub fn decide(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> PolicyDecision 
             RiskClass::Read | RiskClass::Network => PolicyDecision::Allow,
             _ => PolicyDecision::Ask {
                 risk: facts.risk,
-                reason: "o modo Revisar pede aprovação para cada alteração".to_string(),
+                reason: crate::i18n::t("policy.reasons.review"),
             },
         },
         // Unreachable: Autonomous returns above before the mode default.
@@ -175,8 +177,7 @@ impl PolicyDecision {
         match self {
             PolicyDecision::Allow if !trusted => PolicyDecision::Ask {
                 risk: RiskClass::Write,
-                reason: "o workspace não foi confirmado como confiável; confie na pasta para liberar"
-                    .to_string(),
+                reason: crate::i18n::t("policy.reasons.untrusted"),
             },
             other => other,
         }
@@ -205,7 +206,10 @@ fn match_rule(ctx: &PolicyContext<'_>, facts: &CallFacts<'_>) -> Option<PolicyDe
     if let Some(rule) = denied {
         return Some(PolicyDecision::Deny {
             code: "POLICY_DENIED",
-            reason: format!("regra \"{}\" nega esta ação", rule.pattern),
+            reason: crate::i18n::t_args(
+                "policy.reasons.deniedByRule",
+                &[("pattern", &rule.pattern)],
+            ),
         });
     }
     candidates

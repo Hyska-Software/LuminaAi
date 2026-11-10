@@ -207,7 +207,7 @@ fn cancelled(state: &InstallerState) -> bool {
 
 fn check_cancel(state: &InstallerState) -> Result<()> {
     if cancelled(state) {
-        bail!("Instalação cancelada pelo usuário.");
+        bail!(crate::i18n::t("installer.errors.cancelled"));
     }
     Ok(())
 }
@@ -693,63 +693,67 @@ pub fn launch_installed(install_path: &str) -> Result<()> {
 fn validate_options(options: &InstallOptions, existing: Option<&ExistingInstall>) -> Result<()> {
     let path = options.path.trim();
     if path.is_empty() {
-        bail!("Escolha uma pasta de instalação.");
+        bail!(crate::i18n::t("installer.errors.choosePath"));
     }
     let path_ref = Path::new(path);
     if !path_ref.is_absolute() {
-        bail!("A pasta de instalação precisa ser um caminho absoluto.");
+        bail!(crate::i18n::t("installer.errors.pathNotAbsolute"));
     }
     if path_ref
         .components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
     {
-        bail!("A pasta de instalação não pode conter '..'.");
+        bail!(crate::i18n::t("installer.errors.pathParent"));
     }
     if path_ref.parent().is_none() {
-        bail!("Escolha uma pasta, não a raiz da unidade.");
+        bail!(crate::i18n::t("installer.errors.pathRoot"));
     }
     let lower = path.to_ascii_lowercase();
     if lower.starts_with(r"\\") {
-        bail!("Instale em uma unidade local; caminhos de rede não são suportados.");
+        bail!(crate::i18n::t("installer.errors.networkPath"));
     }
     if let Some(windows_dir) = std::env::var("WINDIR").ok() {
         if lower.starts_with(&windows_dir.to_ascii_lowercase()) {
-            bail!("Não instale o Zylara dentro da pasta do Windows.");
+            bail!(crate::i18n::t("installer.errors.windowsDir"));
         }
     }
     if let Some(existing) = existing {
         if !same_path(Path::new(&existing.path), path_ref) {
-            bail!(
-                "O Zylara já está instalado em {}. Use a mesma pasta ou desinstale antes de mover.",
-                existing.path
-            );
+            bail!(crate::i18n::t_args(
+                "installer.errors.alreadyInstalledPath",
+                &[("path", &existing.path)],
+            ));
         }
     } else if path_ref.exists() {
         let has_entries = fs::read_dir(path_ref)
             .map(|mut entries| entries.next().is_some())
             .unwrap_or(false);
         if has_entries {
-            bail!("A pasta escolhida já contém arquivos. Escolha uma pasta vazia ou remova o conteúdo.");
+            bail!(crate::i18n::t("installer.errors.folderNotEmpty"));
         }
     }
     Ok(())
 }
 
 fn copy_payload(install_path: &Path) -> Result<()> {
-    let current = std::env::current_exe().context("não foi possível localizar o executável")?;
+    let current = std::env::current_exe().context(crate::i18n::t("installer.errors.executableNotFound"))?;
     let target = install_path.join(APP_EXE);
     if same_path(&current, &target) {
         return Ok(());
     }
     fs::create_dir_all(install_path).with_context(|| {
-        format!(
-            "não foi possível criar a pasta {}",
-            install_path.display()
+        crate::i18n::t_args(
+            "installer.errors.createFolder",
+            &[("path", &install_path.display().to_string())],
         )
     })?;
     let temporary = install_path.join(format!("{APP_EXE}.new"));
-    fs::copy(&current, &temporary)
-        .with_context(|| format!("falha ao copiar o aplicativo para {}", temporary.display()))?;
+    fs::copy(&current, &temporary).with_context(|| {
+        crate::i18n::t_args(
+            "installer.errors.copyApp",
+            &[("path", &temporary.display().to_string())],
+        )
+    })?;
 
     if target.exists() {
         let replaced = unsafe {
@@ -764,16 +768,20 @@ fn copy_payload(install_path: &Path) -> Result<()> {
         };
         if replaced.is_err() {
             fs::remove_file(&target).with_context(|| {
-                format!(
-                    "o Zylara está aberto ou o arquivo está bloqueado: {}",
-                    target.display()
+                crate::i18n::t_args(
+                    "installer.errors.fileLocked",
+                    &[("path", &target.display().to_string())],
                 )
             })?;
             fs::rename(&temporary, &target)?;
         }
     } else {
-        fs::rename(&temporary, &target)
-            .with_context(|| format!("falha ao finalizar {}", target.display()))?;
+        fs::rename(&temporary, &target).with_context(|| {
+            crate::i18n::t_args(
+                "installer.errors.finalizeFile",
+                &[("path", &target.display().to_string())],
+            )
+        })?;
     }
     remove_zone_identifier(&target);
     Ok(())
@@ -840,42 +848,46 @@ fn install_inner(
         InstallScope::Machine => InstallScope::User,
     });
     if conflicting.is_some() {
-        bail!("Já existe uma instalação do Zylara em outro escopo. Remova-a antes de continuar.");
+        bail!(crate::i18n::t("installer.errors.conflictingScope"));
     }
 
-    step(emit, "prepare", "Validar destino e permissões", "running", None);
-    progress(emit, 6.0, "Validando destino…");
+    step(emit, "prepare", &crate::i18n::t("installer.steps.validateDestination"), "running", None);
+    progress(emit, 6.0, &crate::i18n::t("installer.progress.validatingDestination"));
     validate_options(options, existing.as_ref())?;
     if options.scope == InstallScope::Machine && !is_admin() {
-        bail!("A instalação para todos os usuários exige permissão de administrador.");
+        bail!(crate::i18n::t("installer.errors.adminRequiredInstall"));
     }
     if !allow_downgrade
         && existing
             .as_ref()
             .is_some_and(|install| compare_versions(&install.version, env!("CARGO_PKG_VERSION")) > 0)
     {
-        bail!(
-            "A versão {} é mais nova que este instalador ({}). Instale uma versão mais recente.",
-            existing.as_ref().map(|install| install.version.as_str()).unwrap_or(""),
-            env!("CARGO_PKG_VERSION")
-        );
+        bail!(crate::i18n::t_args(
+            "installer.errors.newerVersion",
+            &[
+                ("version", existing.as_ref().map(|install| install.version.as_str()).unwrap_or("")),
+                ("installer", env!("CARGO_PKG_VERSION")),
+            ],
+        ));
     }
     let install_path = PathBuf::from(options.path.trim());
     if install_path.exists() && !install_path.is_dir() {
-        bail!("O caminho escolhido é um arquivo, não uma pasta.");
+        bail!(crate::i18n::t("installer.errors.pathIsFile"));
     }
     if let Some(free) = free_bytes(&install_path) {
         let required = payload_size().saturating_add(16 * 1024 * 1024);
         if free < required {
-            bail!(
-                "Espaço insuficiente em disco. São necessários {} e há {} livres.",
-                human_bytes(required),
-                human_bytes(free)
-            );
+            bail!(crate::i18n::t_args(
+                "installer.errors.insufficientSpace",
+                &[("required", &human_bytes(required)), ("free", &human_bytes(free))],
+            ));
         }
     }
     fs::create_dir_all(&install_path).with_context(|| {
-        format!("não foi possível criar {}", install_path.display())
+        crate::i18n::t_args(
+            "installer.errors.createPath",
+            &[("path", &install_path.display().to_string())],
+        )
     })?;
     let first_install = existing.is_none();
     let cancel_before_copy = |state: &InstallerState| -> Result<()> {
@@ -883,36 +895,36 @@ fn install_inner(
             if first_install {
                 let _ = fs::remove_dir_all(&install_path);
             }
-            bail!("Instalação cancelada pelo usuário.");
+            bail!(crate::i18n::t("installer.errors.cancelled"));
         }
         Ok(())
     };
-    step(emit, "prepare", "Validar destino e permissões", "done", None);
+    step(emit, "prepare", &crate::i18n::t("installer.steps.validateDestination"), "done", None);
     cancel_before_copy(state)?;
 
-    step(emit, "closeApp", "Fechar o Zylara em execução", "running", None);
-    progress(emit, 16.0, "Verificando o aplicativo em execução…");
+    step(emit, "closeApp", &crate::i18n::t("installer.steps.closeApp"), "running", None);
+    progress(emit, 16.0, &crate::i18n::t("installer.progress.checkingRunningApp"));
     if app_running() {
         log_event(state, emit, "fechando o Zylara em execução");
         close_running_app()?;
     }
-    step(emit, "closeApp", "Fechar o Zylara em execução", "done", None);
+    step(emit, "closeApp", &crate::i18n::t("installer.steps.closeApp"), "done", None);
     cancel_before_copy(state)?;
 
-    step(emit, "copy", "Copiar arquivos do aplicativo", "running", None);
-    progress(emit, 34.0, "Copiando o aplicativo…");
+    step(emit, "copy", &crate::i18n::t("installer.steps.copyFiles"), "running", None);
+    progress(emit, 34.0, &crate::i18n::t("installer.progress.copyingApp"));
     copy_payload(&install_path)?;
     write_install_marker(&install_path)?;
     step(
         emit,
         "copy",
-        "Copiar arquivos do aplicativo",
+        &crate::i18n::t("installer.steps.copyFiles"),
         "done",
         Some(APP_EXE.to_string()),
     );
 
-    step(emit, "shortcuts", "Criar atalhos", "running", None);
-    progress(emit, 62.0, "Criando atalhos…");
+    step(emit, "shortcuts", &crate::i18n::t("installer.steps.createShortcuts"), "running", None);
+    progress(emit, 62.0, &crate::i18n::t("installer.progress.creatingShortcuts"));
     if options.desktop_shortcut || options.start_menu_shortcut {
         let target = install_path.join(APP_EXE);
         if options.start_menu_shortcut {
@@ -921,14 +933,14 @@ fn install_inner(
                     &programs.join("Zylara.lnk"),
                     &target,
                     &install_path,
-                    "Zylara — chat desktop com agentes",
+                    &crate::i18n::t("installer.shortcut.appDescription"),
                     None,
                 )?;
                 create_shortcut(
                     &programs.join("Desinstalar Zylara.lnk"),
                     &target,
                     &install_path,
-                    "Desinstalar o Zylara",
+                    &crate::i18n::t("installer.shortcut.uninstallDescription"),
                     Some("--uninstall"),
                 )?;
             }
@@ -939,7 +951,7 @@ fn install_inner(
                     &desktop.join("Zylara.lnk"),
                     &target,
                     &install_path,
-                    "Zylara — chat desktop com agentes",
+                    &crate::i18n::t("installer.shortcut.appDescription"),
                     None,
                 )?;
             }
@@ -947,41 +959,41 @@ fn install_inner(
         step(
             emit,
             "shortcuts",
-            "Criar atalhos",
+            &crate::i18n::t("installer.steps.createShortcuts"),
             "done",
-            Some("Atalhos criados".to_string()),
+            Some(crate::i18n::t("installer.steps.shortcutsCreated")),
         );
     } else {
-        step(emit, "shortcuts", "Criar atalhos", "skipped", None);
+        step(emit, "shortcuts", &crate::i18n::t("installer.steps.createShortcuts"), "skipped", None);
     }
 
-    step(emit, "register", "Registrar desinstalação", "running", None);
-    progress(emit, 82.0, "Registrando no Windows…");
+    step(emit, "register", &crate::i18n::t("installer.steps.registerUninstall"), "running", None);
+    progress(emit, 82.0, &crate::i18n::t("installer.progress.registeringWindows"));
     register_uninstall(options.scope, &install_path)?;
-    step(emit, "register", "Registrar desinstalação", "done", None);
+    step(emit, "register", &crate::i18n::t("installer.steps.registerUninstall"), "done", None);
 
     let mut launched = false;
     if options.launch_after_install {
-        step(emit, "launch", "Iniciar o Zylara", "running", None);
-        progress(emit, 94.0, "Abrindo o Zylara…");
+        step(emit, "launch", &crate::i18n::t("installer.steps.launch"), "running", None);
+        progress(emit, 94.0, &crate::i18n::t("installer.progress.launchingApp"));
         if let Err(error) = launch_installed(&install_path.to_string_lossy()) {
             log_event(state, emit, format!("aviso ao abrir o app: {error:#}"));
             step(
                 emit,
                 "launch",
-                "Iniciar o Zylara",
+                &crate::i18n::t("installer.steps.launch"),
                 "error",
                 Some(format!("{error:#}")),
             );
         } else {
             launched = true;
-            step(emit, "launch", "Iniciar o Zylara", "done", None);
+            step(emit, "launch", &crate::i18n::t("installer.steps.launch"), "done", None);
         }
     } else {
-        step(emit, "launch", "Iniciar o Zylara", "skipped", None);
+        step(emit, "launch", &crate::i18n::t("installer.steps.launch"), "skipped", None);
     }
 
-    progress(emit, 100.0, "Concluído");
+    progress(emit, 100.0, &crate::i18n::t("installer.progress.done"));
     write_log(state, "instalação concluída");
     let path = install_path.to_string_lossy().to_string();
     emit(InstallerEvent::Done {
@@ -1029,17 +1041,21 @@ pub fn silent_install(
 /* ------------------------------------------------------------------ */
 
 fn remove_data(state: &InstallerState, emit: &dyn Fn(InstallerEvent)) -> Result<()> {
-    step(emit, "removeData", "Remover dados do usuário", "running", None);
-    progress(emit, 28.0, "Removendo dados do usuário…");
+    step(emit, "removeData", &crate::i18n::t("installer.steps.removeData"), "running", None);
+    progress(emit, 28.0, &crate::i18n::t("installer.progress.removingData"));
     for path in data_paths() {
         let path = PathBuf::from(path);
         if path.exists() {
             log_event(state, emit, format!("removendo {}", path.display()));
-            fs::remove_dir_all(&path)
-                .with_context(|| format!("falha ao remover {}", path.display()))?;
+            fs::remove_dir_all(&path).with_context(|| {
+                crate::i18n::t_args(
+                    "installer.errors.removePath",
+                    &[("path", &path.display().to_string())],
+                )
+            })?;
         }
     }
-    step(emit, "removeData", "Remover dados do usuário", "done", None);
+    step(emit, "removeData", &crate::i18n::t("installer.steps.removeData"), "done", None);
     Ok(())
 }
 
@@ -1049,7 +1065,7 @@ fn uninstall_inner(
     emit: &dyn Fn(InstallerEvent),
 ) -> Result<String> {
     let existing = find_install()
-        .ok_or_else(|| anyhow!("O Zylara não está instalado para este usuário."))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("installer.errors.notInstalled")))?;
     write_log(
         state,
         &format!(
@@ -1060,28 +1076,28 @@ fn uninstall_inner(
         ),
     );
 
-    step(emit, "prepare", "Validar a instalação", "running", None);
-    progress(emit, 6.0, "Validando a instalação…");
+    step(emit, "prepare", &crate::i18n::t("installer.steps.validateInstall"), "running", None);
+    progress(emit, 6.0, &crate::i18n::t("installer.progress.validatingInstall"));
     let install_path = PathBuf::from(&existing.path);
     if !install_path.exists() {
         // Registry is stale; still remove the entry and shortcuts.
         log_event(state, emit, "a pasta de instalação não existe; limpando o registro");
     }
     if existing.scope == InstallScope::Machine && !is_admin() {
-        bail!("A desinstalação para todos os usuários exige permissão de administrador.");
+        bail!(crate::i18n::t("installer.errors.adminRequiredUninstall"));
     }
     if install_path.exists() {
         validate_install_marker(&install_path)?;
     }
-    step(emit, "prepare", "Validar a instalação", "done", None);
+    step(emit, "prepare", &crate::i18n::t("installer.steps.validateInstall"), "done", None);
     check_cancel(state)?;
 
-    step(emit, "closeApp", "Fechar o Zylara em execução", "running", None);
-    progress(emit, 16.0, "Fechando o aplicativo…");
+    step(emit, "closeApp", &crate::i18n::t("installer.steps.closeApp"), "running", None);
+    progress(emit, 16.0, &crate::i18n::t("installer.progress.closingApp"));
     if app_running() {
         close_running_app()?;
     }
-    step(emit, "closeApp", "Fechar o Zylara em execução", "done", None);
+    step(emit, "closeApp", &crate::i18n::t("installer.steps.closeApp"), "done", None);
     check_cancel(state)?;
 
     // Remove user data while the installation is still registered. If data
@@ -1093,39 +1109,39 @@ fn uninstall_inner(
         step(
             emit,
             "removeData",
-            "Remover dados do usuário",
+            &crate::i18n::t("installer.steps.removeData"),
             "skipped",
-            Some("Dados preservados".to_string()),
+            Some(crate::i18n::t("installer.steps.dataPreserved")),
         );
     }
 
-    step(emit, "removeFiles", "Remover arquivos do aplicativo", "running", None);
-    progress(emit, 40.0, "Removendo arquivos…");
+    step(emit, "removeFiles", &crate::i18n::t("installer.steps.removeFiles"), "running", None);
+    progress(emit, 40.0, &crate::i18n::t("installer.progress.removingFiles"));
     if install_path.exists() {
         fs::remove_dir_all(&install_path).with_context(|| {
-            format!(
-                "falha ao remover {}; feche o Zylara e tente novamente",
-                install_path.display()
+            crate::i18n::t_args(
+                "installer.errors.removeInstallBusy",
+                &[("path", &install_path.display().to_string())],
             )
         })?;
     }
-    step(emit, "removeFiles", "Remover arquivos do aplicativo", "done", None);
+    step(emit, "removeFiles", &crate::i18n::t("installer.steps.removeFiles"), "done", None);
     check_cancel(state)?;
 
-    step(emit, "removeRegistry", "Remover registro e atalhos", "running", None);
-    progress(emit, 62.0, "Removendo atalhos e registro…");
+    step(emit, "removeRegistry", &crate::i18n::t("installer.steps.removeRegistry"), "running", None);
+    progress(emit, 62.0, &crate::i18n::t("installer.progress.removingRegistry"));
     remove_shortcuts(existing.scope);
     remove_shortcuts(match existing.scope {
         InstallScope::User => InstallScope::Machine,
         InstallScope::Machine => InstallScope::User,
     });
     unregister(existing.scope)?;
-    step(emit, "removeRegistry", "Remover registro e atalhos", "done", None);
+    step(emit, "removeRegistry", &crate::i18n::t("installer.steps.removeRegistry"), "done", None);
     check_cancel(state)?;
 
-    step(emit, "cleanup", "Finalizar", "running", None);
-    progress(emit, 100.0, "Concluído");
-    step(emit, "cleanup", "Finalizar", "done", None);
+    step(emit, "cleanup", &crate::i18n::t("installer.steps.finish"), "running", None);
+    progress(emit, 100.0, &crate::i18n::t("installer.progress.done"));
+    step(emit, "cleanup", &crate::i18n::t("installer.steps.finish"), "done", None);
     write_log(state, "desinstalação concluída");
     emit(InstallerEvent::Done {
         install_path: existing.path.clone(),

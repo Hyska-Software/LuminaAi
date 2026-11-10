@@ -31,6 +31,7 @@ use serde_json::{json, Value};
 use crate::db::StoredArtifact;
 use crate::domain::{Artifact, ArtifactKind, ArtifactPreview};
 use crate::documents::preview::{archive_preview, binary_preview, image_preview};
+use crate::i18n;
 use crate::providers::ToolDefinition;
 
 use super::{clean_inline, json_str, json_u32, truncate_chars, ToolOutcome, ToolRuntime};
@@ -216,7 +217,10 @@ struct Candidate {
 /// used for provenance.
 fn load_library(rt: &ToolRuntime) -> Result<Vec<LibraryEntry>, String> {
     let artifacts = rt.db.list_all_artifacts().map_err(|error| {
-        format!("não foi possível listar a biblioteca de artefatos: {error:#}")
+        i18n::t_args(
+            "tools.artifact_library.listFailed",
+            &[("error", &format!("{error:#}"))],
+        )
     })?;
     let titles = conversation_titles(rt)?;
     Ok(artifacts
@@ -243,7 +247,12 @@ fn conversation_titles(rt: &ToolRuntime) -> Result<HashMap<String, String>, Stri
     let conversations = rt
         .db
         .list_conversations()
-        .map_err(|error| format!("não foi possível carregar as conversas: {error:#}"))?;
+        .map_err(|error| {
+            i18n::t_args(
+                "tools.artifact_library.conversationsFailed",
+                &[("error", &format!("{error:#}"))],
+            )
+        })?;
     Ok(conversations
         .into_iter()
         .map(|conversation| (conversation.id, conversation.title))
@@ -369,6 +378,11 @@ pub async fn run_list(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     ToolOutcome {
         content,
         summary: Some(list_summary(returned, total)),
+        presentation: Some(json!({
+            "kind": "artifact_list",
+            "returned": returned,
+            "total": total,
+        })),
         ..Default::default()
     }
 }
@@ -378,29 +392,31 @@ pub async fn run_list(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
 /// pt-BR: 1 → "1 artefato", N → "N artefatos".
 fn list_summary(returned: usize, total: usize) -> String {
     if returned == 0 {
-        "nenhum artefato".to_string()
+        i18n::t_count("tools.artifact_library.summary", 0, &[])
     } else if total > returned {
-        // `total > returned >= 1` implica total ≥ 2: a cauda é sempre plural.
-        format!("{returned} de {total} artefatos")
+        // `total > returned >= 1` implies total ≥ 2: the tail is always plural.
+        i18n::t_args(
+            "tools.artifact_library.summary.partial",
+            &[
+                ("returned", &returned.to_string()),
+                ("total", &total.to_string()),
+            ],
+        )
     } else {
-        artifact_count(returned)
-    }
-}
-
-fn artifact_count(count: usize) -> String {
-    if count == 1 {
-        "1 artefato".to_string()
-    } else {
-        format!("{count} artefatos")
+        i18n::t_count(
+            "tools.artifact_library.summary",
+            returned,
+            &[("count", &returned.to_string())],
+        )
     }
 }
 
 fn character_count(count: usize) -> String {
-    if count == 1 {
-        "1 caractere".to_string()
-    } else {
-        format!("{count} caracteres")
-    }
+    i18n::t_count(
+        "tools.artifact_library.characters",
+        count,
+        &[("count", &count.to_string())],
+    )
 }
 
 /// `note` do resultado da listagem: deixa explícito que a biblioteca é do
@@ -655,9 +671,9 @@ fn parse_kind_filter(args: &Value) -> Result<Option<ArtifactKind>, String> {
     }
     let slug = raw.to_lowercase();
     kind_from_slug(&slug).map(Some).ok_or_else(|| {
-        format!(
-            "tipo de artefato inválido: `{raw}`; valores aceitos: {}",
-            KIND_SLUGS.join(", ")
+        i18n::t_args(
+            "tools.artifact_library.invalidKind",
+            &[("kind", &raw), ("accepted", &KIND_SLUGS.join(", "))],
         )
     })
 }
@@ -837,14 +853,15 @@ fn resolve_artifact(rt: &ToolRuntime, args: &Value) -> Result<ResolvedArtifact, 
         let stored = match rt.db.get_artifact(&id) {
             Ok(Some(stored)) => stored,
             Ok(None) => {
-                return Err(format!(
-                    "artefato `{id}` não encontrado; use `list_artifacts` para ver a biblioteca de \
-                     artefatos."
+                return Err(i18n::t_args(
+                    "tools.artifact_library.notFound",
+                    &[("id", &id)],
                 ))
             }
             Err(error) => {
-                return Err(format!(
-                    "não foi possível consultar o artefato `{id}`: {error:#}"
+                return Err(i18n::t_args(
+                    "tools.artifact_library.queryFailed",
+                    &[("id", &id), ("error", &format!("{error:#}"))],
                 ))
             }
         };
@@ -857,9 +874,7 @@ fn resolve_artifact(rt: &ToolRuntime, args: &Value) -> Result<ResolvedArtifact, 
     if let Some(name) = name {
         return resolve_by_name(rt, &name);
     }
-    Err("informe `id` ou `name` para ler um artefato; use `list_artifacts` para descobrir os \
-         artefatos da biblioteca."
-        .to_string())
+    Err(i18n::t("tools.artifact_library.missingReference"))
 }
 
 /// Title of one conversation (provenance for a read by id). `None` when the
@@ -880,7 +895,7 @@ fn conversation_title(
 fn resolve_by_name(rt: &ToolRuntime, name: &str) -> Result<ResolvedArtifact, String> {
     let library = load_library(rt)?;
     if library.is_empty() {
-        return Err("nenhum artefato na biblioteca ainda; crie um arquivo antes de ler.".to_string());
+        return Err(i18n::t("tools.artifact_library.emptyLibraryRead"));
     }
     let query = normalize_search_text(name);
     let query_stem = strip_extension(&query);
@@ -911,15 +926,16 @@ fn resolve_by_name(rt: &ToolRuntime, name: &str) -> Result<ResolvedArtifact, Str
                     .db
                     .get_artifact(&entry.artifact.id)
                     .map_err(|error| {
-                        format!(
-                            "não foi possível consultar o artefato `{}`: {error:#}",
-                            entry.artifact.id
+                        i18n::t_args(
+                            "tools.artifact_library.queryFailed",
+                            &[
+                                ("id", &entry.artifact.id),
+                                ("error", &format!("{error:#}")),
+                            ],
                         )
                     })?
                     .ok_or_else(|| {
-                        "o artefato resolvido pelo nome não está mais disponível; use \
-                         `list_artifacts` para atualizar a lista."
-                            .to_string()
+                        i18n::t("tools.artifact_library.staleByName")
                     })?;
                 return Ok(ResolvedArtifact {
                     stored,
@@ -987,37 +1003,36 @@ fn read_artifact_bytes(artifact: &Artifact, path: &str) -> Result<Vec<u8>, Strin
     let path = Path::new(path);
     let metadata = std::fs::metadata(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            format!(
-                "o arquivo `{}` do artefato não foi encontrado no disco (pode ter sido movido ou \
-                 apagado); abra o painel de artefatos para verificar.",
-                artifact.name
+            i18n::t_args(
+                "tools.artifact_library.fileMissing",
+                &[("name", &artifact.name)],
             )
         } else {
-            format!(
-                "não foi possível acessar o arquivo `{}` do artefato: {error}",
-                artifact.name
+            i18n::t_args(
+                "tools.artifact_library.fileAccessFailed",
+                &[("name", &artifact.name), ("error", &error.to_string())],
             )
         }
     })?;
     if !metadata.is_file() {
-        return Err(format!(
-            "o caminho do artefato `{}` não é um arquivo legível; abra o painel de artefatos para \
-             verificar.",
-            artifact.name
+        return Err(i18n::t_args(
+            "tools.artifact_library.notAFile",
+            &[("name", &artifact.name)],
         ));
     }
     if metadata.len() > MAX_READ_BYTES {
-        return Err(format!(
-            "o arquivo `{}` tem {} e passa do limite de 16 MB para leitura nesta ferramenta; abra-o \
-             pelo painel de artefatos ou peça um arquivo menor.",
-            artifact.name,
-            human_size(metadata.len())
+        return Err(i18n::t_args(
+            "tools.artifact_library.readTooLarge",
+            &[
+                ("name", &artifact.name),
+                ("size", &human_size(metadata.len())),
+            ],
         ));
     }
     std::fs::read(path).map_err(|error| {
-        format!(
-            "não foi possível ler o arquivo `{}` do artefato: {error}",
-            artifact.name
+        i18n::t_args(
+            "tools.artifact_library.fileReadFailed",
+            &[("name", &artifact.name), ("error", &error.to_string())],
         )
     })
 }
@@ -1079,7 +1094,11 @@ fn metadata_outcome(artifact: &Artifact, origin: &Origin, details: &str) -> Tool
     let details = details.trim_end();
     ToolOutcome {
         content: format!("{}\n{}\n", artifact_header(artifact, origin), details),
-        summary: Some(format!("{} · binário", artifact.name)),
+        summary: Some(format!(
+            "{} · {}",
+            artifact.name,
+            i18n::t("tools.artifact_library.binary")
+        )),
         ..Default::default()
     }
 }
@@ -1116,15 +1135,17 @@ fn extraction_failure_message(
         .get("error")
         .and_then(|value| value.as_str())
     {
-        Some(error) => format!(
-            "não foi possível extrair texto de `{}` ({format}): {error}. O arquivo continua \
-             disponível no painel de artefatos.",
-            artifact.name
+        Some(error) => i18n::t_args(
+            "tools.artifact_library.extractionFailed",
+            &[
+                ("name", &artifact.name),
+                ("format", format),
+                ("error", error),
+            ],
         ),
-        None => format!(
-            "o texto extraído de `{}` está vazio (documento sem texto legível). O arquivo continua \
-             disponível no painel de artefatos.",
-            artifact.name
+        None => i18n::t_args(
+            "tools.artifact_library.extractionEmpty",
+            &[("name", &artifact.name)],
         ),
     }
 }
@@ -1148,14 +1169,22 @@ fn image_details(bytes: &[u8]) -> String {
             );
             details
         }
-        Ok(ArtifactPreview::Unsupported { reason }) => {
-            format!("Prévia indisponível: {reason}")
-        }
-        Ok(other) => format!(
-            "Prévia: {}",
-            serde_json::to_string(&other).unwrap_or_else(|_| "desconhecida".to_string())
+        Ok(ArtifactPreview::Unsupported { reason }) => i18n::t_args(
+            "tools.artifact_library.previewUnavailable",
+            &[("reason", &reason)],
         ),
-        Err(error) => format!("Não foi possível inspecionar a imagem: {error:#}"),
+        Ok(other) => i18n::t_args(
+            "tools.artifact_library.preview",
+            &[(
+                "preview",
+                &serde_json::to_string(&other)
+                    .unwrap_or_else(|_| i18n::t("tools.artifact_library.unknownPreview")),
+            )],
+        ),
+        Err(error) => i18n::t_args(
+            "tools.artifact_library.imageInspectFailed",
+            &[("error", &format!("{error:#}"))],
+        ),
     }
 }
 
@@ -1189,14 +1218,22 @@ fn archive_details(bytes: &[u8]) -> String {
             );
             details
         }
-        Ok(ArtifactPreview::Unsupported { reason }) => {
-            format!("Prévia indisponível: {reason}")
-        }
-        Ok(other) => format!(
-            "Prévia: {}",
-            serde_json::to_string(&other).unwrap_or_else(|_| "desconhecida".to_string())
+        Ok(ArtifactPreview::Unsupported { reason }) => i18n::t_args(
+            "tools.artifact_library.previewUnavailable",
+            &[("reason", &reason)],
         ),
-        Err(error) => format!("Não foi possível listar o arquivo compactado: {error:#}"),
+        Ok(other) => i18n::t_args(
+            "tools.artifact_library.preview",
+            &[(
+                "preview",
+                &serde_json::to_string(&other)
+                    .unwrap_or_else(|_| i18n::t("tools.artifact_library.unknownPreview")),
+            )],
+        ),
+        Err(error) => i18n::t_args(
+            "tools.artifact_library.archiveListFailed",
+            &[("error", &format!("{error:#}"))],
+        ),
     }
 }
 

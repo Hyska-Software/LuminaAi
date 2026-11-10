@@ -10,7 +10,9 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
+import { formatDateTime } from '@/lib/i18n/format';
 import type { ArtifactContent, LibraryArtifact } from '@/lib/types';
 import { cn, formatBytes } from '@/lib/utils';
 import {
@@ -59,12 +61,6 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function formatCreatedAt(timestamp: number): string {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-}
-
 /**
  * Artifact preview dialog for the Biblioteca page (PLAN §4.2): reuses the same
  * `ArtifactPreview` renderers as the side panel, with type/size/origin/date
@@ -83,6 +79,7 @@ export function LibraryPreviewDialog({
   onOpenExternal,
   onDelete,
 }: LibraryPreviewDialogProps) {
+  const { t } = useTranslation('library');
   const meta = artifactKindMeta(artifact.kind);
   const Icon = meta.icon;
   const origin = libraryArtifactOrigin(artifact);
@@ -108,7 +105,7 @@ export function LibraryPreviewDialog({
         setState(
           content
             ? { status: 'ready', content }
-            : { status: 'error', message: 'Conteúdo do artefato não encontrado.' },
+            : { status: 'error', message: t('library:dialog.noContent') },
         );
       })
       .catch((error: unknown) => {
@@ -149,7 +146,7 @@ export function LibraryPreviewDialog({
   const submitRename = async () => {
     const name = renameValue.trim();
     if (!name) {
-      setRenameError('Informe um nome para o arquivo.');
+      setRenameError(t('library:dialog.nameRequired'));
       return;
     }
     if (name === artifact.name) {
@@ -173,7 +170,7 @@ export function LibraryPreviewDialog({
     try {
       await onDelete(artifact);
     } catch (error) {
-      toast.error('Não foi possível excluir o arquivo', { description: describeError(error) });
+      toast.error(t('library:dialog.deleteError'), { description: describeError(error) });
     } finally {
       setDeleteBusy(false);
     }
@@ -231,7 +228,7 @@ export function LibraryPreviewDialog({
                   ref={renameInputRef}
                   value={renameValue}
                   invalid={Boolean(renameError)}
-                  aria-label="Renomear arquivo"
+                  aria-label={t('library:dialog.renameAria')}
                   className="h-8 min-w-0 max-w-sm flex-1 text-[13px]"
                   onChange={(event) => {
                     setRenameValue(event.target.value);
@@ -253,10 +250,10 @@ export function LibraryPreviewDialog({
                   loading={renameBusy}
                   disabled={!renameValue.trim()}
                 >
-                  Salvar
+                  {t('common:actions.save')}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={cancelRename} disabled={renameBusy}>
-                  Cancelar
+                  {t('common:actions.cancel')}
                 </Button>
               </form>
             ) : null}
@@ -278,7 +275,7 @@ export function LibraryPreviewDialog({
 
         <div className="flex shrink-0 flex-wrap items-center gap-1 border-y border-border bg-surface px-6 py-1.5">
           <IconButton
-            label="Arquivo anterior"
+            label={t('library:dialog.previous')}
             size="sm"
             disabled={siblings.length < 2}
             onClick={() => navigate(-1)}
@@ -286,7 +283,7 @@ export function LibraryPreviewDialog({
             <ChevronLeft aria-hidden className="size-4" />
           </IconButton>
           <IconButton
-            label="Próximo arquivo"
+            label={t('library:dialog.next')}
             size="sm"
             disabled={siblings.length < 2}
             onClick={() => navigate(1)}
@@ -294,12 +291,14 @@ export function LibraryPreviewDialog({
             <ChevronRight aria-hidden className="size-4" />
           </IconButton>
           <span className="ml-1 text-[11px] tabular-nums text-foreground-subtle">
-            {index >= 0 ? `${index + 1} de ${siblings.length}` : `— de ${siblings.length}`}
+            {index >= 0
+              ? t('library:dialog.position', { current: index + 1, total: siblings.length })
+              : t('library:dialog.positionUnknown', { total: siblings.length })}
           </span>
 
           <div className="ml-auto flex flex-wrap items-center gap-1">
             <IconButton
-              label={favorite ? 'Desfavoritar' : 'Favoritar'}
+              label={favorite ? t('library:dialog.unfavorite') : t('library:dialog.favorite')}
               size="sm"
               active={favorite}
               onClick={() => onToggleFavorite(artifact)}
@@ -312,7 +311,7 @@ export function LibraryPreviewDialog({
               />
             </IconButton>
             <IconButton
-              label="Renomear"
+              label={t('library:dialog.rename')}
               size="sm"
               disabled={renaming}
               onClick={startRename}
@@ -325,7 +324,7 @@ export function LibraryPreviewDialog({
               leftIcon={<Download aria-hidden className="size-3.5" />}
               onClick={() => onSave(artifact)}
             >
-              Salvar como…
+              {t('library:dialog.saveAs')}
             </Button>
             <Button
               size="sm"
@@ -333,10 +332,10 @@ export function LibraryPreviewDialog({
               leftIcon={<ExternalLink aria-hidden className="size-3.5" />}
               onClick={() => onOpenExternal(artifact)}
             >
-              Abrir
+              {t('library:dialog.open')}
             </Button>
             <IconButton
-              label="Excluir arquivo"
+              label={t('library:dialog.deleteFile')}
               size="sm"
               className="hover:text-danger"
               onClick={() => setConfirmingDelete(true)}
@@ -349,12 +348,12 @@ export function LibraryPreviewDialog({
         {confirmingDelete ? (
           <div
             role="group"
-            aria-label={`Confirmar exclusão de ${artifact.name}`}
+            aria-label={t('library:dialog.deleteConfirmAria', { name: artifact.name })}
             className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-danger-soft px-6 py-2 text-[12px] text-danger"
           >
             <AlertTriangle aria-hidden className="size-4 shrink-0" />
             <span className="min-w-0 flex-1 leading-snug">
-              Excluir “{artifact.name}”? Esta ação não pode ser desfeita.
+              {t('library:dialog.deleteConfirm', { name: artifact.name })}
             </span>
             <Button
               size="sm"
@@ -362,23 +361,27 @@ export function LibraryPreviewDialog({
               disabled={deleteBusy}
               onClick={() => setConfirmingDelete(false)}
             >
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button size="sm" variant="danger" loading={deleteBusy} onClick={() => void confirmDelete()}>
-              Excluir
+              {t('library:dialog.delete')}
             </Button>
           </div>
         ) : null}
 
         <div
           role="region"
-          aria-label={`Prévia de ${artifact.name}`}
+          aria-label={t('library:dialog.previewAria', { name: artifact.name })}
           className="h-[min(64vh,520px)] min-h-0 overflow-hidden"
         >
           {state.status === 'loading' ? (
             <div className="flex h-full flex-col items-center justify-center gap-2">
-              <Spinner size="md" className="text-accent" label="Carregando prévia" />
-              <span className="text-xs text-foreground-muted">Carregando prévia…</span>
+              <Spinner
+                size="md"
+                className="text-accent"
+                label={t('library:dialog.loadingLabel')}
+              />
+              <span className="text-xs text-foreground-muted">{t('library:dialog.loading')}</span>
             </div>
           ) : null}
 
@@ -389,7 +392,7 @@ export function LibraryPreviewDialog({
             >
               <AlertTriangle aria-hidden className="size-5 text-danger" />
               <p className="text-[13px] font-medium text-foreground">
-                Não foi possível carregar a prévia
+                {t('library:dialog.loadErrorTitle')}
               </p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
                 {state.message}
@@ -402,7 +405,7 @@ export function LibraryPreviewDialog({
                   setAttempt((value) => value + 1);
                 }}
               >
-                Tentar novamente
+                {t('library:dialog.retry')}
               </Button>
             </div>
           ) : null}
@@ -412,10 +415,15 @@ export function LibraryPreviewDialog({
 
         <footer className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-border px-6 py-2 text-[11px] text-foreground-subtle">
           <span className="tabular-nums">
-            {index >= 0 ? `${index + 1} de ${siblings.length}` : `— de ${siblings.length}`}
+            {index >= 0
+              ? t('library:dialog.position', { current: index + 1, total: siblings.length })
+              : t('library:dialog.positionUnknown', { total: siblings.length })}
           </span>
           <span className="min-w-0 truncate">
-            {origin} · Criado em {formatCreatedAt(artifact.createdAt)}
+            {t('library:dialog.footer', {
+              origin,
+              date: formatDateTime(artifact.createdAt),
+            })}
           </span>
         </footer>
       </DialogContent>

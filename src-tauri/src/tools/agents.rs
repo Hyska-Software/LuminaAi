@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use crate::agents::{Agent, AgentRoutineInput};
 use crate::db::Db;
 use crate::domain::{ReasoningMode, ReasoningSelection, Settings};
+use crate::i18n;
 use crate::providers::ToolDefinition;
 use crate::tools::{json_str, AgentHooks, ToolOutcome};
 
@@ -370,14 +371,17 @@ fn require_automation(agent: &Agent) -> Result<(), ToolOutcome> {
     if agent.capabilities.automation {
         Ok(())
     } else {
-        Err(ToolOutcome::error(
-            "AGENT_CAPABILITY_DENIED: a capability `automation` não está habilitada para este agente",
-        ))
+        Err(ToolOutcome::error(format!(
+            "AGENT_CAPABILITY_DENIED: {}",
+            i18n::t("tools.agents.capabilityDeniedAutomation")
+        )))
     }
 }
 
 fn routine_id(args: &Value) -> Result<String, ToolOutcome> {
-    json_str(args, "routineId").ok_or_else(|| ToolOutcome::error("o argumento `routineId` é obrigatório"))
+    json_str(args, "routineId").ok_or_else(|| {
+        ToolOutcome::error(i18n::t("tools.agents.routineIdRequired"))
+    })
 }
 
 fn routine_input(args: &Value, current: Option<&crate::agents::AgentRoutine>) -> Result<AgentRoutineInput, String> {
@@ -518,7 +522,13 @@ fn directory(db: &Db, agent_id: &str) -> Result<ToolOutcome, ToolOutcome> {
             "channels": channels_json,
         }))
         .unwrap_or_else(|_| "{}".to_string()),
-        summary: Some(format!("{} agente(s), {} canal(is)", agents.len(), channels_json.len())),
+        summary: Some(i18n::t_args(
+            "tools.agents.directorySummary",
+            &[
+                ("agents", &agents.len().to_string()),
+                ("channels", &channels_json.len().to_string()),
+            ],
+        )),
         ..Default::default()
     })
 }
@@ -545,7 +555,10 @@ fn usage(db: &Db, agent_id: &str, settings: &Settings) -> ToolOutcome {
             "remainingTodayUsd": limit.map(|limit| (limit - today.cost).max(0.0)),
         }))
         .unwrap_or_else(|_| "{}".to_string()),
-        summary: Some(format!("Hoje: US$ {:.2}", today.cost)),
+        summary: Some(i18n::t_args(
+            "tools.agents.usageSummary",
+            &[("cost", &format!("{:.2}", today.cost))],
+        )),
         ..Default::default()
     }
 }
@@ -559,24 +572,38 @@ fn agent_message(
 ) -> ToolOutcome {
     let target_id = target_id.trim();
     if target_id.is_empty() {
-        return ToolOutcome::error("o argumento `toAgentId` é obrigatório");
+        return ToolOutcome::error(i18n::t("tools.agents.toAgentIdRequired"));
     }
     if target_id == agent_id {
-        return ToolOutcome::error("AGENT_DM_SELF: não é possível enviar mensagem para si mesmo");
+        return ToolOutcome::error(format!(
+            "AGENT_DM_SELF: {}",
+            i18n::t("tools.agents.dmSelf")
+        ));
     }
     let content = content.trim();
     if content.is_empty() {
-        return ToolOutcome::error("o argumento `content` é obrigatório");
+        return ToolOutcome::error(i18n::t("tools.agents.contentRequired"));
     }
     if content.chars().count() > 16_000 {
-        return ToolOutcome::error("AGENT_DM_INVALID: a mensagem passa de 16.000 caracteres");
+        return ToolOutcome::error(format!(
+            "AGENT_DM_INVALID: {}",
+            i18n::t("tools.agents.dmTooLong")
+        ));
     }
     let target = match db.get_agent(target_id) {
         Ok(Some(target)) if !target.is_archived() => target,
         Ok(Some(_)) => {
-            return ToolOutcome::error("AGENT_DM_TARGET_ARCHIVED: o agente destino está arquivado");
+            return ToolOutcome::error(format!(
+                "AGENT_DM_TARGET_ARCHIVED: {}",
+                i18n::t("tools.agents.dmTargetArchived")
+            ));
         }
-        Ok(None) => return ToolOutcome::error("AGENT_DM_INVALID: agente destino não existe"),
+        Ok(None) => {
+            return ToolOutcome::error(format!(
+                "AGENT_DM_INVALID: {}",
+                i18n::t("tools.agents.dmTargetNotFound")
+            ));
+        }
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
     let channel = match db.get_or_create_dm_channel(agent_id, &target.id, crate::domain::now_ms()) {
@@ -611,7 +638,10 @@ fn agent_message(
             "toAgentName": target.name,
         })
         .to_string(),
-        summary: Some(format!("Mensagem direta para {}", target.name)),
+        summary: Some(i18n::t_args(
+            "tools.agents.directMessageSummary",
+            &[("name", target.name.as_str())],
+        )),
         ..Default::default()
     }
 }
@@ -632,7 +662,11 @@ fn agent_inbox(db: &Db, agent_id: &str, args: &Value) -> ToolOutcome {
                 Ok(items) => ToolOutcome {
                     content: serde_json::to_string_pretty(&items)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    summary: Some(format!("{} mensagem(ns) direta(s)", items.len())),
+                    summary: Some(i18n::t_count(
+                        "tools.agents.inboxListSummary",
+                        items.len(),
+                        &[("count", &items.len().to_string())],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -640,18 +674,29 @@ fn agent_inbox(db: &Db, agent_id: &str, args: &Value) -> ToolOutcome {
         }
         "read" => {
             let Some(channel_id) = json_str(args, "channelId") else {
-                return ToolOutcome::error("o argumento `channelId` é obrigatório para read");
+                return ToolOutcome::error(i18n::t("tools.agents.channelIdRequiredRead"));
             };
             let channel = match db.get_agent_channel(&channel_id) {
                 Ok(Some(channel)) => channel,
-                Ok(None) => return ToolOutcome::error("AGENT_INBOX_NOT_FOUND: canal não encontrado"),
+                Ok(None) => {
+                    return ToolOutcome::error(format!(
+                        "AGENT_INBOX_NOT_FOUND: {}",
+                        i18n::t("tools.agents.inboxChannelNotFound")
+                    ));
+                }
                 Err(error) => return ToolOutcome::error(format!("{error:#}")),
             };
             if channel.kind != "dm" {
-                return ToolOutcome::error("AGENT_INBOX_INVALID: o canal não é uma conversa direta");
+                return ToolOutcome::error(format!(
+                    "AGENT_INBOX_INVALID: {}",
+                    i18n::t("tools.agents.inboxNotDm")
+                ));
             }
             if !channel.member_ids.iter().any(|id| id == agent_id) {
-                return ToolOutcome::error("AGENT_INBOX_NOT_FOUND: você não participa deste canal");
+                return ToolOutcome::error(format!(
+                    "AGENT_INBOX_NOT_FOUND: {}",
+                    i18n::t("tools.agents.inboxNotMember")
+                ));
             }
             let limit = args
                 .get("limit")
@@ -662,13 +707,17 @@ fn agent_inbox(db: &Db, agent_id: &str, args: &Value) -> ToolOutcome {
                 Ok(messages) => ToolOutcome {
                     content: serde_json::to_string_pretty(&messages)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    summary: Some(format!("{} mensagem(ns)", messages.len())),
+                    summary: Some(i18n::t_count(
+                        "tools.agents.messagesSummary",
+                        messages.len(),
+                        &[("count", &messages.len().to_string())],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
-        _ => ToolOutcome::error("action inválida: use list ou read"),
+        _ => ToolOutcome::error(i18n::t("tools.agents.invalidInboxAction")),
     }
 }
 
@@ -680,27 +729,32 @@ fn agent_avatar_from_args(args: &Value) -> Result<crate::agents::AgentAvatar, St
     let mut merged = match serde_json::to_value(&avatar) {
         Ok(Value::Object(map)) => map,
         _ => {
-            return Err(
-                "AGENT_AVATAR_INVALID: não foi possível resolver o avatar padrão".to_string(),
-            )
+            return Err(format!(
+                "AGENT_AVATAR_INVALID: {}",
+                i18n::t("tools.agents.avatarDefaultFailed")
+            ))
         }
     };
     let Some(overrides) = value.as_object() else {
-        return Err(
-            "AGENT_AVATAR_INVALID: `avatar` deve ser um objeto com body/expression/color/face"
-                .to_string(),
-        );
+        return Err(format!(
+            "AGENT_AVATAR_INVALID: {}",
+            i18n::t("tools.agents.avatarNotObject")
+        ));
     };
     for (key, override_value) in overrides {
         if !matches!(key.as_str(), "body" | "expression" | "color" | "face") {
             return Err(format!(
-                "AGENT_AVATAR_INVALID: chave desconhecida `{key}`; use body, expression, color, face"
+                "AGENT_AVATAR_INVALID: {}",
+                i18n::t_args("tools.agents.avatarUnknownKey", &[("key", key.as_str())])
             ));
         }
         merged.insert(key.clone(), override_value.clone());
     }
     serde_json::from_value(Value::Object(merged)).map_err(|_| {
-        "AGENT_AVATAR_INVALID: valores inválidos em `avatar`; use os ids do seletor".to_string()
+        format!(
+            "AGENT_AVATAR_INVALID: {}",
+            i18n::t("tools.agents.avatarInvalidValues")
+        )
     })
 }
 
@@ -710,7 +764,10 @@ fn agent_reasoning_from_args(args: &Value) -> Result<Option<ReasoningSelection>,
         return Ok(None);
     };
     let selection: ReasoningSelection = serde_json::from_value(value.clone()).map_err(|_| {
-        "AGENT_REASONING_INVALID: use { mode: off|effort|budget, effort?, budget? }".to_string()
+        format!(
+            "AGENT_REASONING_INVALID: {}",
+            i18n::t("tools.agents.reasoningShape")
+        )
     })?;
     match selection.mode {
         ReasoningMode::Off => Ok(Some(ReasoningSelection {
@@ -720,9 +777,10 @@ fn agent_reasoning_from_args(args: &Value) -> Result<Option<ReasoningSelection>,
         })),
         ReasoningMode::Effort => {
             if selection.budget.is_some() {
-                return Err(
-                    "AGENT_REASONING_INVALID: `budget` só vale com mode=budget".to_string(),
-                );
+                return Err(format!(
+                    "AGENT_REASONING_INVALID: {}",
+                    i18n::t("tools.agents.reasoningBudgetOnly")
+                ));
             }
             let effort = selection
                 .effort
@@ -731,8 +789,11 @@ fn agent_reasoning_from_args(args: &Value) -> Result<Option<ReasoningSelection>,
             if let Some(effort) = effort.as_deref() {
                 if !EFFORTS.contains(&effort) {
                     return Err(format!(
-                        "AGENT_REASONING_INVALID: effort desconhecido `{effort}`; use {}",
-                        EFFORTS.join(", ")
+                        "AGENT_REASONING_INVALID: {}",
+                        i18n::t_args(
+                            "tools.agents.reasoningUnknownEffort",
+                            &[("effort", effort), ("efforts", &EFFORTS.join(", "))],
+                        )
                     ));
                 }
             }
@@ -745,10 +806,10 @@ fn agent_reasoning_from_args(args: &Value) -> Result<Option<ReasoningSelection>,
         ReasoningMode::Budget => {
             let budget = selection.budget.unwrap_or(0);
             if !(1_024..=65_536).contains(&budget) {
-                return Err(
-                    "AGENT_REASONING_INVALID: `budget` deve ficar entre 1024 e 65536 tokens"
-                        .to_string(),
-                );
+                return Err(format!(
+                    "AGENT_REASONING_INVALID: {}",
+                    i18n::t("tools.agents.reasoningBudgetRange")
+                ));
             }
             Ok(Some(ReasoningSelection {
                 mode: ReasoningMode::Budget,
@@ -766,17 +827,19 @@ fn create_agent_tool(
     hooks: Option<&dyn AgentHooks>,
 ) -> ToolOutcome {
     let Some(hooks) = hooks else {
-        return ToolOutcome::error(
-            "AGENT_CREATE_UNAVAILABLE: criação de agentes exige o runtime do app",
-        );
+        return ToolOutcome::error(format!(
+            "AGENT_CREATE_UNAVAILABLE: {}",
+            i18n::t("tools.agents.createUnavailable")
+        ));
     };
     let Some(name) = json_str(args, "name") else {
-        return ToolOutcome::error("o argumento `name` é obrigatório");
+        return ToolOutcome::error(i18n::t("tools.agents.nameRequired"));
     };
     if args.get("routine").is_some() && !caller.capabilities.automation {
-        return ToolOutcome::error(
-            "AGENT_CAPABILITY_DENIED: criar rotina para outro agente exige a capability automation",
-        );
+        return ToolOutcome::error(format!(
+            "AGENT_CAPABILITY_DENIED: {}",
+            i18n::t("tools.agents.capabilityDeniedCreateRoutine")
+        ));
     }
     let provider_id = json_str(args, "providerId")
         .filter(|value| !value.trim().is_empty())
@@ -791,21 +854,29 @@ fn create_agent_tool(
                 match serde_json::to_value(crate::agents::AgentCapabilities::default()) {
                     Ok(Value::Object(map)) => map,
                     _ => {
-                        return ToolOutcome::error(
-                            "AGENT_CAPABILITIES_INVALID: não foi possível resolver o padrão de capabilities",
-                        )
+                        return ToolOutcome::error(format!(
+                            "AGENT_CAPABILITIES_INVALID: {}",
+                            i18n::t("tools.agents.capabilitiesDefaultFailed")
+                        ))
                     }
                 };
             let Some(overrides) = value.as_object() else {
-                return ToolOutcome::error(
-                    "AGENT_CAPABILITIES_INVALID: `capabilities` deve ser um objeto camelCase",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_CAPABILITIES_INVALID: {}",
+                    i18n::t("tools.agents.capabilitiesNotObject")
+                ));
             };
             for (key, override_value) in overrides {
                 if !merged.contains_key(key) {
                     return ToolOutcome::error(format!(
-                        "AGENT_CAPABILITIES_INVALID: chave desconhecida `{key}`; use {}",
-                        merged.keys().cloned().collect::<Vec<_>>().join(", ")
+                        "AGENT_CAPABILITIES_INVALID: {}",
+                        i18n::t_args(
+                            "tools.agents.capabilitiesUnknownKey",
+                            &[
+                                ("key", key.as_str()),
+                                ("keys", &merged.keys().cloned().collect::<Vec<_>>().join(", ")),
+                            ],
+                        )
                     ));
                 }
                 merged.insert(key.clone(), override_value.clone());
@@ -813,9 +884,10 @@ fn create_agent_tool(
             match serde_json::from_value(Value::Object(merged)) {
                 Ok(parsed) => parsed,
                 Err(_) => {
-                    return ToolOutcome::error(
-                        "AGENT_CAPABILITIES_INVALID: valores inválidos em `capabilities` (booleanos; skills/tools/mcpServers aceitam lista ou null)",
-                    )
+                    return ToolOutcome::error(format!(
+                        "AGENT_CAPABILITIES_INVALID: {}",
+                        i18n::t("tools.agents.capabilitiesInvalidValues")
+                    ))
                 }
             }
         }
@@ -889,10 +961,13 @@ fn create_agent_tool(
                     "created": true,
                     "agent": agent_json(&agent, &[]),
                     "routine": routine,
-                    "routineWarning": routine_warning.then_some("rotina não foi criada; verifique os argumentos"),
+                    "routineWarning": routine_warning.then_some(i18n::t("tools.agents.routineWarning")),
                 }))
                 .unwrap_or_else(|_| "{\"created\":true}".to_string()),
-                summary: Some(format!("Agente criado: {}", agent.name)),
+                summary: Some(i18n::t_args(
+                    "tools.agents.createdSummary",
+                    &[("name", agent.name.as_str())],
+                )),
                 ..Default::default()
             }
         }
@@ -920,7 +995,12 @@ pub fn run_with_hooks(
 ) -> ToolOutcome {
     let agent = match db.get_agent(agent_id) {
         Ok(Some(agent)) => agent,
-        Ok(None) => return ToolOutcome::error("AGENT_NOT_FOUND: agente não existe"),
+        Ok(None) => {
+            return ToolOutcome::error(format!(
+                "AGENT_NOT_FOUND: {}",
+                i18n::t("tools.agents.agentNotFound")
+            ));
+        }
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
     match tool {
@@ -929,23 +1009,25 @@ pub fn run_with_hooks(
         "agent_inbox" => agent_inbox(db, agent_id, args),
         "create_agent" => {
             if !agent.capabilities.create_agents {
-                return ToolOutcome::error(
-                    "AGENT_CAPABILITY_DENIED: a criação de agentes não está habilitada",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_CAPABILITY_DENIED: {}",
+                    i18n::t("tools.agents.capabilityDeniedCreateAgents")
+                ));
             }
             create_agent_tool(db, &agent, args, hooks)
         }
         "agent_message" => {
             if !agent.capabilities.delegation {
-                return ToolOutcome::error(
-                    "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_CAPABILITY_DENIED: {}",
+                    i18n::t("tools.agents.capabilityDeniedDelegation")
+                ));
             }
             let Some(target) = json_str(args, "toAgentId") else {
-                return ToolOutcome::error("o argumento `toAgentId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.agents.toAgentIdRequired"));
             };
             let Some(content) = json_str(args, "content") else {
-                return ToolOutcome::error("o argumento `content` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.agents.contentRequired"));
             };
             agent_message(db, agent_id, &target, &content, hooks)
         }
@@ -959,7 +1041,11 @@ pub fn run_with_hooks(
                         &routines.iter().map(routine_json).collect::<Vec<_>>(),
                     )
                     .unwrap_or_else(|_| "[]".to_string()),
-                    summary: Some(format!("{} rotina(s)", routines.len())),
+                    summary: Some(i18n::t_count(
+                        "tools.agents.routinesSummary",
+                        routines.len(),
+                        &[("count", &routines.len().to_string())],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -977,7 +1063,10 @@ pub fn run_with_hooks(
                 Ok(routine) => ToolOutcome {
                     content: serde_json::to_string_pretty(&routine_json(&routine))
                         .unwrap_or_else(|_| "{}".to_string()),
-                    summary: Some(format!("Rotina criada: {}", routine.title)),
+                    summary: Some(i18n::t_args(
+                        "tools.agents.routineCreatedSummary",
+                        &[("title", routine.title.as_str())],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -994,12 +1083,16 @@ pub fn run_with_hooks(
             let current = match db.get_agent_routine(&routine_id) {
                 Ok(Some(routine)) if routine.agent_id == agent_id => routine,
                 Ok(Some(_)) => {
-                    return ToolOutcome::error(
-                        "AGENT_ROUTINE_FORBIDDEN: a rotina pertence a outro agente",
-                    );
+                    return ToolOutcome::error(format!(
+                        "AGENT_ROUTINE_FORBIDDEN: {}",
+                        i18n::t("tools.agents.routineForbidden")
+                    ));
                 }
                 Ok(None) => {
-                    return ToolOutcome::error("AGENT_ROUTINE_NOT_FOUND: rotina não encontrada");
+                    return ToolOutcome::error(format!(
+                        "AGENT_ROUTINE_NOT_FOUND: {}",
+                        i18n::t("tools.agents.routineNotFound")
+                    ));
                 }
                 Err(error) => return ToolOutcome::error(format!("{error:#}")),
             };
@@ -1011,7 +1104,10 @@ pub fn run_with_hooks(
                 Ok(routine) => ToolOutcome {
                     content: serde_json::to_string_pretty(&routine_json(&routine))
                         .unwrap_or_else(|_| "{}".to_string()),
-                    summary: Some(format!("Rotina atualizada: {}", routine.title)),
+                    summary: Some(i18n::t_args(
+                        "tools.agents.routineUpdatedSummary",
+                        &[("title", routine.title.as_str())],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -1028,25 +1124,32 @@ pub fn run_with_hooks(
             match db.get_agent_routine(&routine_id) {
                 Ok(Some(routine)) if routine.agent_id == agent_id => {}
                 Ok(Some(_)) => {
-                    return ToolOutcome::error(
-                        "AGENT_ROUTINE_FORBIDDEN: a rotina pertence a outro agente",
-                    );
+                    return ToolOutcome::error(format!(
+                        "AGENT_ROUTINE_FORBIDDEN: {}",
+                        i18n::t("tools.agents.routineForbidden")
+                    ));
                 }
                 Ok(None) => {
-                    return ToolOutcome::error("AGENT_ROUTINE_NOT_FOUND: rotina não encontrada");
+                    return ToolOutcome::error(format!(
+                        "AGENT_ROUTINE_NOT_FOUND: {}",
+                        i18n::t("tools.agents.routineNotFound")
+                    ));
                 }
                 Err(error) => return ToolOutcome::error(format!("{error:#}")),
             }
             match db.delete_agent_routine(&routine_id) {
                 Ok(()) => ToolOutcome {
                     content: json!({ "deleted": true, "routineId": routine_id }).to_string(),
-                    summary: Some("Rotina removida".to_string()),
+                    summary: Some(i18n::t("tools.agents.routineRemoved")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
-        other => ToolOutcome::error(format!("ferramenta de agente desconhecida: {other}")),
+        other => ToolOutcome::error(i18n::t_args(
+            "tools.agents.unknownTool",
+            &[("tool", other)],
+        )),
     }
 }
 

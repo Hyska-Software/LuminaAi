@@ -30,7 +30,9 @@ pub const KIND_TURN_ENDED: &str = "turn/ended";
 
 /// Feedback sintético quando uma revisão ficou órfã (aprovação expirou ou o
 /// turno terminou sem decisão): o card volta para planejamento com instrução.
-pub const STALE_REVIEW_FEEDBACK: &str = "A revisão não está mais ativa; reenvie o plano.";
+pub fn stale_review_feedback() -> String {
+    crate::i18n::t("code.session.reviewInactive")
+}
 
 /// Grava um evento da sessão (JSON serializado).
 pub fn append(
@@ -214,7 +216,7 @@ pub fn plan_view(db: &Db, conversation_id: &str) -> anyhow::Result<Option<PlanVi
                 return Ok(Some(PlanView {
                     state: PlanState::Planning,
                     markdown: markdown_of(Some(submitted_event)),
-                    feedback: Some(STALE_REVIEW_FEEDBACK.to_string()),
+                    feedback: Some(stale_review_feedback()),
                     updated_at: turn_ended
                         .as_ref()
                         .map(|event| event.created_at)
@@ -271,7 +273,7 @@ pub fn plan_view(db: &Db, conversation_id: &str) -> anyhow::Result<Option<PlanVi
             return Ok(Some(PlanView {
                 state: PlanState::Planning,
                 markdown: markdown_of(Some(&submitted_event)),
-                feedback: Some(STALE_REVIEW_FEEDBACK.to_string()),
+                feedback: Some(stale_review_feedback()),
                 updated_at: turn_ended
                     .as_ref()
                     .map(|event| event.created_at)
@@ -379,13 +381,13 @@ pub fn save_todos(
 /// "limpar" do `todo_write`.
 pub fn validate_todos(items: &[TodoItem]) -> Result<(), String> {
     if items.len() > 50 {
-        return Err("a lista de tarefas aceita no máximo 50 itens".to_string());
+        return Err(crate::i18n::t("code.session.todoMaxItems").to_string());
     }
     let mut seen = std::collections::HashSet::new();
     for item in items {
         let content = item.content.trim();
         if content.is_empty() {
-            return Err("cada tarefa precisa de uma descrição".to_string());
+            return Err(crate::i18n::t("code.session.todoDescriptionRequired").to_string());
         }
         if !seen.insert(content.to_lowercase()) {
             return Err(format!("tarefa duplicada: `{content}`"));
@@ -396,7 +398,7 @@ pub fn validate_todos(items: &[TodoItem]) -> Result<(), String> {
         .filter(|item| item.status == TodoStatus::InProgress)
         .count();
     if in_progress > 1 {
-        return Err("no máximo uma tarefa pode estar `in_progress`".to_string());
+        return Err(crate::i18n::t("code.session.todoSingleInProgress").to_string());
     }
     Ok(())
 }
@@ -701,7 +703,7 @@ mod tests {
             .expect("planejando");
         assert_eq!(view.state, PlanState::Planning);
         assert_eq!(view.markdown.as_deref(), Some("# Plano"));
-        assert_eq!(view.feedback.as_deref(), Some(STALE_REVIEW_FEEDBACK));
+        assert_eq!(view.feedback, Some(stale_review_feedback()));
         assert_eq!(view.updated_at, last_event(&db, KIND_TURN_ENDED).created_at);
     }
 

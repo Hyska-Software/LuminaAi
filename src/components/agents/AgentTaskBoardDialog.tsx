@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Ban, ListChecks, Loader2, Play, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
@@ -17,13 +18,14 @@ import {
   NativeSelect,
 } from '@/components/ui';
 import { api } from '@/lib/api';
+import { formatCurrency } from '@/lib/i18n/format';
 import { selectActiveAgents, useAgentStore, useChatStore, useUiStore } from '@/lib/store';
 import type { Agent, AgentChannel, AgentTask } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   TASK_BOARD_COLUMNS,
   TASK_RESUMABLE_STATUSES,
-  TASK_STATUS_META,
+  taskStatusMeta,
 } from './agentTaskStatus';
 
 const CANCELLABLE: Record<string, true> = {
@@ -61,6 +63,7 @@ export function AgentTaskBoardDialog({
   ownerAgentId?: string;
   title?: string;
 }) {
+  const { t } = useTranslation('agents');
   const agents = useAgentStore(useShallow(selectActiveAgents));
   const conversations = useChatStore((state) => state.conversations);
   const openConversation = useChatStore((state) => state.openConversation);
@@ -101,8 +104,8 @@ export function AgentTaskBoardDialog({
 
   const focusTask = (task: AgentTask) => {
     if (!task.conversationId) {
-      toast.info('Esta tarefa ainda não tem thread', {
-        description: 'Rode a tarefa para criar a thread do agente.',
+      toast.info(t('tasks.noThreadTitle'), {
+        description: t('tasks.noThreadDescription'),
       });
       return;
     }
@@ -116,16 +119,16 @@ export function AgentTaskBoardDialog({
   };
 
   const cancel = async (task: AgentTask) => {
-    if (!window.confirm(`Cancelar a tarefa “${task.title}”?`)) return;
+    if (!window.confirm(t('tasks.cancelConfirm', { title: task.title }))) return;
     setBusyId(task.id);
     try {
       const updated = await api.cancelAgentTask(task.id);
       setTasks((current) =>
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
-      toast.success('Tarefa cancelada');
+      toast.success(t('tasks.cancelled'));
     } catch (caught) {
-      toast.error('Não foi possível cancelar', { description: String(caught) });
+      toast.error(t('tasks.cancelError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -138,9 +141,9 @@ export function AgentTaskBoardDialog({
       setTasks((current) =>
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
-      toast.success('Tarefa retomada');
+      toast.success(t('tasks.resumed'));
     } catch (caught) {
-      toast.error('Não foi possível retomar', { description: String(caught) });
+      toast.error(t('tasks.resumeError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -154,9 +157,9 @@ export function AgentTaskBoardDialog({
       setTasks((current) =>
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
-      toast.success('Tarefa transferida', { description: updated.title });
+      toast.success(t('tasks.reassigned'), { description: updated.title });
     } catch (caught) {
-      toast.error('Não foi possível transferir', { description: String(caught) });
+      toast.error(t('tasks.reassignError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -168,31 +171,30 @@ export function AgentTaskBoardDialog({
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <ListChecks className="size-4 text-accent" />
-            {title ?? 'Tarefas dos agentes'}
+            {title ?? t('tasks.title')}
           </DialogTitle>
           <DialogDescription>
-            Quadro de delegações entre agentes. Abra a thread para ver o histórico completo ou
-            cancele uma tarefa em execução.
+            {t('tasks.description')}
           </DialogDescription>
         </DialogHeader>
         <AgentDialogBody className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px] text-foreground-muted">
-            {tasks.length} tarefa(s) nas últimas 24h · atualiza sozinho quando o status muda
+            {t('tasks.recentSummary', { count: tasks.length })}
           </p>
           <Button
             size="sm"
             variant="ghost"
             onClick={() => void load()}
             disabled={loading}
-            aria-label="Recarregar tarefas"
+            aria-label={t('tasks.reloadAria')}
           >
             {loading ? (
               <Loader2 className="mr-1.5 size-3.5 animate-spin" />
             ) : (
               <RefreshCw className="mr-1.5 size-3.5" />
             )}
-            Atualizar
+            {t('tasks.refresh')}
           </Button>
         </div>
         {error ? (
@@ -213,15 +215,16 @@ export function AgentTaskBoardDialog({
                   id={`task-column-${column.id}`}
                   className="flex shrink-0 items-center justify-between px-1 text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
                 >
-                  {column.title}
+                  {t(column.titleKey as never)}
                   <span className="font-mono text-[10px]">{entries.length}</span>
                 </h3>
                 <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
                 {entries.length === 0 ? (
-                  <p className="px-1 py-3 text-[11px] text-foreground-subtle">Vazio</p>
+                  <p className="px-1 py-3 text-[11px] text-foreground-subtle">{t('tasks.empty')}</p>
                 ) : (
                   entries.map((task) => {
                     const agent = agentById(task.ownerAgentId);
+                    const meta = taskStatusMeta(task.status);
                     return (
                       <article
                         key={task.id}
@@ -240,11 +243,11 @@ export function AgentTaskBoardDialog({
                             {agent?.name ?? task.ownerAgentId}
                           </p>
                           <p className="mt-1 flex flex-wrap gap-1 text-[10px] text-foreground-subtle">
-                            <Badge tone={TASK_STATUS_META[task.status].badge}>
-                              {TASK_STATUS_META[task.status].label}
+                            <Badge tone={meta.badge}>
+                              {t(meta.labelKey as never)}
                             </Badge>
-                            <span>{task.maxTurns} turno(s)</span>
-                            <span>US$ {task.maxCost.toFixed(2)}</span>
+                            <span>{t('tasks.turns', { count: task.maxTurns })}</span>
+                            <span>{formatCurrency(task.maxCost)}</span>
                           </p>
                         </button>
                         {TASK_RESUMABLE_STATUSES.includes(task.status) ? (
@@ -256,19 +259,19 @@ export function AgentTaskBoardDialog({
                             onClick={() => void resume(task)}
                           >
                             <Play className="mr-1.5 size-3" />
-                            Retomar
+                            {t('tasks.resume')}
                           </Button>
                         ) : null}
                         {REASSIGNABLE[task.status] ? (
                           <>
                             <NativeSelect
-                              aria-label={`Reatribuir ${task.title}`}
+                              aria-label={t('tasks.reassignAria', { title: task.title })}
                               className="mt-1.5 w-full text-[11px]"
                               value=""
                               disabled={busyId === task.id}
                               onChange={(event) => void reassign(task, event.target.value)}
                             >
-                              <option value="">Reatribuir…</option>
+                              <option value="">{t('tasks.reassign')}</option>
                               {agents
                                 .filter((entry) => entry.id !== task.ownerAgentId)
                                 .filter((entry) => {
@@ -295,7 +298,7 @@ export function AgentTaskBoardDialog({
                               ) : (
                                 <Ban className="mr-1.5 size-3" />
                               )}
-                              Cancelar
+                              {t('tasks.cancel')}
                             </Button>
                           </>
                         ) : CANCELLABLE[task.status] ? (
@@ -311,7 +314,7 @@ export function AgentTaskBoardDialog({
                             ) : (
                               <Ban className="mr-1.5 size-3" />
                             )}
-                            Cancelar
+                            {t('tasks.cancel')}
                           </Button>
                         ) : null}
                       </article>
@@ -326,7 +329,7 @@ export function AgentTaskBoardDialog({
         </AgentDialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Fechar
+            {t('common:actions.close')}
           </Button>
         </DialogFooter>
       </DialogContent>

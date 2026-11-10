@@ -290,9 +290,9 @@ describe('provedor Anthropic direto (API key)', () => {
     const details = modelDetails(sonnet.model, sonnet.providerName)!;
     expect(details.lines).toEqual(
       expect.arrayContaining([
-        { label: 'Contexto', value: '1M' },
-        { label: 'Custo (1M tok.)', value: '$2.00 / $10.00' },
-        { label: 'Protocolo', value: 'Anthropic Messages' },
+        expect.objectContaining({ id: 'context', label: 'Contexto', value: '1M' }),
+        expect.objectContaining({ id: 'cost', label: 'Custo (1M tok.)', value: '$2.00 / $10.00' }),
+        expect.objectContaining({ id: 'protocol', label: 'Protocolo', value: 'Anthropic Messages' }),
       ]),
     );
     // Esforço: os cinco níveis documentados (low..max).
@@ -304,7 +304,9 @@ describe('provedor Anthropic direto (API key)', () => {
     const haiku = getModel('anthropic', 'claude-haiku-4-5')!;
     const details = modelDetails(haiku, 'Anthropic')!;
     expect(details.lines).toEqual(
-      expect.arrayContaining([{ label: 'Contexto', value: '200K' }]),
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'context', label: 'Contexto', value: '200K' }),
+      ]),
     );
     expect(thinkingOptions(haiku, { mode: 'budget', budget: 8_192 }).map((o) => o.id)).toEqual([
       'budget:4096',

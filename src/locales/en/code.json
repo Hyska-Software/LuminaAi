@@ -1,0 +1,983 @@
+{
+  "permissions": {
+    "autonomousWarningTitle": "Autonomous mode enabled",
+    "autonomousWarning": "Autonomous mode has no confirmation stops: commands, edits, secret access and computer control run without asking for approval. Plan mode, when active, still requires plan approval."
+  },
+  "cache": {
+    "state": {
+      "cold": {
+        "label": "Cold",
+        "description": "First request of the epoch: there is no prefix to reuse yet."
+      },
+      "warming": {
+        "label": "Warming up",
+        "description": "The provider is still writing the prefix to the cache."
+      },
+      "stable": {
+        "label": "Stable",
+        "description": "Steady-state requests are reading the prefix from the cache."
+      },
+      "degraded": {
+        "label": "Cache dropped",
+        "description": "The persistent prefix changed and the cache was invalidated."
+      },
+      "unsupported": {
+        "label": "Not reported",
+        "description": "The provider/gateway does not report cache for this model."
+      },
+      "provider_policy": {
+        "label": "Provider policy",
+        "description": "The provider does not reuse this request due to its own cache rules."
+      }
+    },
+    "break": {
+      "first_request": "First request of the epoch",
+      "system_prompt": "System prompt changed",
+      "tool_definitions": "Tool definitions changed",
+      "history_rewrite": "History was rewritten",
+      "head_trim": "Old history was trimmed",
+      "compaction": "Context compacted",
+      "model_switch": "Model or provider changed",
+      "protocol_fallback": "Wire protocol changed",
+      "attachments": "Attachments changed",
+      "config_change": "Configuration changed",
+      "ttl_expired": "Cache expired (TTL)",
+      "provider_policy": "Provider rule"
+    }
+  },
+  "goal": {
+    "status": {
+      "working": "Working",
+      "automatic": "Automatic",
+      "manual": "Manual",
+      "paused": "Paused",
+      "completed": "Completed",
+      "blocked": "Blocked",
+      "fallback": "Goal"
+    },
+    "adjective": {
+      "active": "active",
+      "paused": "paused",
+      "completed": "completed",
+      "blocked": "blocked"
+    },
+    "pause": {
+      "user": "Paused by you",
+      "error": "Paused after an error",
+      "max_rounds": "Round limit reached",
+      "stalled": "No progress in 3 rounds",
+      "interrupted": "Previous round interrupted"
+    },
+    "round": "Round {{current}} of {{max}}",
+    "continuation": {
+      "no_goal": "Set a goal for this session.",
+      "not_code": "Goals only exist in Code layout sessions.",
+      "completed": "Goal completed.",
+      "blocked": "Goal blocked.",
+      "paused": "Goal paused.",
+      "not_armed": "Automatic continuation is off.",
+      "max_rounds": "Round limit reached.",
+      "plan_mode": "Plan mode is active: approve the plan to continue.",
+      "pending_approval": "There is a pending approval or question.",
+      "busy": "A turn is already running in this session.",
+      "no_workspace": "Open a folder to work on the goal.",
+      "interrupted": "The last round was interrupted. Resume to continue.",
+      "unknown": "Could not continue: {{reason}}",
+      "fallback": "Could not continue."
+    },
+    "progress": {
+      "rounds": "{{rounds}}/{{max}} rounds",
+      "finished_one": "{{count}} finished",
+      "finished_other": "{{count}} finished",
+      "duration": "{{seconds}}s"
+    },
+    "outcome": {
+      "done": "Completed",
+      "cancelled": "Cancelled",
+      "error": "Error",
+      "interrupted": "Interrupted",
+      "running": "In progress"
+    },
+    "dialog": {
+      "title": {
+        "create": "Set goal",
+        "edit": "Edit goal"
+      },
+      "description": {
+        "create": "Describe the expected result. The agent works on it in rounds until it completes, gets blocked or reaches the limit.",
+        "edit": "Adjust the expected result, the round limit and automatic continuation."
+      },
+      "existingBlocking": "A goal is already {{status}} in this session. Close the current one to create another, or edit the existing one.",
+      "completedReplaced": "The completed goal will be replaced by the new one.",
+      "field": {
+        "title": "Title",
+        "optional": "optional",
+        "objective": "Goal",
+        "maxRounds": "Round limit"
+      },
+      "titlePlaceholder": "E.g.: Fix the interest calculation",
+      "titleHint": "Without a title, we use the first line of the goal.",
+      "objectivePlaceholder": "Describe the expected result, with acceptance criteria…",
+      "objectiveHint": "The goal alone decides when the agent stops: complete, blocked or over the limit.",
+      "autoContinue": {
+        "label": "Continue automatically",
+        "locked": "Continuation is re-enabled when you resume the goal.",
+        "description": "The agent keeps going after every successful turn."
+      },
+      "maxRoundsHint": "Between 1 and {{max}}. Default: {{preset}}.",
+      "warning": "Each round is a full turn and consumes provider tokens. The goal pauses by itself on errors, after 3 rounds without progress or when it reaches the limit.",
+      "danger": {
+        "heading": "Danger zone",
+        "description": "Closing removes the goal and stops automatic rounds.",
+        "close": "Close goal",
+        "confirmGroup": "Confirm goal closure",
+        "confirmDescription": "The round history is kept, but the session is left without a goal. This action cannot be undone.",
+        "confirm": "Confirm closure",
+        "back": "Back"
+      },
+      "action": {
+        "createWithoutStart": "Create without starting",
+        "createAndStart": "Create and start",
+        "editObjective": "Edit goal"
+      },
+      "error": {
+        "objectiveRequired": "Describe the goal of this session.",
+        "objectiveTooLong": "The goal must be at most {{max}} characters long.",
+        "titleTooLong": "The title must be at most {{max}} characters long.",
+        "maxRounds": "Use a limit between 1 and {{max}} rounds.",
+        "create": "Could not create the goal. If an active goal already exists, edit it instead of creating another one.",
+        "save": "Could not save the goal. Reload the session and try again.",
+        "delete": "Could not close the goal. Try again."
+      }
+    },
+    "toast": {
+      "created": "Goal created",
+      "createdAuto": "The first round continues automatically at the end of the current turn.",
+      "createdManual": "When the current turn ends, start the round from the goal panel.",
+      "roundNotStarted": "Goal created, but the round did not start",
+      "roundNotStartedDescription": "Check that the session is active in Code and that there is no pending approval or question.",
+      "startRoundFailed": "Could not start the round",
+      "startRoundFailedDescription": "Check that the session is active in Code, without pending approvals or Plan mode.",
+      "copied": "Goal copied",
+      "copyFailed": "Could not copy the goal"
+    },
+    "panel": {
+      "region": "Session goal",
+      "loading": "Loading goal…",
+      "empty": {
+        "title": "No goal in this session",
+        "description": "Set a long-term result. The agent works on it in rounds and keeps going until it completes, gets blocked or reaches the limit. Use <strong>/goal</strong> in the composer and describe the task in the next message."
+      },
+      "createWithGoal": "Create with /goal",
+      "newGoal": "New goal (/goal)",
+      "closeGoal": "Close goal",
+      "pausedFallback": "Goal paused.",
+      "blocked": "Goal blocked — resolve the blocker and resume.",
+      "objectiveHeading": "Goal",
+      "copyObjective": "Copy goal",
+      "objectiveRegion": "Full goal",
+      "noDescription": "Goal without a description.",
+      "roundsHeading": "Round history",
+      "roundsLoading": "Loading rounds…",
+      "roundsError": "Could not load the round history.",
+      "roundsEmpty": "No rounds yet — the goal rounds appear here.",
+      "footer": "The status is set by the backend and reflects what is persisted in the session. Goal {{status}} · revision {{revision}}.",
+      "summary": {
+        "rounds": "Rounds",
+        "roundsValue": "{{current}} of {{max}}",
+        "totalTime": "Total time",
+        "tokens": "Tokens",
+        "cost": "Cost",
+        "lastActivity": "Last activity"
+      },
+      "roundLabel": "Round {{index}}",
+      "roundFiles_one": "{{count}} file",
+      "roundFiles_other": "{{count}} files",
+      "roundTokens": "~{{tokens}} tokens",
+      "roundNoSummary": "No summary for this round"
+    }
+  },
+  "calendar": {
+    "months": {
+      "january": "January",
+      "february": "February",
+      "march": "March",
+      "april": "April",
+      "may": "May",
+      "june": "June",
+      "july": "July",
+      "august": "August",
+      "september": "September",
+      "october": "October",
+      "november": "November",
+      "december": "December"
+    },
+    "weekdays": {
+      "sunday": "Sunday",
+      "monday": "Monday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday",
+      "thursday": "Thursday",
+      "friday": "Friday",
+      "saturday": "Saturday"
+    },
+    "weekdayShort": {
+      "sunday": "Sun",
+      "monday": "Mon",
+      "tuesday": "Tue",
+      "wednesday": "Wed",
+      "thursday": "Thu",
+      "friday": "Fri",
+      "saturday": "Sat"
+    },
+    "weekdayHeaders": {
+      "sunday": "SUN",
+      "monday": "MON",
+      "tuesday": "TUE",
+      "wednesday": "WED",
+      "thursday": "THU",
+      "friday": "FRI",
+      "saturday": "SAT"
+    },
+    "monthYear": "{{month}} {{year}}",
+    "dayLabel": "{{weekday}}, {{month}} {{day}}, {{year}}",
+    "weekRangeSameMonth": "{{month}} {{startDay}} – {{endDay}}, {{year}}",
+    "weekRangeTwoMonths": "{{startMonth}} {{startDay}} – {{endMonth}} {{endDay}}, {{year}}",
+    "weekRangeTwoYears": "{{startMonth}} {{startDay}}, {{startYear}} – {{endMonth}} {{endDay}}, {{endYear}}",
+    "schedule": {
+      "every": "Every {{amount}}",
+      "eventTask": "On event: task status",
+      "eventChannel": "On event: channel message",
+      "daily": "{{days}} at {{time}}"
+    },
+    "days": {
+      "all": "Every day",
+      "weekdays": "Mon to Fri",
+      "weekend": "Sat and Sun",
+      "none": "No days"
+    },
+    "next": {
+      "paused": "Paused",
+      "event": "Waiting for event",
+      "pending": "Pending",
+      "in": "in {{duration}}"
+    },
+    "last": {
+      "never": "Never run",
+      "now": "now",
+      "ago": "{{duration}} ago"
+    },
+    "status": {
+      "ok": "Completed",
+      "error": "Error",
+      "blocked": "Blocked",
+      "running": "Running",
+      "queued": "Queued"
+    }
+  },
+  "git": {
+    "aria": "Git actions",
+    "sync": "Sync",
+    "refresh": "Refresh status",
+    "fetch": "Fetch",
+    "pull": "Pull",
+    "push": "Push",
+    "fetchBusy": "Fetching…",
+    "pullBusy": "Pulling…",
+    "pushBusy": "Pushing…",
+    "fetchSuccess": "Updates fetched",
+    "pullSuccess": "Pull complete",
+    "pushSuccess": "Push complete",
+    "fetchError": "Could not fetch updates",
+    "pullError": "Could not pull",
+    "pushError": "Could not push",
+    "connectionHint": "Check the connection and the configured remote.",
+    "openWorkspace": "Open a workspace to sync",
+    "notRepo": "Not a Git repository",
+    "actionsHint": "Git actions (fetch, pull, push)"
+  },
+  "terminal": {
+    "error": {
+      "limit": "Limit of 4 terminals per session. Close a tab to open another one.",
+      "noWorkspace": "Open a folder to use the terminal.",
+      "workspaceMissing": "The workspace folder is not available on disk.",
+      "conversationNotFound": "This terminal's session no longer exists.",
+      "conversation": "Could not read this terminal's session.",
+      "spawn": "Could not start the system shell.",
+      "read": "The terminal lost its connection to the process.",
+      "write": "Could not send data to the terminal.",
+      "resize": "Could not resize the terminal.",
+      "notFound": "This terminal has already been closed.",
+      "exited": "This terminal's process has already finished.",
+      "close": "Could not close the terminal process.",
+      "kill": "Could not kill the terminal process.",
+      "fallback": "Could not complete the terminal operation."
+    },
+    "writeError": "Error writing to the terminal",
+    "hostLabel": "Interactive terminal",
+    "title": "Terminal {{index}}",
+    "exitNotice": "[process finished{{detail}}]",
+    "exitCode": " (code {{code}})",
+    "tabClosed": "{{title}} (closed)",
+    "tabsAria": "Open terminals",
+    "tabTitleWithCwd": "{{title}} — {{cwd}}",
+    "closeTabAria": "Close {{title}}",
+    "closeTabTitle": "Close tab and terminate the shell",
+    "clear": "Clear terminal",
+    "kill": "Kill process",
+    "restart": "Restart terminal",
+    "limitHint": "Limit of {{limit}} terminals. Close a tab to open another one.",
+    "newTab": "New terminal",
+    "empty": {
+      "title": "No terminal open",
+      "description": "The terminal runs in the workspace folder. The agent uses its own commands and jobs."
+    },
+    "open": "Open terminal",
+    "connecting": "Connecting to the shell…",
+    "noneActive": "No active terminal",
+    "killing": "Stopping…",
+    "running": "Running · {{cols}}×{{rows}}",
+    "exited": "Exited",
+    "exitedCode": "Exited ({{code}})"
+  },
+  "trust": {
+    "title": "Trust this folder?",
+    "description": "The agent will be able to read, edit and run commands in:",
+    "body": "The project instructions (<code>AGENTS.md</code>) and local skills will be loaded into the prompt. You can change the trust later in the workspace options.",
+    "readOnly": "Opening read-only grants reading only: no edits, no commands and no repository instructions.",
+    "openReadOnly": "Open Read-Only",
+    "confirm": "Trust"
+  },
+  "welcome": {
+    "suggestion": {
+      "explain": {
+        "title": "Explain the code",
+        "description": "Understand a snippet and its risks before changing it.",
+        "prompt": "Explain what the code below does and point out the risks:\n\n```\n\n```"
+      },
+      "bug": {
+        "title": "Find a bug",
+        "description": "Investigate the likely cause and propose a fix.",
+        "prompt": "Investigate the likely cause of this error and propose a fix plan:\n\n```\n\n```"
+      },
+      "tests": {
+        "title": "Write tests",
+        "description": "Cover the happy path and the edge cases.",
+        "prompt": "Write tests for the code below, covering edge cases:\n\n```\n\n```"
+      }
+    },
+    "recents": "Recent workspaces",
+    "active": {
+      "title": "Start an agent session",
+      "description": "Describe a code task — explain, fix, test or refactor — in this workspace."
+    },
+    "dirty": "Uncommitted changes",
+    "noFolder": {
+      "title": "Start with a folder",
+      "description": "Open a folder so the agent can read, edit and run commands here."
+    },
+    "loadingWorkspaces": "Loading workspaces",
+    "openFolder": "Open folder…",
+    "loadError": "Could not load the workspaces: {{error}}",
+    "empty": "No folder open yet. Choose a directory on your computer to start."
+  },
+  "cards": {
+    "goalBlocker": "This session already has an {{status}} goal. Complete or close the current goal before running the plan as a goal.",
+    "keepPlanning": "Keep planning.",
+    "announcement": {
+      "plan": "Plan awaiting approval.",
+      "approval": "Approval needed.",
+      "question": "The agent asked a question."
+    },
+    "openEnvironment": "Open environment to help",
+    "assistHint": "Take over and hand back control in the panel before answering."
+  },
+  "addChat": {
+    "title": "Add Chat session",
+    "description": "Choose a Chat conversation to also work on it in Code. It stays available in both layouts.",
+    "searchPlaceholder": "Search Chat sessions…",
+    "searchAria": "Search Chat sessions",
+    "listAria": "Available Chat sessions",
+    "empty": {
+      "title": "No Chat session available",
+      "description": "All Chat conversations are already in Code, or you have no Chat conversations yet."
+    },
+    "noResults": {
+      "title": "No session found",
+      "description": "No Chat conversation matches “{{query}}”."
+    },
+    "clearSearch": "Clear search",
+    "addAria": "Add {{title}} to Code",
+    "adding": "Adding session",
+    "error": "Could not add the session to Code. Try again.",
+    "errorToast": "Could not add the session to Code",
+    "count_zero": "{{count}} sessions available",
+    "count_one": "{{count}} session available",
+    "count_other": "{{count}} sessions available"
+  },
+  "turnSummary": {
+    "region": "Turn summary",
+    "files_one": "{{count}} file changed",
+    "files_other": "{{count}} files changed",
+    "changedFilesAria": "Changed files",
+    "openDiff": "Open diff for {{path}}",
+    "showLess": "Show less",
+    "showAll": "All {{count}} files"
+  },
+  "codeDiff": {
+    "label": "Diff",
+    "staged": "Diff (staged)",
+    "loading": "Loading diff",
+    "reload": "Reload diff",
+    "error": "Could not load the diff."
+  },
+  "codeFile": {
+    "readError": "Could not read the file."
+  },
+  "plan": {
+    "previewPath": "Plan.md",
+    "tabTitle": "Plan"
+  },
+  "panelData": {
+    "filesError": "Could not read the file tree.",
+    "gitError": "Could not read the Git status.",
+    "commitsError": "Could not read the recent commits.",
+    "noWorkspaceDiff": "Open a workspace to see the diff.",
+    "diffError": "Could not load the diff."
+  },
+  "workspaces": {
+    "toast": {
+      "reorderError": "Could not reorder the projects",
+      "bindError": "Could not link the session to the workspace",
+      "pickError": "Could not open the folder picker",
+      "openError": "Could not open the folder",
+      "trusted": "Folder trusted",
+      "readOnly": "Folder opened read-only",
+      "trustedDescription": "The agent can read, edit and run commands in this workspace.",
+      "readOnlyDescription": "The agent can only read files until you trust the folder.",
+      "trustError": "Could not update the folder trust",
+      "cancelError": "Could not cancel opening the folder",
+      "renameError": "Could not rename the workspace",
+      "removeError": "Could not remove the workspace",
+      "refreshError": "Could not update the workspace"
+    }
+  },
+  "sidebar": {
+    "aria": "Sessions",
+    "newSession": "New session",
+    "close": "Close sidebar",
+    "openFolder": "Open folder",
+    "addChat": "Add Chat session",
+    "searchAction": "Search",
+    "skills": "Skills",
+    "workspacesHeading": "Workspaces",
+    "searchWorkspaces": "Search workspaces",
+    "filter": "Filter workspaces",
+    "searchAria": "Search workspaces by name, path or session",
+    "searchPlaceholder": "Search workspaces…",
+    "clearSearch": "Clear search",
+    "clearFilters": "Clear filters",
+    "addWorkspace": "Add workspace",
+    "count": "{{visible}} of {{total}} workspaces",
+    "loading": "Loading workspaces",
+    "loadError": "Could not load the workspaces.",
+    "empty": {
+      "title": "No workspace open",
+      "description": "Open a folder so the agent can read, edit and run commands."
+    },
+    "openFolderCta": "Open folder…",
+    "noResults": {
+      "title": "No workspace found",
+      "description": "Adjust the search or the filters to see other workspaces."
+    },
+    "sessions_one": "{{count}} session",
+    "sessions_other": "{{count}} sessions",
+    "unassigned": "No workspace",
+    "expandUnassigned": "Expand sessions without a workspace",
+    "collapseUnassigned": "Collapse sessions without a workspace",
+    "settings": "Settings",
+    "session": {
+      "sharedAria": "{{title}}, Chat session shared with Code",
+      "sharedTitle": "Chat session shared with Code",
+      "fromChat": "From Chat",
+      "options": "Options for {{title}}",
+      "unpin": "Unpin",
+      "pin": "Pin",
+      "rename": "Rename",
+      "export": "Export",
+      "removeFromCode": "Remove from Code",
+      "delete": "Delete"
+    },
+    "workspace": {
+      "optionsAria": "Options for workspace {{name}}",
+      "optionsTitle": "Workspace options",
+      "newSession": "New session",
+      "refresh": "Refresh",
+      "openExplorer": "Open in Explorer",
+      "copyPath": "Copy path",
+      "rename": "Rename",
+      "remove": "Remove from Zylara",
+      "expand": "Expand sessions of {{name}}",
+      "collapse": "Collapse sessions of {{name}}",
+      "noSessions": "Workspace {{name}} without sessions",
+      "dirty": "Uncommitted changes",
+      "untrustedTitle": "Untrusted folder — the agent is read-only",
+      "readOnlyBadge": "Read-only",
+      "sessionsAria": "Sessions of {{name}}",
+      "emptySessions": "No sessions yet — use “New session” in the workspace menu."
+    },
+    "renameWorkspace": {
+      "title": "Rename workspace",
+      "description": "The new name only applies inside Zylara; the folder on disk keeps the same path.",
+      "nameAria": "Workspace name"
+    },
+    "removeWorkspace": {
+      "title": "Remove workspace from Zylara?",
+      "description": "The folder <path>{{path}}</path> will not be deleted. Sessions remain in history, but stop being grouped under this workspace.",
+      "remove": "Remove"
+    },
+    "renameSession": {
+      "title": "Rename session",
+      "aria": "Rename session",
+      "placeholder": "Session title"
+    },
+    "deleteSession": {
+      "title": "Delete conversation",
+      "description": "“{{title}}” will be permanently removed. This action cannot be undone.",
+      "descriptionNoTitle": "The conversation will be permanently removed. This action cannot be undone."
+    },
+    "toast": {
+      "exportSuccess": "Conversation exported",
+      "exportError": "Could not export",
+      "removeFromCodeError": "Could not remove the session from Code",
+      "removeFromCodeSuccess": "Session removed from Code",
+      "removeFromCodeDescription": "It is still available in Chat.",
+      "explorerError": "Could not open the folder in Explorer",
+      "pathCopied": "Path copied",
+      "copyPathError": "Could not copy the path"
+    },
+    "filters": {
+      "all": "All",
+      "git": "With git",
+      "noGit": "Without git",
+      "untrusted": "Untrusted",
+      "withSessions": "With sessions",
+      "empty": "Without sessions"
+    }
+  },
+  "header": {
+    "newSession": "New session",
+    "pendingApproval_one": "{{count}} request awaiting your decision",
+    "pendingApproval_other": "{{count}} requests awaiting your decision",
+    "pendingApprovalBadge": "Awaiting approval",
+    "goalBadge": {
+      "running": "Open goal: round {{current}} of {{max}} in progress",
+      "paused": "Open goal: paused",
+      "pausedWithReason": "Open goal: paused ({{reason}})",
+      "blocked": "Open goal: blocked",
+      "active": "Open goal: active, round {{current}} of {{max}}",
+      "activeAuto": "Open goal: active, round {{current}} of {{max}}, automatic continuation",
+      "activeManual": "Open goal: active, round {{current}} of {{max}}, manual continuation",
+      "visiblePaused": "Paused",
+      "visibleBlocked": "Blocked"
+    },
+    "workspace": {
+      "none": "No workspace",
+      "aria": "Workspace {{name}}",
+      "ariaDirty": "Workspace {{name}}, uncommitted changes",
+      "ariaWithBranch": "Workspace {{name}}, branch {{branch}}",
+      "ariaWithBranchDirty": "Workspace {{name}}, branch {{branch}}, uncommitted changes",
+      "ariaNone": "No workspace — open folder",
+      "openFolderTitle": "Open a folder for the agent to work in",
+      "dirty": "Uncommitted changes",
+      "refresh": "Refresh",
+      "openExplorer": "Open in Explorer",
+      "copyPath": "Copy path",
+      "revokeTrust": "Revoke trust",
+      "trust": "Trust folder",
+      "noneLinked": "No folder linked",
+      "openFolder": "Open folder…",
+      "switch": "Switch workspace"
+    },
+    "panel": {
+      "show": "Show file panel",
+      "hide": "Hide file panel",
+      "widen": "Widen the window to see the file panel"
+    },
+    "sessionsTablist": "Open sessions",
+    "closeTab": "Close {{title}}",
+    "subagent": {
+      "explore": "exploration",
+      "review": "review",
+      "general": "general",
+      "tabLabel": "Subagent {{description}}"
+    },
+    "fileTab": "File {{path}}",
+    "planTab": {
+      "label": "Approved plan of the session",
+      "visible": "Plan",
+      "close": "Close plan"
+    },
+    "goalTab": {
+      "label": "Session goal",
+      "visible": "Goal",
+      "close": "Close goal"
+    },
+    "diffTab": {
+      "label": "Diff for {{path}}",
+      "title": "Diff: {{path}}",
+      "visible": "Diff",
+      "close": "Close diff for {{path}}"
+    },
+    "commitsTab": {
+      "label": "Commit history",
+      "visible": "Commits",
+      "close": "Close commit history"
+    },
+    "toast": {
+      "bindWorkspaceError": "Could not switch the session workspace",
+      "pathCopied": "Path copied",
+      "copyPathError": "Could not copy the path",
+      "trusted": "Folder trusted",
+      "trustRevoked": "Trust revoked",
+      "trustedDescription": "The agent can read, edit and run commands.",
+      "trustRevokedDescription": "The agent goes back to read-only mode in this workspace.",
+      "trustError": "Could not update the folder trust"
+    }
+  },
+  "panel": {
+    "tabs": {
+      "files": "Files",
+      "changes": "Changes",
+      "terminal": "Terminal"
+    },
+    "aria": "Files and changes panel",
+    "tablist": "Panel content",
+    "refresh": "Refresh panel",
+    "refreshTooltip": "Refresh",
+    "collapse": "Collapse panel",
+    "workspaceNone": "No workspace",
+    "commitsHistory": "History",
+    "commitsHistoryAria": "View commit history",
+    "empty": {
+      "noWorkspaceTitle": "No workspace open",
+      "noWorkspaceDescription": "Open a folder in the sidebar so the agent can read, edit and run commands here.",
+      "noSessionTitle": "No active session",
+      "noSessionDescription": "Open a session to use the terminal in the workspace folder."
+    },
+    "toast": {
+      "openFolderError": "Could not open the folder"
+    },
+    "resizer": "Resize files panel"
+  },
+  "tree": {
+    "filterPlaceholder": "Filter files…",
+    "filterAria": "Filter files",
+    "clearFilter": "Clear filter",
+    "loading": "Loading files",
+    "loadingTree": "Loading the tree",
+    "loadingDir": "Loading {{name}}",
+    "errorTitle": "Could not read the folder",
+    "emptySearchTitle": "No file matches the search",
+    "emptySearchDescription": "Refine the search or clear the filter to see the tree.",
+    "emptyTitle": "No file to show",
+    "emptyDescription": "The workspace tree appears here when the folder is available.",
+    "aria": "Workspace file tree",
+    "gitStatus": "Git status: {{status}}",
+    "count": "Showing {{visible}} of {{total}} files — refine the search",
+    "badge": {
+      "modified": "Modified",
+      "added": "Added",
+      "deleted": "Deleted",
+      "renamed": "Renamed",
+      "copied": "Copied",
+      "conflicted": "Conflicted",
+      "untracked": "Untracked",
+      "ignored": "Ignored"
+    }
+  },
+  "diff": {
+    "loading": "Loading diff",
+    "copied": "Patch copied",
+    "copy": "Copy patch",
+    "copyError": "Could not copy the patch",
+    "errorTitle": "Could not load the diff",
+    "binaryTitle": "Binary file",
+    "binaryDescription": "This file has no text diff. Open it in an external editor to review the change.",
+    "emptyTitle": "No differences to show",
+    "emptyDescription": "The file has no pending text changes.",
+    "groupAria": "Diff for {{path}}",
+    "hunkAria": "Diff hunk: {{header}}",
+    "collapseHunk": "Collapse hunk",
+    "showMore_one": "Show more ({{count}} line)",
+    "showMore_other": "Show more ({{count}} lines)"
+  },
+  "preview": {
+    "markdown": {
+      "document": "Document",
+      "code": "Code",
+      "modeAria": "Markdown view mode"
+    },
+    "copyError": "Could not copy the path",
+    "loading": "Loading file",
+    "errorTitle": "Could not open the file",
+    "noneTitle": "No file selected",
+    "noneDescription": "Choose a file in the Files tab to see the preview.",
+    "lineInfo_one": "{{count}} line · {{size}}",
+    "lineInfo_other": "{{count}} lines · {{size}}",
+    "omitted": {
+      "title": "Preview not available",
+      "description": "The file is {{size}} — too large for the inline preview. Open it in an external editor to view it."
+    },
+    "unsupported": {
+      "title": "Format without a viewer preview",
+      "description": "This format ({{size}}) has no built-in preview. Open it in an external editor to inspect the content."
+    },
+    "binary": {
+      "title": "Binary file",
+      "description": "There is no text preview for this file ({{size}}). Open it in an external editor to inspect the content."
+    },
+    "encoding": "Encoding {{encoding}} detected — the content may show garbled characters.",
+    "truncated": "Preview truncated: showing part of {{size}}. Open it in an external editor to see the whole file.",
+    "markdownEmpty": "Empty Markdown.",
+    "markdownRegion": "Markdown preview",
+    "emptyFile": "Empty file.",
+    "contentAria": "Contents of {{path}}",
+    "wrapOn": "Line wrap enabled",
+    "wrap": "Line wrap",
+    "pathCopied": "Path copied",
+    "copyPath": "Copy path",
+    "reload": "Reload file",
+    "openExternal": "Open in external editor"
+  },
+  "image": {
+    "controls": "Image controls",
+    "dimensionsTitle": "Image dimensions in pixels",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "fit": "Fit to window",
+    "actual": "Actual size",
+    "failedTitle": "Could not decode the image",
+    "failedDescription": "The browser cannot display this format. Use \"Reload file\" or open it in an external editor.",
+    "region": "Image preview {{path}}"
+  },
+  "pdf": {
+    "errorTitle": "Could not render the PDF",
+    "toolbar": "PDF controls",
+    "prev": "Previous page",
+    "next": "Next page",
+    "pageInfo": "Page {{page}} of {{total}}",
+    "loading": "Loading…",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "fitWidth": "Fit to width",
+    "rendering": "Rendering page",
+    "region": "PDF preview {{path}}",
+    "loadingPdf": "Loading PDF",
+    "loadingPdfText": "Loading PDF…",
+    "canvasAria": "Page {{page}} of {{total}} of PDF {{path}}",
+    "renderError": "Could not render this page."
+  },
+  "commit": {
+    "section": "Commit",
+    "linesTitle": "Added and removed lines",
+    "targetAria": "Commit target",
+    "target": {
+      "all": "All",
+      "staged": "Staged ({{count}})",
+      "selection": "Selection ({{count}})"
+    },
+    "messageAria": "Commit message",
+    "messagePlaceholder": "Commit message…",
+    "suggest": "Suggest",
+    "suggestAria": "Suggest message",
+    "suggestTooltip": "Suggest message with AI",
+    "button": "Commit",
+    "recent": "Recent commits",
+    "recentWithCount": "Recent commits ({{count}})",
+    "loading": "Loading commits",
+    "loadingText": "Loading commits…",
+    "empty": {
+      "title": "No commits yet",
+      "description": "The workspace commits appear here."
+    },
+    "error": {
+      "load": "Could not load the recent commits.",
+      "create": "Could not create the commit"
+    },
+    "reason": {
+      "openWorkspace": "Open a workspace to commit",
+      "notRepo": "Not a Git repository",
+      "noChanges": "No changes to commit",
+      "noStaged": "No staged files",
+      "noSelection": "Select files in the list",
+      "noMessage": "Write the commit message"
+    },
+    "suggestEmpty": "The suggestion came back empty — write the commit message.",
+    "suggestError": "Could not suggest a message.",
+    "success": "Commit created",
+    "successWithHash": "Commit created ({{hash}})",
+    "recentListAria": "Recent commits"
+  },
+  "changesFilter": {
+    "label": {
+      "lastTurn": "Last turn",
+      "uncommitted": "Uncommitted",
+      "unstaged": "Not staged",
+      "staged": "Staged",
+      "commit": "Commit {{hash}}",
+      "branch": "Branch {{name}}"
+    },
+    "aria": "Filter changes",
+    "noCommitsInWorkspace": "No commits in the workspace",
+    "chooseCommit": "Choose a commit",
+    "commit": "Commit",
+    "loadingCommits": "Loading commits…",
+    "noCommit": "No commit",
+    "compareBranch": "Compare with a branch",
+    "branch": "Branch",
+    "loadingBranches": "Loading branches…",
+    "noOtherBranch": "No other branch"
+  },
+  "changes": {
+    "groups": {
+      "staged": "Staged",
+      "unstaged": "Not staged",
+      "untracked": "New",
+      "session": "From session",
+      "commit": "Commit",
+      "branch": "Branch"
+    },
+    "empty": {
+      "noWorkspace": {
+        "title": "No workspace selected",
+        "description": "Open a folder to see the code changes."
+      },
+      "lastTurn": {
+        "title": "No changes in the last turn",
+        "description": "The agent's edits in the last turn appear here."
+      },
+      "staged": {
+        "title": "No files staged for commit",
+        "description": "Stage files from the unstaged list to prepare them."
+      },
+      "unstaged": {
+        "title": "No files outside the stage",
+        "description": "Changes that are not staged yet appear here."
+      },
+      "commit": {
+        "title": "No files in this commit",
+        "description": "The selected commit did not change any files."
+      },
+      "branch": {
+        "title": "No difference from {{base}}",
+        "description": "Changes since the common ancestor with that branch appear here."
+      },
+      "uncommitted": {
+        "title": "No pending changes",
+        "description": "The agent's edits and the git changes appear here."
+      }
+    },
+    "loadCommitError": "Could not load the commit.",
+    "compareError": "Could not compare with the branch.",
+    "loadBranchesError": "Could not load the branches.",
+    "noOtherBranchToast": "There is no other branch to compare",
+    "loadBranchesToastError": "Could not load the branches",
+    "noWorkspaceDiff": "Open a workspace to see the diff.",
+    "loadDiffError": "Could not load the diff.",
+    "stageError": "Could not update the stage",
+    "stageSuccess_one": "{{count}} file staged",
+    "stageSuccess_other": "{{count}} files staged",
+    "unstageSuccess_one": "{{count}} file removed from the stage",
+    "unstageSuccess_other": "{{count}} files removed from the stage",
+    "stageAllError": "Could not stage the files",
+    "unstageAllError": "Could not unstage the files",
+    "revertSuccess": "File reverted",
+    "revertError": "Could not revert the file",
+    "blockedReason": "Resolve the merge conflicts before committing",
+    "back": "Back to changes",
+    "diffHeader": "File diff",
+    "notRepoTitle": "Not a Git repository.",
+    "notRepoDescription": "Session changes remain available; initialize a repository to commit.",
+    "conflicts": "Merge conflicts — resolve them before committing.",
+    "count_one": "{{count}} file",
+    "count_other": "{{count}} files",
+    "unstageAll": "Unstage all",
+    "stageAll": "Stage all",
+    "stageAllConflictTitle": "Resolve the merge conflicts before staging everything",
+    "stageAllTitle": "Adds the visible changes to the stage",
+    "branchButton": "View branch diff",
+    "origin": "Origin: {{origin}}",
+    "badge": {
+      "both": "agent + git",
+      "session": "agent",
+      "sessionTitle": "session",
+      "sessionGitTitle": "session + git"
+    },
+    "unstageFile": "Remove {{path}} from the stage",
+    "stageFile": "Stage {{path}}",
+    "revertFile": "Revert {{path}}",
+    "revertDialog": {
+      "title": "Revert file?",
+      "description": "Changes to {{path}} go back to the previous state. This action cannot be undone.",
+      "descriptionGeneric": "The changes go back to the previous state. This action cannot be undone.",
+      "confirm": "Revert"
+    }
+  },
+  "commits": {
+    "status": {
+      "A": "Added",
+      "M": "Modified",
+      "D": "Removed",
+      "R": "Renamed",
+      "C": "Copied",
+      "T": "Type changed"
+    },
+    "loadListError": "Could not load the commits.",
+    "loadingList": "Loading commits",
+    "loadingListText": "Loading commits…",
+    "errorTitle": "Could not read the commits",
+    "empty": {
+      "title": "No commits yet",
+      "description": "The commits of this workspace appear here; make the first commit from the Changes tab."
+    },
+    "listAria": "Workspace commits",
+    "fileAria": "File {{path}}",
+    "binaryBadge": "binary",
+    "binaryDiff": "Binary file — no text diff.",
+    "loadDetailError": "Could not load the commit.",
+    "loadingDetail": "Loading commit",
+    "loadingDetailText": "Loading commit…",
+    "detailErrorTitle": "Could not open the commit",
+    "backToCommits": "Back to commits",
+    "detailAria": "Commit details",
+    "copySha": "Copy commit SHA",
+    "shaCopied": "Commit SHA copied",
+    "shaCopyError": "Could not copy the SHA",
+    "files_one": "{{count}} file",
+    "files_other": "{{count}} files",
+    "collapseDiffs": "Collapse diffs",
+    "expandDiffs": "Expand diffs",
+    "truncated": "Diff too large: the patch was truncated by the output limit.",
+    "noFiles": "This commit did not change any files (merge or empty commit).",
+    "header": "Commit history",
+    "all": "all"
+  },
+  "store": {
+    "approvalUnavailable": "This approval is no longer available",
+    "refreshing": "Updating the session state…",
+    "approvalError": "Could not respond to the approval",
+    "answerError": "Could not send the answer",
+    "permissionError": "Could not change the permission mode",
+    "planModeError": "Could not change Plan mode",
+    "goalCreateError": "Could not create the goal",
+    "goalChanged": "The goal changed in another action",
+    "goalUpdateError": "Could not update the goal",
+    "jobKillError": "Could not stop the process",
+    "turnReverted": "Turn reverted",
+    "turnRevertError": "Could not revert the turn",
+    "fileReverted": "File reverted: {{path}}",
+    "fileRevertError": "Could not revert the file",
+    "compactError": "Could not compact the context"
+  }
+}

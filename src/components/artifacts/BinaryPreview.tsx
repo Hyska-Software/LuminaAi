@@ -1,7 +1,9 @@
 import { useId, useState } from 'react';
 import { ChevronDown, Download, ExternalLink, FileQuestion, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
+import { t as translate } from '@/lib/i18n';
 import { cn, formatBytes } from '@/lib/utils';
 import { Button, Spinner } from '@/components/ui';
 import { artifactKindMeta } from './kinds';
@@ -11,9 +13,9 @@ import { useArtifactPreview, type ArtifactViewProps } from './previewSupport';
 async function saveArtifact(artifactId: string, name: string) {
   try {
     const path = await api.saveArtifact(artifactId, name);
-    if (path) toast.success('Arquivo salvo', { description: path });
+    if (path) toast.success(translate('artifacts:card.saveSuccess'), { description: path });
   } catch (error) {
-    toast.error('Não foi possível salvar', {
+    toast.error(translate('artifacts:card.saveError'), {
       description: error instanceof Error ? error.message : String(error),
     });
   }
@@ -23,7 +25,7 @@ async function openArtifact(artifactId: string) {
   try {
     await api.openArtifact(artifactId);
   } catch (error) {
-    toast.error('Não foi possível abrir o arquivo', {
+    toast.error(translate('artifacts:card.openError'), {
       description: error instanceof Error ? error.message : String(error),
     });
   }
@@ -45,6 +47,7 @@ function ArtifactActions({
   onRetry?: () => void;
   showArtifactActions?: boolean;
 }) {
+  const { t } = useTranslation('artifacts');
   const { artifact } = content;
   if (!showArtifactActions && !onRetry) return null;
   return (
@@ -57,7 +60,7 @@ function ArtifactActions({
             leftIcon={<Download className="size-3.5" />}
             onClick={() => void saveArtifact(artifact.id, artifact.name)}
           >
-            Salvar como…
+            {t('artifacts:binary.saveAs')}
           </Button>
           <Button
             size="sm"
@@ -65,13 +68,13 @@ function ArtifactActions({
             leftIcon={<ExternalLink className="size-3.5" />}
             onClick={() => void openArtifact(artifact.id)}
           >
-            Abrir
+            {t('artifacts:binary.open')}
           </Button>
         </>
       ) : null}
       {onRetry ? (
         <Button size="sm" variant="ghost" leftIcon={<RotateCcw className="size-3.5" />} onClick={onRetry}>
-          Tentar novamente
+          {t('artifacts:binary.retry')}
         </Button>
       ) : null}
     </div>
@@ -86,6 +89,7 @@ function BinaryFallbackCard({
   onRetry,
   showArtifactActions = true,
 }: ArtifactViewProps & { detail?: string; onRetry?: () => void }) {
+  const { t } = useTranslation('artifacts');
   const { artifact } = content;
   const meta = artifactKindMeta(artifact.kind);
 
@@ -98,7 +102,10 @@ function BinaryFallbackCard({
         <div>
           <p className="text-[13px] font-medium text-foreground">{artifact.name}</p>
           <p className="mt-0.5 text-[11px] text-foreground-subtle">
-            {meta.label} · {formatBytes(artifact.size)} · prévia não disponível
+            {t('artifacts:binary.subtitleUnavailable', {
+              kind: meta.label,
+              size: formatBytes(artifact.size),
+            })}
           </p>
           {detail ? (
             <p className="mt-1.5 text-[11px] leading-relaxed text-foreground-muted">{detail}</p>
@@ -126,6 +133,7 @@ function BinaryArtifactPreview({
   onRetry,
   showArtifactActions = true,
 }: BinaryPreviewProps) {
+  const { t } = useTranslation('artifacts');
   const { artifact } = content;
   const { state, retry } = useArtifactPreview(artifact.id);
   const [expanded, setExpanded] = useState(true);
@@ -138,7 +146,9 @@ function BinaryArtifactPreview({
   const errorMessage = state.status === 'error' ? state.message : null;
   const retryAction = onRetry ?? (errorMessage ? retry : undefined);
   const problem =
-    detail ?? unsupportedReason ?? (errorMessage ? `Não foi possível ler os primeiros bytes: ${errorMessage}` : null);
+    detail ??
+    unsupportedReason ??
+    (errorMessage ? t('artifacts:binary.readError', { message: errorMessage }) : null);
 
   return (
     <div className={cn('flex h-full flex-col items-center gap-3 overflow-auto p-4', className)}>
@@ -151,24 +161,24 @@ function BinaryArtifactPreview({
             {artifact.name}
           </p>
           <p className="mt-0.5 text-[11px] text-foreground-subtle">
-            {meta.label}
-            {preview ? (
-              <>
-                {' · '}
-                <span className="font-mono text-foreground-muted">{preview.format}</span>
-              </>
-            ) : null}
-            {' · '}
-            {formatBytes(artifact.size)}
-            {!preview ? ' · prévia não disponível' : ''}
+            {preview
+              ? t('artifacts:binary.subtitleWithFormat', {
+                  kind: meta.label,
+                  format: preview.format,
+                  size: formatBytes(artifact.size),
+                })
+              : t('artifacts:binary.subtitleUnavailable', {
+                  kind: meta.label,
+                  size: formatBytes(artifact.size),
+                })}
           </p>
           {problem ? (
             <p className="mt-1.5 text-[11px] leading-relaxed text-foreground-muted">{problem}</p>
           ) : null}
           {state.status === 'loading' ? (
             <span className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-foreground-subtle">
-              <Spinner size="xs" label="Lendo os primeiros bytes" />
-              Lendo os primeiros bytes…
+              <Spinner size="xs" label={t('artifacts:binary.readingBytes')} />
+              {t('artifacts:binary.readingBytesEllipsis')}
             </span>
           ) : null}
         </div>
@@ -180,7 +190,7 @@ function BinaryArtifactPreview({
       </div>
 
       {preview ? (
-        <section className="w-full max-w-2xl shrink-0" aria-label="Primeiros bytes do arquivo">
+        <section className="w-full max-w-2xl shrink-0" aria-label={t('artifacts:binary.firstBytesAria')}>
           <button
             type="button"
             aria-expanded={expanded}
@@ -200,10 +210,10 @@ function BinaryArtifactPreview({
               })}
             />
             <span className="text-[12px] font-medium text-foreground">
-              Primeiros {preview.previewBytes} bytes
+              {t('artifacts:binary.firstBytes', { count: preview.previewBytes })}
             </span>
             <span className="ml-auto truncate text-[11px] text-foreground-subtle">
-              {formatBytes(artifact.size)} no total
+              {t('artifacts:binary.totalSize', { size: formatBytes(artifact.size) })}
             </span>
           </button>
           {expanded ? (
@@ -211,7 +221,10 @@ function BinaryArtifactPreview({
               <HexDump
                 base64={preview.previewBase64}
                 maxBytes={preview.previewBytes}
-                label={`Primeiros ${preview.previewBytes} bytes do arquivo ${artifact.name}`}
+                label={t('artifacts:binary.hexdumpLabel', {
+                  count: preview.previewBytes,
+                  name: artifact.name,
+                })}
               />
             </div>
           ) : null}

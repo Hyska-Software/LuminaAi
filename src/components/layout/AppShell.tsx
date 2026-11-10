@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'motion/react';
 import { clampSidebarWidth, SIDEBAR_WIDTH_DEFAULT, useUiStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
@@ -51,11 +52,13 @@ export interface AppShellProps {
 export function AppShell({
   children,
   sidebar,
-  sidebarLabel = 'Conversas',
+  sidebarLabel,
   rightPanel,
   rightPanelOpen = false,
   overlays,
 }: AppShellProps) {
+  const { t } = useTranslation('common');
+  const resolvedSidebarLabel = sidebarLabel ?? t('shell.sidebar.aria');
   const sidebarOpen = useUiStore((state) => state.sidebarOpen);
   const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
   const sidebarWidth = useUiStore((state) => state.sidebarWidth);
@@ -184,7 +187,7 @@ export function AppShell({
                   key="sidebar-drawer"
                   role="dialog"
                   aria-modal="true"
-                  aria-label={sidebarLabel}
+                  aria-label={resolvedSidebarLabel}
                   initial={{ x: reduceMotion ? 0 : -drawerWidth }}
                   animate={{ x: 0 }}
                   exit={{ x: reduceMotion ? 0 : -drawerWidth }}

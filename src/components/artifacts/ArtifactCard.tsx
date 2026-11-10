@@ -1,7 +1,9 @@
 import { Download } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { api } from '@/lib/api';
+import { t as translate } from '@/lib/i18n';
 import type { Artifact } from '@/lib/types';
 import { cn, formatBytes } from '@/lib/utils';
 import { useUiStore } from '@/lib/store';
@@ -21,9 +23,9 @@ export interface ArtifactCardProps {
 async function saveArtifact(artifact: Artifact) {
   try {
     const path = await api.saveArtifact(artifact.id, artifact.name);
-    if (path) toast.success('Arquivo salvo', { description: path });
+    if (path) toast.success(translate('artifacts:card.saveSuccess'), { description: path });
   } catch (error) {
-    toast.error('Não foi possível salvar', {
+    toast.error(translate('artifacts:card.saveError'), {
       description: error instanceof Error ? error.message : String(error),
     });
   }
@@ -41,6 +43,7 @@ export function ArtifactCard({
   active = false,
   className,
 }: ArtifactCardProps) {
+  const { t } = useTranslation('artifacts');
   const meta = artifactKindMeta(artifact.kind);
   const Icon = meta.icon;
 
@@ -92,16 +95,20 @@ export function ArtifactCard({
           {artifact.name}
         </span>
         <span className="mt-0.5 block truncate text-[11px] leading-snug text-foreground-muted tabular-nums">
-          {`${meta.label} · ${formatBytes(artifact.size)}`}
+          {t('artifacts:card.subtitle', { kind: meta.label, size: formatBytes(artifact.size) })}
         </span>
       </button>
 
       <div className="flex shrink-0 items-center gap-1">
         <Button size="sm" variant="secondary" onClick={open}>
-          Abrir
+          {t('artifacts:card.open')}
         </Button>
-        <Tooltip content="Salvar como…" side="top">
-          <IconButton label={`Salvar ${artifact.name} como…`} size="sm" onClick={handleSave}>
+        <Tooltip content={t('artifacts:card.saveAs')} side="top">
+          <IconButton
+            label={t('artifacts:card.saveNamed', { name: artifact.name })}
+            size="sm"
+            onClick={handleSave}
+          >
             <Download className="size-3.5" />
           </IconButton>
         </Tooltip>

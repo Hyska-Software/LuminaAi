@@ -3,12 +3,12 @@ import type { LayoutMode } from './store/uiStore';
 
 export interface LayoutModeMeta {
   value: LayoutMode;
-  /** Button accessible name, menu item and Settings row label. */
-  label: string;
-  /** Title-bar tooltip. */
-  title: string;
-  /** One-line explanation shown under the Settings row label. */
-  description: string;
+  /** Translation key in the `common` namespace. */
+  labelKey: string;
+  /** Translation key in the `common` namespace. */
+  titleKey: string;
+  /** Translation key in the `common` namespace. */
+  descriptionKey: string;
   icon: LucideIcon;
 }
 
@@ -16,29 +16,29 @@ export interface LayoutModeMeta {
  * Chat | Code | Agentes, in selector order. Shared by the title-bar switcher,
  * the right-click visibility menu and Settings so labels never drift.
  */
-export const LAYOUT_MODES: readonly LayoutModeMeta[] = [
+export const LAYOUT_MODES = [
   {
     value: 'chat',
-    label: 'Chat',
-    title: 'Layout de conversa',
-    description: 'Conversa com o assistente, artefatos e fontes.',
+    labelKey: 'layouts.chat.label',
+    titleKey: 'layouts.chat.title',
+    descriptionKey: 'layouts.chat.description',
     icon: MessageSquare,
   },
   {
     value: 'code',
-    label: 'Code',
-    title: 'Layout de código',
-    description: 'Workbench com workspaces, arquivos, terminal e alterações.',
+    labelKey: 'layouts.code.label',
+    titleKey: 'layouts.code.title',
+    descriptionKey: 'layouts.code.description',
     icon: Code,
   },
   {
     value: 'agent',
-    label: 'Agentes',
-    title: 'Layout de agentes',
-    description: 'Equipes de personas, canais e rotinas.',
+    labelKey: 'layouts.agent.label',
+    titleKey: 'layouts.agent.title',
+    descriptionKey: 'layouts.agent.description',
     icon: Bot,
   },
-];
+] as const satisfies readonly LayoutModeMeta[];
 
 /** Which layout buttons are offered by the title-bar switcher (persisted). */
 export type LayoutVisibility = Record<LayoutMode, boolean>;

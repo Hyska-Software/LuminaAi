@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '../api';
+import { setLanguage } from '../i18n';
 import {
   defaultReasoningFor,
   defaultSelection,
@@ -29,7 +30,7 @@ export const MAX_STEPS_DEFAULT = 64;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
-  locale: 'pt-BR',
+  locale: 'en',
   defaultProvider: 'opencode-go',
   defaultModel: 'deepseek-v4.1-flash',
   reasoningDefault: 'max',
@@ -179,14 +180,18 @@ export const useAppStore = create<AppState>()(
             selection: { providerId: provider?.id ?? fallback.providerId, modelId, reasoning },
             catalogRefreshedAt: catalogView.remoteRefreshedAt ?? null,
           });
+          await setLanguage(settings.locale);
         } catch (error) {
           set({ initializing: false, error: error instanceof Error ? error.message : String(error) });
         }
       },
 
       saveSettings: async (patch) => {
+        const previousLocale = get().settings.locale;
+        const changesLocale = patch.locale !== undefined;
         const next: Settings = { ...get().settings, ...patch };
         set({ settings: next });
+        if (changesLocale) await setLanguage(next.locale);
         try {
           const view = await api.saveSettings(next);
           set({
@@ -195,8 +200,13 @@ export const useAppStore = create<AppState>()(
             auth: view.auth ?? get().auth,
             secretsError: view.secretsError ?? null,
           });
+          if (changesLocale) await setLanguage(view.settings.locale);
         } catch (error) {
-          set({ error: error instanceof Error ? error.message : String(error) });
+          set((state) => ({
+            settings: changesLocale ? { ...state.settings, locale: previousLocale } : state.settings,
+            error: error instanceof Error ? error.message : String(error),
+          }));
+          if (changesLocale) await setLanguage(previousLocale);
         }
       },
 
@@ -209,6 +219,7 @@ export const useAppStore = create<AppState>()(
             auth: view.auth ?? get().auth,
             secretsError: view.secretsError ?? null,
           });
+          await setLanguage(view.settings.locale);
         } catch (error) {
           set({ error: error instanceof Error ? error.message : String(error) });
         }

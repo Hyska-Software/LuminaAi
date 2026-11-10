@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronRight, CircleAlert, GitCommitHorizontal, Sparkles } from 'lucide-react';
 import { Button, NativeSelect, Spinner, Textarea, Tooltip } from '@/components/ui';
 import { api } from '@/lib/api';
+import { formatDate } from '@/lib/i18n/format';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { CommitTarget, WorkspaceGitCommit, WorkspaceGitStatus } from '@/lib/types';
@@ -43,7 +45,7 @@ export function shortHash(hash: string): string {
 export function formatCommitDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+  return formatDate(date, { day: '2-digit', month: 'short' });
 }
 
 /**
@@ -64,6 +66,7 @@ export function CommitBar({
   onRefresh,
   className,
 }: CommitBarProps) {
+  const { t } = useTranslation('code');
   const [target, setTarget] = useState<CommitTarget>('all');
   const [message, setMessage] = useState('');
   const [suggesting, setSuggesting] = useState(false);
@@ -94,7 +97,7 @@ export function CommitBar({
     } catch (error) {
       if (run !== logRun.current) return;
       setCommits([]);
-      setLogError(describeError(error, 'Não foi possível carregar os commits recentes.'));
+      setLogError(describeError(error, t('code:commit.error.load')));
     } finally {
       if (run === logRun.current) setLogLoading(false);
     }
@@ -127,20 +130,20 @@ export function CommitBar({
   }, [target, stageCount, selectionCount]);
 
   const suggestDisabledReason = !workspaceId
-    ? 'Abra um workspace para commitar'
+    ? t('code:commit.reason.openWorkspace')
     : !isRepo
-      ? 'Não é um repositório Git'
+      ? t('code:commit.reason.notRepo')
       : blockedReason
         ? blockedReason
         : !hasChanges
-          ? 'Nenhuma alteração para commitar'
+          ? t('code:commit.reason.noChanges')
           : target === 'staged' && stageCount === 0
-            ? 'Nenhum arquivo preparado'
+            ? t('code:commit.reason.noStaged')
             : target === 'selection' && selectionCount === 0
-              ? 'Selecione arquivos na lista'
+              ? t('code:commit.reason.noSelection')
               : null;
   const disabledReason =
-    suggestDisabledReason ?? (!message.trim() ? 'Escreva a mensagem do commit' : null);
+    suggestDisabledReason ?? (!message.trim() ? t('code:commit.reason.noMessage') : null);
 
   const canCommit = !disabledReason && !committing;
   const targetPaths = target === 'selection' ? selectedPaths : undefined;
@@ -157,11 +160,11 @@ export function CommitBar({
       if (suggestion?.trim()) {
         setMessage((current) => (current === requestedMessage ? suggestion.trim() : current));
       } else {
-        setSuggestError('A sugestão veio vazia — escreva a mensagem do commit.');
+        setSuggestError(t('code:commit.suggestEmpty'));
       }
     } catch (error) {
       if (run !== suggestRun.current) return;
-      setSuggestError(describeError(error, 'Não foi possível sugerir uma mensagem.'));
+      setSuggestError(describeError(error, t('code:commit.suggestError')));
     } finally {
       if (run === suggestRun.current) setSuggesting(false);
     }
@@ -183,10 +186,14 @@ export function CommitBar({
       } catch {
         /* The commit succeeded; the history refresh is best-effort. */
       }
-      toast.success(hash ? `Commit criado (${shortHash(hash)})` : 'Commit criado');
+      toast.success(
+        hash
+          ? t('code:commit.successWithHash', { hash: shortHash(hash) })
+          : t('code:commit.success'),
+      );
       onRefresh?.();
     } catch (error) {
-      toast.error(describeError(error, 'Não foi possível criar o commit'));
+      toast.error(describeError(error, t('code:commit.error.create')));
     } finally {
       setCommitting(false);
     }
@@ -196,32 +203,32 @@ export function CommitBar({
     <div className={cn('flex shrink-0 flex-col border-t border-border bg-surface', className)}>
       <div className="flex items-center gap-2 px-3 pt-2">
         <span className="text-[11px] font-medium uppercase tracking-wider text-foreground-subtle">
-          Commit
+          {t('code:commit.section')}
         </span>
-        <span className="ml-auto text-[11.5px] tabular-nums" title="Linhas adicionadas e removidas">
+        <span className="ml-auto text-[11.5px] tabular-nums" title={t('code:commit.linesTitle')}>
           <span className="text-success">+{added}</span> <span className="text-danger">−{removed}</span>
         </span>
         <NativeSelect
-          aria-label="Alvo do commit"
+          aria-label={t('code:commit.targetAria')}
           value={target}
           onChange={(event) => setTarget(event.target.value as CommitTarget)}
           wrapperClassName="w-auto"
           className="h-7 w-auto min-w-28 text-[11.5px]"
         >
-          <option value="all">Tudo</option>
+          <option value="all">{t('code:commit.target.all')}</option>
           <option value="staged" disabled={stageCount === 0}>
-            Preparados ({stageCount})
+            {t('code:commit.target.staged', { count: stageCount })}
           </option>
           <option value="selection" disabled={selectionCount === 0}>
-            Seleção ({selectionCount})
+            {t('code:commit.target.selection', { count: selectionCount })}
           </option>
         </NativeSelect>
       </div>
 
       <div className="px-3 pt-2">
         <Textarea
-          aria-label="Mensagem do commit"
-          placeholder="Mensagem do commit…"
+          aria-label={t('code:commit.messageAria')}
+          placeholder={t('code:commit.messagePlaceholder')}
           rows={2}
           value={message}
           onChange={(event) => setMessage(event.target.value)}
@@ -231,7 +238,7 @@ export function CommitBar({
 
       <div className="flex items-center gap-2 px-3 py-2">
         <Tooltip
-          content={suggestDisabledReason ?? 'Sugerir mensagem com IA'}
+          content={suggestDisabledReason ?? t('code:commit.suggestTooltip')}
           side="top"
         >
           <Button
@@ -239,12 +246,12 @@ export function CommitBar({
             variant="subtle"
             loading={suggesting}
             disabled={Boolean(suggestDisabledReason)}
-            title={suggestDisabledReason ?? 'Sugerir mensagem com IA'}
-            aria-label="Sugerir mensagem"
+            title={suggestDisabledReason ?? t('code:commit.suggestTooltip')}
+            aria-label={t('code:commit.suggestAria')}
             leftIcon={<Sparkles aria-hidden className="size-3.5" strokeWidth={1.75} />}
             onClick={() => void handleSuggest()}
           >
-            Sugerir
+            {t('code:commit.suggest')}
           </Button>
         </Tooltip>
 
@@ -255,11 +262,11 @@ export function CommitBar({
             variant="primary"
             loading={committing}
             disabled={!canCommit}
-            title={disabledReason ?? 'Commit'}
+            title={disabledReason ?? t('code:commit.button')}
             leftIcon={<GitCommitHorizontal aria-hidden className="size-3.5" strokeWidth={1.75} />}
             onClick={() => void handleCommit()}
           >
-            Commit
+            {t('code:commit.button')}
           </Button>
         </span>
       </div>
@@ -285,8 +292,10 @@ export function CommitBar({
           )}
           strokeWidth={1.75}
         />
-        Commits recentes{commits.length ? ` (${commits.length})` : ''}
-        {logLoading ? <Spinner size="xs" label="Carregando commits" className="ml-auto" /> : null}
+        {commits.length
+          ? t('code:commit.recentWithCount', { count: commits.length })
+          : t('code:commit.recent')}
+        {logLoading ? <Spinner size="xs" label={t('code:commit.loading')} className="ml-auto" /> : null}
       </button>
 
       {logOpen ? (
@@ -296,16 +305,16 @@ export function CommitBar({
               {logError}
             </p>
           ) : logLoading && commits.length === 0 ? (
-            <p className="text-[11.5px] text-foreground-muted">Carregando commits…</p>
+            <p className="text-[11.5px] text-foreground-muted">{t('code:commit.loadingText')}</p>
           ) : commits.length === 0 ? (
             <div>
-              <p className="text-[12px] font-medium text-foreground">Sem commits ainda</p>
+              <p className="text-[12px] font-medium text-foreground">{t('code:commit.empty.title')}</p>
               <p className="text-[11.5px] text-foreground-muted">
-                Os commits do workspace aparecem aqui.
+                {t('code:commit.empty.description')}
               </p>
             </div>
           ) : (
-            <ul aria-label="Commits recentes" className="max-h-52 space-y-1 overflow-y-auto">
+            <ul aria-label={t('code:commit.recentListAria')} className="max-h-52 space-y-1 overflow-y-auto">
               {commits.map((commit) => (
                 <li key={commit.hash} className="flex items-baseline gap-2 text-[11.5px]">
                   <span

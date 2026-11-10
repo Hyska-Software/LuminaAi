@@ -5,6 +5,7 @@
 
 use serde_json::{json, Value};
 
+use crate::i18n;
 use crate::providers::ToolDefinition;
 
 use super::artifacts;
@@ -46,17 +47,19 @@ pub fn definition() -> ToolDefinition {
 pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let raw_name = match json_str(args, "name") {
         Some(name) if !name.trim().is_empty() => name,
-        _ => return ToolOutcome::error("o argumento `name` é obrigatório"),
+        _ => return ToolOutcome::error(i18n::t("tools.create_file.nameRequired")),
     };
     let content = match args.get("content") {
         Some(Value::String(value)) => value.clone(),
-        Some(Value::Null) | None => return ToolOutcome::error("o argumento `content` é obrigatório"),
+        Some(Value::Null) | None => {
+            return ToolOutcome::error(i18n::t("tools.create_file.contentRequired"))
+        }
         Some(other) => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
     };
     if content.len() > MAX_ARTIFACT_BYTES {
-        return ToolOutcome::error(format!(
-            "conteúdo grande demais ({} bytes); o limite é 10 MB",
-            content.len()
+        return ToolOutcome::error(i18n::t_args(
+            "tools.create_file.tooLarge",
+            &[("size", &content.len().to_string())],
         ));
     }
 
@@ -71,18 +74,22 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         mime_hint.as_deref(),
     ) {
         Ok(artifact) => ToolOutcome {
-            content: format!(
-                "Arquivo `{}` criado com sucesso ({} bytes, tipo `{}`). Artifact id: {}. \
-                 O arquivo já está disponível no painel de artefatos do Zylara para visualização e \
-                 download; não repita o conteúdo completo no chat.",
-                artifact.name, artifact.size, artifact.mime_type, artifact.id
+            content: i18n::t_args(
+                "tools.create_file.created",
+                &[
+                    ("name", &artifact.name),
+                    ("size", &artifact.size.to_string()),
+                    ("mime", &artifact.mime_type),
+                    ("id", &artifact.id),
+                ],
             ),
             summary: Some(format!("{} · {} bytes", artifact.name, artifact.size)),
             artifacts: vec![artifact],
             ..Default::default()
         },
-        Err(error) => ToolOutcome::error(format!(
-            "não foi possível criar o artefato: {error:#}"
+        Err(error) => ToolOutcome::error(i18n::t_args(
+            "tools.create_file.createFailed",
+            &[("error", &format!("{error:#}"))],
         )),
     }
 }

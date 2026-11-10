@@ -1,4 +1,5 @@
 import { cloneElement, Children, isValidElement, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CircleAlert, Info, Lightbulb, OctagonAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
 import { childrenToText, isIgnorableNode, stripLeadingText } from './reactText';
 
@@ -6,16 +7,17 @@ import { childrenToText, isIgnorableNode, stripLeadingText } from './reactText';
 export type GitHubAlertKind = 'note' | 'tip' | 'important' | 'warning' | 'caution';
 
 interface AlertMeta {
-  label: string;
+  /** Stable translation key; resolved at render time. */
+  labelKey: string;
   Icon: LucideIcon;
 }
 
 const ALERT_META: Record<GitHubAlertKind, AlertMeta> = {
-  note: { label: 'Nota', Icon: Info },
-  tip: { label: 'Dica', Icon: Lightbulb },
-  important: { label: 'Importante', Icon: CircleAlert },
-  warning: { label: 'Atenção', Icon: TriangleAlert },
-  caution: { label: 'Cuidado', Icon: OctagonAlert },
+  note: { labelKey: 'alerts.note', Icon: Info },
+  tip: { labelKey: 'alerts.tip', Icon: Lightbulb },
+  important: { labelKey: 'alerts.important', Icon: CircleAlert },
+  warning: { labelKey: 'alerts.warning', Icon: TriangleAlert },
+  caution: { labelKey: 'alerts.caution', Icon: OctagonAlert },
 };
 
 /** `> [!NOTE]` on the first line of a blockquote. */
@@ -71,7 +73,9 @@ export interface GitHubAlertProps {
  * assimétrica (ver docs/DESIGN.md §15).
  */
 export function GitHubAlert({ kind, children }: GitHubAlertProps) {
-  const { label, Icon } = ALERT_META[kind];
+  const { t } = useTranslation('chat');
+  const { labelKey, Icon } = ALERT_META[kind];
+  const label = t(labelKey);
   return (
     <div role="note" aria-label={label} data-alert={kind} className="zylara-alert">
       <div className="zylara-alert-header flex items-center gap-1.5">

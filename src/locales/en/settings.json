@@ -1,0 +1,714 @@
+{
+  "general": {
+    "appearance": {
+      "title": "Appearance",
+      "description": "Theme, language and interface text size."
+    },
+    "theme": {
+      "label": "Theme",
+      "description": "\"System\" follows your operating system preference.",
+      "aria": "Interface theme",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "language": {
+      "label": "Language",
+      "description": "Interface language.",
+      "aria": "Interface language"
+    },
+    "fontSize": {
+      "label": "Text size",
+      "description": "{{percent}}% of the default size — affects the whole interface.",
+      "aria": "Text size"
+    },
+    "layouts": {
+      "title": "Layouts",
+      "description": "Choose which modes appear in the title-bar selector. With only one layout enabled the selector is hidden; at least one stays enabled.",
+      "toggleAria": "Layout {{name}}"
+    },
+    "behavior": {
+      "title": "Behavior",
+      "description": "How the composer sends and displays messages."
+    },
+    "sendWith": {
+      "label": "Send with",
+      "description": "Shift+Enter always inserts a new line.",
+      "aria": "Key to send a message"
+    },
+    "reduceMotion": {
+      "label": "Reduce motion",
+      "description": "Disables transform animations, shimmer and long transitions.",
+      "aria": "Reduce motion"
+    },
+    "showTokenUsage": {
+      "label": "Show token usage",
+      "description": "Shows tokens and estimated cost under each response.",
+      "aria": "Show token usage"
+    },
+    "thinkingCollapsed": {
+      "label": "Reasoning collapsed by default",
+      "description": "The reasoning and agent-step block starts closed and does not open by itself while streaming. You can expand it at any time.",
+      "aria": "Reasoning collapsed by default"
+    }
+  },
+  "tabs": {
+    "general": "General",
+    "providers": "Providers",
+    "model": "Default model",
+    "instructions": "Instructions",
+    "tools": "Tools",
+    "agents": "Agents",
+    "data": "Data",
+    "about": "About"
+  },
+  "dialog": {
+    "title": "Settings",
+    "description": "Zylara preferences",
+    "autoSave": "Saves automatically",
+    "openTab": "Settings › {{tab}}"
+  },
+  "toasts": {
+    "openFolderFailed": "Could not open the folder"
+  },
+  "providers": {
+    "securityNote": "API keys (OpenCode/Anthropic) and the ChatGPT session are stored only in the backend (<code>secrets.json</code> in app-data) and are never exposed to the interface. We also detect the providers' environment variables and an existing OpenCode CLI login.",
+    "storeErrorTitle": "The last action failed",
+    "dismiss": "Dismiss",
+    "secretsErrorTitle": "Could not read the secrets file",
+    "secretsErrorBody": "No key was changed. The original file was preserved; fix or delete the invalid content from the data folder before saving new credentials. Detail: {{error}}",
+    "openDataDir": "Open data folder",
+    "keySource": {
+      "settings": "Configured",
+      "env": "Environment variable",
+      "opencode-cli": "OpenCode CLI",
+      "chatgpt": "ChatGPT account",
+      "none": "Missing"
+    },
+    "keyMissing": "Key missing",
+    "apiKeyAria": "API key for {{name}}",
+    "keyPlaceholder": {
+      "replace": "Paste a new key to replace…",
+      "openai": "Paste your OpenAI API key…",
+      "anthropic": "Paste your Anthropic API key (sk-ant-…)…",
+      "opencode": "Paste your OpenCode Console API key…",
+      "generic": "Paste your {{name}} API key…"
+    },
+    "test": "Test connection",
+    "testOkLatency_one": "Connected · {{latency}} ms · {{count}} model",
+    "testOkLatency_other": "Connected · {{latency}} ms · {{count}} models",
+    "testOkNoLatency_one": "Connected · {{count}} model",
+    "testOkNoLatency_other": "Connected · {{count}} models",
+    "testFailed": "Failed to connect to the provider.",
+    "planNotice": {
+      "title": "You're using your ChatGPT plan",
+      "body": "Eligible requests consume the shared limit of your ChatGPT plan — the same pool used by ChatGPT and other apps. You can follow usage in ChatGPT at any time.",
+      "dismiss": "Got it"
+    },
+    "account": {
+      "pending": "Waiting…",
+      "plan": "ChatGPT plan",
+      "connected": "Account connected",
+      "planDisabled": "Plan not activated",
+      "reauth": "Session expired",
+      "none": "No account"
+    },
+    "manageUsage": "Manage usage",
+    "console": "Console",
+    "login": {
+      "pendingTitle": "Waiting for the browser…",
+      "pendingSpinner": "Waiting for the browser",
+      "pendingBody": "Finish signing in to ChatGPT. This window updates automatically when you return to Zylara.",
+      "copyLink": "Copy link",
+      "copiedLink": "Link copied",
+      "openAgain": "Open again",
+      "browserNotOpenedTitle": "The browser did not open automatically",
+      "browserNotOpenedBody": "Copy the link and paste it into your browser. This window keeps waiting for the sign-in confirmation.",
+      "errorDetails": "Error details",
+      "browserHint": "If the browser does not open, use <b>Copy link</b> and paste the address into your browser.",
+      "showLink": "Show sign-in link"
+    },
+    "planDisabled": {
+      "title": "ChatGPT plan usage is not activated",
+      "body": "Your account is connected, but requests do not use the plan yet. Activate usage (consent) to keep using the models without per-token cost.",
+      "activate": "Activate plan usage",
+      "hideKey": "Hide API key",
+      "useKey": "Use API key"
+    },
+    "reauth": {
+      "title": "ChatGPT session expired",
+      "hintFallback": "Sign in again to renew the credential. The account registration is reused.",
+      "reconnect": "Reconnect"
+    },
+    "signedOut": {
+      "continue": "Continue with ChatGPT",
+      "body": "Eligible requests use your ChatGPT plan — the limit is shared across apps, Codex and ChatGPT Work. Without a plan, the same provider accepts a platform API key <code>sk-…</code>."
+    },
+    "signedIn": {
+      "signOut": "Sign out",
+      "useKeyAlternative": "Use API key as fallback"
+    },
+    "accountDetails": {
+      "summary": "Account details",
+      "clientId": "Client ID",
+      "hostId": "Host ID",
+      "scopes": "Scopes",
+      "expires": "Expires at",
+      "tokensNote": "Access and refresh tokens stay only in the backend and are never sent to the interface."
+    },
+    "toasts": {
+      "successTitle": "ChatGPT account connected",
+      "successPlan": "Eligible requests use your ChatGPT plan.",
+      "successNoPlan": "Plan usage is not activated for this account.",
+      "planDisabled": "The account was connected, but plan usage is not activated. Use \"Activate plan usage\".",
+      "signOutTitle": "Account disconnected",
+      "signOutBody": "The tokens were revoked. The next connection reuses the same client registration.",
+      "copiedTitle": "Sign-in link copied",
+      "copyFailed": "Could not copy the link",
+      "copyFailedBody": "Open \"Show sign-in link\" and copy the address manually.",
+      "keySaved": "Key saved",
+      "keySaveFailed": "Could not save the key",
+      "keyRemoved": "Key removed",
+      "keyStillDetected": "Saved key removed",
+      "keyStillDetectedBody": "A key detected via {{source}} is still available."
+    },
+    "privacyFooter": "Zylara does not send your credentials to any server of its own: requests go straight to the chosen provider. When you remove a key saved in Settings, detection via environment/CLI applies again, if present. Signing out of ChatGPT revokes the refresh token and keeps only the account registration for the next connection.",
+    "description": {
+      "opencode-go": "OpenCode Go subscription — high-performance open models with monthly limits.",
+      "opencode-zen": "OpenCode Console (pay-as-you-go) — curated catalog of models from multiple providers.",
+      "openai": "OpenAI models using your account's ChatGPT plan (Sign in with ChatGPT) or a platform API key.",
+      "anthropic": "Claude models through the official Anthropic API — per-token billing on your account (pay-as-you-go)."
+    },
+    "notes": {
+      "opencode-go": {
+        "0": "Send the x-opencode-session header for better routing and prompt caching.",
+        "1": "Models marked as \"contributor\" may use your data for training."
+      },
+      "opencode-zen": {
+        "0": "Works with OpenCode Console credits.",
+        "1": "Free models require the OpenCode client."
+      },
+      "openai": {
+        "0": "Usage consumes your ChatGPT plan limit (the same pool shared by apps, Codex and ChatGPT Work).",
+        "1": "Plus accounts share the 5-hour window; Pro does not have that limit. App-specific limits may also apply.",
+        "2": "The model list is specific to the account: use \"Refresh models\" after signing in."
+      },
+      "anthropic": {
+        "0": "Per-token billing on your Anthropic account (pay-as-you-go) — this provider does not use a subscription/plan.",
+        "1": "Create or review the API key at https://platform.claude.com/settings/keys.",
+        "2": "The account list is fetched from GET /v1/models; use \"Refresh models\" to merge new entries.",
+        "3": "API version pinned to anthropic-version: 2026-10-21 (no beta headers)."
+      }
+    }
+  },
+  "model": {
+    "title": "Default model",
+    "description": "Used in new conversations and as the composer's initial selection.",
+    "startedWarning": "The current conversation has already started. The changes below apply only to upcoming conversations.",
+    "provider": {
+      "label": "Provider",
+      "description": "OpenCode Go (subscription), OpenCode Zen (credits) or OpenAI (ChatGPT plan or API key).",
+      "aria": "Default provider"
+    },
+    "model": {
+      "label": "Model",
+      "description": "Unavailable models are not listed here.",
+      "aria": "Default model"
+    },
+    "estimated": "Estimated",
+    "estimatedTitle": "Model listed by your account: estimated capabilities.",
+    "context": "{{window}} context",
+    "includedInPlan": "Included in the ChatGPT plan",
+    "reasoningNote": "The reasoning default applies to the chosen model; models without support ignore this setting.",
+    "missingModel": "The saved model ({{model}}) is not in the current catalog.",
+    "tip": "Tip",
+    "tipBody": "You can also switch models from the selector at the top of the window or from the composer, without changing the default for upcoming conversations."
+  },
+  "instructions": {
+    "title": "System instructions",
+    "description": "A custom prompt attached to every conversation, on top of Zylara's default instructions.",
+    "aria": "System instructions",
+    "placeholder": "E.g.: “Respond in English, concisely. Use tables when it makes sense and cite sources when using search.”\n\nLeave blank to use only Zylara's default instructions (language, tools, generative UI format and safety).",
+    "counter": "{{value}} / {{max}} characters",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "autoSave": "Automatic saving",
+    "footer": "Custom instructions do not replace the internal safety rules, the generative UI format or the artifact policy — they only guide the tone and style of responses."
+  },
+  "tools": {
+    "agent": {
+      "title": "Agent tools",
+      "description": "What the model can do during a response.",
+      "webSearch": {
+        "label": "Web search",
+        "description": "Lets the model search the internet and cite sources in the chat.",
+        "aria": "Enable web search"
+      },
+      "fileCreation": {
+        "label": "Create files",
+        "description": "Lets the model generate artifacts (documents, spreadsheets, code, HTML).",
+        "aria": "Enable file creation"
+      },
+      "attachments": {
+        "label": "Send attachments to the model",
+        "description": "Includes extracted text and images from attachments in the context.",
+        "aria": "Send attachments to the model"
+      },
+      "autoTitle": {
+        "label": "Generate automatic title",
+        "description": "Creates a short conversation title on the first turn.",
+        "aria": "Generate automatic title"
+      }
+    },
+    "cache": {
+      "title": "Prompt cache",
+      "description": "How Zylara reuses the prompt prefix on providers that measure cache.",
+      "indicator": {
+        "label": "Show indicator",
+        "description": "Shows the real-time cache hit in the Code context meter and in the Chat composer. Turning it off only hides the indicator: measurement continues.",
+        "aria": "Show cache indicator"
+      },
+      "anthropicTtl": {
+        "label": "Cache TTL (Anthropic)",
+        "description": "How long the prefix stays cached on the Anthropic API. 1 h costs 2× on writes and reduces renewals mid-turn; 5 min costs 1.25×.",
+        "aria": "Anthropic cache TTL",
+        "oneHour": "1 hour (default)",
+        "fiveMinutes": "5 minutes"
+      },
+      "openaiRetention": {
+        "label": "Cache retention (OpenAI)",
+        "description": "How long OpenAI keeps the prefix in cache. Automatic lets the provider decide.",
+        "aria": "OpenAI cache retention",
+        "auto": "Automatic",
+        "memory": "In memory",
+        "day": "24 hours"
+      }
+    },
+    "execution": {
+      "title": "Execution",
+      "description": "Limits of the agent loop and model creativity.",
+      "maxSteps": {
+        "label": "Maximum steps",
+        "description_one": "The agent runs up to {{count}} step (tool → response) per turn.",
+        "description_other": "The agent runs up to {{count}} steps (tool → response) per turn.",
+        "aria": "Maximum agent steps"
+      },
+      "temperature": {
+        "label": "Customize temperature",
+        "description": "When off, each provider uses its own default.",
+        "sliderDescription": "Low values are more deterministic; high values are more creative.",
+        "aria": "Temperature"
+      }
+    },
+    "codeExecution": {
+      "title": "Code execution",
+      "description": "Lets the agent run scripts to create documents, spreadsheets, presentations and images.",
+      "enable": {
+        "label": "Allow code execution",
+        "description": "Opt-in: the model only receives the execution tool when this is on.",
+        "aria": "Enable code execution"
+      },
+      "warning": "The code runs on this machine with your permissions and network access — <b>it is not a system sandbox</b>. The app's API keys are not passed through and every run has a time limit, but enable it only if you trust what the model will run.",
+      "timeout": {
+        "label": "Execution timeout",
+        "description_one": "Each script is interrupted after {{count}} second.",
+        "description_other": "Each script is interrupted after {{count}} seconds.",
+        "aria": "Execution timeout"
+      }
+    },
+    "sandbox": {
+      "title": "Command sandbox",
+      "description": "Where the code agent's commands run. The default runs on this machine; Docker isolates the process with the workspace mounted at /workspace.",
+      "environment": {
+        "label": "Environment",
+        "description": "The panel's interactive terminal stays local; this option applies to the run_command/run_checks tools and agent jobs.",
+        "aria": "Agent command execution environment",
+        "local": "This computer",
+        "docker": "Docker"
+      },
+      "image": {
+        "label": "Docker image",
+        "description": "It must exist in the local Docker (the app does not download images automatically). E.g. node:22-bookworm, python:3.12, ubuntu:24.04.",
+        "aria": "Docker image for agent commands"
+      },
+      "network": {
+        "label": "Network in the container",
+        "description": "When off, the command runs with --network none. Turn it on only when the task needs to download dependencies or access the internet.",
+        "aria": "Allow network in the Docker container"
+      },
+      "memory": {
+        "label": "Memory (MB)",
+        "description": "Docker sandbox limit.",
+        "aria": "Docker sandbox memory in MB"
+      },
+      "cpus": {
+        "label": "CPUs",
+        "description": "Sandbox CPU limit.",
+        "aria": "Docker sandbox CPUs"
+      },
+      "pids": {
+        "label": "PIDs",
+        "description": "Sandbox process limit.",
+        "aria": "Docker sandbox PID limit"
+      },
+      "readOnlyRoot": {
+        "label": "Read-only rootfs",
+        "description": "The workspace at /workspace stays writable; the rest of the container is read-only.",
+        "aria": "Mount the container rootfs as read-only"
+      },
+      "warning": "Docker Desktop/Engine must be installed and running. The workspace is mounted at <code>/workspace</code>; the container can read and change those files, but has no access to the rest of the computer. Still, review what the agent runs.",
+      "validate": "Validate image",
+      "invalidImage": "Invalid Docker image",
+      "pullAria": "Download image for commands",
+      "download": "Download image",
+      "available": "Image available: {{image}}",
+      "pullFailed": "Could not download the image"
+    },
+    "codeSessions": {
+      "title": "Code sessions",
+      "description": "Defaults for new sessions in the Code layout and how the workbench shows changes.",
+      "permission": {
+        "label": "Default permission mode",
+        "description": "Every new Code session starts in this mode. You can change it from the permission chip in the composer at any time — the change here applies to upcoming sessions.",
+        "aria": "Default permission mode for new Code sessions",
+        "read_only": "Read only",
+        "review": "Review",
+        "edit": "Edit",
+        "autonomous": "Autonomous"
+      },
+      "diff": {
+        "label": "Open file diff",
+        "description": "Choose where a file's diff from the Changes tab opens when clicked.",
+        "aria": "Where to open the file diff",
+        "tab": "In a chat tab (default)",
+        "panel": "In the side panel"
+      }
+    },
+    "environment": {
+      "title": "Code environment",
+      "description": "Detected on this machine; nothing is installed automatically.",
+      "checking": "Checking code environment",
+      "checkingShort": "Checking environment…",
+      "errorTitle": "Could not check the environment",
+      "retry": "Check again",
+      "notFound": "Not found",
+      "versionUnknown": "unknown version",
+      "sourceConfigured": "configured path",
+      "sourcePath": "detected in PATH",
+      "python": {
+        "label": "Python",
+        "description": "Interpreter used by scripts that generate documents and spreadsheets."
+      },
+      "node": {
+        "label": "Node.js",
+        "description": "Interpreter used to run JavaScript scripts."
+      },
+      "packages": {
+        "title": "Optional packages",
+        "description": "Expand the formats supported in Python scripts. The bundled helpers use only the standard library.",
+        "available": "available",
+        "unavailable": "not installed",
+        "none": "No optional packages verified.",
+        "installHint": "To install the optional packages, run:",
+        "copyInstall": "Copy installation command",
+        "nothingInstalled": "Nothing is installed automatically."
+      }
+    },
+    "skills": {
+      "title": "Skills",
+      "description": "Instructions and scripts the agent can consult for specialized tasks.",
+      "panel": {
+        "label": "Skills panel in the sidebar",
+        "description": "Shows the Skills item in the sidebar. When off, management is still available here.",
+        "aria": "Show skills panel in the sidebar"
+      },
+      "loading": "Loading skills",
+      "loadingShort": "Loading skills…",
+      "error": "Could not load skills. Try checking the environment again.",
+      "count_one": "{{count}} skill",
+      "count_other": "{{count}} skills",
+      "ofZylara": "{{count}} from Zylara",
+      "external_one": "{{count}} external",
+      "external_other": "{{count}} external",
+      "bundled_one": "{{count}} bundled",
+      "bundled_other": "{{count}} bundled",
+      "other_one": "{{count}} other",
+      "other_other": "{{count}} others",
+      "manage": "Manage skills",
+      "openFolder": "Open skills folder",
+      "openFolderFailed": "Could not open the skills folder",
+      "copied": "Command copied",
+      "copyFailed": "Could not copy the command",
+      "disabled": "Disabled",
+      "empty": "No skills found."
+    }
+  },
+  "agents": {
+    "intro": "Model, instructions, workspace, permissions and capabilities are defined per agent in the persona editor. This tab only gathers the global preferences of the Agents layout.",
+    "queue": {
+      "title": "Execution and queue",
+      "description": "How many turns can run at the same time and each thread's queue size. Turns beyond the limit wait in their own conversation's queue.",
+      "global": {
+        "label": "Concurrent turns (global)",
+        "description": "Up to {{count}} turns running at the same time across the app. The backend enforces this limit too.",
+        "aria": "Maximum concurrent turns"
+      },
+      "perAgent": {
+        "label": "Concurrent turns per agent",
+        "description": "Prevents a single agent from taking every slot. Default: 1.",
+        "aria": "Maximum concurrent turns per agent"
+      },
+      "queueLength": {
+        "label": "Queued messages per thread",
+        "description": "When the queue reaches this size, new messages are refused with a warning.",
+        "aria": "Maximum queued messages per thread"
+      }
+    },
+    "budget": {
+      "title": "Budget",
+      "description": "Daily spending limit for agents. The backend refuses new turns once the limit is reached.",
+      "dailyLimit": {
+        "label": "Daily limit per agent (US$)",
+        "description": "Empty turns it off. The day's accumulated cost considers all of the agent's threads.",
+        "placeholder": "No limit",
+        "aria": "Daily cost limit per agent in dollars"
+      }
+    },
+    "notifications": {
+      "title": "Notifications",
+      "description": "Alerts for background agent threads. The OS and the in-app toast respect these options.",
+      "enabled": {
+        "label": "Notifications enabled",
+        "description": "When off, no background notification is emitted.",
+        "aria": "Notifications enabled"
+      },
+      "dnd": {
+        "label": "Do not disturb",
+        "description": "Keeps alerts only in the Activity dialog, with no toast or OS notification.",
+        "aria": "Do not disturb"
+      },
+      "approvals": {
+        "label": "Approvals",
+        "description": "Actions that need you.",
+        "aria": "Notify approvals"
+      },
+      "questions": {
+        "label": "Questions",
+        "description": "Structured questions from the agent.",
+        "aria": "Notify questions"
+      },
+      "completions": {
+        "label": "Completions",
+        "description": "Completed agent turns.",
+        "aria": "Notify completions"
+      },
+      "tasks": {
+        "label": "Tasks",
+        "description": "Tasks that need a person.",
+        "aria": "Notify tasks"
+      }
+    },
+    "browser": {
+      "title": "Controlled browser",
+      "description": "Host policy for the CDP browser. The denylist wins over the allowlist; cloud metadata is always blocked.",
+      "allowed": {
+        "label": "Allowed hosts",
+        "description": "Comma-separated list (e.g. github.com, notion.so). Empty allows public hosts.",
+        "aria": "Hosts allowed in the browser",
+        "placeholder": "github.com, notion.so"
+      },
+      "blocked": {
+        "label": "Blocked hosts",
+        "description": "Always denied; evaluated before the allowlist.",
+        "aria": "Hosts blocked in the browser",
+        "placeholder": "bank.com, internal.admin"
+      },
+      "privateHosts": {
+        "label": "Allow private hosts",
+        "description": "Localhost, 127.0.0.1 and RFC1918 networks. Turn it off to avoid SSRF; required for local dev servers.",
+        "aria": "Allow private hosts in the browser"
+      },
+      "routines": {
+        "label": "Browser in routines",
+        "description": "Allows browser actions in tasks/routines without an approval card. The host allowlist/denylist still applies; desktop stays fail-closed.",
+        "aria": "Allow browser in unattended routines"
+      }
+    },
+    "desktopApps": {
+      "title": "Desktop apps",
+      "description": "Allowlist/denylist by process or window title, applied before any click/keypress. The denylist wins.",
+      "allowed": {
+        "label": "Allowed apps",
+        "description": "Comma-separated (e.g. notepad, chrome, code). Empty allows all except the denylist.",
+        "aria": "Apps allowed on the computer",
+        "placeholder": "notepad, chrome"
+      },
+      "blocked": {
+        "label": "Blocked apps",
+        "description": "Always denied; evaluated before the allowlist.",
+        "aria": "Apps blocked on the computer",
+        "placeholder": "1password, banking"
+      }
+    },
+    "computer": {
+      "title": "Private desktop (computer use)",
+      "description": "Desktop isolated in Docker, independent from the command sandbox. These options apply when the agent uses the “Private desktop” environment.",
+      "image": {
+        "label": "Computer use image",
+        "description": "Graphical image published on GHCR (Xvfb + Chromium + xdotool + noVNC). Download it with the button or provide another image the daemon can reach. For production, prefer a fixed digest.",
+        "aria": "Computer use Docker image"
+      },
+      "download": "Download image",
+      "downloadAria": "Download computer use image",
+      "downloaded": "Computer use image downloaded",
+      "downloadFailed": "Could not download the image",
+      "usePublished": "Use published image",
+      "container": {
+        "label": "Computer use container",
+        "description": "Fixed name of the graphical container. It is created on the first screenshot and kept between actions.",
+        "aria": "Computer use container name"
+      },
+      "actionsPerTurn": {
+        "label": "Actions per turn",
+        "description": "Computer use limit in a single turn.",
+        "aria": "Maximum computer use actions per turn"
+      },
+      "actionsPerHour": {
+        "label": "Actions per hour",
+        "description": "Per-agent limit in a rolling one-hour window.",
+        "aria": "Maximum computer use actions per hour"
+      },
+      "warning": "Docker Desktop/Engine must be installed and running. The agent controls an isolated display in the container; noVNC stays on loopback, only for you to watch.",
+      "cleanup": "Clean up containers",
+      "cleanupNone": "No active Zylara container",
+      "cleanupRemoved_one": "{{count}} container removed",
+      "cleanupRemoved_other": "{{count}} containers removed",
+      "cleanupFailed": "Could not clean up",
+      "diagnostics": "Diagnostics",
+      "diagnosticsTitle": "Diagnostics · v{{version}}",
+      "diagnosticsBody": "{{turns}} active turn(s) · {{tasks}} open task(s) · {{sessions}} computer use session(s)",
+      "diagnosticsFailed": "Could not read diagnostics"
+    }
+  },
+  "data": {
+    "storage": {
+      "title": "Storage",
+      "description": "Everything stays on this machine only.",
+      "folder": {
+        "label": "Data folder",
+        "description": "Conversations (SQLite), attachments, artifacts and settings."
+      },
+      "open": "Open folder",
+      "location": "Location"
+    },
+    "danger": {
+      "title": "Danger zone",
+      "description": "These actions are permanent and cannot be undone.",
+      "clearTitle": "Clear all data",
+      "clearDescription": "Deletes conversations, messages, attachments, artifacts and saved API keys.",
+      "clearAction": "Clear data…",
+      "confirmTitle": "Are you sure you want to clear the data?",
+      "confirmBody": "Conversations, attachments, artifacts, settings and API keys will be deleted from this machine.",
+      "finalTitle": "Final confirmation",
+      "finalBody": "This is the last confirmation. Once deleted, conversations cannot be recovered.",
+      "continue": "Continue",
+      "deleteAll": "Delete everything permanently"
+    },
+    "toasts": {
+      "clearedTitle": "Data erased",
+      "clearedDescription": "Settings were restored to their defaults.",
+      "clearFailed": "Could not clear the data"
+    }
+  },
+  "about": {
+    "title": "About Zylara",
+    "description": "Local-first desktop chat with OpenCode Go, Zen, OpenAI (ChatGPT) and Anthropic.",
+    "stack": "Tauri 2 · React 19 · Tailwind CSS 4",
+    "tauri": {
+      "label": "Tauri",
+      "description": "Desktop app runtime"
+    },
+    "platform": {
+      "label": "Platform"
+    },
+    "catalog": {
+      "label": "Model catalog",
+      "description": "Generated on {{date}}",
+      "value": "v{{version}} · {{count}} models"
+    },
+    "storage": {
+      "label": "Storage",
+      "description": "Local-first: nothing leaves your machine unless you send it.",
+      "value": "SQLite + local files"
+    },
+    "links": {
+      "title": "Links",
+      "description": "Opens in the default browser, never inside the app.",
+      "opencode": {
+        "label": "OpenCode",
+        "description": "Official site of the Go and Zen providers.",
+        "action": "Open site"
+      },
+      "console": {
+        "label": "OpenCode Console",
+        "description": "Manage subscription, credits and API keys.",
+        "action": "Open console"
+      },
+      "chatgpt": {
+        "label": "ChatGPT (OpenAI)",
+        "description": "Sign in with your ChatGPT account and follow plan usage.",
+        "action": "Open ChatGPT"
+      },
+      "usage": {
+        "label": "ChatGPT plan usage",
+        "description": "Your plan's shared limits and consumption.",
+        "action": "Manage usage"
+      },
+      "repository": {
+        "label": "Repository",
+        "description": "Source code, releases and project news.",
+        "action": "Open GitHub"
+      }
+    },
+    "footer": "Zylara can make mistakes. Verify important information. API keys stay in the local backend and are never exposed to the interface."
+  },
+  "update": {
+    "title": "Updates",
+    "description": "Downloads and installs versions published on GitHub. The download is verified with SHA-256 and installation is always confirmed by you.",
+    "current": {
+      "label": "Current version",
+      "description": "Version of Zylara currently running."
+    },
+    "auto": {
+      "label": "Automatic updates",
+      "description": "Checks on startup and every hour while the app is open. Downloading and installing remain your decisions.",
+      "aria": "Check for updates automatically"
+    },
+    "status": {
+      "label": "Status",
+      "checking": "Checking for updates…",
+      "downloading": "Downloading update…",
+      "verifying": "Verifying download integrity…",
+      "installing": "Opening installer…",
+      "downloadError": "Failed to download the update",
+      "available": "Update available",
+      "upToDate": "You are on the latest version",
+      "checkError": "Could not check for updates",
+      "idleChecked": "Everything up to date",
+      "idle": "No check completed yet"
+    },
+    "detail": {
+      "lastResult": "{{error}} Showing the last result.",
+      "availableWithAsset": "{{checked}} · for {{platform}}.",
+      "availableNoAsset": "{{checked}} · no installer for this platform.",
+      "recentCheck": "Recent check",
+      "idle": "Zylara checks GitHub for stable releases. Nothing is installed without your confirmation."
+    },
+    "noConnection": "Offline",
+    "checkNow": "Check now",
+    "viewOnGithub": "View on GitHub",
+    "skip": "Skip this version",
+    "skipped": "Version v{{version}} is skipped.",
+    "unskip": "Show again"
+  }
+}

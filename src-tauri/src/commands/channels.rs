@@ -283,26 +283,30 @@ pub async fn post_agent_channel_message(
 ) -> Result<AgentChannelPostResult, String> {
     let content = content.trim().to_string();
     if content.chars().count() > 16_000 {
-        return Err("AGENT_CHANNEL_INVALID: a mensagem passa de 16.000 caracteres.".to_string());
+        return Err(crate::i18n::t("channels.errors.messageTooLong"));
     }
     let channel = state
         .db
         .get_agent_channel(&channel_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_CHANNEL_NOT_FOUND: canal `{channel_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args(
+                "channels.errors.notFound",
+                &[("channel_id", &channel_id)],
+            )
+        })?;
     if channel.member_ids.is_empty() {
-        return Err("AGENT_CHANNEL_EMPTY: adicione pelo menos um agente ao canal.".to_string());
+        return Err(crate::i18n::t("channels.errors.emptyChannel"));
     }
     if channel.kind == "dm" {
         return Err(
-            "AGENT_CHANNEL_DM_READONLY: conversas diretas são geradas pelo inbox dos agentes."
-                .to_string(),
+            crate::i18n::t("channels.errors.dmReadOnly"),
         );
     }
     let attachments = resolve_attachments(&state.db, &attachment_ids)
         .map_err(|error| format!("AGENT_CHANNEL_INVALID: {error}"))?;
     if content.is_empty() && attachments.is_empty() {
-        return Err("AGENT_CHANNEL_INVALID: a mensagem não pode ser vazia.".to_string());
+        return Err(crate::i18n::t("channels.errors.emptyMessage"));
     }
 
     let _ = state
@@ -386,16 +390,25 @@ pub async fn post_agent_channel_message(
         let agent = match db.get_agent(agent_id) {
             Ok(Some(agent)) => agent,
             Ok(None) => {
-                errors.push(format!("Agente `{agent_id}` não existe."));
+                errors.push(crate::i18n::t_args(
+                    "channels.errors.agentMissing",
+                    &[("agent_id", agent_id)],
+                ));
                 continue;
             }
             Err(error) => {
-                errors.push(format!("Falha ao ler o agente `{agent_id}`: {error:#}"));
+                errors.push(crate::i18n::t_args(
+                    "channels.errors.readAgentFailed",
+                    &[("agent_id", agent_id), ("error", &format!("{error:#}"))],
+                ));
                 continue;
             }
         };
         if agent.is_archived() {
-            errors.push(format!("Agente `{}` está arquivado.", agent.name));
+            errors.push(crate::i18n::t_args(
+                "channels.errors.agentArchived",
+                &[("agent", &agent.name)],
+            ));
             continue;
         }
         let conversation = match db.get_or_create_channel_conversation(
@@ -405,7 +418,10 @@ pub async fn post_agent_channel_message(
         ) {
             Ok(conversation) => conversation,
             Err(error) => {
-                errors.push(format!("Falha ao criar a thread de {}: {error:#}", agent.name));
+                errors.push(crate::i18n::t_args(
+                    "channels.errors.createThreadFailed",
+                    &[("agent", &agent.name), ("error", &format!("{error:#}"))],
+                ));
                 continue;
             }
         };
@@ -428,7 +444,10 @@ pub async fn post_agent_channel_message(
         let profile = TurnProfile::Code;
         let turn_id = uuid::Uuid::new_v4().to_string();
         let Some(cancel) = state.register_turn_if_idle(&turn_id, &conversation.id) else {
-            errors.push(format!("{} está com outro turno em andamento.", agent.name));
+            errors.push(crate::i18n::t_args(
+                "channels.errors.agentBusy",
+                &[("agent", &agent.name)],
+            ));
             continue;
         };
         let _turn_guard = state.turn_guard(&turn_id);
@@ -481,7 +500,10 @@ pub async fn post_agent_channel_message(
             Ok(result) => {
                 let reply = result.assistant_message.content.trim().to_string();
                 if reply.is_empty() {
-                    errors.push(format!("{} não devolveu texto.", agent.name));
+                    errors.push(crate::i18n::t_args(
+                        "channels.errors.agentNoText",
+                        &[("agent", &agent.name)],
+                    ));
                 } else {
                     let _ = db.append_agent_channel_message(
                         &channel.id,

@@ -1,0 +1,289 @@
+{
+  "groups": {
+    "conversas": "Conversations",
+    "navegacao": "Navigation",
+    "ferramentas": "Tools",
+    "aparencia": "Appearance",
+    "configuracoes": "Settings",
+    "sistema": "System"
+  },
+  "sections": {
+    "suggestions": "Suggestions",
+    "conversations": "Conversations found",
+    "recentConversations": "Recent conversations",
+    "fallbackNote": "History search unavailable; showing title and preview."
+  },
+  "dialog": {
+    "title": "Command palette",
+    "description": "Search conversations or run Zylara commands. Use the arrows to navigate, Enter to execute and Esc to clear the search or close."
+  },
+  "aria": {
+    "input": "Search conversations or commands",
+    "list": "Commands and conversations"
+  },
+  "placeholders": {
+    "commands": "Search commands…",
+    "conversations": "Search conversations…",
+    "all": "Search conversations or commands…"
+  },
+  "empty": {
+    "queryTitle": "No results for “{{query}}”",
+    "conversationsTitle": "No conversations yet",
+    "commandsTitle": "No commands found",
+    "commandsHint": "Try another term.",
+    "conversationMinChars": "Type at least 2 characters to search the history.",
+    "conversationsHint": "Type the title or a snippet of a message.",
+    "allHint": "Try another term or use > for commands and # for conversations."
+  },
+  "footer": {
+    "navigate": "navigate",
+    "execute": "execute",
+    "pin": "pin",
+    "unpin": "unpin",
+    "clearSearch": "clear search",
+    "close": "close",
+    "scopes": "> commands · # conversations",
+    "searching": "Searching conversations…",
+    "noResults": "No results",
+    "commandsOne": "{{count}} command",
+    "commandsOther": "{{count}} commands",
+    "conversationsOne": "{{count}} conversation",
+    "conversationsOther": "{{count}} conversations"
+  },
+  "announce": {
+    "searching": "Searching conversations",
+    "resultsOne": "{{count}} result",
+    "resultsOther": "{{count}} results"
+  },
+  "toasts": {
+    "noAnswer": "No answer to copy yet",
+    "answerCopied": "Answer copied",
+    "copyFailed": "Could not copy",
+    "noConversation": "No conversation open",
+    "exported": "Conversation exported",
+    "exportFailed": "Could not export",
+    "noArtifacts": "No artifacts in this conversation",
+    "noSources": "No sources in this conversation",
+    "openDataDirFailed": "Could not open the data folder",
+    "openSkillsDirFailed": "Could not open the skills folder",
+    "catalogFailed": "Could not refresh the catalog",
+    "catalogUpdated": "Model catalog updated",
+    "conversationPinned": "Conversation pinned",
+    "conversationUnpinned": "Conversation unpinned",
+    "attachmentsRemoved": "Attachments removed",
+    "toolEnabled": "{{tool}} enabled",
+    "toolDisabled": "{{tool}} disabled",
+    "runFailed": "Could not run the action"
+  },
+  "tools": {
+    "webSearch": "Web search",
+    "fileCreation": "File creation",
+    "codeExecution": "Code execution"
+  },
+  "themes": {
+    "dark": "dark",
+    "light": "light"
+  },
+  "settingsTabDescriptions": {
+    "general": "Theme, language and text size",
+    "providers": "API keys and provider status",
+    "model": "Default model and thinking mode",
+    "instructions": "System instructions",
+    "tools": "Web search, file creation, execution and steps",
+    "agents": "Concurrency, budget, notifications and computer use",
+    "data": "Data folder, export and cleanup",
+    "about": "Version and app information"
+  },
+  "actions": {
+    "newConversation": {
+      "codeLabel": "New session",
+      "agentLabel": "New conversation with agent",
+      "chatLabel": "New chat",
+      "codeDescription": "Start a new session in the Code layout",
+      "agentDescription": "Start a conversation with the selected agent",
+      "chatDescription": "Start a blank conversation",
+      "codeKeywords": "new session code create",
+      "agentKeywords": "new conversation agent create",
+      "chatKeywords": "new conversation create blank"
+    },
+    "pinConversation": {
+      "pinLabel": "Pin conversation",
+      "unpinLabel": "Unpin conversation",
+      "keywords": "pin top"
+    },
+    "exportMarkdown": {
+      "label": "Export conversation (Markdown)",
+      "description": "Save the current conversation as Markdown",
+      "keywords": "save markdown file"
+    },
+    "exportJson": {
+      "label": "Export conversation (JSON)",
+      "description": "Save the conversation as structured data",
+      "keywords": "save json data backup"
+    },
+    "copyLastAnswer": {
+      "label": "Copy last answer",
+      "description": "Copies the text of the most recent answer",
+      "keywords": "copy clipboard"
+    },
+    "clearAttachments": {
+      "label": "Clear attachments",
+      "keywords": "files remove composer",
+      "descriptionOne": "Remove 1 pending attachment from the composer",
+      "descriptionOther": "Remove {{count}} pending attachments from the composer"
+    },
+    "stopResponse": {
+      "label": "Stop response",
+      "description": "Interrupts the response in progress",
+      "keywords": "cancel stop interrupt"
+    },
+    "regenerateResponse": {
+      "label": "Regenerate response",
+      "description": "Generates the last answer again",
+      "keywords": "try again redo"
+    },
+    "modeCode": {
+      "label": "Go to Code mode",
+      "description": "Open the code workspace (sessions and changes)",
+      "keywords": "layout mode code chat conversation workspace agent"
+    },
+    "modeChat": {
+      "label": "Go to Chat mode",
+      "description": "Return to the conversation layout with the assistant",
+      "keywords": "layout mode code chat conversation workspace agent"
+    },
+    "modeAgents": {
+      "label": "Go to Agents mode",
+      "description": "Open the agent team and personas",
+      "keywords": "layout mode agents team personas"
+    },
+    "newAgent": {
+      "label": "New agent",
+      "description": "Create a persona with identity, model and instructions",
+      "keywords": "agent new create persona"
+    },
+    "editAgent": {
+      "label": "Edit agent",
+      "description": "Open the selected agent's settings",
+      "keywords": "agent edit instructions model"
+    },
+    "focusComposer": {
+      "label": "Focus message field",
+      "description": "Moves the cursor to the composer",
+      "keywords": "input write message"
+    },
+    "cacheDiagnostics": {
+      "label": "Cache diagnostics",
+      "description": "Per-request samples, prefix breaks and raw usage of the active conversation",
+      "keywords": "cache diagnostics prompt tokens hit samples usage provider prefix break"
+    },
+    "toggleSidebar": {
+      "label": "Toggle sidebar",
+      "description": "Show or hide the history",
+      "keywords": "sidebar history side"
+    },
+    "openArtifacts": {
+      "label": "Open artifacts panel",
+      "descriptionEmpty": "No artifacts in this conversation",
+      "keywords": "files canvas preview",
+      "descriptionOne": "{{count}} artifact in this conversation",
+      "descriptionOther": "{{count}} artifacts in this conversation"
+    },
+    "openSources": {
+      "label": "Open sources panel",
+      "descriptionEmpty": "No sources in this conversation",
+      "keywords": "citations links references web",
+      "descriptionOne": "{{count}} source in this conversation",
+      "descriptionOther": "{{count}} sources in this conversation"
+    },
+    "openLibrary": {
+      "label": "Open library",
+      "description": "All conversation files and the ones you uploaded",
+      "keywords": "library files favorites upload uploaded documents"
+    },
+    "importLibrary": {
+      "label": "Send files to the library",
+      "description": "Import files from the computer to use in the chat",
+      "keywords": "upload import send files library attach"
+    },
+    "manageSkills": {
+      "label": "Manage skills",
+      "description": "Enable, disable and delete agent skills",
+      "keywords": "skills agent"
+    },
+    "openSkillsFolder": {
+      "label": "Open skills folder",
+      "description": "Open the user's skills folder",
+      "keywords": "skills folder files"
+    },
+    "backToSession": {
+      "label": "Back to session",
+      "description": "Leave skill management and return to the agent",
+      "keywords": "session agent back code"
+    },
+    "backToChat": {
+      "label": "Back to chat",
+      "descriptionLibrary": "Leave the library",
+      "descriptionSkills": "Leave skill management",
+      "keywords": "chat conversation back"
+    },
+    "switchModel": {
+      "label": "Switch model",
+      "description": "Choose the model and thinking mode",
+      "keywords": "model reasoning thinking provider"
+    },
+    "webSearch": {
+      "enableLabel": "Enable web search",
+      "disableLabel": "Disable web search",
+      "enabledDescription": "Tool active on the next turn",
+      "disabledDescription": "Tool off in the composer",
+      "keywords": "web search internet research"
+    },
+    "fileCreation": {
+      "enableLabel": "Enable file creation",
+      "disableLabel": "Disable file creation",
+      "enabledDescription": "Tool active on the next turn",
+      "disabledDescription": "Tool off in the composer",
+      "keywords": "files create documents artifacts"
+    },
+    "codeExecution": {
+      "enableLabel": "Enable code execution",
+      "disableLabel": "Disable code execution",
+      "enabledDescription": "run_code active on the next turn",
+      "disabledDescription": "run_code off in settings",
+      "keywords": "code python node scripts run_code"
+    },
+    "toggleTheme": {
+      "label": "Toggle theme",
+      "description": "Current theme: {{theme}} — switches to {{next}}",
+      "keywords": "dark light appearance"
+    },
+    "systemTheme": {
+      "label": "Follow system theme",
+      "description": "Uses the operating system appearance preference",
+      "keywords": "system automatic auto appearance"
+    },
+    "openSettings": {
+      "label": "Open settings",
+      "description": "Theme, providers, default model and tools",
+      "keywords": "preferences adjustments settings"
+    },
+    "openDataFolder": {
+      "label": "Open data folder",
+      "description": "Zylara database, attachments and artifacts",
+      "keywords": "data database files folder"
+    },
+    "refreshCatalog": {
+      "label": "Reload model catalog",
+      "description": "Fetch the updated list of available models",
+      "keywords": "models catalog update refresh"
+    }
+  },
+  "conversationRow": {
+    "noMessages": "No messages",
+    "oneMessage": "1 message",
+    "messages": "{{count}} messages",
+    "contentBadge": "Content",
+    "contentMatch": "Match in the conversation content"
+  }
+}

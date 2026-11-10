@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react';
 import { AlertCircle, ExternalLink, Sparkles, Star } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { t } from '@/lib/i18n';
 import { modelDetails } from '@/lib/modelMenu';
 import type { ProviderAuth, ProviderAuthStatus, ProviderKeyStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Badge, IconButton } from '@/components/ui';
 import { CapabilityBadges } from './CapabilityBadges';
 import { FamilyAvatar } from './FamilyAvatar';
-import type { ModelListEntry } from '@/lib/modelMenu';
+import type { ModelDetailLineId, ModelListEntry } from '@/lib/modelMenu';
 
 export interface ModelDetailPanelProps {
   entry: ModelListEntry | null;
@@ -34,7 +36,12 @@ export interface ModelDetailPanelProps {
   className?: string;
 }
 
-const COMPACT_LINES = ['Contexto', 'Saída máx.', 'Custo (1M tok.)', 'Protocolo'];
+const COMPACT_LINES: readonly ModelDetailLineId[] = [
+  'context',
+  'maxOutput',
+  'cost',
+  'protocol',
+];
 
 const STATUS_TONES: Record<string, string> = {
   unavailable: 'bg-danger-soft text-danger',
@@ -49,18 +56,18 @@ function accountPrompt(
   switch (authState) {
     case 'reauth-required':
       return {
-        text: 'Sua sessão do ChatGPT expirou. Entre novamente para continuar usando o plano.',
-        action: 'Conectar novamente',
+        text: t('models:detail.accountReauth'),
+        action: t('models:detail.accountReauthAction'),
       };
     case 'plan-disabled':
       return {
-        text: 'Sua conta ChatGPT está conectada, mas o uso do plano não está ativado para este app.',
-        action: 'Ativar uso do plano',
+        text: t('models:detail.accountPlanDisabled'),
+        action: t('models:detail.accountPlanDisabledAction'),
       };
     default:
       return {
-        text: 'Conecte sua conta ChatGPT para usar estes modelos com o seu plano.',
-        action: 'Conectar conta ChatGPT',
+        text: t('models:detail.accountSignIn'),
+        action: t('models:detail.accountSignInAction'),
       };
   }
 }
@@ -84,10 +91,11 @@ export function ModelDetailPanel({
   onConfigureProvider,
   onConnectAccount,
   footer,
-  emptyTitle = 'Selecione um modelo',
-  emptyDescription = 'Os detalhes e o modo de pensamento aparecem aqui.',
+  emptyTitle,
+  emptyDescription,
   className,
 }: ModelDetailPanelProps) {
+  const { t: translate } = useTranslation('models');
   const compact = variant === 'compact';
   const details = entry ? modelDetails(entry.model, entry.providerName) : null;
 
@@ -99,8 +107,12 @@ export function ModelDetailPanel({
           className,
         )}
       >
-        <p className="text-[13px] font-medium text-foreground">{emptyTitle}</p>
-        <p className="text-xs leading-relaxed text-foreground-muted">{emptyDescription}</p>
+        <p className="text-[13px] font-medium text-foreground">
+          {emptyTitle ?? translate('detail.emptyTitle')}
+        </p>
+        <p className="text-xs leading-relaxed text-foreground-muted">
+          {emptyDescription ?? translate('detail.emptyDescription')}
+        </p>
       </div>
     );
   }
@@ -120,9 +132,9 @@ export function ModelDetailPanel({
   const showAccountCta = Boolean(connectAction);
 
   const lines = (compact
-    ? details.lines.filter((line) => COMPACT_LINES.includes(line.label))
+    ? details.lines.filter((line) => COMPACT_LINES.includes(line.id))
     : details.lines
-  ).filter((line) => !(includedInPlan && line.label === 'Custo (1M tok.)'));
+  ).filter((line) => !(includedInPlan && line.id === 'cost'));
   const statusTone = STATUS_TONES[model.status];
 
   return (
@@ -145,7 +157,9 @@ export function ModelDetailPanel({
         </div>
         <IconButton
           label={
-            favorite ? `Remover ${model.name} dos favoritos` : `Favoritar ${model.name}`
+            favorite
+              ? translate('detail.favoriteRemove', { name: model.name })
+              : translate('detail.favoriteAdd', { name: model.name })
           }
           size="sm"
           active={favorite}
@@ -168,11 +182,8 @@ export function ModelDetailPanel({
         <div className="flex flex-wrap items-center gap-1">
           <CapabilityBadges model={model} max={compact ? 3 : 6} />
           {model.estimated ? (
-            <Badge
-              tone="outline"
-              title="Modelo listado pela sua conta: capacidades estimadas."
-            >
-              Estimado
+            <Badge tone="outline" title={translate('detail.estimatedTitle')}>
+              {translate('detail.estimated')}
             </Badge>
           ) : null}
           {statusTone && details.statusNote ? (
@@ -184,10 +195,10 @@ export function ModelDetailPanel({
               title={details.statusNote}
             >
               {model.status === 'unavailable'
-                ? 'Indisponível'
+                ? translate('badges.unavailable')
                 : model.status === 'free'
-                  ? 'Grátis'
-                  : 'Preview'}
+                  ? translate('badges.free')
+                  : translate('badges.preview')}
             </span>
           ) : null}
         </div>
@@ -206,7 +217,7 @@ export function ModelDetailPanel({
         <dl className="flex flex-col">
           {lines.map((line) => (
             <div
-              key={line.label}
+              key={line.id}
               className="flex items-baseline justify-between gap-2 border-b border-border py-1 last:border-b-0"
             >
               <dt className="shrink-0 text-[11px] text-foreground-subtle">{line.label}</dt>
@@ -226,18 +237,16 @@ export function ModelDetailPanel({
           <div className="rounded-lg bg-accent-soft px-2.5 py-2 text-[11px] leading-relaxed text-accent">
             <p className="flex items-center gap-1.5 font-medium">
               <Sparkles aria-hidden className="size-3 shrink-0" />
-              Incluído no seu plano ChatGPT
+              {translate('detail.planIncluded')}
             </p>
-            <p className="mt-0.5 text-foreground-muted">
-              O uso consome o limite compartilhado do seu plano.
-            </p>
+            <p className="mt-0.5 text-foreground-muted">{translate('detail.planUsageNote')}</p>
             {onManagePlan ? (
               <button
                 type="button"
                 onClick={onManagePlan}
                 className="mt-1 inline-flex items-center gap-1 font-medium text-accent underline-offset-2 transition-opacity hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transition-none"
               >
-                Gerenciar uso
+                {translate('detail.manageUsage')}
                 <ExternalLink aria-hidden className="size-3" />
               </button>
             ) : null}
@@ -261,17 +270,14 @@ export function ModelDetailPanel({
 
         {needsPlanActivation ? (
           <div className="rounded-lg bg-warning-soft px-2.5 py-2 text-[11px] leading-relaxed text-warning">
-            <p>
-              O uso do plano não está ativado para esta conta. Ative para usar os modelos sem custo
-              por token.
-            </p>
+            <p>{translate('detail.planNotActive')}</p>
             {showAccountCta ? (
               <button
                 type="button"
                 onClick={connectAction}
                 className="mt-1 font-medium underline underline-offset-2 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transition-none"
               >
-                Ativar uso do plano
+                {translate('detail.planNotActiveAction')}
               </button>
             ) : null}
           </div>
@@ -279,14 +285,14 @@ export function ModelDetailPanel({
 
         {!oauthProvider && keyStatus && !keyStatus.hasKey ? (
           <div className="rounded-lg bg-warning-soft px-2.5 py-2 text-[11px] leading-relaxed text-warning">
-            <p>Sem chave de API para {entry.providerName}. Configure em Configurações › Provedores.</p>
+            <p>{translate('detail.missingKey', { provider: entry.providerName })}</p>
             {onConfigureProvider ? (
               <button
                 type="button"
                 onClick={onConfigureProvider}
                 className="mt-1 font-medium underline underline-offset-2 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 motion-reduce:transition-none"
               >
-                Configurar
+                {translate('detail.configure')}
               </button>
             ) : null}
           </div>
@@ -295,7 +301,7 @@ export function ModelDetailPanel({
         {needsAccount || needsPlanActivation ? (
           <p className="flex items-start gap-1.5 text-[10.5px] leading-relaxed text-foreground-subtle">
             <AlertCircle aria-hidden className="mt-0.5 size-3 shrink-0" />
-            Você também pode usar este provedor colando uma API key da OpenAI.
+            {translate('detail.apiKeyNote')}
           </p>
         ) : null}
       </div>

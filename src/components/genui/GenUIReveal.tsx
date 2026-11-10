@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronRight } from 'lucide-react';
 import { propBool, propString, type GenUIValue } from '@/lib/genui';
 
@@ -15,7 +16,8 @@ export interface GenUIRevealProps {
  * (150ms) e respeita `prefers-reduced-motion`.
  */
 export function GenUIReveal({ props, children }: GenUIRevealProps) {
-  const title = propString(props, 'title') || 'Detalhes';
+  const { t } = useTranslation('genui');
+  const title = propString(props, 'title') || t('reveal.defaultTitle');
   const open = propBool(props, 'open');
 
   return (

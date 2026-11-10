@@ -1,7 +1,10 @@
+import { t } from '@/lib/i18n';
+
 import type {
   InstallOptions,
   InstallScope,
   InstallStep,
+  InstallStepId,
   InstallerContext,
   InstallerEvent,
   InstallerMode,
@@ -46,27 +49,36 @@ export interface InstallerUiState {
   cancelling: boolean;
 }
 
-export const INSTALL_STEPS: Array<Pick<InstallStep, 'id' | 'label'>> = [
-  { id: 'prepare', label: 'Validar destino e permissões' },
-  { id: 'closeApp', label: 'Fechar o Zylara em execução' },
-  { id: 'copy', label: 'Copiar arquivos do aplicativo' },
-  { id: 'shortcuts', label: 'Criar atalhos' },
-  { id: 'register', label: 'Registrar desinstalação' },
-  { id: 'launch', label: 'Iniciar o Zylara' },
+export interface InstallerStepDefinition {
+  id: InstallStepId;
+  labelKey: string;
+}
+
+export const INSTALL_STEPS: InstallerStepDefinition[] = [
+  { id: 'prepare', labelKey: 'installer:steps.install.prepare' },
+  { id: 'closeApp', labelKey: 'installer:steps.install.closeApp' },
+  { id: 'copy', labelKey: 'installer:steps.install.copy' },
+  { id: 'shortcuts', labelKey: 'installer:steps.install.shortcuts' },
+  { id: 'register', labelKey: 'installer:steps.install.register' },
+  { id: 'launch', labelKey: 'installer:steps.install.launch' },
 ];
 
-export const UNINSTALL_STEPS: Array<Pick<InstallStep, 'id' | 'label'>> = [
-  { id: 'prepare', label: 'Validar a instalação' },
-  { id: 'closeApp', label: 'Fechar o Zylara em execução' },
-  { id: 'removeFiles', label: 'Remover arquivos do aplicativo' },
-  { id: 'removeRegistry', label: 'Remover registro e atalhos' },
-  { id: 'removeData', label: 'Remover dados do usuário' },
-  { id: 'cleanup', label: 'Finalizar' },
+export const UNINSTALL_STEPS: InstallerStepDefinition[] = [
+  { id: 'prepare', labelKey: 'installer:steps.uninstall.prepare' },
+  { id: 'closeApp', labelKey: 'installer:steps.uninstall.closeApp' },
+  { id: 'removeFiles', labelKey: 'installer:steps.uninstall.removeFiles' },
+  { id: 'removeRegistry', labelKey: 'installer:steps.uninstall.removeRegistry' },
+  { id: 'removeData', labelKey: 'installer:steps.uninstall.removeData' },
+  { id: 'cleanup', labelKey: 'installer:steps.uninstall.cleanup' },
 ];
 
 function stepsFor(mode: InstallerMode): InstallStep[] {
   const source = mode === 'uninstall' ? UNINSTALL_STEPS : INSTALL_STEPS;
-  return source.map((step) => ({ ...step, status: 'pending' as const }));
+  return source.map((step) => ({
+    id: step.id,
+    label: t(step.labelKey),
+    status: 'pending' as const,
+  }));
 }
 
 /** Picks a sensible initial path, preserving the backend's default for the scope. */
@@ -103,7 +115,7 @@ export function createInitialState(context: InstallerContext): InstallerUiState 
     progress: 0,
     progressMessage: '',
     logLines: [],
-    error: missingInstall ? 'O Zylara não está instalado para este usuário.' : null,
+    error: missingInstall ? t('installer:errors.notInstalled') : null,
     outcome: null,
     starting: false,
     cancelling: false,
@@ -210,15 +222,15 @@ export function isAbsoluteWindowsPath(path: string): boolean {
 
 export function pathError(path: string): string | null {
   const value = path.trim();
-  if (!value) return 'Escolha uma pasta de instalação.';
+  if (!value) return t('installer:pathError.empty');
   if (!isAbsoluteWindowsPath(value)) {
-    return 'Use um caminho absoluto em uma unidade local, como C:\\Program Files\\Zylara.';
+    return t('installer:pathError.absolute');
   }
   if (value.split(/[\\/]/).some((part) => part === '..')) {
-    return 'O caminho não pode conter "..".';
+    return t('installer:pathError.parent');
   }
   if (/^[A-Za-z]:[\\/]?$/.test(value)) {
-    return 'Escolha uma pasta dentro da unidade, não a raiz.';
+    return t('installer:pathError.root');
   }
   return null;
 }
@@ -291,5 +303,7 @@ export function installOptions(state: InstallerUiState): InstallOptions {
 }
 
 export function scopeLabel(scope: InstallScope): string {
-  return scope === 'machine' ? 'Todos os usuários' : 'Apenas para mim';
+  return scope === 'machine'
+    ? t('installer:scopeLabel.machine')
+    : t('installer:scopeLabel.user');
 }

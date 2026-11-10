@@ -18,6 +18,7 @@ use anyhow::Context;
 
 use crate::db::{Db, StoredArtifact};
 use crate::domain::{now_ms, Artifact, ArtifactKind};
+use crate::i18n::{t, t_args};
 
 use super::clean_inline;
 
@@ -151,14 +152,17 @@ pub fn write_artifact(
     let artifact_id = uuid::Uuid::new_v4().to_string();
     let directory = data_dir.join("artifacts").join(&artifact_id);
     std::fs::create_dir_all(&directory).with_context(|| {
-        format!(
-            "não foi possível criar o diretório do artefato: {}",
-            directory.display()
-        )
+        let path = directory.display().to_string();
+        t_args("tools.artifacts.createDirFailed", &[("path", &path)])
     })?;
     let path = directory.join(&name);
-    std::fs::write(&path, bytes)
-        .with_context(|| format!("não foi possível gravar `{name}` em {}", path.display()))?;
+    std::fs::write(&path, bytes).with_context(|| {
+        let path = path.display().to_string();
+        t_args(
+            "tools.artifacts.writeFailed",
+            &[("name", &name), ("path", &path)],
+        )
+    })?;
 
     let artifact = Artifact {
         id: artifact_id,
@@ -179,9 +183,9 @@ pub fn write_artifact(
         path: path.to_string_lossy().into_owned(),
     })
     .with_context(|| {
-        format!(
-            "o arquivo `{}` foi gravado, mas o registro do artefato falhou",
-            artifact.name
+        t_args(
+            "tools.artifacts.registerFailed",
+            &[("name", &artifact.name)],
         )
     })?;
     Ok(artifact)
@@ -215,13 +219,16 @@ fn write_artifact_file_with(
     source: &Path,
     insert: impl FnOnce(&StoredArtifact) -> anyhow::Result<()>,
 ) -> anyhow::Result<Artifact> {
-    let metadata = std::fs::metadata(source)
-        .with_context(|| format!("não foi possível inspecionar `{}`", source.display()))?;
+    let metadata = std::fs::metadata(source).with_context(|| {
+        let path = source.display().to_string();
+        t_args("tools.artifacts.inspectFailed", &[("path", &path)])
+    })?;
     if !metadata.is_file() {
-        return Err(anyhow::anyhow!(
-            "`{}` não é um arquivo regular e não pode ser enviado à biblioteca",
-            source.display()
-        ));
+        let path = source.display().to_string();
+        return Err(anyhow::anyhow!(t_args(
+            "tools.artifacts.notRegularFile",
+            &[("path", &path)]
+        )));
     }
     let raw_name = source
         .file_name()
@@ -240,17 +247,16 @@ fn write_artifact_file_with(
     let artifact_id = uuid::Uuid::new_v4().to_string();
     let directory = data_dir.join("artifacts").join(&artifact_id);
     std::fs::create_dir_all(&directory).with_context(|| {
-        format!(
-            "não foi possível criar o diretório do artefato: {}",
-            directory.display()
-        )
+        let path = directory.display().to_string();
+        t_args("tools.artifacts.createDirFailed", &[("path", &path)])
     })?;
     let path = directory.join(&name);
     std::fs::copy(source, &path).with_context(|| {
-        format!(
-            "não foi possível copiar `{}` para {}",
-            source.display(),
-            path.display()
+        let source = source.display().to_string();
+        let path = path.display().to_string();
+        t_args(
+            "tools.artifacts.copyFailed",
+            &[("source", &source), ("path", &path)],
         )
     })?;
 
@@ -266,7 +272,7 @@ fn write_artifact_file_with(
         kind,
         language,
         size: i64::try_from(size)
-            .context("o arquivo é grande demais para ser registrado como artefato")?,
+            .context(t("tools.artifacts.tooLargeToRegister"))?,
         created_at: now_ms(),
         favorite: false,
     };
@@ -279,9 +285,9 @@ fn write_artifact_file_with(
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&directory);
         return Err(error).with_context(|| {
-            format!(
-                "o arquivo `{}` foi copiado, mas o registro do artefato falhou; a cópia foi removida",
-                artifact.name
+            t_args(
+                "tools.artifacts.copyRegisterFailed",
+                &[("name", &artifact.name)],
             )
         });
     }
@@ -292,12 +298,15 @@ fn write_artifact_file_with(
 fn read_prefix(path: &Path, limit: usize) -> anyhow::Result<Vec<u8>> {
     use std::io::Read;
 
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("não foi possível abrir `{}`", path.display()))?;
+    let file = std::fs::File::open(path).with_context(|| {
+        let path = path.display().to_string();
+        t_args("tools.artifacts.openFailed", &[("path", &path)])
+    })?;
     let mut buffer = Vec::new();
-    file.take(limit as u64)
-        .read_to_end(&mut buffer)
-        .with_context(|| format!("não foi possível ler `{}`", path.display()))?;
+    file.take(limit as u64).read_to_end(&mut buffer).with_context(|| {
+        let path = path.display().to_string();
+        t_args("tools.artifacts.readFailed", &[("path", &path)])
+    })?;
     Ok(buffer)
 }
 
@@ -430,7 +439,7 @@ pub(crate) fn sanitize_filename(input: &str) -> String {
         cleaned.pop();
     }
     if cleaned.is_empty() || cleaned == ".." {
-        cleaned = "arquivo.txt".to_string();
+        cleaned = t("tools.artifacts.defaultFileName");
     }
 
     if cleaned.chars().count() > MAX_NAME_CHARS {

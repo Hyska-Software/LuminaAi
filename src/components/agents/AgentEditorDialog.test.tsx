@@ -13,7 +13,10 @@ vi.mock('sonner', () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }));
 
-import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
+import { i18n } from '@/lib/i18n';
+import { AUTONOMOUS_MODE_WARNING_KEY } from '@/lib/permissionModes';
+
+const AUTONOMOUS_MODE_WARNING = i18n.t('code:permissions.autonomousWarning');
 import { useAppStore, useUiStore } from '@/lib/store';
 import { AgentEditorDialog } from './AgentEditorDialog';
 

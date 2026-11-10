@@ -60,7 +60,7 @@ pub async fn run_turn(
         && state.has_active_turn_for(&payload.conversation_id)
     {
         return Err(
-            "GOAL_BUSY: já existe um turno em andamento nesta sessão; aguarde terminar".to_string(),
+            crate::i18n::t("turn.errors.goalBusy"),
         );
     }
     let turn_id = payload
@@ -69,7 +69,7 @@ pub async fn run_turn(
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let Some(cancel) = state.register_turn_if_idle(&turn_id, &payload.conversation_id) else {
         return Err(
-            "TURN_BUSY: já existe um turno em andamento nesta conversa; aguarde terminar"
+            crate::i18n::t("turn.errors.turnBusy")
                 .to_string(),
         );
     };
@@ -79,7 +79,12 @@ pub async fn run_turn(
         .db
         .get_conversation(&payload.conversation_id)
         .map_err(|error| format!("{error:#}"))?
-        .ok_or_else(|| format!("conversa não encontrada: {}", payload.conversation_id))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args(
+                "turn.errors.conversationNotFound",
+                &[("conversation_id", &payload.conversation_id)],
+            )
+        })?;
     let agent_key = conversation.agent_id.clone();
     let limits = crate::concurrency::TurnLimits {
         global: settings.max_concurrent_turns.max(1) as usize,
@@ -93,7 +98,7 @@ pub async fn run_turn(
         Ok(permit) => permit,
         Err(_) => {
             state.finish_turn(&turn_id);
-            return Err("TURN_CANCELLED: o turno foi cancelado antes de começar".to_string());
+            return Err(crate::i18n::t("turn.errors.cancelledBeforeStart"));
         }
     };
     let deps = HarnessDeps {

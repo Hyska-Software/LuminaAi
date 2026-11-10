@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
+import { i18n } from '@/lib/i18n';
 import type { ProviderInfo } from '@/lib/types';
 import {
   CHATGPT_USAGE_URL,
@@ -84,21 +85,19 @@ describe('planUsageUrl', () => {
 });
 
 describe('planLimitDescription', () => {
-  it('remove o prefixo duplicado do hint do backend (o banner tem título)', () => {
-    const description = planLimitDescription(
-      'Limite de uso atingido — pode ser do plano ou deste app. Use "Gerenciar uso".',
-    );
-    expect(description).toBe('pode ser do plano ou deste app. Use "Gerenciar uso".');
+  it('usa o hint do backend como corpo (o título vem do código)', () => {
+    const hint = 'pode ser do plano ou deste app. Use "Gerenciar uso".';
+    expect(planLimitDescription(hint)).toBe(hint);
   });
 
-  it('usa a copy honesta quando não há hint ou o hint é de rate limit genérico', () => {
-    expect(planLimitDescription(null)).toBe(PLAN_LIMIT_BODY);
-    expect(
-      planLimitDescription('O provedor limitou a taxa de requisições; tente novamente em instantes.'),
-    ).toBe(PLAN_LIMIT_BODY);
+  it('usa a copy localizada quando não há hint', () => {
+    expect(planLimitDescription(null)).toBe(i18n.t(PLAN_LIMIT_BODY));
+    expect(planLimitDescription('   ')).toBe(i18n.t(PLAN_LIMIT_BODY));
   });
 
-  it('mantém hints de plano que não repetem o título', () => {
+  it('não remove prefixos nem reescreve hints de plano', () => {
+    const legacy = 'Limite de uso atingido — pode ser do plano ou deste app. Use "Gerenciar uso".';
+    expect(planLimitDescription(legacy)).toBe(legacy);
     expect(planLimitDescription('O limite do seu plano será renovado em breve.')).toBe(
       'O limite do seu plano será renovado em breve.',
     );

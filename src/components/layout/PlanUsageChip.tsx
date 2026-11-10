@@ -8,12 +8,14 @@
  * dashboard. "Gerenciar uso" always opens externally.
  */
 import { Sparkles } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { providerSupportsPlan } from '@/lib/catalog';
 import { useAppStore } from '@/lib/store';
 import { openExternalUrl } from '@/components/chat/external';
 import { planUsageUrl } from '@/components/chat/turnError';
 
 export function PlanUsageChip() {
+  const { t } = useTranslation('common');
   const provider = useAppStore((state) =>
     state.providers.find((entry) => entry.id === state.selection.providerId),
   );
@@ -25,17 +27,17 @@ export function PlanUsageChip() {
   return (
     <div
       className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface-raised py-0.5 pl-2 pr-0.5 text-[11px] leading-none"
-      title="As requisições usam o limite do seu plano ChatGPT"
+      title={t('shell.plan.tooltip')}
     >
       <Sparkles aria-hidden className="size-4 shrink-0 text-accent" strokeWidth={1.75} />
-      <span className="font-medium text-foreground-muted">Plano ChatGPT</span>
+      <span className="font-medium text-foreground-muted">{t('shell.plan.title')}</span>
       <button
         type="button"
         onClick={() => void openExternalUrl(planUsageUrl(provider))}
-        aria-label="Gerenciar uso do plano ChatGPT"
+        aria-label={t('shell.plan.manageAria')}
         className="rounded-full px-1.5 py-1 font-medium text-accent underline-offset-2 transition-colors duration-150 hover:bg-accent-soft hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
-        Gerenciar uso
+        {t('shell.plan.manage')}
       </button>
     </div>
   );

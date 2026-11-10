@@ -4,13 +4,14 @@ import type {
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 /** Which edge of the resized surface the handle controls. */
 export type PanelResizerSide = 'start' | 'end';
 
-/** Default tooltip: discoverability + the double-click shortcut. */
-export const PANEL_RESIZER_HINT = 'Arraste para redimensionar · duplo clique para restaurar';
+/** Translation key of the default tooltip (discoverability + double-click reset). */
+export const PANEL_RESIZER_HINT = 'panelResizer.hint' as const;
 
 export interface PanelResizerProps {
   /** Current width of the surface being resized, in px. */
@@ -96,12 +97,13 @@ export function PanelResizer({
   step = 16,
   side = 'start',
   label,
-  hint = PANEL_RESIZER_HINT,
+  hint,
   onResize,
   onResizeEnd,
   onReset,
   className,
 }: PanelResizerProps) {
+  const { t } = useTranslation('common');
   const dragRef = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -214,7 +216,7 @@ export function PanelResizer({
       aria-valuemin={min}
       aria-valuemax={max}
       aria-valuetext={`${value} px`}
-      title={hint}
+      title={hint ?? t(PANEL_RESIZER_HINT)}
       tabIndex={0}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

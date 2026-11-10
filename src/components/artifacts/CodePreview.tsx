@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { WrapText } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { CodeBlock } from '@/components/genui';
 import { Badge, IconButton, Tooltip } from '@/components/ui';
 import { languageLabel } from '@/lib/highlight';
@@ -19,6 +20,7 @@ function countLines(source: string): number {
  * for code, where horizontal scrolling preserves indentation).
  */
 export function CodePreview({ content, className }: ArtifactViewProps) {
+  const { t } = useTranslation('artifacts');
   const { artifact, content: raw } = content;
   const code = raw ?? '';
   const language = artifactLanguage(artifact);
@@ -27,7 +29,7 @@ export function CodePreview({ content, className }: ArtifactViewProps) {
   const lineCount = countLines(code);
 
   if (!code.trim()) {
-    return <PreviewEmpty message="Nada para exibir." className={className} />;
+    return <PreviewEmpty message={t('artifacts:code.empty')} className={className} />;
   }
 
   const toggleWrap = () => {
@@ -38,15 +40,15 @@ export function CodePreview({ content, className }: ArtifactViewProps) {
     <div className={cn('flex h-full flex-col', className)}>
       <div
         role="toolbar"
-        aria-label="Controles do código"
+        aria-label={t('artifacts:code.toolbar')}
         className="flex shrink-0 items-center gap-2 border-b border-border bg-surface-raised px-3 py-1.5"
       >
         <Badge tone="neutral" size="md">
           {languageLabel(language)}
         </Badge>
-        <Tooltip content={wrap ? 'Rolagem horizontal' : 'Quebrar linhas'} side="top">
+        <Tooltip content={wrap ? t('artifacts:code.noWrap') : t('artifacts:code.wrap')} side="top">
           <IconButton
-            label="Quebrar linhas"
+            label={t('artifacts:code.wrap')}
             size="sm"
             active={wrap}
             aria-pressed={wrap}
@@ -62,7 +64,7 @@ export function CodePreview({ content, className }: ArtifactViewProps) {
           code={code}
           language={language}
           title={artifact.name}
-          meta={`${lineCount} ${lineCount === 1 ? 'linha' : 'linhas'}`}
+          meta={t('artifacts:code.lineCount', { count: lineCount })}
           showLineNumbers={artifact.kind === 'code' || language !== 'text'}
           wrap={wrap}
           maxHeight={100_000}

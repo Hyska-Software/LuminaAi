@@ -1,11 +1,7 @@
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import {
-  LIBRARY_FILTERS,
-  libraryFilterLabel,
-  pluralizeFiles,
-  type LibraryFilterId,
-} from './filters';
+import { LIBRARY_FILTERS, type LibraryFilterId } from './filters';
 
 export interface LibraryFiltersProps {
   filter: LibraryFilterId;
@@ -19,17 +15,19 @@ export interface LibraryFiltersProps {
  * page; a filter without matches shows the "Limpar filtros" empty state.
  */
 export function LibraryFilters({ filter, counts, onChange }: LibraryFiltersProps) {
+  const { t } = useTranslation('library');
   return (
     <RadioGroupPrimitive.Root
       value={filter}
       onValueChange={(value) => onChange(value as LibraryFilterId)}
-      aria-label="Filtrar biblioteca"
+      aria-label={t('library:filters.aria')}
       orientation="horizontal"
       className="flex flex-wrap items-center gap-1.5"
     >
       {LIBRARY_FILTERS.map((definition) => {
         const count = counts[definition.id] ?? 0;
-        const countLabel = `${libraryFilterLabel(definition.id)} (${pluralizeFiles(count)})`;
+        const label = t(definition.labelKey);
+        const countLabel = t('library:filters.countLabel', { label, count });
         return (
           <RadioGroupPrimitive.Item
             key={definition.id}
@@ -45,7 +43,7 @@ export function LibraryFilters({ filter, counts, onChange }: LibraryFiltersProps
               'motion-reduce:transition-none',
             )}
           >
-            {definition.label}
+            {label}
             <span aria-hidden className="tabular-nums text-[11px] font-normal">
               {count}
             </span>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ExternalLink, Globe, PanelRight, X } from 'lucide-react';
 import { PanelResizer } from '@/components/layout/PanelResizer';
 import { Badge, IconButton, Tooltip } from '@/components/ui';
@@ -14,10 +15,6 @@ import {
 import type { Citation } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { openExternalUrl } from './external';
-
-function pluralize(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
 
 /** One source row: domain + truncated title; the whole row opens the browser. */
 function SourceRow({ citation }: { citation: Citation }) {
@@ -75,6 +72,7 @@ function SourceRow({ citation }: { citation: Citation }) {
  * responsive decision and the persisted width live in `useSidePanelResize`.
  */
 export function SourcesPanel() {
+  const { t } = useTranslation('chat');
   const open = useUiStore((state) => state.sourcesPanelOpen);
   const closeSourcesPanel = useUiStore((state) => state.closeSourcesPanel);
   const messages = useChatStore(selectActiveMessages);
@@ -82,10 +80,16 @@ export function SourcesPanel() {
   const panelRef = useRef<HTMLElement | null>(null);
   const { layout, mode, setMode, onResize, onResizeEnd, onReset } = useSidePanelResize();
 
+  /** Source count label: only `1` is singular (0 reads as plural). */
+  const sourceCount = (count: number) =>
+    count === 1
+      ? t('sources.countOne', { count })
+      : t('sources.countMany', { count });
+
   /** Pin/unpin action; the docked preference can outlive a narrow window. */
-  const modeToggleLabel = mode === 'docked' ? 'Soltar painel sobre o chat' : 'Fixar painel ao lado do chat';
+  const modeToggleLabel = mode === 'docked' ? t('sources.unpin') : t('sources.pin');
   const modeToggleDisabled = !layout.canDock && mode !== 'docked';
-  const modeTooltip = modeToggleDisabled ? 'Aumente a janela para fixar o painel' : modeToggleLabel;
+  const modeTooltip = modeToggleDisabled ? t('sources.pinHint') : modeToggleLabel;
   const modeToggle = (
     <IconButton
       label={modeToggleLabel}
@@ -123,7 +127,7 @@ export function SourcesPanel() {
     <aside
       ref={panelRef}
       tabIndex={-1}
-      aria-label="Painel de fontes"
+      aria-label={t('sources.panelAria')}
       aria-hidden={!open || undefined}
       inert={!open}
       style={{
@@ -139,12 +143,12 @@ export function SourcesPanel() {
           <Globe aria-hidden className="size-4" strokeWidth={1.9} />
         </span>
         <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-foreground">
-          Fontes
+          {t('sources.title')}
         </h2>
         <Badge
           tone="muted"
           size="md"
-          title={pluralize(sources.length, 'fonte', 'fontes')}
+          title={sourceCount(sources.length)}
           className="tabular-nums"
         >
           {sources.length}
@@ -154,8 +158,8 @@ export function SourcesPanel() {
               "aumente a janela" hint stays discoverable. */}
           {modeToggleDisabled ? <span className="inline-flex">{modeToggle}</span> : modeToggle}
         </Tooltip>
-        <Tooltip content="Fechar" side="bottom">
-          <IconButton label="Fechar painel de fontes" size="sm" onClick={closeSourcesPanel}>
+        <Tooltip content={t('sources.closeTooltip')} side="bottom">
+          <IconButton label={t('sources.close')} size="sm" onClick={closeSourcesPanel}>
             <X className="size-4" />
           </IconButton>
         </Tooltip>
@@ -163,7 +167,7 @@ export function SourcesPanel() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {sources.length > 0 ? (
-          <ul aria-label="Fontes da conversa" className="flex min-w-0 flex-col gap-0.5">
+          <ul aria-label={t('sources.listAria')} className="flex min-w-0 flex-col gap-0.5">
             {sources.map((citation) => (
               <SourceRow key={citation.id || citation.url} citation={citation} />
             ))}
@@ -171,17 +175,17 @@ export function SourcesPanel() {
         ) : (
           <div className="flex h-full min-h-48 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
             <Globe aria-hidden className="size-6 text-foreground-subtle" strokeWidth={1.9} />
-            <p className="text-[13px] font-medium text-foreground">Nenhuma fonte nesta conversa</p>
+            <p className="text-[13px] font-medium text-foreground">{t('sources.emptyTitle')}</p>
             <p className="max-w-64 text-xs leading-relaxed text-foreground-muted">
-              Quando o agente pesquisar na web, as fontes aparecem aqui.
+              {t('sources.emptyBody')}
             </p>
           </div>
         )}
       </div>
 
       <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
-        <span className="tabular-nums">{pluralize(sources.length, 'fonte', 'fontes')}</span>
-        <span>Abre no navegador padrão</span>
+        <span className="tabular-nums">{sourceCount(sources.length)}</span>
+        <span>{t('sources.opensExternally')}</span>
       </footer>
 
       {/* Fora do fluxo, sobre a borda esquerda: não cobre a lista nem a scrollbar.
@@ -193,7 +197,7 @@ export function SourcesPanel() {
         min={SIDE_PANEL_WIDTH_MIN}
         max={layout.maxWidth}
         step={SIDE_PANEL_WIDTH_STEP}
-        label="Redimensionar painel de fontes"
+        label={t('sources.resize')}
         className="absolute inset-y-0 -left-2 z-10"
         onResize={onResize}
         onResizeEnd={onResizeEnd}

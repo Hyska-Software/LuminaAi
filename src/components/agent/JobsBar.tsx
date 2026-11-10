@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CheckCircle2,
   ChevronDown,
@@ -21,10 +22,10 @@ export interface JobsBarProps {
 }
 
 const STATUS_LABEL: Record<JobView['status'], string> = {
-  running: 'Rodando',
-  done: 'Concluído',
-  failed: 'Falhou',
-  killed: 'Interrompido',
+  running: 'jobs.status.running',
+  done: 'jobs.status.done',
+  failed: 'jobs.status.failed',
+  killed: 'jobs.status.killed',
 };
 
 function StatusIcon({ status }: { status: JobView['status'] }) {
@@ -50,6 +51,7 @@ function elapsed(job: JobView): string {
  * tempo e ações "ver"/"parar". Recolhível; some quando não há jobs.
  */
 export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
+  const { t } = useTranslation('agents');
   const listId = useId();
   const [open, setOpen] = useState(true);
 
@@ -58,7 +60,7 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
   const running = jobs.filter((job) => job.status === 'running').length;
 
   return (
-    <section aria-label="Trabalhos em segundo plano" className={cn('rounded-xl border border-border bg-surface', className)}>
+    <section aria-label={t('jobs.aria')} className={cn('rounded-xl border border-border bg-surface', className)}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -75,14 +77,14 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
           <ChevronRight aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
         )}
         <span className="min-w-0 flex-1 text-[12px] font-medium text-foreground-muted">
-          Trabalhos em segundo plano
+          {t('jobs.title')}
         </span>
-        {running > 0 ? <Badge variant="accent">{running} rodando</Badge> : null}
+        {running > 0 ? <Badge variant="accent">{t('jobs.runningCount', { count: running })}</Badge> : null}
         <span className="text-[11px] tabular-nums text-foreground-muted">{jobs.length}</span>
       </button>
 
       {open ? (
-        <ul id={listId} aria-label="Jobs em segundo plano" className="border-t border-border p-1.5">
+        <ul id={listId} aria-label={t('jobs.listAria')} className="border-t border-border p-1.5">
           {jobs.map((job) => {
             const isRunning = job.status === 'running';
             return (
@@ -97,7 +99,7 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
                 >
                   {job.command}
                 </code>
-                <span className="sr-only">{STATUS_LABEL[job.status]}</span>
+                <span className="sr-only">{t(STATUS_LABEL[job.status])}</span>
                 {job.exitCode != null && !isRunning ? (
                   <span className="shrink-0 font-mono text-[10px] tabular-nums text-foreground-muted">
                     exit {job.exitCode}
@@ -109,7 +111,7 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
                 {onOpen ? (
                   <IconButton
                     size="sm"
-                    label={`Ver job: ${job.command}`}
+                    label={t('jobs.openJob', { command: job.command })}
                     onClick={() => onOpen(job)}
                   >
                     <Eye className="size-3.5" />
@@ -119,7 +121,7 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
                   <IconButton
                     size="sm"
                     variant="ghost"
-                    label={`Parar job: ${job.command}`}
+                    label={t('jobs.killJob', { command: job.command })}
                     onClick={() => onKill(job.id)}
                   >
                     <Square className="size-3.5" />

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { FileCode, X } from 'lucide-react';
 import { IconButton } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -15,6 +16,7 @@ export interface MentionChipsProps {
  * representação visual do que será enviado como `[arquivo: path]` no turno.
  */
 export function MentionChips({ mentions, onRemove, className }: MentionChipsProps) {
+  const { t } = useTranslation('composer');
   if (!mentions.length) return null;
 
   return (
@@ -36,7 +38,7 @@ export function MentionChips({ mentions, onRemove, className }: MentionChipsProp
             {mention.path}
           </span>
           <IconButton
-            label={`Remover menção a ${mention.path}`}
+            label={t('mentionChips.remove', { path: mention.path })}
             size="sm"
             variant="ghost"
             className="size-6 rounded-md"

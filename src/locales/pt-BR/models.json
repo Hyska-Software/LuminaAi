@@ -1,0 +1,246 @@
+{
+  "effort": {
+    "none": "Desligado",
+    "minimal": "Mínimo",
+    "low": "Baixo",
+    "medium": "Médio",
+    "high": "Alto",
+    "xhigh": "Muito alto",
+    "max": "Máximo"
+  },
+  "effortDescriptions": {
+    "none": "Sem raciocínio estendido.",
+    "minimal": "Quase direto; o mínimo de raciocínio.",
+    "low": "Rápido, para tarefas simples.",
+    "medium": "Equilíbrio entre velocidade e profundidade.",
+    "high": "Pensa mais antes de responder; bom para problemas complexos.",
+    "xhigh": "Esforço muito alto; respostas mais lentas e detalhadas.",
+    "max": "Maior esforço disponível; mais lento e mais tokens.",
+    "fallback": "Ajusta quanto o modelo pensa antes de responder."
+  },
+  "reasoning": {
+    "shortOff": "off",
+    "shortOn": "on",
+    "noControl": "Sem controle",
+    "thinkingOff": "Pensamento off",
+    "default": "Padrão",
+    "thinkingOn": "Pensamento ligado",
+    "effortLabel": "Pensamento {{effort}}",
+    "budget": "Orçamento {{value}}"
+  },
+  "price": {
+    "free": "Grátis",
+    "freeShort": "grátis",
+    "pair": "{{input}} / {{output}}"
+  },
+  "badges": {
+    "free": "Grátis",
+    "vision": "Visão",
+    "reasoning": "Raciocínio",
+    "open": "Open",
+    "preview": "Preview",
+    "unavailable": "Indisponível"
+  },
+  "capabilities": {
+    "free": "Grátis",
+    "freeTitle": "Modelo gratuito no gateway",
+    "vision": "Visão",
+    "visionTitle": "Aceita {{modalities}}",
+    "attachments": "anexos",
+    "reasoning": "Raciocínio",
+    "reasoningTitle": "Expõe controle de modo de pensamento",
+    "open": "Open",
+    "openTitle": "Pesos abertos",
+    "preview": "Preview",
+    "previewTitle": "Modelo em prévia",
+    "unavailable": "Indisponível",
+    "unavailableTitle": "Este modelo não está disponível no gateway"
+  },
+  "family": {
+    "other": "Outros"
+  },
+  "filters": {
+    "favorites": {
+      "label": "Favoritos",
+      "title": "Mostrar apenas modelos favoritos"
+    },
+    "vision": {
+      "label": "Visão",
+      "title": "Modelos que aceitam imagens/anexos"
+    },
+    "reasoning": {
+      "label": "Raciocínio",
+      "title": "Modelos com controle de pensamento"
+    },
+    "free": {
+      "label": "Grátis",
+      "title": "Modelos gratuitos no gateway"
+    }
+  },
+  "groups": {
+    "favorites": "Favoritos",
+    "providerFamily": "{{provider}} · {{family}}"
+  },
+  "budget": {
+    "fast": {
+      "label": "Rápido",
+      "description": "Cerca de 4 mil tokens de raciocínio."
+    },
+    "balanced": {
+      "label": "Equilibrado",
+      "description": "Cerca de 8 mil tokens de raciocínio."
+    },
+    "deep": {
+      "label": "Profundo",
+      "description": "Cerca de 16 mil tokens de raciocínio."
+    },
+    "max": {
+      "label": "Máximo",
+      "description": "Cerca de 32 mil tokens de raciocínio."
+    }
+  },
+  "thinking": {
+    "offLabel": "Desligado",
+    "offDescription": "Responde direto, sem raciocínio estendido.",
+    "onLabel": "Ligado",
+    "onDescription": "Habilita o raciocínio do modelo, sem ajuste de esforço.",
+    "alwaysEffort": "Este modelo sempre pensa; escolha o nível de esforço.",
+    "alwaysBudget": "Este modelo sempre pensa; escolha o orçamento de tokens.",
+    "noControl": "Este modelo não expõe controle de raciocínio.",
+    "noReasoningHint": "Este modelo não expõe controle de raciocínio",
+    "defaultLabel": "Padrão",
+    "headlineNoControl": "Sem controle de raciocínio",
+    "headlineOff": "Pensamento desligado",
+    "headlineDefault": "Padrão do modelo",
+    "headlineEffort": "Pensamento {{effort}}",
+    "headlineOn": "Pensamento ligado",
+    "headlineBudget": "Orçamento de {{value}} tokens",
+    "budgetK": "{{value}}k",
+    "modeLabel": "Modo de pensamento",
+    "backToList": "Voltar para a lista de modelos",
+    "empty": "Este modelo não expõe controle de raciocínio.",
+    "budgetLabel": "Orçamento",
+    "budgetSliderAria": "Orçamento de raciocínio em tokens",
+    "budgetSliderLabel": "Orçamento de raciocínio",
+    "budgetRange": "De {{min}} a {{max}} tokens reservados para o raciocínio.",
+    "tokens": "{{value}} tokens"
+  },
+  "details": {
+    "context": "Contexto",
+    "maxOutput": "Saída máx.",
+    "cost": "Custo (1M tok.)",
+    "input": "Entrada",
+    "protocol": "Protocolo",
+    "knowledge": "Conhecimento até",
+    "release": "Lançamento"
+  },
+  "modalities": {
+    "text": "Texto",
+    "image": "Imagem",
+    "pdf": "PDF",
+    "audio": "Áudio",
+    "video": "Vídeo"
+  },
+  "protocols": {
+    "openai-chat": "OpenAI Chat",
+    "openai-responses": "OpenAI Responses",
+    "anthropic": "Anthropic Messages",
+    "google": "Google Gemini"
+  },
+  "status": {
+    "unavailable": "Indisponível no gateway — não pode ser usado.",
+    "beta": "Modelo em prévia: pode mudar ou sair do catálogo.",
+    "free": "Modelo gratuito no gateway, com limites de uso."
+  },
+  "keys": {
+    "settings": "Chave configurada",
+    "env": "Chave via variável de ambiente",
+    "opencodeCli": "Chave do OpenCode CLI",
+    "chatgpt": "Conta ChatGPT conectada",
+    "chatgptPlan": "Plano ChatGPT conectado",
+    "chatgptExpired": "Sessão do ChatGPT expirada",
+    "noChatgpt": "Sem conta ChatGPT",
+    "noKey": "Sem chave de API"
+  },
+  "detail": {
+    "emptyTitle": "Selecione um modelo",
+    "emptyDescription": "Os detalhes e o modo de pensamento aparecem aqui.",
+    "favoriteAdd": "Favoritar {{name}}",
+    "favoriteRemove": "Remover {{name}} dos favoritos",
+    "estimated": "Estimado",
+    "estimatedTitle": "Modelo listado pela sua conta: capacidades estimadas.",
+    "planIncluded": "Incluído no seu plano ChatGPT",
+    "planUsageNote": "O uso consome o limite compartilhado do seu plano.",
+    "manageUsage": "Gerenciar uso",
+    "accountReauth": "Sua sessão do ChatGPT expirou. Entre novamente para continuar usando o plano.",
+    "accountReauthAction": "Conectar novamente",
+    "accountPlanDisabled": "Sua conta ChatGPT está conectada, mas o uso do plano não está ativado para este app.",
+    "accountPlanDisabledAction": "Ativar uso do plano",
+    "accountSignIn": "Conecte sua conta ChatGPT para usar estes modelos com o seu plano.",
+    "accountSignInAction": "Conectar conta ChatGPT",
+    "planNotActive": "O uso do plano não está ativado para esta conta. Ative para usar os modelos sem custo por token.",
+    "planNotActiveAction": "Ativar uso do plano",
+    "missingKey": "Sem chave de API para {{provider}}. Configure em Configurações › Provedores.",
+    "configure": "Configurar",
+    "apiKeyNote": "Você também pode usar este provedor colando uma API key da OpenAI.",
+    "unavailableTitle": "Indisponível no gateway — não pode ser usado."
+  },
+  "row": {
+    "favoriteAdd": "Favoritar {{name}}",
+    "favoriteRemove": "Remover {{name}} dos favoritos",
+    "favoriteRemoveShort": "Remover dos favoritos",
+    "favoriteAddShort": "Favoritar",
+    "estimatedTitle": "Modelo listado pela sua conta: capacidades estimadas."
+  },
+  "list": {
+    "emptyTitle": "Nenhum modelo encontrado",
+    "emptyHint": "Tente outro termo ou limpe os filtros."
+  },
+  "search": {
+    "placeholder": "Buscar modelos…",
+    "clear": "Limpar busca"
+  },
+  "picker": {
+    "title": "Selecionar modelo",
+    "description": "Busque por nome, família, identificador ou capacidade e ajuste o pensamento antes de confirmar.",
+    "searchAria": "Buscar modelos",
+    "filtersAria": "Filtros de modelos",
+    "planBadge": "Plano ChatGPT",
+    "planBadgeTitle": "Modelos inclusos no seu plano ChatGPT",
+    "allProviders": "Todos os provedores",
+    "providersAria": "Provedores",
+    "resultsAria": "Resultados da busca de modelos",
+    "providerModelsAria": "Modelos do provedor",
+    "detailsAria": "Detalhes do modelo",
+    "footerNavigate": "navegar",
+    "footerUse": "usar",
+    "footerClose": "fechar",
+    "inUse": "Em uso",
+    "useModel": "Usar este modelo",
+    "lockedHint": "Você pode ajustar o modo de pensamento pelo botão ✦ no composer.",
+    "noResultsTitle": "Nenhum modelo encontrado",
+    "noResultsHint": "Tente outro termo ou ajuste os filtros.",
+    "noModelsTitle": "Nenhum modelo disponível",
+    "noModelsHint": "O catálogo deste provedor está vazio no momento.",
+    "clearSearchAndFilters": "Limpar busca e filtros",
+    "emptyPillHint": "Tente outro termo ou busque pelo provedor.",
+    "clearSearch": "Limpar busca",
+    "allProvidersTitle": "Busca em todos os provedores",
+    "modelsAria": "Modelos",
+    "providerAria": "Provedor",
+    "thinkingStep": "aplicar",
+    "chooseStep": "escolher",
+    "kbdNavigate": "Navegar",
+    "kbdApply": "Aplicar",
+    "kbdClose": "Fechar",
+    "selectModel": "Selecionar modelo",
+    "selectModelCurrent": "Selecionar modelo. Atual: {{name}}",
+    "selectThinking": "Selecionar modo de pensamento. Atual: {{value}}",
+    "lockedStreamingAria": "Troca de modelo indisponível durante a resposta. Atual: {{name}}",
+    "lockedConversationAria": "Modelo bloqueado nesta conversa. Atual: {{name}}",
+    "viewAllModels": "Ver todos os modelos…",
+    "detailsGroupAria": "Detalhes do modelo",
+    "countOne": "{{count}} modelo",
+    "countOther": "{{count}} modelos"
+  }
+}

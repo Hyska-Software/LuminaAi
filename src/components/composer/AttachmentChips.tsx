@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 import { FileIcon } from '@/components/code/FileIcon';
 import { IconButton } from '@/components/ui';
@@ -56,6 +57,7 @@ export interface AttachmentChipsProps {
 
 /** Attachment chips used above user bubbles and inside the composer. */
 export function AttachmentChips({ attachments, onRemove, align = 'start', className }: AttachmentChipsProps) {
+  const { t } = useTranslation('composer');
   const [previewing, setPreviewing] = useState<AttachmentInfo | null>(null);
   if (!attachments.length) return null;
 
@@ -72,8 +74,8 @@ export function AttachmentChips({ attachments, onRemove, align = 'start', classN
           <button
             type="button"
             onClick={() => setPreviewing(attachment)}
-            aria-label={`Ver prévia de ${attachment.name}`}
-            title="Ver prévia"
+            aria-label={t('attachments.previewOf', { name: attachment.name })}
+            title={t('attachments.preview')}
             className={cn(
               'flex min-w-0 items-center gap-2 rounded-lg text-left',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -93,7 +95,7 @@ export function AttachmentChips({ attachments, onRemove, align = 'start', classN
           </button>
           {onRemove ? (
             <IconButton
-              label={`Remover ${attachment.name}`}
+              label={t('attachments.remove', { name: attachment.name })}
               size="sm"
               variant="ghost"
               className="size-6 rounded-md"

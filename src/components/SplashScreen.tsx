@@ -1,7 +1,9 @@
+import { useTranslation } from 'react-i18next';
 import { BrandMark } from '@/components/chat/BrandMark';
 
 /** Minimal boot screen shown while settings/catalog/conversations load. */
 export function SplashScreen() {
+  const { t } = useTranslation('common');
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-5 bg-background">
       <div className="relative inline-flex items-center justify-center">
@@ -10,7 +12,7 @@ export function SplashScreen() {
       </div>
       <div className="flex flex-col items-center gap-1.5">
         <span className="text-lg font-semibold tracking-tight">Zylara</span>
-        <span className="text-[13px] text-foreground-muted">Preparando seu espaço…</span>
+        <span className="text-[13px] text-foreground-muted">{t('shell.splash.loading')}</span>
       </div>
       <div className="h-1 w-36 overflow-hidden rounded-full bg-surface-active">
         <div className="h-full w-1/3 animate-[shimmer_1.4s_linear_infinite] rounded-full bg-accent" />

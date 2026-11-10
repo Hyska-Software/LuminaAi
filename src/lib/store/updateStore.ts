@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { api } from '../api';
+import { t } from '../i18n';
 import type {
   DownloadedUpdate,
   UpdateInfo,
@@ -187,10 +188,10 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       const available = next.info;
       if (available) {
         if (silent && status.preferences.notifiedVersion !== available.latestVersion) {
-          toast.info(`Zylara v${available.latestVersion} disponível`, {
-            description: 'Abra o aviso na barra de título para baixar e instalar.',
+          toast.info(t('common:shell.update.toasts.availableTitle', { version: available.latestVersion }), {
+            description: t('common:shell.update.toasts.availableDescription'),
             action: {
-              label: 'Ver',
+              label: t('common:shell.update.toasts.availableAction'),
               onClick: () => useUpdateStore.getState().openPanel(),
             },
           });
@@ -203,7 +204,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
           void api.markUpdateNotified(available.latestVersion).catch(() => undefined);
         }
       } else if (!silent) {
-        toast.success('Você está na versão mais recente', {
+        toast.success(t('common:shell.update.toasts.latestTitle'), {
           description: `Zylara v${status.currentVersion}`,
         });
       }
@@ -219,7 +220,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         manualCheck: false,
       }));
       if (!silent) {
-        toast.error('Não foi possível verificar atualizações', { description: message });
+        toast.error(t('common:shell.update.toasts.checkFailed'), { description: message });
       }
     }
   },
@@ -279,7 +280,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       });
       if (result.cancelled || !result.download) {
         set({ phase: 'available', progress: null });
-        toast.info('Download cancelado');
+        toast.info(t('common:shell.update.toasts.cancelled'));
         return;
       }
       set({
@@ -289,13 +290,13 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         error: null,
         errorScope: null,
       });
-      toast.success('Atualização baixada', {
-        description: 'O download foi verificado e está pronto para instalar.',
+      toast.success(t('common:shell.update.toasts.downloadedTitle'), {
+        description: t('common:shell.update.toasts.downloadedDescription'),
       });
     } catch (error) {
       const message = errorMessage(error);
       set({ phase: 'error', error: message, errorScope: 'download', progress: null });
-      toast.error('Falha ao baixar a atualização', { description: message });
+      toast.error(t('common:shell.update.toasts.downloadFailed'), { description: message });
     }
   },
 
@@ -314,16 +315,16 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     try {
       await api.installUpdate(info.latestVersion);
       const manual = info.asset && info.asset.kind !== 'setup';
-      toast.success('Instalador aberto', {
+      toast.success(t('common:shell.update.toasts.installerOpenTitle'), {
         description: manual
-          ? 'Siga as instruções do instalador do sistema.'
-          : 'Conclua a atualização na janela do Zylara Setup. Suas conversas e configurações são mantidas.',
+          ? t('common:shell.update.toasts.installerOpenManual')
+          : t('common:shell.update.toasts.installerOpenSetup'),
       });
       set({ phase: 'ready' });
     } catch (error) {
       const message = errorMessage(error);
       set({ phase: 'ready', error: message, errorScope: 'install' });
-      toast.error('Não foi possível abrir o instalador', { description: message });
+      toast.error(t('common:shell.update.toasts.installerOpenFailed'), { description: message });
     }
   },
 
@@ -333,7 +334,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     try {
       await api.revealUpdate(version);
     } catch (error) {
-      toast.error('Não foi possível abrir a pasta', {
+      toast.error(t('common:shell.update.toasts.revealFailed'), {
         description: errorMessage(error),
       });
     }
@@ -385,11 +386,11 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         error: null,
         errorScope: null,
       });
-      toast.info('Atualização ignorada', {
-        description: `Você não será avisado sobre a v${version}. Uma versão mais nova volta a aparecer.`,
+      toast.info(t('common:shell.update.toasts.skippedTitle'), {
+        description: t('common:shell.update.toasts.skippedDescription', { version }),
       });
     } catch (error) {
-      toast.error('Não foi possível ignorar esta versão', {
+      toast.error(t('common:shell.update.toasts.skipFailed'), {
         description: errorMessage(error),
       });
     }
@@ -401,7 +402,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       set({ ...fromStatus(status) });
       await get().check({ force: true });
     } catch (error) {
-      toast.error('Não foi possível reativar o aviso', {
+      toast.error(t('common:shell.update.toasts.unskipFailed'), {
         description: errorMessage(error),
       });
     }
@@ -415,7 +416,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       set({ preferences: status.preferences });
     } catch (error) {
       set({ preferences: previous });
-      toast.error('Não foi possível salvar a preferência', {
+      toast.error(t('common:shell.update.toasts.preferenceFailed'), {
         description: errorMessage(error),
       });
     }

@@ -7,6 +7,7 @@
  * quota data (PLAN kill criteria (e)) — only explain the state and point at
  * the ChatGPT usage dashboard when the plan limit was hit.
  */
+import { t } from '@/lib/i18n';
 import type { ProviderInfo } from '@/lib/types';
 
 /** Fixed ChatGPT usage dashboard (PLAN §1.5). The API exposes no remaining-quota data. */
@@ -70,42 +71,28 @@ export function planUsageUrl(provider?: ProviderInfo | null): string {
   return configured && configured.length > 0 ? configured : CHATGPT_USAGE_URL;
 }
 
-/* Copy (pt-BR). Kept here so the banner and its tests share one source. */
+/* Copy keys. The banner and its tests resolve them through `t`. */
 
-export const PLAN_LIMIT_TITLE = 'Limite de uso atingido';
-export const PLAN_LIMIT_BODY = 'O limite pode ser do plano ou deste app.';
-export const PLAN_NOT_ELIGIBLE_TITLE = 'Uso do plano indisponível';
-export const PLAN_NOT_ELIGIBLE_BODY =
-  'Sua conta/workspace não tem acesso ao plano ChatGPT. Use uma API key ou outra conta.';
-export const AUTH_REQUIRED_TITLE = 'Credencial necessária';
-export const AUTH_REQUIRED_BODY = 'Reconecte o provedor para continuar enviando mensagens.';
+export const PLAN_LIMIT_TITLE = 'chat:turnError.planLimit.title';
+export const PLAN_LIMIT_BODY = 'chat:turnError.planLimit.body';
+export const PLAN_NOT_ELIGIBLE_TITLE = 'chat:turnError.planNotEligible.title';
+export const PLAN_NOT_ELIGIBLE_BODY = 'chat:turnError.planNotEligible.body';
+export const AUTH_REQUIRED_TITLE = 'chat:turnError.authRequired.title';
+export const AUTH_REQUIRED_BODY = 'chat:turnError.authRequired.body';
 
 /**
  * Description of the plan-limit banner. The backend hint already carries the
- * honest copy (`PLAN_USAGE_HINT` in the harness); its "Limite de uso atingido —"
- * prefix is dropped because the banner has a title. Generic rate-limit hints are
- * ignored: retrying is not the guidance when a usage limit was hit.
+ * honest body copy (no title prefix); when it is missing, the localized body is
+ * used. Retrying is never suggested for a usage limit.
  */
 export function planLimitDescription(hint?: string | null): string {
   const trimmed = hint?.trim();
-  if (!trimmed) return PLAN_LIMIT_BODY;
-  const prefix = `${PLAN_LIMIT_TITLE} — `;
-  if (trimmed.startsWith(prefix)) {
-    const rest = trimmed.slice(prefix.length).trim();
-    return rest.length > 0 ? rest : PLAN_LIMIT_BODY;
-  }
-  if (!/plano/i.test(trimmed)) return PLAN_LIMIT_BODY;
-  if (trimmed.startsWith(PLAN_LIMIT_TITLE)) {
-    const rest = trimmed.slice(PLAN_LIMIT_TITLE.length).replace(/^\s*[—:-]\s*/, '').trim();
-    return rest.length > 0 ? rest : PLAN_LIMIT_BODY;
-  }
-  return trimmed;
+  return trimmed && trimmed.length > 0 ? trimmed : t(PLAN_LIMIT_BODY);
 }
 
 /** Inline notice shown when the composer is blocked for lack of credentials (D9). */
 export function credentialGateMessage(provider?: ProviderInfo | null): string {
-  if (provider?.auth === 'oauth') {
-    return 'Entre com sua conta ChatGPT ou adicione uma API key para enviar.';
-  }
-  return 'Adicione a API key deste provedor para enviar.';
+  return provider?.auth === 'oauth'
+    ? t('chat:credentialGate.oauth')
+    : t('chat:credentialGate.apiKey');
 }

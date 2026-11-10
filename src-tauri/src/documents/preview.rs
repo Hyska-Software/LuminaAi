@@ -365,7 +365,7 @@ impl<'a> DocxParser<'a> {
     fn finish(mut self) -> String {
         self.flush_list();
         if self.truncated {
-            let marker = "<p>Prévia truncada: o documento é grande demais.</p>";
+            let marker = &crate::i18n::t("documents.preview.truncated");
             if self.html.len() + marker.len() <= MAX_DOCX_HTML_BYTES {
                 self.html.push_str(marker);
             }
@@ -1297,19 +1297,13 @@ pub fn image_preview(bytes: &[u8]) -> Result<ArtifactPreview> {
     match format {
         ImageFormat::Tiff => tiff_png_preview(bytes),
         ImageFormat::Heic => Ok(ArtifactPreview::Unsupported {
-            reason: "imagens HEIC/HEIF não abrem no visualizador interno. Use \"Salvar como…\" \
-                     para baixar o arquivo e \"Abrir\" para vê-lo no aplicativo do sistema."
-                .to_string(),
+            reason: crate::i18n::t("documents.preview.heicUnsupported"),
         }),
         _ if bytes.is_empty() => Ok(ArtifactPreview::Unsupported {
-            reason: "arquivo de imagem vazio. Use \"Salvar como…\" para baixar o arquivo e \
-                     \"Abrir\" para vê-lo no aplicativo do sistema."
-                .to_string(),
+            reason: crate::i18n::t("documents.preview.emptyImage"),
         }),
         _ => Ok(ArtifactPreview::Unsupported {
-            reason: "formato de imagem não reconhecido. Use \"Salvar como…\" para baixar o \
-                     arquivo e \"Abrir\" para vê-lo no aplicativo do sistema."
-                .to_string(),
+            reason: crate::i18n::t("documents.preview.unknownImage"),
         }),
     }
 }
@@ -1318,13 +1312,12 @@ pub fn image_preview(bytes: &[u8]) -> Result<ArtifactPreview> {
 /// de [`MAX_TIFF_PREVIEW_SIDE`]. Devolve as dimensões **originais** para a UI
 /// exibir os metadados do arquivo.
 fn tiff_png_preview(bytes: &[u8]) -> Result<ArtifactPreview> {
-    let decoded = image::load_from_memory_with_format(bytes, image::ImageFormat::Tiff).context(
-        "não foi possível decodificar a imagem TIFF (arquivo corrompido ou variante não suportada)",
-    )?;
+    let decoded = image::load_from_memory_with_format(bytes, image::ImageFormat::Tiff)
+        .context(crate::i18n::t("documents.preview.tiffDecode"))?;
     let width = decoded.width();
     let height = decoded.height();
     if width == 0 || height == 0 {
-        bail!("imagem TIFF sem dimensões válidas");
+        bail!(crate::i18n::t("documents.preview.tiffDimensions"));
     }
 
     let mut rgba = decoded.into_rgba8();

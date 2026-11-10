@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { Check, ChevronLeft, Sparkles } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   thinkingNote,
   thinkingOptions,
@@ -44,6 +45,7 @@ export function ThinkingOptions({
   autoFocus = false,
   className,
 }: ThinkingOptionsProps) {
+  const { t } = useTranslation('models');
   const options = thinkingOptions(model, value);
   const note = thinkingNote(model);
   // Always highlight something: the requested id, the current option, or the
@@ -115,7 +117,7 @@ export function ThinkingOptions({
         {onBack ? (
           <button
             type="button"
-            aria-label="Voltar para a lista de modelos"
+            aria-label={t('thinking.backToList')}
             onClick={onBack}
             className={cn(
               'flex size-8 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
@@ -129,7 +131,7 @@ export function ThinkingOptions({
         ) : null}
         <div className="min-w-0 flex-1">
           <p className="text-[12px] font-medium leading-tight text-foreground">
-            Modo de pensamento
+            {t('thinking.modeLabel')}
           </p>
           <p className="truncate text-[11px] text-foreground-subtle" title={model.name}>
             {model.name}
@@ -148,7 +150,7 @@ export function ThinkingOptions({
         ref={listRef}
         role="listbox"
         id={listId}
-        aria-label="Modo de pensamento"
+        aria-label={t('thinking.modeLabel')}
         aria-activedescendant={
           resolvedActiveId ? thinkingOptionId(listId, resolvedActiveId) : undefined
         }
@@ -199,7 +201,7 @@ export function ThinkingOptions({
 
         {options.length === 0 ? (
           <p className="px-2 py-3 text-[12px] text-foreground-subtle">
-            Este modelo não expõe controle de raciocínio.
+            {t('thinking.empty')}
           </p>
         ) : null}
       </div>

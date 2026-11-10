@@ -75,6 +75,7 @@ export type InstallerEvent =
 
 export interface InstallerApi {
   context(): Promise<InstallerContext>;
+  setLanguage(locale: string): Promise<void>;
   start(options: InstallOptions, onEvent: (event: InstallerEvent) => void): Promise<void>;
   uninstall(purgeData: boolean, onEvent: (event: InstallerEvent) => void): Promise<void>;
   cancel(): Promise<void>;

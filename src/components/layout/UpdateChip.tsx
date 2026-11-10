@@ -15,6 +15,7 @@ import {
   Loader2,
   ShieldCheck,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
 import { useUpdateStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
@@ -32,6 +33,7 @@ const TONES: Record<Tone, string> = {
 };
 
 export function UpdateChip() {
+  const { t } = useTranslation('common');
   const info = useUpdateStore((state) => state.info);
   const phase = useUpdateStore((state) => state.phase);
   const progress = useUpdateStore((state) => state.progress);
@@ -48,8 +50,12 @@ export function UpdateChip() {
 
   const percent = Math.round(progress?.percent ?? 0);
   let tone: Tone = 'accent';
-  let label = info ? `v${info.latestVersion} disponível` : 'Verificando…';
-  let title = info ? `Atualização v${info.latestVersion} disponível` : 'Verificando atualizações';
+  let label = info
+    ? t('shell.update.available', { version: info.latestVersion })
+    : t('shell.update.checking');
+  let title = info
+    ? t('shell.update.availableTitle', { version: info.latestVersion })
+    : t('shell.update.checkingTitle');
   let Icon = ArrowUpCircle;
   let spin = false;
 
@@ -59,40 +65,40 @@ export function UpdateChip() {
       // manual check without a known version shows the checking state.
       if (info) break;
       tone = 'neutral';
-      label = 'Verificando…';
-      title = 'Verificando atualizações';
+      label = t('shell.update.checking');
+      title = t('shell.update.checkingTitle');
       Icon = Loader2;
       spin = true;
       break;
     case 'downloading':
       tone = 'accent';
-      label = `Baixando ${percent}%`;
-      title = `Baixando atualização — ${percent}%`;
+      label = t('shell.update.downloading', { percent });
+      title = t('shell.update.downloadingTitle', { percent });
       Icon = Download;
       break;
     case 'verifying':
       tone = 'neutral';
-      label = 'Verificando…';
-      title = 'Verificando a integridade do download';
+      label = t('shell.update.verifying');
+      title = t('shell.update.verifyingTitle');
       Icon = ShieldCheck;
       break;
     case 'ready':
       tone = 'success';
-      label = `Instalar v${info?.latestVersion ?? ''}`.trim();
-      title = `Atualização v${info?.latestVersion ?? ''} pronta para instalar`.trim();
+      label = t('shell.update.ready', { version: info?.latestVersion ?? '' });
+      title = t('shell.update.readyTitle', { version: info?.latestVersion ?? '' });
       Icon = CheckCircle2;
       break;
     case 'installing':
       tone = 'accent';
-      label = 'Abrindo instalador…';
-      title = 'Abrindo o instalador';
+      label = t('shell.update.installing');
+      title = t('shell.update.installingTitle');
       Icon = Loader2;
       spin = true;
       break;
     case 'error':
       tone = 'danger';
-      label = 'Falha na atualização';
-      title = 'Falha na atualização';
+      label = t('shell.update.error');
+      title = t('shell.update.error');
       Icon = AlertTriangle;
       break;
     default:
@@ -137,7 +143,7 @@ export function UpdateChip() {
         align="end"
         sideOffset={8}
         collisionPadding={12}
-        aria-label="Atualização do Zylara"
+        aria-label={t('shell.update.popoverAria')}
         className="w-[360px] p-4"
       >
         <UpdatePopoverBody onClose={() => setOpen(false)} />

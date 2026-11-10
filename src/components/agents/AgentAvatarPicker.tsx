@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ImagePlus } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { toast } from 'sonner';
@@ -49,6 +50,7 @@ export function AgentAvatarPicker({
   disabled = false,
   className,
 }: AgentAvatarPickerProps) {
+  const { t } = useTranslation('agents');
   const [uploading, setUploading] = useState(false);
   const mascot = isMascotAvatar(value) ? value : null;
 
@@ -57,7 +59,7 @@ export function AgentAvatarPicker({
     const selected = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: 'Imagem', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
+      filters: [{ name: t('avatar.imageFilter'), extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
     });
     if (!selected || Array.isArray(selected)) return;
     setUploading(true);
@@ -69,7 +71,7 @@ export function AgentAvatarPicker({
         shape: value.shape === 'mascot' ? 'circle' : value.shape,
       });
     } catch (error) {
-      toast.error('Não foi possível usar a imagem', { description: String(error) });
+      toast.error(t('avatar.useImageError'), { description: String(error) });
     } finally {
       setUploading(false);
     }
@@ -84,7 +86,7 @@ export function AgentAvatarPicker({
           disabled={disabled}
           onClick={() => onChange(DEFAULT_AGENT_AVATAR)}
         >
-          Redefinir mascote
+          {t('avatar.reset')}
         </Button>
       </div>
 
@@ -100,21 +102,24 @@ export function AgentAvatarPicker({
         onClick={() => void pickImage()}
         leftIcon={<ImagePlus className="size-4" />}
       >
-        Enviar imagem
+        {t('avatar.upload')}
       </Button>
       <p className="-mt-3 text-center text-[11px] text-foreground-subtle">
-        PNG, JPEG, GIF ou WebP · até 10 MB
+        {t('avatar.uploadHint')}
       </p>
 
       <section className="space-y-2">
-        <p className={LABEL}>Formato</p>
+        <p className={LABEL}>{t('avatar.shape')}</p>
         <SegmentedControl
-          options={[...AGENT_AVATAR_SHAPES]}
+          options={AGENT_AVATAR_SHAPES.map((option) => ({
+            value: option.value,
+            label: t(option.labelKey as never),
+          }))}
           value={value.shape}
           onChange={(shape) =>
             onChange({ ...value, shape: shape as AgentAvatarShape } as AgentAvatarSpec)
           }
-          ariaLabel="Formato do avatar"
+          ariaLabel={t('avatar.shapeAria')}
           size="sm"
           fullWidth
           disabled={disabled}
@@ -125,14 +130,17 @@ export function AgentAvatarPicker({
       {mascot ? (
         <>
           <section className="space-y-2">
-            <p className={LABEL}>Cor dos olhos</p>
+            <p className={LABEL}>{t('avatar.eyes')}</p>
             <SegmentedControl
-              options={[...AGENT_AVATAR_FACES]}
+              options={AGENT_AVATAR_FACES.map((option) => ({
+                value: option.value,
+                label: t(option.labelKey as never),
+              }))}
               value={mascot.face}
               onChange={(face) =>
                 onChange(mascotVariant(mascot, { face: face as AgentAvatarFace }))
               }
-              ariaLabel="Cor dos olhos"
+              ariaLabel={t('avatar.eyes')}
               size="sm"
               fullWidth
               disabled={disabled}
@@ -140,8 +148,8 @@ export function AgentAvatarPicker({
           </section>
 
           <section className="space-y-2">
-            <p className={LABEL}>Expressão</p>
-            <div role="group" aria-label="Expressão" className="grid grid-cols-5 gap-2">
+            <p className={LABEL}>{t('avatar.expression')}</p>
+            <div role="group" aria-label={t('avatar.expression')} className="grid grid-cols-5 gap-2">
               {AGENT_AVATAR_EXPRESSIONS.map((spec) => {
                 const selected = mascot.expression === spec.value;
                 const variant = mascotVariant(mascot, { expression: spec.value });
@@ -149,7 +157,7 @@ export function AgentAvatarPicker({
                   <button
                     key={spec.value}
                     type="button"
-                    aria-label={`Expressão ${spec.label}`}
+                    aria-label={t('avatar.expressionAria', { label: t(spec.labelKey as never) })}
                     aria-pressed={selected}
                     disabled={disabled}
                     onClick={() => onChange(variant)}
@@ -163,15 +171,15 @@ export function AgentAvatarPicker({
           </section>
 
           <section className="space-y-2">
-            <p className={LABEL}>Cor</p>
-            <div role="group" aria-label="Cor" className="grid grid-cols-6 gap-2">
+            <p className={LABEL}>{t('avatar.color')}</p>
+            <div role="group" aria-label={t('avatar.color')} className="grid grid-cols-6 gap-2">
               {AGENT_AVATAR_COLORS.map((spec) => {
                 const selected = mascot.color === spec.value;
                 return (
                   <button
                     key={spec.value}
                     type="button"
-                    aria-label={`Cor ${spec.label}`}
+                    aria-label={t('avatar.colorAria', { label: t(spec.labelKey as never) })}
                     aria-pressed={selected}
                     disabled={disabled}
                     onClick={() => onChange(mascotVariant(mascot, { color: spec.value }))}
@@ -194,8 +202,8 @@ export function AgentAvatarPicker({
           </section>
 
           <section className="space-y-2">
-            <p className={LABEL}>Corpo</p>
-            <div role="group" aria-label="Corpo" className="grid grid-cols-5 gap-2">
+            <p className={LABEL}>{t('avatar.body')}</p>
+            <div role="group" aria-label={t('avatar.body')} className="grid grid-cols-5 gap-2">
               {AGENT_AVATAR_BODIES.map((spec) => {
                 const selected = mascot.body === spec.value;
                 const variant = mascotVariant(mascot, { body: spec.value });
@@ -203,7 +211,7 @@ export function AgentAvatarPicker({
                   <button
                     key={spec.value}
                     type="button"
-                    aria-label={`Corpo ${spec.label}`}
+                    aria-label={t('avatar.bodyAria', { label: t(spec.labelKey as never) })}
                     aria-pressed={selected}
                     disabled={disabled}
                     onClick={() => onChange(variant)}

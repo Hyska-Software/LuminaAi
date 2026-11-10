@@ -7,10 +7,12 @@
  * é configurável em Configurações → Ferramentas (`diffOpenMode`).
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CircleAlert, RefreshCw } from 'lucide-react';
 
 import { IconButton, Spinner, Tooltip } from '@/components/ui';
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import type { CodeDiffTab } from '@/lib/store';
 import { DiffView } from './DiffView';
 
@@ -22,10 +24,11 @@ export interface CodeDiffViewProps {
 function describeError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error.trim()) return error;
-  return 'Não foi possível carregar o diff.';
+  return t('code:codeDiff.error');
 }
 
 export function CodeDiffView({ target, className }: CodeDiffViewProps) {
+  const { t: translate } = useTranslation('code');
   const [diff, setDiff] = useState(target.knownDiff ?? '');
   const [loading, setLoading] = useState(target.knownDiff == null);
   const [error, setError] = useState<string | null>(null);
@@ -59,13 +62,12 @@ export function CodeDiffView({ target, className }: CodeDiffViewProps) {
     <div className={className}>
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-muted">
-          Diff
-          {target.staged ? ' (preparado)' : ''}
+          {target.staged ? translate('code:codeDiff.staged') : translate('code:codeDiff.label')}
           {target.base ? ` · ${target.base.slice(0, 7)}` : ''}
         </span>
-        {loading ? <Spinner size="xs" label="Carregando diff" /> : null}
-        <Tooltip content="Recarregar diff" side="bottom">
-          <IconButton label="Recarregar diff" size="sm" onClick={() => void load()}>
+        {loading ? <Spinner size="xs" label={translate('code:codeDiff.loading')} /> : null}
+        <Tooltip content={translate('code:codeDiff.reload')} side="bottom">
+          <IconButton label={translate('code:codeDiff.reload')} size="sm" onClick={() => void load()}>
             <RefreshCw aria-hidden className="size-3.5" />
           </IconButton>
         </Tooltip>

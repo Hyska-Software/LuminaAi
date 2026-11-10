@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArchiveRestore, ArrowLeft, MessagesSquare } from 'lucide-react';
 
 import { AgentChannelDialog } from './AgentChannelDialog';
@@ -28,6 +29,7 @@ import {
 import type { Agent, AgentChannel } from '@/lib/types';
 
 function ArchivedAgentHome({ agent }: { agent: Agent }) {
+  const { t } = useTranslation('agents');
   const restore = useAgentStore((state) => state.restore);
   const conversations = useChatStore((state) => state.conversations);
   const threads = conversations.filter(
@@ -43,14 +45,15 @@ function ArchivedAgentHome({ agent }: { agent: Agent }) {
           <MessagesSquare className="size-6" />
         </div>
         <h1 className="mt-5 text-xl font-semibold tracking-tight">{agent.name}</h1>
-        <p className="mt-1 text-[13px] text-foreground-muted">{agent.role} · Arquivado</p>
+        <p className="mt-1 text-[13px] text-foreground-muted">
+          {t('workspaceView.archivedRole', { role: agent.role })}
+        </p>
         <p className="mt-4 text-[13px] leading-relaxed text-foreground-muted">
-          Este agente está arquivado. As {threads.length} conversa(s) continuam preservadas, mas
-          novos turnos ficam bloqueados até restaurar.
+          {t('workspaceView.archivedDescription', { count: threads.length })}
         </p>
         <Button className="mt-6" onClick={() => void restore(agent.id)}>
           <ArchiveRestore className="mr-1.5 size-4" />
-          Restaurar agente
+          {t('workspaceView.restoreAgent')}
         </Button>
       </div>
     </div>
@@ -61,6 +64,7 @@ function ArchivedAgentHome({ agent }: { agent: Agent }) {
  * commits/goal). The conversation itself stays mounted underneath so returning
  * never loses the draft or scroll position. */
 function AgentCodeView({ conversationId }: { conversationId: string }) {
+  const { t } = useTranslation('agents');
   const codeView = useUiStore((state) => state.codeView);
   const setCodeView = useUiStore((state) => state.setCodeView);
   const diffTab = useUiStore((state) => state.codeDiffTab);
@@ -72,7 +76,7 @@ function AgentCodeView({ conversationId }: { conversationId: string }) {
   if (codeView === 'diff' && diffTab) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <AgentCodeViewHeader title="Alterações" onBack={() => setCodeView('session')} />
+        <AgentCodeViewHeader title={t('workspaceView.changes')} onBack={() => setCodeView('session')} />
         <CodeDiffView target={diffTab} className="min-h-0 flex-1" />
       </div>
     );
@@ -88,7 +92,7 @@ function AgentCodeView({ conversationId }: { conversationId: string }) {
   if (codeView === 'plan' && planTab) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <AgentCodeViewHeader title="Plano" onBack={() => setCodeView('session')} />
+        <AgentCodeViewHeader title={t('workspaceView.plan')} onBack={() => setCodeView('session')} />
         <CodePlanView tab={planTab} className="min-h-0 flex-1" />
       </div>
     );
@@ -96,7 +100,7 @@ function AgentCodeView({ conversationId }: { conversationId: string }) {
   if (codeView === 'commits' && commitsTab) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <AgentCodeViewHeader title="Histórico" onBack={() => setCodeView('session')} />
+        <AgentCodeViewHeader title={t('workspaceView.history')} onBack={() => setCodeView('session')} />
         <CodeCommitHistoryView
           target={commitsTab}
           onSelect={(revision) => selectCommit(revision)}
@@ -108,7 +112,7 @@ function AgentCodeView({ conversationId }: { conversationId: string }) {
   if (codeView === 'goal') {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <AgentCodeViewHeader title="Objetivo" onBack={() => setCodeView('session')} />
+        <AgentCodeViewHeader title={t('workspaceView.goal')} onBack={() => setCodeView('session')} />
         <GoalPanel conversationId={conversationId} className="min-h-0 flex-1" />
       </div>
     );
@@ -117,9 +121,10 @@ function AgentCodeView({ conversationId }: { conversationId: string }) {
 }
 
 function AgentCodeViewHeader({ title, onBack }: { title: string; onBack: () => void }) {
+  const { t } = useTranslation('agents');
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border/70 px-3">
-      <IconButton label="Voltar para a conversa" size="sm" variant="ghost" onClick={onBack}>
+      <IconButton label={t('workspaceView.backToConversation')} size="sm" variant="ghost" onClick={onBack}>
         <ArrowLeft className="size-4" />
       </IconButton>
       <p className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground-muted">

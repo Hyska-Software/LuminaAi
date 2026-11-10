@@ -3,6 +3,8 @@
  * used by the model picker and the reasoning selector.
  */
 import catalogJson from '@data/catalog.json';
+import { t } from './i18n';
+import { compareText } from './i18n/format';
 import type {
   CatalogFile,
   ModelInfo,
@@ -172,16 +174,24 @@ export function reasoningUi(model?: ModelInfo | null): ReasoningUi {
 
 /** Human label for an effort value. */
 export function effortLabel(effort: string): string {
-  const map: Record<string, string> = {
-    none: 'Desligado',
-    minimal: 'Mínimo',
-    low: 'Baixo',
-    medium: 'Médio',
-    high: 'Alto',
-    xhigh: 'Muito alto',
-    max: 'Máximo',
-  };
-  return map[effort] ?? effort;
+  switch (effort) {
+    case 'none':
+      return t('models:effort.none');
+    case 'minimal':
+      return t('models:effort.minimal');
+    case 'low':
+      return t('models:effort.low');
+    case 'medium':
+      return t('models:effort.medium');
+    case 'high':
+      return t('models:effort.high');
+    case 'xhigh':
+      return t('models:effort.xhigh');
+    case 'max':
+      return t('models:effort.max');
+    default:
+      return effort;
+  }
 }
 
 /** Compact reasoning label used inside pills (e.g. "Máx."). */
@@ -191,10 +201,10 @@ export function reasoningShortLabel(
 ): string {
   if (!model || !reasoningUi(model).supported) return '';
   if (!selection || selection.mode === 'off') {
-    return reasoningUi(model).canDisable ? 'off' : '';
+    return reasoningUi(model).canDisable ? t('models:reasoning.shortOff') : '';
   }
   if (selection.mode === 'effort') {
-    return selection.effort ? effortLabel(selection.effort) : 'on';
+    return selection.effort ? effortLabel(selection.effort) : t('models:reasoning.shortOn');
   }
   if (selection.mode === 'budget') return String(selection.budget ?? 0);
   return '';
@@ -204,16 +214,20 @@ export function reasoningLabel(
   model: ModelInfo | undefined,
   selection: ReasoningSelection | null | undefined,
 ): string {
-  if (!model || !reasoningUi(model).supported) return 'Sem controle';
+  if (!model || !reasoningUi(model).supported) return t('models:reasoning.noControl');
   if (!selection || selection.mode === 'off') {
-    return reasoningUi(model).canDisable ? 'Pensamento off' : 'Padrão';
+    return reasoningUi(model).canDisable
+      ? t('models:reasoning.thinkingOff')
+      : t('models:reasoning.default');
   }
   if (selection.mode === 'effort') {
-    if (!selection.effort) return 'Pensamento ligado';
-    return `Pensamento ${effortLabel(selection.effort)}`;
+    if (!selection.effort) return t('models:reasoning.thinkingOn');
+    return t('models:reasoning.effortLabel', { effort: effortLabel(selection.effort) });
   }
-  if (selection.mode === 'budget') return `Orçamento ${selection.budget ?? 0}`;
-  return 'Padrão';
+  if (selection.mode === 'budget') {
+    return t('models:reasoning.budget', { value: selection.budget ?? 0 });
+  }
+  return t('models:reasoning.default');
 }
 
 export function formatContextWindow(tokens: number): string {
@@ -229,19 +243,19 @@ export function formatContextWindow(tokens: number): string {
 
 export function formatPrice(cost?: ModelInfo['cost']): string {
   if (!cost || cost.input == null || cost.output == null) return '—';
-  if (cost.input === 0 && cost.output === 0) return 'Grátis';
-  const fmt = (v: number) => (v === 0 ? 'grátis' : `$${v.toFixed(2)}`);
-  return `${fmt(cost.input)} / ${fmt(cost.output)}`;
+  if (cost.input === 0 && cost.output === 0) return t('models:price.free');
+  const fmt = (v: number) => (v === 0 ? t('models:price.freeShort') : `$${v.toFixed(2)}`);
+  return t('models:price.pair', { input: fmt(cost.input), output: fmt(cost.output) });
 }
 
 export function modelBadges(model: ModelInfo): string[] {
   const badges: string[] = [];
-  if (model.status === 'free') badges.push('Grátis');
-  if (model.tags.includes('vision') || model.attachment) badges.push('Visão');
-  if (model.reasoningOptions.length) badges.push('Raciocínio');
-  if (model.openWeights) badges.push('Open');
-  if (model.status === 'beta') badges.push('Preview');
-  if (model.status === 'unavailable') badges.push('Indisponível');
+  if (model.status === 'free') badges.push(t('models:badges.free'));
+  if (model.tags.includes('vision') || model.attachment) badges.push(t('models:badges.vision'));
+  if (model.reasoningOptions.length) badges.push(t('models:badges.reasoning'));
+  if (model.openWeights) badges.push(t('models:badges.open'));
+  if (model.status === 'beta') badges.push(t('models:badges.preview'));
+  if (model.status === 'unavailable') badges.push(t('models:badges.unavailable'));
   return badges;
 }
 
@@ -262,9 +276,9 @@ export function groupByFamily(models: ModelInfo[]): { family: string; models: Mo
   return [...map.entries()]
     .map(([family, list]) => ({
       family,
-      models: list.sort((a, b) => a.name.localeCompare(b.name)),
+      models: list.sort((a, b) => compareText(a.name, b.name)),
     }))
-    .sort((a, b) => a.family.localeCompare(b.family));
+    .sort((a, b) => compareText(a.family, b.family));
 }
 
 export const CATALOG_GENERATED_AT = catalog.generatedAt;

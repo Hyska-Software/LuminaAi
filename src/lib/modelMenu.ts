@@ -17,6 +17,8 @@ import {
   modelBadges,
   reasoningUi,
 } from './catalog';
+import { t } from './i18n';
+import { compareText } from './i18n/format';
 import type {
   ModelInfo,
   ModelSelection,
@@ -80,14 +82,15 @@ const FAMILY_LABELS: Record<string, string> = {
 /** Curated family label; unknown families are capitalized, empty/default → "Outros". */
 export function familyLabel(family: string | null | undefined): string {
   const key = (family ?? '').toLowerCase().trim();
-  if (!key || key === 'default' || key === 'outros' || key === 'other') return 'Outros';
+  if (isOtherFamily(family)) return t('models:family.other');
   const known = FAMILY_LABELS[key];
   if (known) return known;
   return key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 function isOtherFamily(family: string | null | undefined): boolean {
-  return familyLabel(family) === 'Outros';
+  const key = (family ?? '').toLowerCase().trim();
+  return !key || key === 'default' || key === 'outros' || key === 'other';
 }
 
 /* ------------------------------------------------------------------ */
@@ -146,10 +149,26 @@ export interface ModelFilterOption {
 /** Quick filters shown as toggle chips in the full dialog. */
 export function modelFilterOptions(): ModelFilterOption[] {
   return [
-    { value: 'favorites', label: 'Favoritos', title: 'Mostrar apenas modelos favoritos' },
-    { value: 'vision', label: 'Visão', title: 'Modelos que aceitam imagens/anexos' },
-    { value: 'reasoning', label: 'Raciocínio', title: 'Modelos com controle de pensamento' },
-    { value: 'free', label: 'Grátis', title: 'Modelos gratuitos no gateway' },
+    {
+      value: 'favorites',
+      label: t('models:filters.favorites.label'),
+      title: t('models:filters.favorites.title'),
+    },
+    {
+      value: 'vision',
+      label: t('models:filters.vision.label'),
+      title: t('models:filters.vision.title'),
+    },
+    {
+      value: 'reasoning',
+      label: t('models:filters.reasoning.label'),
+      title: t('models:filters.reasoning.title'),
+    },
+    {
+      value: 'free',
+      label: t('models:filters.free.label'),
+      title: t('models:filters.free.title'),
+    },
   ];
 }
 
@@ -250,13 +269,13 @@ function groupModelsByFamily(models: ModelInfo[]): { family: string; models: Mod
   return [...map.entries()]
     .map(([family, list]) => ({
       family,
-      models: list.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+      models: list.sort((a, b) => compareText(a.name, b.name)),
     }))
     .sort((a, b) => {
       const aOther = isOtherFamily(a.family);
       const bOther = isOtherFamily(b.family);
       if (aOther !== bOther) return aOther ? 1 : -1;
-      return familyLabel(a.family).localeCompare(familyLabel(b.family), 'pt-BR');
+      return compareText(familyLabel(a.family), familyLabel(b.family));
     });
 }
 
@@ -314,7 +333,10 @@ export function buildModelGroups(
       for (const family of groupModelsByFamily(models)) {
         groups.push({
           key: `${provider.id}:${family.family}`,
-          label: `${provider.shortName} · ${familyLabel(family.family)}`,
+          label: t('models:groups.providerFamily', {
+            provider: provider.shortName,
+            family: familyLabel(family.family),
+          }),
           providerId: provider.id,
           items: family.models.map((model) => toEntry(provider, model, isFavorite(provider, model))),
         });
@@ -327,11 +349,11 @@ export function buildModelGroups(
   for (const { provider, models } of filtered) {
     const favoriteModels = models
       .filter((model) => isFavorite(provider, model))
-      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+      .sort((a, b) => compareText(a.name, b.name));
     if (favoriteModels.length) {
       groups.push({
         key: `${provider.id}:favorites`,
-        label: 'Favoritos',
+        label: t('models:groups.favorites'),
         providerId: provider.id,
         items: favoriteModels.map((model) => toEntry(provider, model, true)),
       });
@@ -390,34 +412,75 @@ export interface ThinkingOption {
   current: boolean;
 }
 
-const EFFORT_DESCRIPTIONS: Record<string, string> = {
-  none: 'Sem raciocínio estendido.',
-  minimal: 'Quase direto; o mínimo de raciocínio.',
-  low: 'Rápido, para tarefas simples.',
-  medium: 'Equilíbrio entre velocidade e profundidade.',
-  high: 'Pensa mais antes de responder; bom para problemas complexos.',
-  xhigh: 'Esforço muito alto; respostas mais lentas e detalhadas.',
-  max: 'Maior esforço disponível; mais lento e mais tokens.',
-};
-
 export function effortDescription(effort: string): string {
-  return EFFORT_DESCRIPTIONS[effort] ?? 'Ajusta quanto o modelo pensa antes de responder.';
+  switch (effort) {
+    case 'none':
+      return t('models:effortDescriptions.none');
+    case 'minimal':
+      return t('models:effortDescriptions.minimal');
+    case 'low':
+      return t('models:effortDescriptions.low');
+    case 'medium':
+      return t('models:effortDescriptions.medium');
+    case 'high':
+      return t('models:effortDescriptions.high');
+    case 'xhigh':
+      return t('models:effortDescriptions.xhigh');
+    case 'max':
+      return t('models:effortDescriptions.max');
+    default:
+      return t('models:effortDescriptions.fallback');
+  }
 }
 
-const BUDGET_PRESETS: { budget: number; label: string; description: string }[] = [
-  { budget: 4_096, label: 'Rápido', description: 'Cerca de 4 mil tokens de raciocínio.' },
-  { budget: 8_192, label: 'Equilibrado', description: 'Cerca de 8 mil tokens de raciocínio.' },
-  { budget: 16_384, label: 'Profundo', description: 'Cerca de 16 mil tokens de raciocínio.' },
-  { budget: 32_768, label: 'Máximo', description: 'Cerca de 32 mil tokens de raciocínio.' },
-];
+export interface BudgetPreset {
+  budget: number;
+  label: string;
+  description: string;
+}
+
+const BUDGET_PRESET_BUDGETS = [4_096, 8_192, 16_384, 32_768] as const;
+
+/** Copy of a budget preset; `null` for an out-of-catalog budget. */
+function budgetPresetCopy(budget: number): { label: string; description: string } | null {
+  switch (budget) {
+    case 4_096:
+      return {
+        label: t('models:budget.fast.label'),
+        description: t('models:budget.fast.description'),
+      };
+    case 8_192:
+      return {
+        label: t('models:budget.balanced.label'),
+        description: t('models:budget.balanced.description'),
+      };
+    case 16_384:
+      return {
+        label: t('models:budget.deep.label'),
+        description: t('models:budget.deep.description'),
+      };
+    case 32_768:
+      return {
+        label: t('models:budget.max.label'),
+        description: t('models:budget.max.description'),
+      };
+    default:
+      return null;
+  }
+}
 
 /** Budget presets that fit the model's declared range. */
-export function budgetPresets(model?: ModelInfo | null): typeof BUDGET_PRESETS {
+export function budgetPresets(model?: ModelInfo | null): BudgetPreset[] {
   const ui = reasoningUi(model);
   if (!ui.budget) return [];
   const min = ui.budget.min ?? 1_024;
   const max = ui.budget.max ?? 65_536;
-  return BUDGET_PRESETS.filter((preset) => preset.budget >= min && preset.budget <= max);
+  return BUDGET_PRESET_BUDGETS.filter((budget) => budget >= min && budget <= max).flatMap(
+    (budget) => {
+      const copy = budgetPresetCopy(budget);
+      return copy ? [{ budget, ...copy }] : [];
+    },
+  );
 }
 
 /**
@@ -445,8 +508,8 @@ export function thinkingOptions(
     options.push({
       id: 'off',
       kind: 'off',
-      label: 'Desligado',
-      description: 'Responde direto, sem raciocínio estendido.',
+      label: t('models:thinking.offLabel'),
+      description: t('models:thinking.offDescription'),
       current: currentId === 'off',
     });
   }
@@ -467,8 +530,8 @@ export function thinkingOptions(
     options.push({
       id: 'on',
       kind: 'on',
-      label: 'Ligado',
-      description: 'Habilita o raciocínio do modelo, sem ajuste de esforço.',
+      label: t('models:thinking.onLabel'),
+      description: t('models:thinking.onDescription'),
       current: currentId === 'on',
     });
   }
@@ -511,12 +574,12 @@ export function thinkingSelectionFor(option: ThinkingOption): ReasoningSelection
 /** Note shown above the thinking list when the model has constraints. */
 export function thinkingNote(model?: ModelInfo | null): string | null {
   const ui = reasoningUi(model);
-  if (!model || !ui.supported) return 'Este modelo não expõe controle de raciocínio.';
+  if (!model || !ui.supported) return t('models:thinking.noControl');
   if (!ui.canDisable && ui.efforts.length) {
-    return 'Este modelo sempre pensa; escolha o nível de esforço.';
+    return t('models:thinking.alwaysEffort');
   }
   if (!ui.canDisable && ui.budget) {
-    return 'Este modelo sempre pensa; escolha o orçamento de tokens.';
+    return t('models:thinking.alwaysBudget');
   }
   return null;
 }
@@ -526,21 +589,22 @@ export function effortSegmentLabel(
   model: ModelInfo | undefined,
   selection: ReasoningSelection | null | undefined,
 ): string {
-  if (!model) return 'Padrão';
+  if (!model) return t('models:thinking.defaultLabel');
   const ui = reasoningUi(model);
-  if (!ui.supported) return 'Padrão';
+  if (!ui.supported) return t('models:thinking.defaultLabel');
   if (!selection || selection.mode === 'off') {
-    return ui.canDisable ? 'Desligado' : 'Padrão';
+    return ui.canDisable ? t('models:thinking.offLabel') : t('models:thinking.defaultLabel');
   }
   if (selection.mode === 'effort') {
-    return selection.effort ? effortLabel(selection.effort) : 'Ligado';
+    return selection.effort ? effortLabel(selection.effort) : t('models:thinking.onLabel');
   }
   if (selection.mode === 'budget') {
     const budget = selection.budget ?? 4_096;
-    const preset = BUDGET_PRESETS.find((candidate) => candidate.budget === budget);
-    return preset ? preset.label : `${Math.round(budget / 1_024)}k`;
+    const preset = budgetPresetCopy(budget);
+    if (preset) return preset.label;
+    return t('models:thinking.budgetK', { value: Math.round(budget / 1_024) });
   }
-  return 'Padrão';
+  return t('models:thinking.defaultLabel');
 }
 
 /** Sentence used by the detail panel to describe the current thinking mode. */
@@ -550,19 +614,22 @@ export function thinkingHeadline(
 ): string {
   if (!model) return '—';
   const ui = reasoningUi(model);
-  if (!ui.supported) return 'Sem controle de raciocínio';
+  if (!ui.supported) return t('models:thinking.headlineNoControl');
   if (!selection || selection.mode === 'off') {
-    return ui.canDisable ? 'Pensamento desligado' : 'Padrão do modelo';
+    return ui.canDisable ? t('models:thinking.headlineOff') : t('models:thinking.headlineDefault');
   }
   if (selection.mode === 'effort') {
-    return selection.effort
-      ? `Pensamento ${effortLabel(selection.effort).toLowerCase()}`
-      : 'Pensamento ligado';
+    if (!selection.effort) return t('models:thinking.headlineOn');
+    return t('models:thinking.headlineEffort', {
+      effort: effortLabel(selection.effort).toLowerCase(),
+    });
   }
   if (selection.mode === 'budget') {
-    return `Orçamento de ${formatContextWindow(selection.budget ?? 8_192)} tokens`;
+    return t('models:thinking.headlineBudget', {
+      value: formatContextWindow(selection.budget ?? 8_192),
+    });
   }
-  return 'Padrão do modelo';
+  return t('models:thinking.headlineDefault');
 }
 
 function pickEffort(efforts: string[], preferred: string): string {
@@ -612,22 +679,49 @@ export function reasoningForModel(
 /* Details                                                             */
 /* ------------------------------------------------------------------ */
 
-export const PROTOCOL_LABELS: Record<string, string> = {
-  'openai-chat': 'OpenAI Chat',
-  'openai-responses': 'OpenAI Responses',
-  anthropic: 'Anthropic Messages',
-  google: 'Google Gemini',
-};
+export function protocolLabel(protocol: string): string {
+  switch (protocol) {
+    case 'openai-chat':
+      return t('models:protocols.openai-chat');
+    case 'openai-responses':
+      return t('models:protocols.openai-responses');
+    case 'anthropic':
+      return t('models:protocols.anthropic');
+    case 'google':
+      return t('models:protocols.google');
+    default:
+      return protocol;
+  }
+}
 
-export const MODALITY_LABELS: Record<string, string> = {
-  text: 'Texto',
-  image: 'Imagem',
-  pdf: 'PDF',
-  audio: 'Áudio',
-  video: 'Vídeo',
-};
+export function modalityLabel(modality: string): string {
+  switch (modality.toLowerCase()) {
+    case 'text':
+      return t('models:modalities.text');
+    case 'image':
+      return t('models:modalities.image');
+    case 'pdf':
+      return t('models:modalities.pdf');
+    case 'audio':
+      return t('models:modalities.audio');
+    case 'video':
+      return t('models:modalities.video');
+    default:
+      return modality;
+  }
+}
+
+export type ModelDetailLineId =
+  | 'context'
+  | 'maxOutput'
+  | 'cost'
+  | 'input'
+  | 'protocol'
+  | 'knowledge'
+  | 'release';
 
 export interface ModelDetailLine {
+  id: ModelDetailLineId;
   label: string;
   value: string;
 }
@@ -650,23 +744,33 @@ export function modelDetails(
   if (!model) return null;
 
   const lines: ModelDetailLine[] = [
-    { label: 'Contexto', value: formatContextWindow(model.contextWindow) },
-    { label: 'Saída máx.', value: formatContextWindow(model.maxOutput) },
-    { label: 'Custo (1M tok.)', value: formatPrice(model.cost) },
+    {
+      id: 'context',
+      label: t('models:details.context'),
+      value: formatContextWindow(model.contextWindow),
+    },
+    {
+      id: 'maxOutput',
+      label: t('models:details.maxOutput'),
+      value: formatContextWindow(model.maxOutput),
+    },
+    { id: 'cost', label: t('models:details.cost'), value: formatPrice(model.cost) },
   ];
 
   const inputs = (model.modalities.input ?? [])
-    .map((modality) => MODALITY_LABELS[modality.toLowerCase()] ?? modality)
+    .map((modality) => modalityLabel(modality))
     .join(', ');
-  if (inputs) lines.push({ label: 'Entrada', value: inputs });
+  if (inputs) lines.push({ id: 'input', label: t('models:details.input'), value: inputs });
 
-  const protocols = model.protocols
-    .map((protocol) => PROTOCOL_LABELS[protocol] ?? protocol)
-    .join(', ');
-  if (protocols) lines.push({ label: 'Protocolo', value: protocols });
+  const protocols = model.protocols.map((protocol) => protocolLabel(protocol)).join(', ');
+  if (protocols) lines.push({ id: 'protocol', label: t('models:details.protocol'), value: protocols });
 
-  if (model.knowledge) lines.push({ label: 'Conhecimento até', value: model.knowledge });
-  if (model.releaseDate) lines.push({ label: 'Lançamento', value: model.releaseDate });
+  if (model.knowledge) {
+    lines.push({ id: 'knowledge', label: t('models:details.knowledge'), value: model.knowledge });
+  }
+  if (model.releaseDate) {
+    lines.push({ id: 'release', label: t('models:details.release'), value: model.releaseDate });
+  }
 
   return {
     id: model.id,
@@ -683,10 +787,10 @@ export function modelDetails(
 export function modelStatusNote(model?: ModelInfo | null): string | null {
   if (!model) return null;
   if (model.status === 'unavailable') {
-    return 'Indisponível no gateway — não pode ser usado.';
+    return t('models:status.unavailable');
   }
-  if (model.status === 'beta') return 'Modelo em prévia: pode mudar ou sair do catálogo.';
-  if (model.status === 'free') return 'Modelo gratuito no gateway, com limites de uso.';
+  if (model.status === 'beta') return t('models:status.beta');
+  if (model.status === 'free') return t('models:status.free');
   return null;
 }
 
@@ -708,14 +812,14 @@ export function providerHasKey(keys: ProviderKeyStatus[], providerId: string): b
 export function keyStatusLabel(key?: ProviderKeyStatus): string {
   switch (key?.source) {
     case 'settings':
-      return 'Chave configurada';
+      return t('models:keys.settings');
     case 'env':
-      return 'Chave via variável de ambiente';
+      return t('models:keys.env');
     case 'opencode-cli':
-      return 'Chave do OpenCode CLI';
+      return t('models:keys.opencodeCli');
     case 'chatgpt':
-      return key?.hasKey ? 'Conta ChatGPT conectada' : 'Sessão do ChatGPT expirada';
+      return key?.hasKey ? t('models:keys.chatgpt') : t('models:keys.chatgptExpired');
     default:
-      return key?.mode === 'oauth' ? 'Sem conta ChatGPT' : 'Sem chave de API';
+      return key?.mode === 'oauth' ? t('models:keys.noChatgpt') : t('models:keys.noKey');
   }
 }

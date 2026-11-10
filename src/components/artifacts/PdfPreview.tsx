@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, type KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -31,6 +32,7 @@ function errorMessage(error: unknown): string {
  * falls back to the binary card.
  */
 export function PdfPreview({ content, className, showArtifactActions }: ArtifactViewProps) {
+  const { t } = useTranslation('artifacts');
   const { artifact, dataBase64 } = content;
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +143,7 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
         content={content}
         className={className}
         showArtifactActions={showArtifactActions}
-        detail="Este PDF veio sem os dados necessários para a prévia."
+        detail={t('artifacts:pdf.noData')}
       />
     );
   }
@@ -150,10 +152,12 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
     return (
       <div className={cn('flex h-full flex-col items-center justify-center gap-3 px-6 text-center', className)}>
         <AlertTriangle aria-hidden className="size-5 text-danger" />
-        <p className="text-[13px] font-medium text-foreground">Não foi possível renderizar o PDF</p>
+        <p className="text-[13px] font-medium text-foreground">
+          {t('artifacts:pdf.renderErrorTitle')}
+        </p>
         <p className="max-w-sm text-xs leading-relaxed text-foreground-muted">{error}</p>
         <Button size="sm" variant="secondary" onClick={() => setAttempt((value) => value + 1)}>
-          Tentar novamente
+          {t('artifacts:pdf.retry')}
         </Button>
       </div>
     );
@@ -205,11 +209,11 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
     <div className={cn('flex h-full flex-col', className)}>
       <div
         role="toolbar"
-        aria-label="Controles do PDF"
+        aria-label={t('artifacts:pdf.toolbarAria')}
         className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-raised px-2 py-1.5"
       >
         <IconButton
-          label="Página anterior"
+          label={t('artifacts:pdf.previousPage')}
           size="sm"
           disabled={!ready || pageNumber <= 1}
           onClick={() => goToPage(pageNumber - 1)}
@@ -220,10 +224,12 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
           aria-live="polite"
           className="min-w-[104px] text-center text-[11px] tabular-nums text-foreground-muted"
         >
-          {ready ? `Página ${pageNumber} de ${numPages}` : 'Carregando…'}
+          {ready
+            ? t('artifacts:pdf.pageStatus', { page: pageNumber, total: numPages })
+            : t('artifacts:pdf.loadingShort')}
         </span>
         <IconButton
-          label="Próxima página"
+          label={t('artifacts:pdf.nextPage')}
           size="sm"
           disabled={!ready || pageNumber >= numPages}
           onClick={() => goToPage(pageNumber + 1)}
@@ -232,7 +238,7 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
         </IconButton>
         <span aria-hidden className="mx-1 h-4 w-px bg-border" />
         <IconButton
-          label="Diminuir zoom"
+          label={t('artifacts:pdf.zoomOut')}
           size="sm"
           disabled={!ready || zoom <= MIN_ZOOM}
           onClick={() => setZoom((value) => clampZoom(value - ZOOM_STEP))}
@@ -243,7 +249,7 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
           {Math.round(zoom * 100)}%
         </span>
         <IconButton
-          label="Aumentar zoom"
+          label={t('artifacts:pdf.zoomIn')}
           size="sm"
           disabled={!ready || zoom >= MAX_ZOOM}
           onClick={() => setZoom((value) => clampZoom(value + ZOOM_STEP))}
@@ -251,38 +257,46 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
           <ZoomIn className="size-4" />
         </IconButton>
         {rendering ? (
-          <Spinner size="xs" className="ml-auto text-foreground-subtle" label="Renderizando página" />
+          <Spinner
+            size="xs"
+            className="ml-auto text-foreground-subtle"
+            label={t('artifacts:pdf.rendering')}
+          />
         ) : null}
       </div>
 
       <div
         ref={scrollRef}
         role="region"
-        aria-label="Prévia do PDF"
+        aria-label={t('artifacts:pdf.previewAria')}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         className="min-h-0 flex-1 overflow-auto bg-surface p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
       >
         {!ready ? (
           <div className="flex h-full flex-col items-center justify-center gap-2">
-            <Spinner size="md" className="text-accent" label="Carregando PDF" />
-            <span className="text-xs text-foreground-muted">Carregando PDF…</span>
+            <Spinner size="md" className="text-accent" label={t('artifacts:pdf.loading')} />
+            <span className="text-xs text-foreground-muted">{t('artifacts:pdf.loadingEllipsis')}</span>
           </div>
         ) : (
           <div className="relative flex min-h-full justify-center">
             <canvas
               ref={canvasRef}
               role="img"
-              aria-label={`Página ${pageNumber} de ${numPages} do PDF ${artifact.name}`}
+              aria-label={t('artifacts:pdf.canvasAria', {
+                page: pageNumber,
+                total: numPages,
+                name: artifact.name,
+              })}
               className="h-auto max-w-none rounded-md border border-border bg-background shadow-sm"
             />
             {renderError ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background px-4 text-center">
                 <AlertTriangle aria-hidden className="size-4 text-danger" />
-                <p className="text-xs text-foreground-muted">Não foi possível renderizar esta página.</p>
+                <p className="text-xs text-foreground-muted">{t('artifacts:pdf.pageRenderError')}</p>
                 <p className="max-w-sm text-[11px] leading-relaxed text-foreground-subtle">{renderError}</p>
                 <Button size="sm" variant="secondary" onClick={() => setRenderAttempt((value) => value + 1)}>
-                  Tentar novamente
+                  {t('artifacts:pdf.retry')}
                 </Button>
               </div>
             ) : null}

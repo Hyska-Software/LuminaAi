@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseGenUI, type GenUIDiagnostic } from '@/lib/genui';
@@ -34,17 +35,18 @@ function DiagnosticItem({ diagnostic }: { diagnostic: GenUIDiagnostic }) {
  * (ex.: falha bruta de JSON), o erro textual vira a única entrada.
  */
 function DiagnosticList({ diagnostics, error }: { diagnostics: GenUIDiagnostic[]; error: string | null }) {
+  const { t } = useTranslation('genui');
   const fallback: GenUIDiagnostic = {
     code: 'parse',
     severity: 'error',
     path: '$',
-    message: error ?? 'Não foi possível interpretar o bloco de UI generativa.',
+    message: error ?? t('block.parseError'),
   };
   const visible = (diagnostics.length ? diagnostics : [fallback]).slice(0, MAX_VISIBLE_DIAGNOSTICS);
 
   return (
     <ul
-      aria-label="Diagnósticos da UI generativa"
+      aria-label={t('block.diagnosticsAria')}
       className="flex flex-col gap-1 text-[11px] leading-relaxed text-foreground-subtle"
     >
       {visible.map((diagnostic, index) => (
@@ -63,14 +65,15 @@ function DiagnosticList({ diagnostics, error }: { diagnostics: GenUIDiagnostic[]
  * DevTools (o `normalized` já é o que o usuário vê).
  */
 export function GenUIBlock({ source, className }: GenUIBlockProps) {
+  const { t } = useTranslation('genui');
   const result = useMemo(() => parseGenUI(source), [source]);
   const { spec, diagnostics, error, warnings } = result;
 
   useEffect(() => {
     if (!LOG_DEV_WARNINGS || warnings.length === 0) return;
     console.warn(
-      `[Zylara GenUI] UI normalizada com ${warnings.length} ${
-        warnings.length === 1 ? 'aviso de design' : 'avisos de design'
+      `[Zylara GenUI] UI normalized with ${warnings.length} design ${
+        warnings.length === 1 ? 'warning' : 'warnings'
       }`,
       warnings.map((warning) => ({
         code: warning.code,
@@ -85,7 +88,7 @@ export function GenUIBlock({ source, className }: GenUIBlockProps) {
     const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error');
     return (
       <div className={cn('my-3 flex flex-col gap-2', className)}>
-        <CodeBlock code={source.trim()} language="json" title="UI generativa" maxHeight={300} />
+        <CodeBlock code={source.trim()} language="json" title={t('block.title')} maxHeight={300} />
         {errors.length || error ? (
           <DiagnosticList diagnostics={errors} error={error} />
         ) : null}

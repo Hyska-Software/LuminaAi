@@ -9,6 +9,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { BadgeTone } from '@/components/ui';
+import { t } from '@/lib/i18n';
 import type { SkillSummary } from '@/lib/types';
 
 /**
@@ -18,77 +19,115 @@ import type { SkillSummary } from '@/lib/types';
  * external origins are the default skill folders of other agents, which the
  * app only reads — they can be disabled but never deleted.
  */
+type SkillSourceKey = 'user' | 'agents' | 'codex' | 'claude' | 'opencode' | 'bundled';
+type SkillSourceGroupKey = `library:skills.sources.${SkillSourceKey}.group`;
+type SkillSourceLabelKey = `library:skills.sources.${SkillSourceKey}.label`;
+
 export interface SkillSourceMeta {
   /** Backend `SkillSummary.source` value. */
   key: string;
-  /** Section title in the Skills view (plural). */
-  groupLabel: string;
-  /** Short badge label shown on each skill row / settings list. */
-  label: string;
+  /** Translation key of the section title (plural), or `null` for unknown origins. */
+  groupLabelKey: SkillSourceGroupKey | null;
+  /** Translation key of the short badge label, or `null` for unknown origins. */
+  labelKey: SkillSourceLabelKey | null;
+  /** Section title in the Skills view, resolved on access. */
+  readonly groupLabel: string;
+  /** Short badge label shown on each skill row / settings list, resolved on access. */
+  readonly label: string;
   tone: BadgeTone;
   icon: LucideIcon;
   /** Origin owned by another agent: read-only, but can be disabled. */
   external: boolean;
 }
 
+function sourceMeta(
+  key: SkillSourceKey,
+  groupLabelKey: SkillSourceGroupKey,
+  labelKey: SkillSourceLabelKey,
+  tone: BadgeTone,
+  icon: LucideIcon,
+  external: boolean,
+): SkillSourceMeta {
+  return {
+    key,
+    groupLabelKey,
+    labelKey,
+    tone,
+    icon,
+    external,
+    get groupLabel() {
+      return t(groupLabelKey);
+    },
+    get label() {
+      return t(labelKey);
+    },
+  };
+}
+
 /** Canonical order used by the Skills view (FILES §7.4). */
 export const SKILL_SOURCES: readonly SkillSourceMeta[] = [
-  {
-    key: 'user',
-    groupLabel: 'Zylara',
-    label: 'Do Zylara',
-    tone: 'accent',
-    icon: Sparkles,
-    external: false,
-  },
-  {
-    key: 'agents',
-    groupLabel: 'Agentes',
-    label: 'Agentes',
-    tone: 'muted',
-    icon: Boxes,
-    external: true,
-  },
-  {
-    key: 'codex',
-    groupLabel: 'Codex',
-    label: 'Codex',
-    tone: 'muted',
-    icon: SquareTerminal,
-    external: true,
-  },
-  {
-    key: 'claude',
-    groupLabel: 'Claude',
-    label: 'Claude',
-    tone: 'muted',
-    icon: Bot,
-    external: true,
-  },
-  {
-    key: 'opencode',
-    groupLabel: 'OpenCode',
-    label: 'OpenCode',
-    tone: 'muted',
-    icon: Terminal,
-    external: true,
-  },
-  {
-    key: 'bundled',
-    groupLabel: 'Embutidas',
-    label: 'Embutida',
-    tone: 'success',
-    icon: Package,
-    external: false,
-  },
+  sourceMeta(
+    'user',
+    'library:skills.sources.user.group',
+    'library:skills.sources.user.label',
+    'accent',
+    Sparkles,
+    false,
+  ),
+  sourceMeta(
+    'agents',
+    'library:skills.sources.agents.group',
+    'library:skills.sources.agents.label',
+    'muted',
+    Boxes,
+    true,
+  ),
+  sourceMeta(
+    'codex',
+    'library:skills.sources.codex.group',
+    'library:skills.sources.codex.label',
+    'muted',
+    SquareTerminal,
+    true,
+  ),
+  sourceMeta(
+    'claude',
+    'library:skills.sources.claude.group',
+    'library:skills.sources.claude.label',
+    'muted',
+    Bot,
+    true,
+  ),
+  sourceMeta(
+    'opencode',
+    'library:skills.sources.opencode.group',
+    'library:skills.sources.opencode.label',
+    'muted',
+    Terminal,
+    true,
+  ),
+  sourceMeta(
+    'bundled',
+    'library:skills.sources.bundled.group',
+    'library:skills.sources.bundled.label',
+    'success',
+    Package,
+    false,
+  ),
 ];
 
 function fallbackMeta(source: string): SkillSourceMeta {
-  const label = source.trim() || 'Outra origem';
+  const raw = source.trim();
   return {
     key: source,
-    groupLabel: label,
-    label,
+    groupLabelKey: null,
+    labelKey: null,
+    get groupLabel() {
+      return raw || t('library:skills.sources.other');
+    },
+    get label() {
+      return raw || t('library:skills.sources.other');
+    },
     tone: 'muted',
     icon: LibraryBig,
     external: false,
@@ -97,6 +136,46 @@ function fallbackMeta(source: string): SkillSourceMeta {
 
 export function skillSourceMeta(source: string): SkillSourceMeta {
   return SKILL_SOURCES.find((entry) => entry.key === source) ?? fallbackMeta(source);
+}
+
+/**
+ * Display metadata of a skill. Built-in skills ship their `SKILL.md` in English,
+ * so their name/description are localized; user and external skills keep the
+ * metadata exactly as the repository provides it.
+ */
+export function localizedSkillMeta(skill: Pick<SkillSummary, 'name' | 'description'>): {
+  name: string;
+  description: string;
+} {
+  switch (skill.name) {
+    case 'imagens':
+      return {
+        name: t('library:skills.builtin.imagens.name'),
+        description: t('library:skills.builtin.imagens.description'),
+      };
+    case 'pdf':
+      return {
+        name: t('library:skills.builtin.pdf.name'),
+        description: t('library:skills.builtin.pdf.description'),
+      };
+    case 'office-docx':
+      return {
+        name: t('library:skills.builtin.office-docx.name'),
+        description: t('library:skills.builtin.office-docx.description'),
+      };
+    case 'office-pptx':
+      return {
+        name: t('library:skills.builtin.office-pptx.name'),
+        description: t('library:skills.builtin.office-pptx.description'),
+      };
+    case 'office-xlsx':
+      return {
+        name: t('library:skills.builtin.office-xlsx.name'),
+        description: t('library:skills.builtin.office-xlsx.description'),
+      };
+    default:
+      return { name: skill.name, description: skill.description };
+  }
 }
 
 /** True when the skill comes from another agent's read-only repository. */

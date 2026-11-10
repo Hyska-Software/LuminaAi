@@ -20,6 +20,7 @@ use tokio::process::Command;
 use crate::domain::{
     CodeEnvironmentStatus, CodePackageStatus, InterpreterInfo, Settings,
 };
+use crate::i18n::{t, t_args, t_count};
 use crate::providers::ToolDefinition;
 
 use super::artifacts::{sanitize_filename, write_artifact};
@@ -77,7 +78,8 @@ impl Language {
             "python" | "py" => Ok(Self::Python),
             "javascript" | "js" | "node" => Ok(Self::JavaScript),
             other => bail!(
-                "linguagem `{other}` não suportada; use `python` ou `javascript`"
+                "{}",
+                t_args("tools.code_exec.unsupportedLanguage", &[("other", other)])
             ),
         }
     }
@@ -110,18 +112,10 @@ impl Language {
         }
     }
 
-    fn missing_message(self) -> &'static str {
+    fn missing_message(self) -> String {
         match self {
-            Self::Python => {
-                "nenhum interpretador Python encontrado. Instale o Python 3 \
-                 (https://www.python.org/downloads/) e reinicie o app, ou configure o caminho em \
-                 Configurações → Ferramentas → Ambiente de código"
-            }
-            Self::JavaScript => {
-                "nenhum interpretador Node.js encontrado. Instale o Node.js \
-                 (https://nodejs.org/) e reinicie o app, ou configure o caminho em \
-                 Configurações → Ferramentas → Ambiente de código"
-            }
+            Self::Python => t("tools.code_exec.pythonMissing"),
+            Self::JavaScript => t("tools.code_exec.nodeMissing"),
         }
     }
 }
@@ -171,8 +165,11 @@ fn resolve_interpreter_in(
             }
         }
         bail!(
-            "o interpretador configurado em Configurações → Ferramentas não foi encontrado ou não \
-             respondeu: `{configured}`"
+            "{}",
+            t_args(
+                "tools.code_exec.configuredInterpreterMissing",
+                &[("configured", configured)]
+            )
         );
     }
 
@@ -342,9 +339,9 @@ fn environment_status_impl(
             "\"{}\" -m pip install {INSTALL_PACKAGES}",
             interpreter.path.display()
         ),
-        None => format!(
-            "Instale o Python 3 em https://www.python.org/downloads/ e rode: \
-             python -m pip install {INSTALL_PACKAGES}"
+        None => t_args(
+            "tools.code_exec.installHint",
+            &[("packages", INSTALL_PACKAGES)],
         ),
     };
 
@@ -462,22 +459,20 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
 
 async fn run_checked(rt: &ToolRuntime, args: &Value) -> anyhow::Result<ToolOutcome> {
     if !rt.settings.code_execution_enabled {
-        bail!(
-            "a execução de código está desativada nas configurações (Ferramentas → Execução de \
-             código)"
-        );
+        bail!("{}", t("tools.code_exec.disabled"));
     }
     let language = Language::parse(json_str(args, "language").unwrap_or_default().as_str())?;
     let code = match args.get("code") {
         Some(Value::String(code)) if !code.trim().is_empty() => code.clone(),
-        Some(Value::String(_)) => bail!("o argumento `code` não pode ser vazio"),
-        Some(Value::Null) | None => bail!("o argumento `code` é obrigatório"),
-        Some(_) => bail!("o argumento `code` deve ser uma string"),
+        Some(Value::String(_)) => bail!("{}", t("tools.code_exec.codeEmpty")),
+        Some(Value::Null) | None => bail!("{}", t("tools.code_exec.codeRequired")),
+        Some(_) => bail!("{}", t("tools.code_exec.codeNotString")),
     };
     if code.len() > MAX_CODE_BYTES {
+        let bytes = code.len().to_string();
         bail!(
-            "código grande demais ({} bytes); o limite é 100 KB",
-            code.len()
+            "{}",
+            t_args("tools.code_exec.codeTooLarge", &[("bytes", &bytes)])
         );
     }
     let timeout = resolve_timeout(args, &rt.settings);
@@ -500,12 +495,17 @@ fn parse_input_files(args: &Value) -> anyhow::Result<Vec<InputFile>> {
     let items = match raw {
         Value::Null => return Ok(Vec::new()),
         Value::Array(items) => items,
-        _ => bail!("`inputFiles` deve ser uma lista de objetos {{name, content}}"),
+        _ => bail!("{}", t("tools.code_exec.inputFilesNotList")),
     };
     if items.len() > MAX_INPUT_FILES {
+        let count = items.len().to_string();
+        let max = MAX_INPUT_FILES.to_string();
         bail!(
-            "arquivos de entrada demais ({}); o limite é {MAX_INPUT_FILES}",
-            items.len()
+            "{}",
+            t_args(
+                "tools.code_exec.tooManyInputFiles",
+                &[("count", &count), ("max", &max)]
+            )
         );
     }
 
@@ -517,18 +517,31 @@ fn parse_input_files(args: &Value) -> anyhow::Result<Vec<InputFile>> {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|name| !name.is_empty())
-            .ok_or_else(|| anyhow!("cada arquivo de entrada precisa de um `name`"))?;
+            .ok_or_else(|| anyhow!(t("tools.code_exec.inputFileMissingName")))?;
         let content = match item.get("content") {
             Some(Value::String(content)) => content.clone(),
             Some(Value::Null) | None => {
-                bail!("o arquivo de entrada `{name}` precisa de um `content`")
+                bail!(
+                    "{}",
+                    t_args("tools.code_exec.inputFileMissingContent", &[("name", name)])
+                )
             }
-            Some(_) => bail!("o `content` do arquivo de entrada `{name}` deve ser uma string"),
+            Some(_) => bail!(
+                "{}",
+                t_args(
+                    "tools.code_exec.inputFileContentNotString",
+                    &[("name", name)]
+                )
+            ),
         };
         if content.len() > MAX_INPUT_FILE_BYTES {
+            let bytes = content.len().to_string();
             bail!(
-                "o arquivo de entrada `{name}` excede 1 MB ({} bytes)",
-                content.len()
+                "{}",
+                t_args(
+                    "tools.code_exec.inputFileTooLarge",
+                    &[("name", name), ("bytes", &bytes)]
+                )
             );
         }
         files.insert(sanitize_filename(name), content);
@@ -548,10 +561,8 @@ impl Workspace {
     fn create(data_dir: &Path) -> anyhow::Result<Self> {
         let path = data_dir.join("code-runs").join(uuid::Uuid::new_v4().to_string());
         std::fs::create_dir_all(&path).with_context(|| {
-            format!(
-                "não foi possível criar o workspace de execução: {}",
-                path.display()
-            )
+            let path = path.display().to_string();
+            t_args("tools.code_exec.workspaceCreateFailed", &[("path", &path)])
         })?;
         Ok(Self { path })
     }
@@ -594,17 +605,21 @@ async fn run_script(
         let path = workspace.path.join(&name);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
-                format!("não foi possível criar {}", parent.display())
+                let parent = parent.display().to_string();
+                t_args("tools.code_exec.inputDirCreateFailed", &[("path", &parent)])
             })?;
         }
-        std::fs::write(&path, input.content.as_bytes())
-            .with_context(|| format!("não foi possível gravar o arquivo `{name}`"))?;
+        std::fs::write(&path, input.content.as_bytes()).with_context(|| {
+            t_args("tools.code_exec.inputFileWriteFailed", &[("name", &name)])
+        })?;
         protected.insert(path);
     }
 
     let script_path = workspace.path.join(language.script_name());
-    std::fs::write(&script_path, code.as_bytes())
-        .with_context(|| format!("não foi possível gravar {}", script_path.display()))?;
+    std::fs::write(&script_path, code.as_bytes()).with_context(|| {
+        let path = script_path.display().to_string();
+        t_args("tools.code_exec.scriptWriteFailed", &[("path", &path)])
+    })?;
     protected.insert(script_path.clone());
 
     if rt.cancel.is_cancelled() {
@@ -683,9 +698,12 @@ async fn run_script(
             .map(|interpreter| interpreter.path.display().to_string())
             .unwrap_or_else(|| language.as_str().to_string()),
     };
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("não foi possível iniciar {spawn_label}"))?;
+    let mut child = command.spawn().with_context(|| {
+        t_args(
+            "tools.code_exec.spawnFailed",
+            &[("target", &spawn_label)],
+        )
+    })?;
     let pid = child.id();
     let stdout_task = tokio::spawn(read_capped(child.stdout.take()));
     let stderr_task = tokio::spawn(read_capped(child.stderr.take()));
@@ -699,7 +717,10 @@ async fn run_script(
                 kill_process_tree(pid).await;
                 let _ = child.start_kill();
                 let _ = child.wait().await;
-                return Err(anyhow!("falha ao aguardar o processo: {error}"));
+                return Err(anyhow!(t_args(
+                    "tools.code_exec.waitFailed",
+                    &[("error", &error.to_string())]
+                )));
             }
             Err(_) => RunEnd::TimedOut,
         },
@@ -735,29 +756,41 @@ async fn run_script(
     let summary = summary_for(language, &end, exit_success, exit_code, duration, artifacts.len());
 
     let mut content = String::new();
+    let duration_text = format_duration(duration);
     let headline = match &end {
-        RunEnd::Exited(_) if exit_success => format!(
-            "Execução de código `{}` concluída em {} (exit code 0).",
-            language.as_str(),
-            format_duration(duration)
+        RunEnd::Exited(_) if exit_success => t_args(
+            "tools.code_exec.headlineSuccess",
+            &[
+                ("language", language.as_str()),
+                ("duration", &duration_text),
+            ],
         ),
-        RunEnd::Exited(_) => format!(
-            "execução de código `{}` falhou com exit code {} após {}.",
-            language.as_str(),
-            exit_code
+        RunEnd::Exited(_) => {
+            let code = exit_code
                 .map(|code| code.to_string())
-                .unwrap_or_else(|| "desconhecido".to_string()),
-            format_duration(duration)
+                .unwrap_or_else(|| t("tools.code_exec.exitCodeUnknown"));
+            t_args(
+                "tools.code_exec.headlineFailed",
+                &[
+                    ("language", language.as_str()),
+                    ("code", &code),
+                    ("duration", &duration_text),
+                ],
+            )
+        }
+        RunEnd::TimedOut => t_args(
+            "tools.code_exec.headlineTimeout",
+            &[
+                ("language", language.as_str()),
+                ("duration", &duration_text),
+            ],
         ),
-        RunEnd::TimedOut => format!(
-            "execução de código `{}` interrompida após {} por tempo limite (timeout).",
-            language.as_str(),
-            format_duration(duration)
-        ),
-        RunEnd::Cancelled => format!(
-            "execução de código `{}` cancelada após {}.",
-            language.as_str(),
-            format_duration(duration)
+        RunEnd::Cancelled => t_args(
+            "tools.code_exec.headlineCancelled",
+            &[
+                ("language", language.as_str()),
+                ("duration", &duration_text),
+            ],
         ),
     };
     if is_error {
@@ -775,9 +808,10 @@ async fn run_script(
         content.push_str(&section);
     }
     if !artifacts.is_empty() {
+        let count = artifacts.len().to_string();
         content.push_str(&format!(
-            "\nArtefatos criados ({}):\n",
-            artifacts.len()
+            "\n{}\n",
+            t_args("tools.code_exec.artifactsHeader", &[("count", &count)])
         ));
         for artifact in &artifacts {
             content.push_str(&format!(
@@ -787,7 +821,7 @@ async fn run_script(
         }
     }
     if !notes.is_empty() {
-        content.push_str("\nAvisos:\n");
+        content.push_str(&format!("\n{}\n", t("tools.code_exec.warningsHeader")));
         for note in &notes {
             content.push_str(&format!("- {note}\n"));
         }
@@ -805,10 +839,16 @@ async fn run_script(
 fn cancelled_outcome(language: Language) -> ToolOutcome {
     ToolOutcome {
         content: format!(
-            "ERROR: execução de código `{}` cancelada antes de iniciar.",
-            language.as_str()
+            "ERROR: {}",
+            t_args(
+                "tools.code_exec.cancelledBeforeStart",
+                &[("language", language.as_str())]
+            )
         ),
-        summary: Some(format!("{} · cancelado", language.as_str())),
+        summary: Some(t_args(
+            "tools.code_exec.cancelledSummary",
+            &[("language", language.as_str())],
+        )),
         is_error: true,
         ..Default::default()
     }
@@ -913,8 +953,13 @@ fn render_stream(label: &str, captured: &[u8], total: u64) -> Option<String> {
     let captured_truncated = total > captured.len() as u64;
     let chars_truncated = text.chars().count() > MAX_REPORT_STREAM_CHARS;
     if captured_truncated || chars_truncated {
+        let total = total.to_string();
         section.push_str(&format!(
-            "\n[{label} truncado: {total} bytes no total, mostrando a cauda]"
+            "\n{}",
+            t_args(
+                "tools.code_exec.streamTruncated",
+                &[("label", label), ("total", &total)]
+            )
         ));
     }
     section.push('\n');
@@ -947,34 +992,42 @@ fn collect_artifacts(
     for (relative, path, size) in candidates {
         workspace_bytes += size;
         if workspace_bytes > MAX_WORKSPACE_BYTES {
-            warnings.push(format!(
-                "o workspace excedeu 128 MB; `{relative}` e os arquivos seguintes foram ignorados"
+            warnings.push(t_args(
+                "tools.code_exec.workspaceTooLarge",
+                &[("path", &relative)],
             ));
             break;
         }
         if artifacts.len() >= MAX_OUTPUT_FILES {
-            warnings.push(format!(
-                "mais de {MAX_OUTPUT_FILES} arquivos gerados; os excedentes foram ignorados"
+            let max = MAX_OUTPUT_FILES.to_string();
+            warnings.push(t_args(
+                "tools.code_exec.tooManyArtifacts",
+                &[("max", &max)],
             ));
             break;
         }
         if size > MAX_OUTPUT_FILE_BYTES {
-            warnings.push(format!(
-                "`{relative}` tem {} bytes e excede o limite de 25 MB; foi ignorado",
-                size
+            let bytes = size.to_string();
+            warnings.push(t_args(
+                "tools.code_exec.outputFileTooLarge",
+                &[("path", &relative), ("bytes", &bytes)],
             ));
             continue;
         }
         if total_bytes + size > MAX_OUTPUT_TOTAL_BYTES {
-            warnings.push(format!(
-                "`{relative}` ignorado: os arquivos gerados excedem o total de 64 MB"
+            warnings.push(t_args(
+                "tools.code_exec.outputTotalTooLarge",
+                &[("path", &relative)],
             ));
             break;
         }
         let bytes = match std::fs::read(&path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                warnings.push(format!("não foi possível ler `{relative}`: {error}"));
+                warnings.push(t_args(
+                    "tools.code_exec.outputReadFailed",
+                    &[("path", &relative), ("error", &error.to_string())],
+                ));
                 continue;
             }
         };
@@ -989,9 +1042,13 @@ fn collect_artifacts(
             None,
         ) {
             Ok(artifact) => artifacts.push(artifact),
-            Err(error) => warnings.push(format!(
-                "`{relative}` foi gerado, mas não virou artefato: {error:#}"
-            )),
+            Err(error) => {
+                let error = format!("{error:#}");
+                warnings.push(t_args(
+                    "tools.code_exec.artifactFailed",
+                    &[("path", &relative), ("error", &error)],
+                ));
+            }
         }
     }
     (artifacts, warnings)
@@ -1044,14 +1101,6 @@ fn format_duration(duration: Duration) -> String {
     format!("{:.2} s", duration.as_secs_f64()).replace('.', ",")
 }
 
-fn plural_files(count: usize) -> String {
-    if count == 1 {
-        "1 arquivo".to_string()
-    } else {
-        format!("{count} arquivos")
-    }
-}
-
 fn summary_for(
     language: Language,
     end: &RunEnd,
@@ -1061,21 +1110,35 @@ fn summary_for(
     artifacts: usize,
 ) -> String {
     let seconds = format_duration(duration);
+    let count = artifacts.to_string();
+    let language = language.as_str();
     match end {
-        RunEnd::Exited(_) if success => format!(
-            "{} · {} · {seconds}",
-            language.as_str(),
-            plural_files(artifacts)
+        RunEnd::Exited(_) if success => t_count(
+            "tools.code_exec.summarySuccess",
+            artifacts,
+            &[
+                ("language", language),
+                ("count", &count),
+                ("duration", &seconds),
+            ],
         ),
-        RunEnd::Exited(_) => format!(
-            "{} · falhou (exit {}) · {seconds}",
-            language.as_str(),
-            exit_code
+        RunEnd::Exited(_) => {
+            let code = exit_code
                 .map(|code| code.to_string())
-                .unwrap_or_else(|| "?".to_string())
+                .unwrap_or_else(|| t("tools.code_exec.exitCodeUnknownShort"));
+            t_args(
+                "tools.code_exec.summaryFailed",
+                &[("language", language), ("code", &code), ("duration", &seconds)],
+            )
+        }
+        RunEnd::TimedOut => t_args(
+            "tools.code_exec.summaryTimeout",
+            &[("language", language), ("duration", &seconds)],
         ),
-        RunEnd::TimedOut => format!("{} · tempo esgotado · {seconds}", language.as_str()),
-        RunEnd::Cancelled => format!("{} · cancelado · {seconds}", language.as_str()),
+        RunEnd::Cancelled => t_args(
+            "tools.code_exec.summaryCancelled",
+            &[("language", language), ("duration", &seconds)],
+        ),
     }
 }
 
@@ -1903,7 +1966,21 @@ print('docx ok')
     fn formats_durations_and_plurals() {
         assert_eq!(format_duration(Duration::from_millis(250)), "250 ms");
         assert_eq!(format_duration(Duration::from_millis(1_234)), "1,23 s");
-        assert_eq!(plural_files(1), "1 arquivo");
-        assert_eq!(plural_files(3), "3 arquivos");
+        assert_eq!(
+            t_count(
+                "tools.code_exec.summarySuccess",
+                1,
+                &[("language", "py"), ("count", "1"), ("duration", "0 ms")],
+            ),
+            "py · 1 arquivo · 0 ms"
+        );
+        assert_eq!(
+            t_count(
+                "tools.code_exec.summarySuccess",
+                3,
+                &[("language", "py"), ("count", "3"), ("duration", "0 ms")],
+            ),
+            "py · 3 arquivos · 0 ms"
+        );
     }
 }

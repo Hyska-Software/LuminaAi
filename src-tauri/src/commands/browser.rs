@@ -68,7 +68,7 @@ fn ensure_browser_capability_in_db(db: &crate::db::Db, conversation_id: &str) ->
         .ok_or_else(|| "BROWSER_AGENT_NOT_FOUND".to_string())?;
     if !agent.capabilities.browser_use {
         return Err(
-            "BROWSER_CAPABILITY_DENIED: ative o navegador para este agente".to_string(),
+            crate::i18n::t("browser.errors.capabilityDenied"),
         );
     }
     Ok(())
@@ -114,7 +114,7 @@ pub(crate) async fn open_browser_session<F: FnOnce()>(
         .transpose()?;
     let control = db.computer_control(&conversation_id).map_err(to_error)?;
     if target.is_some() && (!starting || control == (true, true)) {
-        return Err("BROWSER_HUMAN_CONTROL_REQUIRED: use a barra de endereço durante o controle".into());
+        return Err(crate::i18n::t("browser.errors.humanControlRequired").into());
     }
     let status = browser::ensure_for_conversation(manager, db, data_dir, &conversation_id).await?;
     if starting && control == (true, true)

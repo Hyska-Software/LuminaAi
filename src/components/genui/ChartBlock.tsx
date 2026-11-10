@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseChartSpec } from '@/lib/genui/schema';
@@ -19,16 +20,17 @@ export interface ChartBlockProps {
  * "data": [{ "label": "...", "value": 1 }] }`.
  */
 export function ChartBlock({ spec, code, title, className }: ChartBlockProps) {
+  const { t } = useTranslation('genui');
   const source = spec ?? code ?? '';
   const { chart, error } = useMemo(() => parseChartSpec(source), [source]);
 
   if (!chart) {
     return (
       <div className={cn('my-3 flex flex-col gap-2', className)}>
-        <CodeBlock code={source.trim()} language="json" title={title ?? 'Gráfico'} maxHeight={320} />
+        <CodeBlock code={source.trim()} language="json" title={title ?? t('chart.titleFallback')} maxHeight={320} />
         <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-foreground-subtle">
           <AlertTriangle aria-hidden className="mt-px size-3.5 shrink-0" />
-          <span>{error ?? 'Não foi possível interpretar os dados do gráfico.'}</span>
+          <span>{error ?? t('chart.parseError')}</span>
         </p>
       </div>
     );

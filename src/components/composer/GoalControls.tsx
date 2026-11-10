@@ -18,6 +18,7 @@
  *   vêm do Radix/`aria-busy` explícito.
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Target } from 'lucide-react';
 
 import { GoalCard, type GoalCardAction } from '@/components/agent';
@@ -75,15 +76,16 @@ const TONE_ICON: Record<GoalTone, string> = {
 const ICON_PILL_CLASS_NAME =
   'flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
 
-/** Rótulo de atenção curto para o `title` do pill (motivo de pausa/bloqueio). */
+/** Short attention label for the pill's `title` (pause/block reason). */
 function statusHint(
+  t: (key: string) => string,
   status: GoalStatus,
   pauseReason: string | null,
   blockerReason: string | null | undefined,
 ) {
-  if (status === 'paused') return pauseReason ?? 'Objetivo pausado';
-  if (status === 'blocked') return blockerReason ?? 'Objetivo bloqueado';
-  if (status === 'completed') return 'Objetivo concluído';
+  if (status === 'paused') return pauseReason ?? t('goal.paused');
+  if (status === 'blocked') return blockerReason ?? t('goal.blocked');
+  if (status === 'completed') return t('goal.completed');
   return null;
 }
 
@@ -110,6 +112,7 @@ export function GoalControls({
   goalIntent = false,
   onToggleGoalIntent,
 }: GoalControlsProps) {
+  const { t } = useTranslation('composer');
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const streaming = useChatStore((state) => state.streaming);
   const activeId = useChatStore((state) => state.activeId);
@@ -136,7 +139,9 @@ export function GoalControls({
   const tone = goalStatusTone(goal);
   const statusLabel = goal ? goalStatusLabel(goal, running) : '';
   const roundLabel = goalRoundLabel(goal);
-  const pauseHint = goal ? statusHint(goal.status, goalPauseReasonLabel(goal.pauseReason), goal.blockerReason) : null;
+  const pauseHint = goal
+    ? statusHint(t, goal.status, goalPauseReasonLabel(goal.pauseReason), goal.blockerReason)
+    : null;
   const canStart = goal
     ? canStartGoalRound({
         goal,
@@ -259,14 +264,12 @@ export function GoalControls({
         <Tooltip
           side="top"
           content={
-            goalIntent
-              ? 'Objetivo ativo — clique para desativar'
-              : 'Criar objetivo: use /goal e descreva a tarefa na próxima mensagem.'
+            goalIntent ? t('goal.tooltipActive') : t('goal.tooltipIdle')
           }
         >
           <button
             type="button"
-            aria-label={goalIntent ? 'Desativar objetivo' : 'Criar objetivo com /goal'}
+            aria-label={goalIntent ? t('goal.disable') : t('goal.create')}
             aria-pressed={goalIntent}
             onClick={toggleGoalIntent}
             className={cn(
@@ -301,8 +304,8 @@ export function GoalControls({
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label={`Objetivo: ${statusLabel} — ${roundLabel}`}
-            title={pauseHint ?? `${statusLabel} — ${roundLabel}`}
+            aria-label={t('goal.pillAria', { status: statusLabel, round: roundLabel })}
+            title={pauseHint ?? t('goal.pillTitle', { status: statusLabel, round: roundLabel })}
             className={cn(ICON_PILL_CLASS_NAME, toneClass)}
           >
             {running && !reduceMotion ? (
@@ -334,9 +337,7 @@ export function GoalControls({
                 className="flex items-center gap-1.5 rounded-lg bg-accent-soft px-2.5 py-1.5 text-[11px] font-medium leading-relaxed text-foreground"
               >
                 <Spinner size="xs" className="shrink-0 text-accent" />
-                <span className="min-w-0 break-words">
-                  Rodada em andamento — o agente está trabalhando no objetivo.
-                </span>
+                <span className="min-w-0 break-words">{t('goal.running')}</span>
               </p>
             ) : null}
 
@@ -354,18 +355,18 @@ export function GoalControls({
                 className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-2.5 py-2"
               >
                 <p className="text-[12px] leading-relaxed text-foreground">
-                  Concluir o objetivo? O agente para de continuar sozinho nesta sessão.
+                  {t('goal.confirmBody')}
                 </p>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Button
                     size="sm"
                     variant="primary"
-                    aria-label="Confirmar conclusão do objetivo"
+                    aria-label={t('goal.confirmAria')}
                     loading={pending}
                     disabled={busy}
                     onClick={() => void confirmCompletion()}
                   >
-                    Concluir objetivo
+                    {t('goal.confirmAction')}
                   </Button>
                   <Button
                     size="sm"
@@ -373,7 +374,7 @@ export function GoalControls({
                     disabled={pending}
                     onClick={() => setConfirmComplete(false)}
                   >
-                    Cancelar
+                    {t('common:actions.cancel')}
                   </Button>
                 </div>
               </div>
@@ -388,10 +389,10 @@ export function GoalControls({
                   disabled={busy}
                   onClick={pauseAfterRound}
                 >
-                  Pausar após esta rodada
+                  {t('goal.pauseAfterRound')}
                 </Button>
                 <span className="min-w-0 flex-1 text-[11px] leading-relaxed text-foreground-subtle">
-                  A rodada atual termina antes de pausar.
+                  {t('goal.pauseAfterRoundHint')}
                 </span>
               </div>
             ) : goal.status === 'active' && goal.autoContinue ? (
@@ -401,20 +402,16 @@ export function GoalControls({
                   variant="secondary"
                   loading={pending}
                   disabled={busy || !canStart}
-                  title={
-                    canStart
-                      ? undefined
-                      : 'Indisponível enquanto houver plano, aprovação/pergunta pendente ou orçamento esgotado.'
-                  }
+                  title={canStart ? undefined : t('goal.newRoundUnavailable')}
                   onClick={() => void startRound()}
                 >
-                  Nova rodada agora
+                  {t('goal.newRound')}
                 </Button>
               </div>
             ) : null}
 
             <p className="px-0.5 text-[11px] leading-relaxed text-foreground-subtle">
-              Cada rodada é um turno completo e consome tokens do provedor.
+              {t('goal.costNote')}
             </p>
           </div>
         </PopoverContent>

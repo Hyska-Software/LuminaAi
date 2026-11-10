@@ -40,12 +40,15 @@ pub(crate) fn workspace_path(state: &AppState, workspace_id: &str) -> Result<Pat
         .db
         .get_workspace(workspace_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("workspace não encontrado: {workspace_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "workspace.errors.notFound",
+            &[("workspace_id", &workspace_id)],
+        ))?;
     let path = PathBuf::from(&workspace.path);
     if !path.is_dir() {
-        return Err(format!(
-            "a pasta do workspace não existe mais: {}",
-            workspace.path
+        return Err(crate::i18n::t_args(
+            "workspace.errors.folderGone",
+            &[("path", &workspace.path)],
         ));
     }
     Ok(path)
@@ -109,7 +112,10 @@ pub async fn pick_workspace_folder(app: AppHandle) -> Result<Option<String>, Str
     };
     let path = selected
         .into_path()
-        .map_err(|error| format!("caminho inválido: {error}"))?;
+        .map_err(|error| crate::i18n::t_args(
+            "workspace.errors.invalidPath",
+            &[("error", &error.to_string())],
+        ))?;
     let canonical = dunce::canonicalize(&path).unwrap_or(path);
     Ok(Some(canonical.to_string_lossy().to_string()))
 }
@@ -123,13 +129,16 @@ pub async fn add_workspace(
 ) -> Result<Workspace, String> {
     let raw = path.trim();
     if raw.is_empty() {
-        return Err("o caminho do workspace não pode ser vazio".to_string());
+        return Err(crate::i18n::t("workspace.errors.emptyPath"));
     }
     let canonical = dunce::canonicalize(raw).map_err(|error| {
-        format!("não foi possível abrir a pasta `{raw}`: {error}")
+        crate::i18n::t_args(
+            "workspace.errors.openFolder",
+            &[("path", &raw), ("error", &error.to_string())],
+        )
     })?;
     if !canonical.is_dir() {
-        return Err(format!("`{raw}` não é uma pasta"));
+        return Err(crate::i18n::t_args("workspace.errors.notFolder", &[("path", &raw)]));
     }
     let canonical_str = canonical.to_string_lossy().to_string();
     if let Some(existing) = state
@@ -174,7 +183,7 @@ pub async fn add_workspace(
         .db
         .get_workspace(&workspace.id)
         .map_err(map_err)?
-        .ok_or_else(|| "workspace não encontrado após a criação".to_string())?;
+        .ok_or_else(|| crate::i18n::t("workspace.errors.notFoundAfterCreate"))?;
     Ok(enrich_workspace(&canonical, workspace).await)
 }
 
@@ -221,14 +230,14 @@ pub async fn rename_workspace(
         .db
         .get_workspace(&id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("workspace não encontrado: {id}"))?;
+        .ok_or_else(|| crate::i18n::t_args("workspace.errors.notFound", &[("workspace_id", &id)]))?;
     workspace.name = name.trim().to_string();
     state.db.update_workspace(&workspace).map_err(map_err)?;
     let updated = state
         .db
         .get_workspace(&id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("workspace não encontrado: {id}"))?;
+        .ok_or_else(|| crate::i18n::t_args("workspace.errors.notFound", &[("workspace_id", &id)]))?;
     Ok(updated)
 }
 
@@ -241,7 +250,7 @@ pub async fn remove_workspace(state: State<'_, AppState>, id: String) -> Result<
         .map_err(map_err)?;
     let removed = state.db.delete_workspace(&id).map_err(map_err)?;
     if !removed {
-        return Err(format!("workspace não encontrado: {id}"));
+        return Err(crate::i18n::t_args("workspace.errors.notFound", &[("workspace_id", &id)]));
     }
     for conversation in conversations {
         state.terminals.close_conversation(&conversation.id);
@@ -263,7 +272,7 @@ pub async fn set_workspace_trusted(
         .db
         .get_workspace(&id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("workspace não encontrado: {id}"))
+        .ok_or_else(|| crate::i18n::t_args("workspace.errors.notFound", &[("workspace_id", &id)]))
 }
 
 /// Vincula (ou desvincula) uma sessão a um workspace.
@@ -278,7 +287,10 @@ pub async fn set_conversation_workspace(
 
 pub(crate) async fn bind_conversation_workspace(db: &crate::db::Db, conversation_id: &str, workspace_id: Option<&str>, browser: Option<&crate::computer::browser::BrowserManager>) -> Result<Conversation, String> {
     let conversation = db.get_conversation(conversation_id).map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "workspace.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
     let gate = crate::agents::workspace_gate(conversation_id);
     let _guard = if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
         Some(gate.try_write().map_err(|_| "AGENT_WORKSPACE_BUSY: aguarde o fim do turno".to_string())?)
@@ -288,9 +300,9 @@ pub(crate) async fn bind_conversation_workspace(db: &crate::db::Db, conversation
     if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
         if let Some(id) = workspace_id {
             let workspace = db.get_workspace(id).map_err(map_err)?
-                .ok_or_else(|| format!("workspace não encontrado: {id}"))?;
+                .ok_or_else(|| crate::i18n::t_args("workspace.errors.notFound", &[("workspace_id", &id)]))?;
             if !workspace.trusted {
-                return Err("AGENT_WORKSPACE_UNTRUSTED: confie na pasta antes de usá-la".into());
+                return Err(crate::i18n::t("workspace.errors.untrusted"));
             }
         }
     }
@@ -310,7 +322,10 @@ pub(crate) async fn bind_conversation_workspace(db: &crate::db::Db, conversation
     db
         .get_conversation(conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))
+        .ok_or_else(|| crate::i18n::t_args(
+            "workspace.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))
 }
 
 #[tauri::command]
@@ -322,7 +337,10 @@ pub async fn open_workspace_in_explorer(
     let root = workspace_path(&state, &id)?;
     app.opener()
         .open_path(root.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|error| format!("não foi possível abrir a pasta: {error}"))
+        .map_err(|error| crate::i18n::t_args(
+            "workspace.errors.openFolderGeneric",
+            &[("error", &error.to_string())],
+        ))
 }
 
 /* ------------------------------------------------------------------ */
@@ -653,9 +671,12 @@ fn build_binary_content(
 fn read_file_content(root: &Path, requested: &str) -> Result<WorkspaceFileContent, String> {
     let file_path = safe_path::resolve(root, requested, Access::Read).map_err(map_err)?;
     let metadata = std::fs::metadata(&file_path)
-        .map_err(|error| format!("não foi possível ler `{requested}`: {error}"))?;
+        .map_err(|error| crate::i18n::t_args(
+            "workspace.errors.readFile",
+            &[("path", &requested), ("error", &error.to_string())],
+        ))?;
     if !metadata.is_file() {
-        return Err(format!("`{requested}` não é um arquivo"));
+        return Err(crate::i18n::t_args("workspace.errors.notFile", &[("path", &requested)]));
     }
     let size = metadata.len();
     let relative = safe_path::to_relative(root, &file_path);
@@ -668,7 +689,10 @@ fn read_file_content(root: &Path, requested: &str) -> Result<WorkspaceFileConten
             return Ok(build_preview_content(relative, size, mime, None));
         }
         let bytes = std::fs::read(&file_path)
-            .map_err(|error| format!("não foi possível abrir `{requested}`: {error}"))?;
+            .map_err(|error| crate::i18n::t_args(
+            "workspace.errors.openFile",
+            &[("path", &requested), ("error", &error.to_string())],
+        ))?;
         return Ok(build_preview_content(relative, size, mime, Some(&bytes)));
     }
 
@@ -679,7 +703,10 @@ fn read_file_content(root: &Path, requested: &str) -> Result<WorkspaceFileConten
         return Ok(build_binary_content(relative, size, true, None));
     }
     let bytes = std::fs::read(&file_path)
-        .map_err(|error| format!("não foi possível abrir `{requested}`: {error}"))?;
+        .map_err(|error| crate::i18n::t_args(
+            "workspace.errors.openFile",
+            &[("path", &requested), ("error", &error.to_string())],
+        ))?;
     // 3) Binário sem prévia inline: o MIME da extensão ajuda a UI a ser honesta.
     if bytes.iter().take(8_000).any(|byte| *byte == 0) {
         return Ok(build_binary_content(

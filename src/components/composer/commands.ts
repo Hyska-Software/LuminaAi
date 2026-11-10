@@ -5,9 +5,25 @@
  * catálogo de comandos abaixo. Ações `invoke` só chamam contratos já
  * existentes — quando a fase do backend ainda não existe, o Composer degrada
  * com um toast honesto em vez de fingir que executou.
+ *
+ * The catalog stores **keys**, never rendered copy: `filterSlashCommands`
+ * resolves them for the active language, so the menu and the inserted fill text
+ * follow a runtime language change. `id`, `command` and `invoke` stay stable.
  */
+import { t } from '@/lib/i18n';
 
-export type SlashCommandGroup = 'Sessão' | 'Plano' | 'Objetivo' | 'Git' | 'Contexto' | 'Projeto';
+/** Stable group ids (labels are resolved through `SLASH_GROUP_LABEL_KEYS`). */
+export type SlashCommandGroup = 'session' | 'plan' | 'goal' | 'git' | 'context' | 'project';
+
+/** Grupo labels (literal keys; never built from the id at runtime). */
+export const SLASH_GROUP_LABEL_KEYS: Record<SlashCommandGroup, string> = {
+  session: 'composer:slash.groups.session',
+  plan: 'composer:slash.groups.plan',
+  goal: 'composer:slash.groups.goal',
+  git: 'composer:slash.groups.git',
+  context: 'composer:slash.groups.context',
+  project: 'composer:slash.groups.project',
+};
 
 /** Ações diretas suportadas nesta fase (sem backend novo). */
 export type SlashInvoke =
@@ -34,129 +50,149 @@ export interface SlashCommand {
   id: string;
   /** Texto exibido no menu, incluindo a barra (ex.: `/compact`). */
   command: string;
-  title: string;
-  description: string;
+  /** Translation keys for the visible copy. */
+  titleKey: string;
+  descriptionKey: string;
   group: SlashCommandGroup;
   /**
    * `fill` insere texto; `invoke` executa uma ação; `intent` ativa um chip de
    * intenção no composer (ex.: `/goal`) sem alterar a mensagem do usuário.
    */
   action: 'fill' | 'invoke' | 'intent';
-  /** Texto inserido no composer quando `action === 'fill'`. */
-  fill?: string;
+  /** Translation key of the text inserted when `action === 'fill'`. */
+  fillKey?: string;
   /** Ação executada quando `action === 'invoke'`. */
   invoke?: SlashInvoke;
+}
+
+/** A catalog entry with its copy resolved for the active language. */
+export interface SlashCommandView extends SlashCommand {
+  title: string;
+  description: string;
+  fill: string | null;
+  groupLabel: string;
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   {
     id: 'plan',
     command: '/plan',
-    title: 'Planejar antes de editar',
-    description: 'Ativa o modo Plano e insere um pedido de plano para o agente.',
-    group: 'Plano',
+    titleKey: 'composer:slash.commands.plan.title',
+    descriptionKey: 'composer:slash.commands.plan.description',
+    group: 'plan',
     action: 'fill',
-    fill: 'Planeje a solução para esta tarefa antes de alterar arquivos:\n',
+    fillKey: 'composer:slash.commands.plan.fill',
     // `fill` + `invoke`: ativa o modo (o texto continua sendo a instrução).
     invoke: 'plan-on',
   },
   {
     id: 'plan-off',
     command: '/plan off',
-    title: 'Sair do modo Plano',
-    description: 'Desativa o modo Plano da sessão ativa.',
-    group: 'Plano',
+    titleKey: 'composer:slash.commands.planOff.title',
+    descriptionKey: 'composer:slash.commands.planOff.description',
+    group: 'plan',
     action: 'invoke',
     invoke: 'plan-off',
   },
   {
     id: 'goal',
     command: '/goal',
-    title: 'Criar objetivo da sessão',
-    description:
-      'Ativa o chip de objetivo; a mensagem seguinte descreve a tarefa e o agente cria o objetivo.',
-    group: 'Objetivo',
+    titleKey: 'composer:slash.commands.goal.title',
+    descriptionKey: 'composer:slash.commands.goal.description',
+    group: 'goal',
     action: 'intent',
   },
   {
     id: 'permissoes',
     command: '/permissoes',
-    title: 'Modo de permissão',
-    description: 'Mostra onde trocar entre Leitura, Revisar, Editar e Autônomo.',
-    group: 'Sessão',
+    titleKey: 'composer:slash.commands.permissions.title',
+    descriptionKey: 'composer:slash.commands.permissions.description',
+    group: 'session',
     action: 'invoke',
     invoke: 'permissoes',
   },
   {
     id: 'novo',
     command: '/novo',
-    title: 'Nova sessão',
-    description: 'Cria uma nova sessão de código no workspace atual.',
-    group: 'Sessão',
+    titleKey: 'composer:slash.commands.new.title',
+    descriptionKey: 'composer:slash.commands.new.description',
+    group: 'session',
     action: 'invoke',
     invoke: 'novo',
   },
   {
     id: 'limpar',
     command: '/limpar',
-    title: 'Limpar composer',
-    description: 'Limpa o texto e as menções a arquivos.',
-    group: 'Sessão',
+    titleKey: 'composer:slash.commands.clear.title',
+    descriptionKey: 'composer:slash.commands.clear.description',
+    group: 'session',
     action: 'invoke',
     invoke: 'limpar',
   },
   {
     id: 'compact',
     command: '/compact',
-    title: 'Compactar contexto',
-    description: 'Pede ao backend para resumir o histórico desta sessão.',
-    group: 'Contexto',
+    titleKey: 'composer:slash.commands.compact.title',
+    descriptionKey: 'composer:slash.commands.compact.description',
+    group: 'context',
     action: 'invoke',
     invoke: 'compact',
   },
   {
     id: 'commit',
     command: '/commit',
-    title: 'Abrir Alterações',
-    description: 'Abre o painel Alterações para revisar e commitar.',
-    group: 'Git',
+    titleKey: 'composer:slash.commands.commit.title',
+    descriptionKey: 'composer:slash.commands.commit.description',
+    group: 'git',
     action: 'invoke',
     invoke: 'commit',
   },
   {
     id: 'test',
     command: '/test',
-    title: 'Rodar verificação',
-    description: 'Insere um pedido para rodar testes/lint e corrigir falhas.',
-    group: 'Projeto',
+    titleKey: 'composer:slash.commands.test.title',
+    descriptionKey: 'composer:slash.commands.test.description',
+    group: 'project',
     action: 'fill',
-    fill: 'Rode as verificações do projeto com `run_checks` (test primeiro) e corrija o que falhar. Mostre o exit code e o que mudou:\n',
+    fillKey: 'composer:slash.commands.test.fill',
   },
   {
     id: 'review',
     command: '/review',
-    title: 'Revisar alterações',
-    description: 'Insere um pedido de revisão do diff atual.',
-    group: 'Projeto',
+    titleKey: 'composer:slash.commands.review.title',
+    descriptionKey: 'composer:slash.commands.review.description',
+    group: 'project',
     action: 'fill',
-    fill: 'Revise as alterações atuais (git diff/status): aponte bugs, riscos e testes faltantes. Se fizer sentido, delegue uma revisão com `task` (subagent_type: "review") e consolide o resultado:\n',
+    fillKey: 'composer:slash.commands.review.fill',
   },
   {
     id: 'init',
     command: '/init',
-    title: 'Gerar AGENTS.md',
-    description: 'Insere um pedido para documentar o projeto para agentes.',
-    group: 'Projeto',
+    titleKey: 'composer:slash.commands.init.title',
+    descriptionKey: 'composer:slash.commands.init.description',
+    group: 'project',
     action: 'fill',
-    fill: 'Analise este projeto e gere/atualize o AGENTS.md com instruções para agentes: comandos de build/test/lint, convenções, armadilhas e mapa de diretórios. Antes de gravar, me mostre o conteúdo proposto:\n',
+    fillKey: 'composer:slash.commands.init.fill',
   },
 ];
 
+/** Resolves the catalog copy for the active language. */
+export function localizeSlashCommand(entry: SlashCommand): SlashCommandView {
+  return {
+    ...entry,
+    title: t(entry.titleKey),
+    description: t(entry.descriptionKey),
+    fill: entry.fillKey ? t(entry.fillKey) : null,
+    groupLabel: t(SLASH_GROUP_LABEL_KEYS[entry.group]),
+  };
+}
+
 /** Filtro tolerante (sem caixa) por comando, título ou descrição. */
-export function filterSlashCommands(query: string): SlashCommand[] {
+export function filterSlashCommands(query: string): SlashCommandView[] {
+  const localized = SLASH_COMMANDS.map(localizeSlashCommand);
   const needle = query.trim().toLowerCase();
-  if (!needle) return [...SLASH_COMMANDS];
-  return SLASH_COMMANDS.filter((entry) => {
+  if (!needle) return localized;
+  return localized.filter((entry) => {
     const haystack = `${entry.command} ${entry.title} ${entry.description}`.toLowerCase();
     return haystack.includes(needle);
   });

@@ -47,10 +47,20 @@ impl CallbackParams {
 pub async fn bind(host: &str) -> Result<(TcpListener, u16)> {
     let listener = TcpListener::bind((host, 0))
         .await
-        .map_err(|error| anyhow!("não foi possível abrir o callback local em {host}: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.callbackBind",
+                &[("host", host), ("error", &error.to_string())],
+            ))
+        })?;
     let port = listener
         .local_addr()
-        .map_err(|error| anyhow!("callback local sem porta: {error}"))?
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.callbackNoPort",
+                &[("error", &error.to_string())],
+            ))
+        })?
         .port();
     Ok((listener, port))
 }
@@ -62,58 +72,72 @@ pub async fn serve_once(
 ) -> Result<CallbackParams> {
     for _ in 0..MAX_CONNECTIONS {
         let (mut stream, _) = tokio::select! {
-            _ = cancel.cancelled() => return Err(anyhow!("login cancelado")),
+            _ = cancel.cancelled() => return Err(anyhow!(crate::i18n::t("oauth.errors.loginCancelled"))),
             accepted = listener.accept() => match accepted {
                 Ok(value) => value,
-                Err(error) => return Err(anyhow!("falha ao aceitar callback: {error}")),
+                Err(error) => return Err(anyhow!(crate::i18n::t_args(
+                    "oauth.errors.callbackAccept",
+                    &[("error", &error.to_string())],
+                ))),
             },
         };
 
         let request = match read_request(&mut stream).await {
             Ok(request) => request,
             Err(_) => {
-                respond(&mut stream, 400, "Requisição inválida", None).await;
+                respond(
+                    &mut stream,
+                    400,
+                    &crate::i18n::t("oauth.callback.invalidRequest"),
+                    None,
+                )
+                .await;
                 continue;
             }
         };
 
         let Some((path, query)) = split_target(&request) else {
-            respond(&mut stream, 404, "Não encontrado", None).await;
+            respond(&mut stream, 404, &crate::i18n::t("oauth.callback.notFound"), None).await;
             continue;
         };
 
         if path != CALLBACK_PATH {
-            respond(&mut stream, 404, "Não encontrado", None).await;
+            respond(&mut stream, 404, &crate::i18n::t("oauth.callback.notFound"), None).await;
             continue;
         }
 
         let params = CallbackParams::from_query(&query);
         let (title, message) = if params.error.is_some() {
             (
-                "Login não concluído",
+                crate::i18n::t("oauth.callback.loginFailedTitle"),
                 params
                     .error_description
                     .clone()
-                    .unwrap_or_else(|| "A autorização foi negada ou interrompida.".to_string()),
+                    .unwrap_or_else(|| crate::i18n::t("oauth.callback.denied")),
             )
         } else {
             (
-                "Conta conectada",
-                "Você já pode voltar ao Zylara. Esta janela pode ser fechada.".to_string(),
+                crate::i18n::t("oauth.callback.connectedTitle"),
+                crate::i18n::t("oauth.callback.connectedBody"),
             )
         };
-        respond(&mut stream, 200, title, Some(&message)).await;
+        respond(&mut stream, 200, &title, Some(&message)).await;
         return Ok(params);
     }
-    Err(anyhow!("nenhum callback válido recebido"))
+    Err(anyhow!(crate::i18n::t("oauth.errors.noValidCallback")))
 }
 
 async fn read_request(stream: &mut TcpStream) -> Result<String> {
     let mut buffer = vec![0_u8; MAX_REQUEST_BYTES];
     let read = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buffer))
         .await
-        .map_err(|_| anyhow!("timeout ao ler callback"))?
-        .map_err(|error| anyhow!("falha ao ler callback: {error}"))?;
+        .map_err(|_| anyhow!(crate::i18n::t("oauth.errors.callbackTimeout")))?
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.callbackRead",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     let text = String::from_utf8_lossy(&buffer[..read]).to_string();
     // Only the request line is needed; the browser may send headers after it.
     let first = text
@@ -121,7 +145,7 @@ async fn read_request(stream: &mut TcpStream) -> Result<String> {
         .next()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .ok_or_else(|| anyhow!("callback vazio"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("oauth.errors.callbackEmpty")))?;
     Ok(first.to_string())
 }
 
@@ -189,12 +213,13 @@ async fn respond(stream: &mut TcpStream, status: u16, title: &str, message: Opti
 }
 
 fn page(title: &str, message: Option<&str>) -> String {
+    let language = crate::i18n::language();
     let title = escape_html(title);
     let message = message
         .map(|message| format!("<p>{}</p>", escape_html(message)))
         .unwrap_or_default();
     format!(
-        "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title><style>body{{font-family:system-ui,sans-serif;background:#0b0d12;color:#e6e8ee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}main{{max-width:420px;padding:32px;text-align:center}}h1{{font-size:20px;margin:0 0 12px}}p{{color:#9aa3b2;font-size:14px;line-height:1.5}}</style></head><body><main><h1>{title}</h1>{message}</main></body></html>"
+        "<!doctype html><html lang=\"{language}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{title}</title><style>body{{font-family:system-ui,sans-serif;background:#0b0d12;color:#e6e8ee;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}main{{max-width:420px;padding:32px;text-align:center}}h1{{font-size:20px;margin:0 0 12px}}p{{color:#9aa3b2;font-size:14px;line-height:1.5}}</style></head><body><main><h1>{title}</h1>{message}</main></body></html>"
     )
 }
 

@@ -1,0 +1,198 @@
+{
+  "header": {
+    "back": "Voltar ao chat",
+    "title": "Biblioteca",
+    "description": "Todos os arquivos das suas conversas e os que você enviar. O agente pode consultá-los durante a conversa.",
+    "searchPlaceholder": "Pesquisar na biblioteca",
+    "searchAria": "Pesquisar na biblioteca",
+    "clearSearch": "Limpar busca",
+    "sortAria": "Ordenar: {{label}}",
+    "sortMenu": "Ordenar por",
+    "viewAria": "Modo de visualização",
+    "grid": "Grade",
+    "list": "Lista",
+    "upload": "Enviar arquivos",
+    "uploading": "Enviando arquivos…"
+  },
+  "filters": {
+    "aria": "Filtrar biblioteca",
+    "all": "Tudo",
+    "favorites": "Favoritos",
+    "images": "Imagens",
+    "documents": "Documentos",
+    "code": "Código",
+    "media": "Mídia",
+    "others": "Outros",
+    "countLabel_one": "{{label}} ({{count}} arquivo)",
+    "countLabel_other": "{{label}} ({{count}} arquivos)",
+    "countLabel_zero": "{{label}} ({{count}} arquivos)"
+  },
+  "sorts": {
+    "recent": "Recentes",
+    "oldest": "Mais antigos",
+    "name": "Nome (A–Z)",
+    "size": "Tamanho"
+  },
+  "card": {
+    "openAria": "Abrir {{name}} — {{kind}} · {{origin}}",
+    "favorite": "Favoritar {{name}}",
+    "unfavorite": "Desfavoritar {{name}}",
+    "actionsAria": "Ações de {{name}}",
+    "rename": "Renomear",
+    "favoriteAction": "Favoritar",
+    "unfavoriteAction": "Desfavoritar",
+    "saveAs": "Salvar como…",
+    "open": "Abrir",
+    "delete": "Excluir",
+    "thumbnailAlt": "Miniatura de {{name}}",
+    "originFallback": "Biblioteca"
+  },
+  "view": {
+    "aria": "Biblioteca de arquivos",
+    "loading": "Carregando biblioteca…",
+    "loadErrorTitle": "Não foi possível carregar a biblioteca",
+    "retry": "Tentar novamente",
+    "emptyTitle": "Sua biblioteca está vazia",
+    "emptyDescription": "Os arquivos criados pelo agente durante as conversas aparecem aqui. Você também pode enviar arquivos próprios para consultá-los no chat.",
+    "filteredEmptyTitle": "Nenhum artefato encontrado",
+    "filteredEmptyDescription": "Nenhum arquivo corresponde à busca ou ao filtro selecionado.",
+    "clearFilters": "Limpar filtros",
+    "count_one": "{{count}} arquivo",
+    "count_other": "{{count}} arquivos",
+    "visibleCount_one": "{{visible}} de {{count}} arquivo",
+    "visibleCount_other": "{{visible}} de {{count}} arquivos",
+    "listAria": "Arquivos da biblioteca",
+    "dropTitle": "Solte para enviar à biblioteca",
+    "noFiles": "Nenhum arquivo enviado",
+    "importError": "Não foi possível enviar os arquivos",
+    "pickerError": "Não foi possível abrir o seletor de arquivos",
+    "pickerTitle": "Enviar arquivos para a biblioteca",
+    "favoriteError": "Não foi possível favoritar o arquivo",
+    "unfavoriteError": "Não foi possível desfavoritar o arquivo",
+    "renamed": "Arquivo renomeado",
+    "deleted": "Arquivo excluído",
+    "saveSuccess": "Arquivo salvo",
+    "saveError": "Não foi possível salvar",
+    "openError": "Não foi possível abrir o arquivo",
+    "import_one": "{{count}} arquivo enviado",
+    "import_other": "{{count}} arquivos enviados",
+    "count_zero": "{{count}} arquivos",
+    "visibleCount_zero": "{{visible}} de {{count}} arquivos",
+    "import_zero": "{{count}} arquivos enviados"
+  },
+  "dialog": {
+    "previous": "Arquivo anterior",
+    "next": "Próximo arquivo",
+    "position": "{{current}} de {{total}}",
+    "positionUnknown": "— de {{total}}",
+    "renameAria": "Renomear arquivo",
+    "nameRequired": "Informe um nome para o arquivo.",
+    "favorite": "Favoritar",
+    "unfavorite": "Desfavoritar",
+    "rename": "Renomear",
+    "saveAs": "Salvar como…",
+    "open": "Abrir",
+    "deleteFile": "Excluir arquivo",
+    "deleteConfirmAria": "Confirmar exclusão de {{name}}",
+    "deleteConfirm": "Excluir “{{name}}”? Esta ação não pode ser desfeita.",
+    "delete": "Excluir",
+    "deleteError": "Não foi possível excluir o arquivo",
+    "previewAria": "Prévia de {{name}}",
+    "loading": "Carregando prévia…",
+    "loadingLabel": "Carregando prévia",
+    "loadErrorTitle": "Não foi possível carregar a prévia",
+    "retry": "Tentar novamente",
+    "footer": "{{origin}} · Criado em {{date}}",
+    "noContent": "Conteúdo do artefato não encontrado."
+  },
+  "skills": {
+    "sources": {
+      "user": {
+        "group": "Zylara",
+        "label": "Do Zylara"
+      },
+      "agents": {
+        "group": "Agentes",
+        "label": "Agentes"
+      },
+      "codex": {
+        "group": "Codex",
+        "label": "Codex"
+      },
+      "claude": {
+        "group": "Claude",
+        "label": "Claude"
+      },
+      "opencode": {
+        "group": "OpenCode",
+        "label": "OpenCode"
+      },
+      "bundled": {
+        "group": "Embutidas",
+        "label": "Embutida"
+      },
+      "other": "Outra origem"
+    },
+    "builtin": {
+      "imagens": {
+        "name": "Imagens",
+        "description": "Cria imagens SVG e arquivos PNG/JPG para gráficos, ícones e ilustrações."
+      },
+      "pdf": {
+        "name": "PDF",
+        "description": "Cria e manipula documentos PDF."
+      },
+      "office-docx": {
+        "name": "Documentos Word",
+        "description": "Cria documentos Word (.docx)."
+      },
+      "office-pptx": {
+        "name": "Apresentações PowerPoint",
+        "description": "Cria apresentações PowerPoint (.pptx)."
+      },
+      "office-xlsx": {
+        "name": "Planilhas Excel",
+        "description": "Cria planilhas Excel (.xlsx)."
+      }
+    },
+    "view": {
+      "aria": "Gerenciamento de skills",
+      "back": "Voltar ao chat",
+      "openFolder": "Abrir pasta de skills",
+      "title": "Skills",
+      "description": "Instruções e scripts que o agente pode consultar durante a conversa. Ative, desative ou remova skills do usuário. Skills externas de outros agentes são somente leitura.",
+      "loading": "Carregando skills…",
+      "loadingLabel": "Carregando skills",
+      "loadErrorTitle": "Não foi possível carregar as skills",
+      "retry": "Tentar novamente",
+      "emptyTitle": "Nenhuma skill encontrada",
+      "emptyDescription": "Adicione uma pasta com um arquivo <code>{{file}}</code> na pasta de skills do Zylara (botão “Abrir pasta de skills”) e tente novamente. As skills de outros agentes são detectadas automaticamente.",
+      "disabledNote": "Skills desativadas não são usadas pelo agente.",
+      "createNote": "Para criar uma skill, adicione <code>{{path}}</code> na pasta de skills. Skills embutidas e externas não podem ser excluídas — desative-as se não quiser usá-las.",
+      "readOnly": "Somente leitura",
+      "externalDescription": "Repositório de outro agente: desative para o agente ignorar; o Zylara não altera estes arquivos.",
+      "disabledBadge": "Desativada",
+      "deleteQuestion": "Excluir?",
+      "deleteConfirmAria": "Confirmar exclusão de {{name}}",
+      "enableAria": "Ativar skill {{name}}",
+      "previewAria": "Visualizar skill {{name}}",
+      "deleteAria": "Excluir skill {{name}}",
+      "updateError": "Não foi possível atualizar a skill",
+      "deleted": "Skill excluída",
+      "deleteError": "Não foi possível excluir a skill",
+      "openFolderError": "Não foi possível abrir a pasta de skills"
+    },
+    "preview": {
+      "viewAria": "Modo de visualização da skill",
+      "document": "Documento",
+      "code": "Código",
+      "history": "Histórico de versões ({{count}})",
+      "contentAria": "Conteúdo da skill {{name}}",
+      "loading": "Carregando conteúdo da skill…",
+      "loadErrorTitle": "Não foi possível carregar o conteúdo da skill",
+      "retry": "Tentar novamente",
+      "empty": "Esta skill não tem instruções.",
+      "disabledBadge": "Desativada"
+    }
+  }
+}

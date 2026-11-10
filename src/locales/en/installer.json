@@ -1,0 +1,231 @@
+{
+  "window": {
+    "install": "Zylara Setup",
+    "uninstall": "Uninstall Zylara"
+  },
+  "loading": {
+    "spinner": "Loading installer",
+    "preparing": "Preparing the installer…"
+  },
+  "screens": {
+    "welcome": "Welcome",
+    "scope": "Scope",
+    "location": "Destination",
+    "options": "Options",
+    "progress": "Installation",
+    "finish": "Done",
+    "confirmUninstall": "Remove",
+    "error": "Error"
+  },
+  "shell": {
+    "close": "Close installer",
+    "steps": "Steps",
+    "mode": {
+      "install": "Installer",
+      "uninstall": "Uninstallation"
+    },
+    "local": {
+      "title": "Local installation",
+      "description": "Your data stays on this computer. Nothing is sent to us."
+    }
+  },
+  "language": {
+    "label": "Language"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "back": "Back",
+    "continue": "Continue",
+    "openLog": "Open log"
+  },
+  "welcome": {
+    "eyebrowUpdate": "Update",
+    "eyebrowWelcome": "Welcome",
+    "titleUpdate": "Update Zylara",
+    "titleInstall": "Install Zylara",
+    "subtitle": "Desktop chat with agents, documents and code.",
+    "versionAvailable": "Version {{version}} available",
+    "version": "Version {{version}}",
+    "currentInstall": "Current installation: {{version}} in {{path}}",
+    "duration": "Installation takes less than a minute.",
+    "badgeUpdate": "Update",
+    "badgeReady": "Ready",
+    "features": {
+      "models": {
+        "title": "Your models",
+        "description": "OpenCode, OpenAI and Anthropic in one place."
+      },
+      "local": {
+        "title": "Local-first",
+        "description": "Conversations and files stay on your computer."
+      },
+      "complete": {
+        "title": "Complete",
+        "description": "Library, code, terminal and skills included."
+      },
+      "updates": {
+        "title": "Easy updates",
+        "description": "Run the new installer whenever you want."
+      }
+    },
+    "keepData": "Updating keeps your conversations, files, settings and API keys.",
+    "hint": "By continuing, you can choose where and for whom to install.",
+    "update": "Update Zylara",
+    "continue": "Continue"
+  },
+  "scope": {
+    "eyebrow": "Step 1 of 3",
+    "title": "Who are we installing for?",
+    "description": "Choose the scope. The per-user option does not require administrator; the option for everyone makes Zylara available to any account on this computer.",
+    "radiogroup": "Installation scope",
+    "user": {
+      "title": "Just for me",
+      "description": "Installs to {{path}}. Does not require administrator permission."
+    },
+    "machine": {
+      "title": "For all users",
+      "description": "Installs to {{path}}. Windows will ask for administrator permission."
+    },
+    "elevateWarning": "If you continue, the installer will reopen with administrator permissions to create shortcuts and register the app for everyone.",
+    "conflicting": {
+      "title": "An installation already exists in another scope.",
+      "description": "{{scope}} in {{path}} (v{{version}}). Remove that installation before continuing."
+    },
+    "hint": "You can change the folder in the next step."
+  },
+  "location": {
+    "eyebrow": "Step 2 of 3",
+    "title": "Where to install?",
+    "description": "The folder will be created if it does not exist yet. Zylara needs a local drive for the database and checkpoints.",
+    "label": "Installation folder",
+    "browse": "Browse…",
+    "browseTitle": "Choose the installation folder",
+    "scope": "Scope",
+    "required": "Required space",
+    "free": "{{size}} free on the destination drive.",
+    "adminWarning": "The folder in Program Files requires administrator.",
+    "hint": "Your conversation data is kept separate from the application folder."
+  },
+  "options": {
+    "eyebrowUpdate": "Update",
+    "eyebrow": "Step 3 of 3",
+    "titleUpdate": "Confirm the update",
+    "title": "Adjust the details",
+    "descriptionUpdate": "Zylara {{version}} will be installed over version {{existingVersion}}. Your data will be preserved.",
+    "description": "Choose how Zylara should appear in Windows. You can change the shortcuts later in the installation folder.",
+    "conflicting": {
+      "title": "Another Zylara installation exists.",
+      "description": "{{scope}} in {{path}} (v{{version}}). Remove that installation before continuing."
+    },
+    "running": {
+      "title": "Zylara is open",
+      "description": "Close the application before continuing to avoid locked files.",
+      "close": "Close now"
+    },
+    "desktopShortcut": {
+      "title": "Desktop shortcut",
+      "description": "Creates a shortcut to open Zylara."
+    },
+    "startMenuShortcut": {
+      "title": "Start menu shortcut",
+      "description": "Adds Zylara to the Start menu and Windows search."
+    },
+    "launchAfterInstall": {
+      "title": "Open Zylara when finished",
+      "description": "Starts the application as soon as installation ends."
+    },
+    "destination": "Destination:",
+    "scope": "Scope:",
+    "hintElevate": "When installing, Windows will ask for administrator permission.",
+    "hintDefault": "Installation does not remove or change your existing conversations.",
+    "installUpdate": "Update now",
+    "install": "Install Zylara"
+  },
+  "progress": {
+    "eyebrowUninstall": "Removing",
+    "eyebrow": "Installing",
+    "titleUninstall": "Removing Zylara",
+    "title": "Installing Zylara",
+    "description": "Keep this window open. The installer is applying the changes safely.",
+    "preparing": "Preparing…",
+    "progressUninstall": "Uninstallation progress",
+    "progress": "Installation progress",
+    "details": "Installation details",
+    "noDetails": "No details yet.",
+    "hint": "You can cancel before the file copy starts."
+  },
+  "finish": {
+    "titleUninstall": "Zylara removed",
+    "titleLaunched": "All set",
+    "titleDone": "Installation complete",
+    "descriptionUninstallPurge": "The application and user data were removed from this computer.",
+    "descriptionUninstall": "The application was removed. Your conversations, files and settings were preserved.",
+    "descriptionLaunched": "Zylara was installed and is already open. Nice work!",
+    "descriptionDone": "Zylara is ready to use. You can open it now or from the desktop.",
+    "openLaunched": "Open Zylara",
+    "open": "Open Zylara now",
+    "openFolder": "Open folder"
+  },
+  "uninstall": {
+    "eyebrow": "Uninstallation",
+    "title": "Remove Zylara?",
+    "description": "The application will be removed from this computer. You can choose whether conversations, files and settings should also be deleted.",
+    "purge": {
+      "label": "Also remove my data",
+      "description": "Deletes conversations, attachments, artifacts, settings and API keys saved on this computer. This action cannot be undone."
+    },
+    "purgeWarning": "API keys will be deleted. You will need to configure them again if you reinstall Zylara.",
+    "infoConfirm": "Confirm again to delete the application and all data for the current user. This action is permanent.",
+    "infoNext": "In the next step you confirm the data removal. Your files are still protected until then.",
+    "infoDefault": "Your conversations, files and settings are kept by default.",
+    "hint": "Removing the application does not affect other accounts on this computer.",
+    "confirm": "Confirm removal",
+    "remove": "Remove Zylara"
+  },
+  "errorScreen": {
+    "eyebrow": "Something went wrong",
+    "titleUninstall": "Could not remove",
+    "title": "Could not install",
+    "description": "The operation was interrupted. See the details below and try again.",
+    "problem": "The installer ran into a problem",
+    "unknown": "Unknown error.",
+    "technical": "Technical details",
+    "logFallback": "See the full log.",
+    "hint": "The full log is in the Windows temporary folder.",
+    "retry": "Try again"
+  },
+  "errors": {
+    "generic": "Could not complete the operation.",
+    "notInstalled": "Zylara is not installed for this user.",
+    "loadTitle": "Could not open the installer"
+  },
+  "steps": {
+    "install": {
+      "prepare": "Validate destination and permissions",
+      "closeApp": "Close the running Zylara",
+      "copy": "Copy application files",
+      "shortcuts": "Create shortcuts",
+      "register": "Register uninstaller",
+      "launch": "Start Zylara"
+    },
+    "uninstall": {
+      "prepare": "Validate the installation",
+      "closeApp": "Close the running Zylara",
+      "removeFiles": "Remove application files",
+      "removeRegistry": "Remove registry and shortcuts",
+      "removeData": "Remove user data",
+      "cleanup": "Finish"
+    }
+  },
+  "scopeLabel": {
+    "user": "Just for me",
+    "machine": "All users"
+  },
+  "pathError": {
+    "empty": "Choose an installation folder.",
+    "absolute": "Use an absolute path on a local drive, such as C:\\Program Files\\Zylara.",
+    "parent": "The path cannot contain \"..\".",
+    "root": "Choose a folder inside the drive, not the root."
+  }
+}

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 
 import { ChartSvg } from '@/components/genui';
 import { Button, IconButton, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
+import { formatNumber, formatPercent } from '@/lib/i18n/format';
 import { useAppStore, useUiStore } from '@/lib/store';
 import type { UsageStats } from '@/lib/types';
 
@@ -11,27 +13,21 @@ import { formatUsageCost, formatUsageTokens, modelLabel, relativeTime } from './
 
 type UsagePeriod = '7d' | '30d' | '90d' | 'all';
 
-const PERIODS: Array<{ id: UsagePeriod; label: string }> = [
-  { id: '7d', label: '7 dias' },
-  { id: '30d', label: '30 dias' },
-  { id: '90d', label: '90 dias' },
-  { id: 'all', label: 'Tudo' },
+const PERIODS: Array<{ id: UsagePeriod; labelKey: string }> = [
+  { id: '7d', labelKey: 'stats.periods.7d' },
+  { id: '30d', labelKey: 'stats.periods.30d' },
+  { id: '90d', labelKey: 'stats.periods.90d' },
+  { id: 'all', labelKey: 'stats.periods.all' },
 ];
 
 const PERIOD_LABELS: Record<UsagePeriod, string> = {
-  '7d': 'Últimos 7 dias',
-  '30d': 'Últimos 30 dias',
-  '90d': 'Últimos 90 dias',
-  all: 'Todo o período',
+  '7d': 'stats.periods.long.7d',
+  '30d': 'stats.periods.long.30d',
+  '90d': 'stats.periods.long.90d',
+  all: 'stats.periods.long.all',
 };
 
 const DAY_MS = 86_400_000;
-
-const INTEGER_FORMAT = new Intl.NumberFormat('pt-BR');
-const PERCENT_FORMAT = new Intl.NumberFormat('pt-BR', {
-  style: 'percent',
-  maximumFractionDigits: 1,
-});
 
 function sinceForPeriod(period: UsagePeriod): number | null {
   if (period === 'all') return null;
@@ -57,6 +53,7 @@ function StatCard({ label, value, detail }: { label: string; value: string; deta
 }
 
 export function AgentStatsView() {
+  const { t } = useTranslation('agents');
   const [period, setPeriod] = useState<UsagePeriod>('all');
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,8 +85,11 @@ export function AgentStatsView() {
   }, [period, reloadToken]);
 
   const topModel = stats?.byModel[0];
+  const providerName = (providerId: string): string =>
+    providers.find((provider) => provider.id === providerId)?.name ??
+    (providerId || t('stats.unknownProvider'));
   const topModelLabel = topModel
-    ? modelLabel(providers, topModel.providerId, topModel.modelId) || 'Modelo desconhecido'
+    ? modelLabel(providers, topModel.providerId, topModel.modelId) || t('stats.unknownModel')
     : '—';
 
   return (
@@ -103,16 +103,16 @@ export function AgentStatsView() {
               leftIcon={<ArrowLeft className="size-4" />}
               onClick={() => setAgentView('team')}
             >
-              Voltar à Equipe
+              {t('stats.back')}
             </Button>
             <div className="min-w-0 flex-1">
-              <h1 className="text-xl font-semibold tracking-tight">Estatísticas</h1>
+              <h1 className="text-xl font-semibold tracking-tight">{t('stats.title')}</h1>
               <p className="mt-0.5 text-[12px] text-foreground-muted">
-                {PERIOD_LABELS[period]} · Uso de tokens e custo em todas as conversas do Zylara.
+                {t('stats.subtitle', { period: t(PERIOD_LABELS[period] as never) })}
               </p>
             </div>
             <IconButton
-              label="Atualizar estatísticas"
+              label={t('stats.refreshAria')}
               size="sm"
               disabled={loading}
               onClick={() => setReloadToken((value) => value + 1)}
@@ -120,7 +120,7 @@ export function AgentStatsView() {
               <RefreshCw className="size-4" />
             </IconButton>
           </div>
-          <div role="group" aria-label="Período" className="flex flex-wrap items-center gap-1">
+          <div role="group" aria-label={t('stats.periodAria')} className="flex flex-wrap items-center gap-1">
             {PERIODS.map((item) => (
               <button
                 key={item.id}
@@ -133,7 +133,7 @@ export function AgentStatsView() {
                     : 'h-8 rounded-lg px-2.5 text-[12px] text-foreground-muted hover:bg-surface-hover hover:text-foreground'
                 }
               >
-                {item.label}
+                {t(item.labelKey as never)}
               </button>
             ))}
           </div>
@@ -148,11 +148,11 @@ export function AgentStatsView() {
               className="rounded-2xl border border-border bg-surface-raised/60 px-4 py-8 text-center"
             >
               <p className="text-[13px] font-medium text-foreground">
-                Não foi possível carregar as estatísticas.
+                {t('stats.loadError')}
               </p>
               <p className="mt-1 text-[11px] text-foreground-subtle">{error}</p>
               <Button className="mt-4" size="sm" onClick={() => setReloadToken((value) => value + 1)}>
-                Tentar novamente
+                {t('common:actions.retry')}
               </Button>
             </div>
           ) : !stats ? (
@@ -160,54 +160,60 @@ export function AgentStatsView() {
               role="status"
               className="flex min-h-40 items-center justify-center gap-2 text-[13px] text-foreground-muted"
             >
-              <Spinner size="sm" label="Carregando estatísticas" />
-              Carregando estatísticas…
+              <Spinner size="sm" label={t('stats.loadingAria')} />
+              {t('stats.loading')}
             </div>
           ) : stats.totals.turns === 0 ? (
             <div className="rounded-2xl border border-border bg-surface-raised/60 px-4 py-10 text-center">
               <p className="text-[13px] font-medium text-foreground">
-                Nenhum uso registrado neste período.
+                {t('stats.noUsage')}
               </p>
               <p className="mt-1 text-[12px] text-foreground-muted">
-                Converse no Chat, no Code ou com um agente para começar a registrar.
+                {t('stats.noUsageHint')}
               </p>
             </div>
           ) : (
             <>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard
-                  label="Tokens usados"
+                  label={t('stats.cards.tokens')}
                   value={formatUsageTokens(stats.totals.totalTokens)}
-                  detail={`Entrada ${formatUsageTokens(stats.totals.inputTokens)} · Saída ${formatUsageTokens(stats.totals.outputTokens)} · Raciocínio ${formatUsageTokens(stats.totals.reasoningTokens)}`}
+                  detail={t('stats.cards.tokensDetail', {
+                    input: formatUsageTokens(stats.totals.inputTokens),
+                    output: formatUsageTokens(stats.totals.outputTokens),
+                    reasoning: formatUsageTokens(stats.totals.reasoningTokens),
+                  })}
                 />
                 <StatCard
-                  label="Gasto total"
+                  label={t('stats.cards.spend')}
                   value={formatUsageCost(stats.totals.cost)}
                   detail={
                     stats.totals.lastUsedAt
-                      ? `Última atividade ${relativeTime(stats.totals.lastUsedAt)}`
-                      : 'Sem atividade no período'
+                      ? t('stats.cards.lastActivity', {
+                          time: relativeTime(stats.totals.lastUsedAt),
+                        })
+                      : t('stats.cards.noActivity')
                   }
                 />
                 <StatCard
-                  label="Turnos"
-                  value={INTEGER_FORMAT.format(stats.totals.turns)}
-                  detail={`Média de ${formatUsageTokens(
-                    Math.round(stats.totals.totalTokens / Math.max(stats.totals.turns, 1)),
-                  )} tokens por turno`}
+                  label={t('stats.cards.turns')}
+                  value={formatNumber(stats.totals.turns)}
+                  detail={t('stats.cards.averageTokens', {
+                    tokens: formatUsageTokens(
+                      Math.round(stats.totals.totalTokens / Math.max(stats.totals.turns, 1)),
+                    ),
+                  })}
                 />
                 <StatCard
-                  label="Modelo mais usado"
+                  label={t('stats.cards.topModel')}
                   value={topModelLabel}
                   detail={
                     topModel
-                      ? `${
-                          providers.find((provider) => provider.id === topModel.providerId)?.name ??
-                          (topModel.providerId || 'Provedor desconhecido')
-                        } · ${topModel.turns} ${
-                          topModel.turns === 1 ? 'turno' : 'turnos'
-                        }`
-                      : 'Sem uso no período'
+                      ? t('stats.cards.modelTurns', {
+                          provider: providerName(topModel.providerId),
+                          count: topModel.turns,
+                        })
+                      : t('stats.cards.noUsageInPeriod')
                   }
                 />
               </div>
@@ -217,14 +223,14 @@ export function AgentStatsView() {
                   id="stats-daily-heading"
                   className="text-base font-semibold tracking-tight text-foreground"
                 >
-                  Uso por dia
+                  {t('stats.daily')}
                 </h2>
                 <div className="mt-3 rounded-2xl border border-border bg-surface-raised/60 p-4">
                   {stats.byDay.length > 0 ? (
                     <ChartSvg
                       spec={{
                         type: 'bar',
-                        title: 'Tokens por dia',
+                        title: t('stats.tokensPerDay'),
                         data: stats.byDay.map((row) => ({
                           label: dayLabel(row.day),
                           value: row.totalTokens,
@@ -234,7 +240,7 @@ export function AgentStatsView() {
                     />
                   ) : (
                     <p className="py-6 text-center text-[12px] text-foreground-subtle">
-                      Sem uso diário no período.
+                      {t('stats.noDailyUsage')}
                     </p>
                   )}
                 </div>
@@ -246,20 +252,18 @@ export function AgentStatsView() {
                     id="stats-models-heading"
                     className="text-base font-semibold tracking-tight text-foreground"
                   >
-                    Por modelo
+                    {t('stats.byModel')}
                   </h2>
                   <span className="text-[11px] text-foreground-subtle">
-                    {stats.byModel.length === 1
-                      ? '1 modelo'
-                      : `${stats.byModel.length} modelos`}
+                    {t('stats.modelCount', { count: stats.byModel.length })}
                   </span>
                 </div>
                 {stats.byModel.length === 0 ? (
-                  <p className="mt-3 text-[12px] text-foreground-subtle">Sem modelos no período.</p>
+                  <p className="mt-3 text-[12px] text-foreground-subtle">{t('stats.noModels')}</p>
                 ) : (
                   <div className="mt-3 overflow-x-auto rounded-xl border border-border">
                     <table
-                      aria-label="Uso por modelo"
+                      aria-label={t('stats.byModelAria')}
                       className="w-full border-collapse text-left text-[12.5px]"
                     >
                       <thead className="bg-surface">
@@ -268,31 +272,31 @@ export function AgentStatsView() {
                             scope="col"
                             className="whitespace-nowrap border-b border-border px-3 py-2 font-semibold text-foreground"
                           >
-                            Modelo
+                            {t('stats.columns.model')}
                           </th>
                           <th
                             scope="col"
                             className="whitespace-nowrap border-b border-border px-3 py-2 text-right font-semibold text-foreground"
                           >
-                            Turnos
+                            {t('stats.columns.turns')}
                           </th>
                           <th
                             scope="col"
                             className="whitespace-nowrap border-b border-border px-3 py-2 text-right font-semibold text-foreground"
                           >
-                            Tokens
+                            {t('stats.columns.tokens')}
                           </th>
                           <th
                             scope="col"
                             className="whitespace-nowrap border-b border-border px-3 py-2 text-right font-semibold text-foreground"
                           >
-                            Participação
+                            {t('stats.columns.share')}
                           </th>
                           <th
                             scope="col"
                             className="whitespace-nowrap border-b border-border px-3 py-2 text-right font-semibold text-foreground"
                           >
-                            Custo
+                            {t('stats.columns.cost')}
                           </th>
                         </tr>
                       </thead>
@@ -307,22 +311,20 @@ export function AgentStatsView() {
                               <td className="min-w-40 px-3 py-2 align-top">
                                 <span className="block truncate font-medium text-foreground">
                                   {modelLabel(providers, row.providerId, row.modelId) ||
-                                    'Modelo desconhecido'}
+                                    t('stats.unknownModel')}
                                 </span>
                                 <span className="block truncate text-[11px] text-foreground-subtle">
-                                  {providers.find((provider) => provider.id === row.providerId)
-                                    ?.name ??
-                                    (row.providerId || 'Provedor desconhecido')}
+                                  {providerName(row.providerId)}
                                 </span>
                               </td>
                               <td className="px-3 py-2 text-right align-top tabular-nums text-foreground-muted">
-                                {INTEGER_FORMAT.format(row.turns)}
+                                {formatNumber(row.turns)}
                               </td>
                               <td className="px-3 py-2 text-right align-top tabular-nums text-foreground-muted">
                                 {formatUsageTokens(row.totalTokens)}
                               </td>
                               <td className="px-3 py-2 text-right align-top tabular-nums text-foreground-muted">
-                                {share === null ? '—' : PERCENT_FORMAT.format(share)}
+                                {share === null ? '—' : formatPercent(share, 1)}
                               </td>
                               <td className="px-3 py-2 text-right align-top tabular-nums text-foreground-muted">
                                 {formatUsageCost(row.cost)}
@@ -337,8 +339,7 @@ export function AgentStatsView() {
               </section>
 
               <p className="mt-8 text-[11px] text-foreground-subtle">
-                Custos em dólares reportados pelos provedores; turnos sem preço não entram no
-                total.
+                {t('stats.footnote')}
               </p>
             </>
           )}

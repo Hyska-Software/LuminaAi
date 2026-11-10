@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUpRight, RefreshCw } from 'lucide-react';
 
 import { AgentDialogBody } from './AgentDialogBody';
@@ -15,6 +16,7 @@ import {
   Spinner,
 } from '@/components/ui';
 import { api } from '@/lib/api';
+import { formatDate } from '@/lib/i18n/format';
 import {
   ROUTINE_STATUS_META,
   routineScheduleLabel,
@@ -22,7 +24,7 @@ import {
 import type { AgentRoutine, AgentRoutineRun } from '@/lib/types';
 
 function formatWhen(timestamp: number): string {
-  return new Date(timestamp).toLocaleString('pt-BR', {
+  return formatDate(new Date(timestamp), {
     day: '2-digit',
     month: 'short',
     hour: '2-digit',
@@ -30,8 +32,8 @@ function formatWhen(timestamp: number): string {
   });
 }
 
-function formatDuration(run: AgentRoutineRun): string {
-  if (run.endedAt === null) return 'em andamento';
+function formatDuration(run: AgentRoutineRun, runningLabel: string): string {
+  if (run.endedAt === null) return runningLabel;
   const seconds = Math.max(0, Math.round((run.endedAt - run.startedAt) / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -51,6 +53,7 @@ export function AgentRoutineRunsDialog({
   routine: AgentRoutine | null;
   onOpenThread: (conversationId: string, agentId: string) => void;
 }) {
+  const { t } = useTranslation('agents');
   const [runs, setRuns] = useState<AgentRoutineRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,12 +88,12 @@ export function AgentRoutineRunsDialog({
       <DialogContent size="md">
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle>
-            Execuções de {routine?.title ?? 'rotina'}
+            {t('routineRuns.title', { title: routine?.title ?? t('routineRuns.fallbackRoutine') })}
           </DialogTitle>
           <DialogDescription>
             {routine
-              ? `${routineScheduleLabel(routine)} · últimas 30 execuções na conversa principal.`
-              : 'Histórico de execução da rotina.'}
+              ? t('routineRuns.description', { schedule: routineScheduleLabel(routine) })
+              : t('routineRuns.fallbackDescription')}
           </DialogDescription>
         </DialogHeader>
 
@@ -100,15 +103,15 @@ export function AgentRoutineRunsDialog({
               role="status"
               className="flex items-center justify-center gap-2 py-8 text-[12px] text-foreground-muted"
             >
-              <Spinner size="sm" label="Carregando execuções" />
-              Carregando execuções…
+              <Spinner size="sm" label={t('routineRuns.loadingAria')} />
+              {t('routineRuns.loading')}
             </div>
           ) : error ? (
             <div
               role="alert"
               className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger"
             >
-              <p>Não foi possível carregar as execuções.</p>
+              <p>{t('routineRuns.loadError')}</p>
               <p className="mt-1 text-[11px] opacity-80">{error}</p>
               <Button
                 size="sm"
@@ -117,12 +120,12 @@ export function AgentRoutineRunsDialog({
                 onClick={() => setReloadToken((value) => value + 1)}
               >
                 <RefreshCw className="mr-1.5 size-3.5" />
-                Tentar novamente
+                {t('common:actions.retry')}
               </Button>
             </div>
           ) : runs.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border px-3 py-8 text-center text-[12px] text-foreground-muted">
-              Nenhuma execução registrada.
+              {t('routineRuns.empty')}
             </p>
           ) : (
             runs.map((run) => {
@@ -138,13 +141,13 @@ export function AgentRoutineRunsDialog({
                       {formatWhen(run.startedAt)}
                     </span>
                     <span className="block truncate text-[10px] text-foreground-subtle">
-                      {formatDuration(run)}
+                      {formatDuration(run, t('routineRuns.running'))}
                       {run.error ? ` · ${run.error}` : ''}
                     </span>
                   </span>
                   {run.conversationId ? (
                     <IconButton
-                      label="Abrir conversa"
+                      label={t('routineRuns.openConversation')}
                       size="sm"
                       onClick={() => {
                         if (!routine) return;
@@ -163,7 +166,7 @@ export function AgentRoutineRunsDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Fechar
+            {t('common:actions.close')}
           </Button>
         </DialogFooter>
       </DialogContent>

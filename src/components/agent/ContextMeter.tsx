@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
@@ -23,15 +24,15 @@ type TierKey = 'ok' | 'warning' | 'critical';
 
 interface Tier {
   key: TierKey;
-  label: string;
+  labelKey: string;
   /** Cor do anel/alerta (a barra usa as cores do breakdown). */
   ring: string;
 }
 
 const TIERS: Record<TierKey, Tier> = {
-  ok: { key: 'ok', label: 'ok', ring: 'text-success' },
-  warning: { key: 'warning', label: 'atenção', ring: 'text-warning' },
-  critical: { key: 'critical', label: 'compactando', ring: 'text-danger' },
+  ok: { key: 'ok', labelKey: 'context.tier.ok', ring: 'text-success' },
+  warning: { key: 'warning', labelKey: 'context.tier.warning', ring: 'text-warning' },
+  critical: { key: 'critical', labelKey: 'context.tier.critical', ring: 'text-danger' },
 };
 
 function tierFor(percent: number): Tier {
@@ -61,12 +62,12 @@ function formatWindow(value?: number | null): string {
 /** Legenda e segmentos na ordem do briefing: sistema → ferramentas → mensagens. */
 const BREAKDOWN_SEGMENTS: Array<{
   key: keyof ContextBreakdown;
-  label: string;
+  labelKey: string;
   color: string;
 }> = [
-  { key: 'systemPrompt', label: 'Prompt de sistema', color: 'bg-context-system' },
-  { key: 'toolDefinitions', label: 'Definições de ferramentas', color: 'bg-context-tools' },
-  { key: 'messages', label: 'Mensagens', color: 'bg-context-messages' },
+  { key: 'systemPrompt', labelKey: 'context.segments.systemPrompt', color: 'bg-context-system' },
+  { key: 'toolDefinitions', labelKey: 'context.segments.toolDefinitions', color: 'bg-context-tools' },
+  { key: 'messages', labelKey: 'context.segments.messages', color: 'bg-context-messages' },
 ];
 
 const RING_RADIUS = 6.5;
@@ -99,12 +100,6 @@ function ContextRing({ percent, tier }: { percent: number; tier: Tier }) {
   );
 }
 
-function compactedNote(count: number): string {
-  return `Contexto compactado · ${count} mensage${count === 1 ? 'm' : 'ns'} resumida${
-    count === 1 ? '' : 's'
-  }`;
-}
-
 /**
  * Medidor de contexto do harness de código (WORKBENCH §4/§9), agora com o
  * indicador de cache de prompt ao lado do anel (PLAN §7).
@@ -117,23 +112,33 @@ function compactedNote(count: number): string {
  * rerenderiza no lugar (larguras animadas, valores tabulares, sem layout shift).
  */
 export function ContextMeter({ stats, cache, compacted, className }: ContextMeterProps) {
+  const { t } = useTranslation('agents');
   const cacheDescriptionId = useId();
   const hasCache = cache !== undefined;
   const percent = clampPercent(stats.percent);
   const tier = tierFor(percent);
+  const tierLabel = t(tier.labelKey as never);
   const compactedCount = compacted ?? stats.compacted ?? 0;
-  const note = compactedCount > 0 ? compactedNote(compactedCount) : null;
+  const note = compactedCount > 0 ? t('context.compacted', { count: compactedCount }) : null;
 
   const breakdown = stats.breakdown;
   const hasBreakdown = breakdown != null;
   const parts = hasBreakdown
     ? BREAKDOWN_SEGMENTS.map((segment) => ({
         ...segment,
+        label: t(segment.labelKey as never),
         value: Number.isFinite(breakdown?.[segment.key])
           ? Math.max(0, breakdown?.[segment.key] ?? 0)
           : 0,
       }))
-    : [{ key: 'messages' as const, label: 'Mensagens', color: 'bg-accent', value: stats.used }];
+    : [
+        {
+          key: 'messages' as const,
+          label: t('context.segments.messages'),
+          color: 'bg-accent',
+          value: stats.used,
+        },
+      ];
   const breakdownTotal = parts.reduce((total, part) => total + part.value, 0);
   // Barra usa as cores do breakdown; payload antigo (ou breakdown zerado)
   // degrada para uma barra única accent.
@@ -156,7 +161,7 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`Contexto usado: ${percent}%`}
+          aria-label={t('context.usedAria', { percent })}
           aria-describedby={hasCache ? cacheDescriptionId : undefined}
           className={cn(
             'flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium tabular-nums',
@@ -169,7 +174,7 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
         >
           <ContextRing percent={percent} tier={tier} />
           <span className="tabular-nums">{percent}%</span>
-          <span className="sr-only"> — {tier.label}</span>
+          <span className="sr-only"> — {tierLabel}</span>
           {hasCache ? (
             <>
               <CacheChipSegment cache={cache} />
@@ -180,11 +185,15 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
           ) : null}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" aria-label="Detalhes do contexto" className="w-72 p-3 shadow-lg">
+      <PopoverContent
+        align="end"
+        aria-label={t('context.detailsAria')}
+        className="w-72 p-3 shadow-lg"
+      >
         <div className="flex flex-col gap-2.5">
           <div className="flex items-baseline justify-between gap-3">
             <p className="min-w-0 text-[13px] font-semibold text-foreground">
-              {percent}% do contexto usado
+              {t('context.usedPercent', { percent })}
             </p>
             <p className="shrink-0 text-[11px] tabular-nums text-foreground-muted">
               ~{formatTokens(stats.used)} / {formatWindow(stats.window)}
@@ -193,12 +202,12 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
 
           <div
             role="progressbar"
-            aria-label="Contexto usado"
+            aria-label={t('context.usedProgressAria')}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent}
-            aria-valuetext={`${percent}% do contexto usado — ${tier.label}`}
-            title={`Limite de saída: ~${formatTokens(stats.outputCap)} tokens`}
+            aria-valuetext={t('context.usedValueText', { percent, tier: tierLabel })}
+            title={t('context.outputCapTitle', { tokens: formatTokens(stats.outputCap) })}
             className="flex h-1.5 w-full overflow-hidden rounded-full bg-surface-active"
           >
             {useAccentBar ? (
@@ -220,7 +229,7 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
             )}
           </div>
 
-          <ul aria-label="Composição do contexto" className="flex flex-col gap-1">
+          <ul aria-label={t('context.compositionAria')} className="flex flex-col gap-1">
             {parts.map((part) => (
               <li
                 key={part.key}
@@ -230,7 +239,7 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
                 <span className="min-w-0 flex-1 truncate text-foreground-muted">{part.label}</span>
                 <span
                   className="shrink-0 tabular-nums text-foreground-muted"
-                  aria-label={`aproximadamente ${formatTokens(part.value)} tokens`}
+                  aria-label={t('context.approxTokens', { tokens: formatTokens(part.value) })}
                 >
                   ~{formatTokens(part.value)}
                 </span>
@@ -245,7 +254,7 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
           ) : null}
 
           <div className="flex flex-col gap-1 border-t border-border pt-2 text-[11px] leading-snug text-foreground-muted">
-            <p>Limite de saída: ~{formatTokens(stats.outputCap)}</p>
+            <p>{t('context.outputCap', { tokens: formatTokens(stats.outputCap) })}</p>
             {note ? (
               <p role="status" className="text-foreground-muted">
                 {note}

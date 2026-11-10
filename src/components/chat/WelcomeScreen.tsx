@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CodeXml, FilePlus, FileText, Globe, type LucideIcon } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useReduceMotion } from '@/components/layout/hooks';
@@ -10,37 +11,43 @@ const EASE_OUT_SOFT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 interface Suggestion {
   icon: LucideIcon;
-  title: string;
-  description: string;
-  prompt: string;
+  /** Stable id used as the translation base key and the React key. */
+  id: 'document' | 'web' | 'file' | 'code';
 }
 
 const SUGGESTIONS: Suggestion[] = [
-  {
-    icon: FileText,
-    title: 'Analisar documento',
-    description: 'Resuma um PDF, DOCX ou planilha e destaque os pontos principais.',
-    prompt: 'Analise o documento em anexo e faça um resumo com os pontos principais.',
-  },
-  {
-    icon: Globe,
-    title: 'Pesquisar na web',
-    description: 'Busque informações atuais e cite as fontes.',
-    prompt: 'Pesquise na web as notícias mais recentes sobre ',
-  },
-  {
-    icon: FilePlus,
-    title: 'Criar arquivo',
-    description: 'Gere um artefato em Markdown, HTML, CSV ou código.',
-    prompt: 'Crie um arquivo Markdown com ',
-  },
-  {
-    icon: CodeXml,
-    title: 'Explicar código',
-    description: 'Entenda um trecho de código ou encontre a causa de um bug.',
-    prompt: 'Explique o que faz o código abaixo e sugira melhorias:\n\n```\n\n```',
-  },
+  { icon: FileText, id: 'document' },
+  { icon: Globe, id: 'web' },
+  { icon: FilePlus, id: 'file' },
+  { icon: CodeXml, id: 'code' },
 ];
+
+/** Literal keys per suggestion (never built from the id at runtime). */
+const SUGGESTION_KEYS: Record<
+  Suggestion['id'],
+  { title: string; description: string; prompt: string }
+> = {
+  document: {
+    title: 'welcome.suggestions.document.title',
+    description: 'welcome.suggestions.document.description',
+    prompt: 'welcome.suggestions.document.prompt',
+  },
+  web: {
+    title: 'welcome.suggestions.web.title',
+    description: 'welcome.suggestions.web.description',
+    prompt: 'welcome.suggestions.web.prompt',
+  },
+  file: {
+    title: 'welcome.suggestions.file.title',
+    description: 'welcome.suggestions.file.description',
+    prompt: 'welcome.suggestions.file.prompt',
+  },
+  code: {
+    title: 'welcome.suggestions.code.title',
+    description: 'welcome.suggestions.code.description',
+    prompt: 'welcome.suggestions.code.prompt',
+  },
+};
 
 /** Suggestions fill the composer through a `zylara:suggest` window event. */
 function fillComposer(text: string) {
@@ -49,6 +56,7 @@ function fillComposer(text: string) {
 
 /** Empty-conversation hero (DESIGN §6.1). */
 export function WelcomeScreen() {
+  const { t } = useTranslation('chat');
   const reduceMotion = useReduceMotion();
 
   useEffect(() => {
@@ -76,20 +84,25 @@ export function WelcomeScreen() {
         </span>
       </motion.div>
 
-      <h1 className="mt-6 text-[32px] font-semibold tracking-tight text-foreground">Como posso ajudar?</h1>
+      <h1 className="mt-6 text-[32px] font-semibold tracking-tight text-foreground">
+        {t('welcome.title')}
+      </h1>
       <p className="mt-2 max-w-md text-[15px] leading-relaxed text-foreground-muted">
-        Pergunte, pesquise, analise documentos ou crie arquivos com os modelos OpenCode e OpenAI —
-        incluindo o uso do seu plano ChatGPT.
+        {t('welcome.description')}
       </p>
 
       <div className="mt-8 grid w-full grid-cols-1 gap-2.5 text-left sm:grid-cols-2">
         {SUGGESTIONS.map((suggestion, index) => {
           const Icon = suggestion.icon;
+          const keys = SUGGESTION_KEYS[suggestion.id];
+          const title = t(keys.title);
+          const description = t(keys.description);
+          const prompt = t(keys.prompt);
           return (
             <motion.button
-              key={suggestion.title}
+              key={suggestion.id}
               type="button"
-              onClick={() => fillComposer(suggestion.prompt)}
+              onClick={() => fillComposer(prompt)}
               initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{
@@ -107,9 +120,9 @@ export function WelcomeScreen() {
                 <Icon className="size-4" />
               </span>
               <span className="min-w-0">
-                <span className="block text-[13.5px] font-medium text-foreground">{suggestion.title}</span>
+                <span className="block text-[13.5px] font-medium text-foreground">{title}</span>
                 <span className="mt-0.5 block text-[12.5px] leading-relaxed text-foreground-muted">
-                  {suggestion.description}
+                  {description}
                 </span>
               </span>
             </motion.button>
@@ -121,16 +134,16 @@ export function WelcomeScreen() {
         <span className="flex items-center gap-1.5">
           <Kbd>{modKey}</Kbd>
           <Kbd>K</Kbd>
-          Comandos
+          {t('welcome.commands')}
         </span>
         <span className="flex items-center gap-1.5">
           <Kbd>{modKey}</Kbd>
           <Kbd>B</Kbd>
-          Barra lateral
+          {t('welcome.sidebar')}
         </span>
         <span className="flex items-center gap-1.5">
           <Kbd>Enter</Kbd>
-          Enviar
+          {t('welcome.send')}
         </span>
       </p>
     </div>

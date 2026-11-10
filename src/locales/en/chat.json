@@ -1,0 +1,524 @@
+{
+  "queue": {
+    "aria": "Message queue",
+    "title": "Queued · {{count}}",
+    "titlePaused": "Queued · {{count}} · paused",
+    "resume": "Resume queue",
+    "pause": "Pause queue",
+    "sendNow": "Send now",
+    "clear": "Clear queue",
+    "remove": "Remove from queue",
+    "attachments": "{{count}} attachment(s)",
+    "more": "+{{count}} message(s)"
+  },
+  "turnError": {
+    "planLimit": {
+      "title": "Usage limit reached",
+      "body": "The limit may belong to the plan or to this app.",
+      "manageUsage": "Manage usage"
+    },
+    "planNotEligible": {
+      "title": "Plan usage unavailable",
+      "body": "Your account/workspace has no access to the ChatGPT plan. Use an API key or another account."
+    },
+    "authRequired": {
+      "title": "Credential required",
+      "body": "Reconnect the provider to keep sending messages."
+    },
+    "openProviders": "Open Providers",
+    "dismiss": "Dismiss notice"
+  },
+  "credentialGate": {
+    "oauth": "Sign in with your ChatGPT account or add an API key to send.",
+    "apiKey": "Add this provider's API key to send."
+  },
+  "message": {
+    "copyFailed": "Could not copy",
+    "editAria": "Edit message",
+    "saveAndResend": "Save and resend",
+    "copied": "Message copied",
+    "copy": "Copy message",
+    "edit": "Edit message",
+    "generating": "Generating response…",
+    "failedTitle": "Could not complete",
+    "failedHint": "Try again in a moment.",
+    "openSettings": "Open settings",
+    "responseCopied": "Response copied",
+    "copyResponse": "Copy response",
+    "regenerate": "Regenerate response",
+    "useful": "Helpful response",
+    "notUseful": "Not helpful",
+    "cancelled": "Cancelled",
+    "tokens": "{{tokens}} tokens",
+    "tokensAndDuration": "{{tokens}} tokens · {{duration}}"
+  },
+  "loading": {
+    "aria": "Loading conversation",
+    "text": "Loading conversation…"
+  },
+  "code": {
+    "copyFailed": "Could not copy the code",
+    "copiedAria": "Code copied",
+    "copyAria": "Copy code",
+    "copied": "Copied",
+    "copy": "Copy"
+  },
+  "markdown": {
+    "taskDone": "Done",
+    "taskPending": "Pending",
+    "footnotes": "Notes",
+    "backref": "Back to reference",
+    "backrefWithId": "Back to reference {{id}}"
+  },
+  "alerts": {
+    "note": "Note",
+    "tip": "Tip",
+    "important": "Important",
+    "warning": "Warning",
+    "caution": "Caution"
+  },
+  "image": {
+    "unavailable": "Image unavailable",
+    "unavailableWithDescription": "Image unavailable: {{description}}"
+  },
+  "sources": {
+    "panelAria": "Sources panel",
+    "title": "Sources",
+    "unpin": "Unfloat panel over the chat",
+    "pin": "Pin panel beside the chat",
+    "pinHint": "Enlarge the window to pin the panel",
+    "closeTooltip": "Close",
+    "close": "Close sources panel",
+    "listAria": "Conversation sources",
+    "emptyTitle": "No sources in this conversation",
+    "emptyBody": "When the agent searches the web, the sources show up here.",
+    "opensExternally": "Opens in the default browser",
+    "resize": "Resize sources panel",
+    "countOne": "{{count}} source",
+    "countMany": "{{count}} sources"
+  },
+  "citations": {
+    "openHidden_one": "Open {{count}} source in the side panel",
+    "openHidden_other": "Open {{count}} sources in the side panel",
+    "hidden_one": "{{count}} source",
+    "hidden_other": "{{count}} sources"
+  },
+  "welcome": {
+    "title": "How can I help?",
+    "description": "Ask, search, analyze documents or create files with the OpenCode and OpenAI models — including usage of your ChatGPT plan.",
+    "suggestions": {
+      "document": {
+        "title": "Analyze a document",
+        "description": "Summarize a PDF, DOCX or spreadsheet and highlight the key points.",
+        "prompt": "Analyze the attached document and summarize the key points."
+      },
+      "web": {
+        "title": "Search the web",
+        "description": "Find current information and cite the sources.",
+        "prompt": "Search the web for the latest news about "
+      },
+      "file": {
+        "title": "Create a file",
+        "description": "Generate an artifact in Markdown, HTML, CSV or code.",
+        "prompt": "Create a Markdown file with "
+      },
+      "code": {
+        "title": "Explain code",
+        "description": "Understand a code snippet or find the cause of a bug.",
+        "prompt": "Explain what the code below does and suggest improvements:\n\n```\n\n```"
+      }
+    },
+    "commands": "Commands",
+    "sidebar": "Sidebar",
+    "send": "Send"
+  },
+  "modelSwitch": {
+    "label": "Model changed to {{model}}",
+    "labelWithProvider": "Model changed to {{model}} · {{provider}}"
+  },
+  "goalRound": {
+    "text": "Goal continuation",
+    "label": "Goal continuation — round in progress",
+    "labelWithTime": "Goal continuation — {{when}}"
+  },
+  "trace": {
+    "thought": "Thought",
+    "reasoning": "Reasoning",
+    "labelWithDuration": "{{label}} {{duration}}",
+    "toolsRunning": "Running tools…",
+    "thinking": "Thinking…",
+    "workedFor": "Worked for {{duration}}",
+    "thoughtFor": "Thought for {{duration}}",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "worked": "Worked",
+    "reasoned": "Reasoned",
+    "working": "Working…",
+    "sourcesAria": "Sources: {{domains}}",
+    "openPageAria": "Open {{title}} in the browser",
+    "toolLabel": "{{verb}} {{detail}}",
+    "toolLabelPlain": "{{verb}}",
+    "families": {
+      "shell": "Shell",
+      "checks": "Checks",
+      "read": "Reading",
+      "list": "Listing",
+      "search": "Search",
+      "edit": "Edit",
+      "tasks": "Tasks",
+      "plan": "Plan",
+      "question": "Question",
+      "subagent": "Subagent",
+      "jobs": "Jobs",
+      "git": "Git",
+      "goal": "Goal",
+      "ui": "UI",
+      "web": "Web search",
+      "pages": "Pages",
+      "files": "Files",
+      "code": "Code",
+      "skills": "Skills",
+      "artifacts": "Artifacts"
+    },
+    "activity": {
+      "run_command": "Running commands",
+      "run_checks": "Running checks",
+      "read_file": "Reading files",
+      "read_tool_output": "Reading the tool output",
+      "list_dir": "Exploring files",
+      "search_files": "Searching files",
+      "search_text": "Searching the code",
+      "write_file": "Creating files",
+      "edit_file": "Editing files",
+      "todo_write": "Updating the tasks",
+      "submit_plan": "Sending the plan",
+      "ask_user": "Waiting for the user's answer",
+      "task": "Delegating to the subagent",
+      "job_list": "Checking the jobs",
+      "job_output": "Reading a job's output",
+      "job_kill": "Stopping a job",
+      "git_status": "Checking git",
+      "git_diff": "Reading the git diff",
+      "git_log": "Checking the git history",
+      "goal": "Updating the goal",
+      "validate_ui": "Validating the UI",
+      "web_search": "Searching the web",
+      "fetch_url": "Reading pages",
+      "create_file": "Creating files",
+      "run_code": "Running code",
+      "list_skills": "Checking the skills",
+      "read_skill": "Reading a skill",
+      "list_artifacts": "Checking the artifacts",
+      "read_artifact": "Reading an artifact",
+      "fallback": "Using {{family}}"
+    },
+    "analyzing": "Analyzing the request",
+    "subagentKind": {
+      "review": "review",
+      "general": "general",
+      "explore": "exploration"
+    },
+    "group": {
+      "web_search": {
+        "running": "Searching the web…",
+        "found_one": "Found {{count}} web page",
+        "found_other": "Found {{count}} web pages",
+        "failed": "The web search failed",
+        "empty": "No results found"
+      },
+      "fetch_url": {
+        "running_one": "Reading {{count}} page…",
+        "running_other": "Reading {{count}} pages…",
+        "read_one": "Read {{count}} page",
+        "read_other": "Read {{count}} pages",
+        "failed_one": "Could not read the page",
+        "failed_other": "Could not read the pages"
+      },
+      "create_file": {
+        "running_one": "Creating {{count}} file…",
+        "running_other": "Creating {{count}} files…",
+        "created_one": "Created {{count}} file",
+        "created_other": "Created {{count}} files",
+        "failed": "Failed to create the file"
+      },
+      "validate_ui": {
+        "running": "Validating the UI…",
+        "failed": "The UI validation failed",
+        "done_one": "Validated the UI",
+        "done_other": "Validated the UI {{count}} times"
+      },
+      "run_code": {
+        "running": "Running code…",
+        "failed": "Code execution failed",
+        "done": "Ran code",
+        "doneWithDetail": "Ran code · {{detail}}"
+      },
+      "list_skills": {
+        "running": "Checking skills…",
+        "failed": "The skills lookup failed",
+        "done": "Checked the available skills"
+      },
+      "read_skill": {
+        "runningNamed": "Reading skill {{name}}…",
+        "runningMany": "Reading {{count}} skills…",
+        "running": "Reading a skill…",
+        "doneNamed": "Read the {{name}} skill",
+        "doneMany": "Read {{count}} skills",
+        "done": "Read a skill",
+        "failed": "Could not read the skill"
+      },
+      "list_artifacts": {
+        "running": "Searching the artifacts…",
+        "failed": "The artifact search failed",
+        "done": "Checked the artifacts",
+        "empty": "No artifacts found",
+        "found_one": "Found {{count}} artifact",
+        "found_other": "Found {{count}} artifacts"
+      },
+      "read_artifact": {
+        "runningNamed": "Reading artifact {{name}}…",
+        "runningMany": "Reading {{count}} artifacts…",
+        "running": "Reading an artifact…",
+        "doneNamed": "Read artifact {{name}}",
+        "doneMany": "Read {{count}} artifacts",
+        "done": "Read an artifact",
+        "failed": "Could not read the artifact"
+      },
+      "default": {
+        "running": "Running {{name}}…",
+        "failed": "Failed at {{name}}",
+        "done_one": "Ran {{name}}",
+        "done_other": "Ran {{name}} {{count}} times"
+      },
+      "list_dir": {
+        "runningPath": "Listing {{path}}…",
+        "running": "Listing the folder…",
+        "failedPath": "Could not list {{path}}",
+        "failed": "Could not list the folder",
+        "donePath": "Listed {{path}}",
+        "done": "Listed the folder"
+      },
+      "search_text": {
+        "runningPattern": "Searching “{{pattern}}”…",
+        "running": "Searching the workspace…",
+        "failed": "The workspace search failed",
+        "donePattern": "Searched “{{pattern}}”",
+        "done": "Searched the workspace"
+      },
+      "read_file": {
+        "runningPath": "Reading {{path}}…",
+        "running": "Reading files…",
+        "failedPath": "Could not read {{path}}",
+        "failed": "Could not read the files",
+        "done_one": "Read {{path}}",
+        "done_other": "Read {{count}} files",
+        "done": "Read the file"
+      },
+      "write_file": {
+        "runningPath": "Writing {{path}}…",
+        "running": "Writing files…",
+        "failedPath": "Failed to write {{path}}",
+        "failed": "Failed to write the files",
+        "done_one": "Changed {{path}}",
+        "done_other": "Changed {{count}} files",
+        "done": "Changed the file"
+      },
+      "run_command": {
+        "runningCommand": "Running {{command}}…",
+        "running": "Running a command…",
+        "failedCommand": "Command failed: {{command}}",
+        "failed": "The command failed",
+        "doneCommand": "Ran {{command}}",
+        "done": "Ran the command"
+      },
+      "run_checks": {
+        "running": "Running the checks…",
+        "failed": "The checks failed",
+        "done": "Ran the checks"
+      },
+      "todo_write": {
+        "running": "Updating the tasks…",
+        "failed": "Failed to update the tasks",
+        "done": "Updated the tasks"
+      },
+      "submit_plan": {
+        "running": "Sending the plan for review…",
+        "failedFeedback": "Plan not approved",
+        "failed": "Failed to send the plan",
+        "approved": "Plan approved",
+        "reviewingFeedback": "Plan revised",
+        "reviewing": "Plan sent for review",
+        "proposed": "Plan proposed"
+      },
+      "goal": {
+        "running": "Updating the goal…",
+        "failed": "Failed to update the goal",
+        "completed": "Goal completed",
+        "blocked": "Goal blocked",
+        "paused": "Goal paused",
+        "progressed": "Progressed on the goal"
+      },
+      "ask_user": {
+        "running": "Waiting for the user's answer…",
+        "failed": "The question was not completed",
+        "done": "Asked the user"
+      },
+      "task": {
+        "running": "Delegating to a subagent…",
+        "failed": "The subagent failed",
+        "done": "Delegated {{kind}} to a subagent"
+      },
+      "job_list": {
+        "running": "Checking jobs…",
+        "failed": "Failed to check the job",
+        "kill": "Stopped a job",
+        "output": "Read a job's output",
+        "list": "Listed the jobs"
+      },
+      "git_status": {
+        "running": "Checking git…",
+        "failed": "The git command failed",
+        "diff": "Saw the git diff",
+        "log": "Checked the git history",
+        "status": "Checked the git status"
+      },
+      "read_tool_output": {
+        "running": "Reading the full output…",
+        "failed": "Could not read the output",
+        "done": "Read the full output of a tool"
+      }
+    },
+    "verb": {
+      "read": "Read",
+      "list": "Listed",
+      "search": "Searched",
+      "created": "Created",
+      "deleted": "Removed",
+      "renamed": "Renamed",
+      "changed": "Changed",
+      "command": "Ran",
+      "checksFailed": "The checks failed",
+      "checksDone": "Ran the checks",
+      "todoFailed": "Failed to update the tasks",
+      "todoDone": "Updated the tasks",
+      "goalFailed": "Failed to update the goal",
+      "goalCompleted": "Goal completed",
+      "goalBlocked": "Goal blocked",
+      "goalPaused": "Goal paused",
+      "goalProgressed": "Progressed on the goal",
+      "planNotApproved": "Plan not approved",
+      "planFailed": "Failed to send the plan",
+      "planApproved": "Plan approved",
+      "planRevised": "Plan revised",
+      "planSentForReview": "Plan sent for review",
+      "planProposed": "Plan proposed",
+      "askFailed": "The question was not completed",
+      "askRunning": "Waiting for the user's answer",
+      "askDone": "Asked the user",
+      "taskFailed": "The subagent failed",
+      "taskDone": "Delegated {{kind}} to a subagent",
+      "jobsFailed": "Failed to check the jobs",
+      "jobsDone": "Listed the jobs",
+      "jobOutputFailed": "Failed to read the job output",
+      "jobOutputDone": "Read a job's output",
+      "jobKillFailed": "Failed to stop the job",
+      "jobKillDone": "Stopped a job",
+      "gitStatusFailed": "The git status failed",
+      "gitStatusDone": "Checked the git status",
+      "gitDiffFailed": "The git diff failed",
+      "gitDiffDone": "Saw the git diff",
+      "gitLogFailed": "The git history failed",
+      "gitLogDone": "Checked the git history",
+      "readOutputFailed": "Could not read the full output",
+      "readOutputDone": "Read the full output of a tool",
+      "uiFailed": "The UI validation failed",
+      "uiDone": "Validated the UI",
+      "defaultFailed": "Failed at {{name}}",
+      "defaultDone": "Ran {{name}}"
+    }
+  },
+  "tool": {
+    "copyOutputFailed": "Could not copy the output",
+    "outputFailed": "Output (failed)",
+    "output": "Output",
+    "copyOutput": "Copy output",
+    "imageUnavailable": "Image unavailable",
+    "openScreenshot": "Open screenshot {{index}}",
+    "screenshotAlt": "Screenshot returned by the tool ({{index}})",
+    "statusLive": "live",
+    "statusDone": "done",
+    "statusError": "failed",
+    "statusCancelled": "cancelled",
+    "steps_one": "{{count}} step",
+    "steps_other": "{{count}} steps",
+    "tokens": "{{tokens}} tokens",
+    "effort": "effort {{effort}}",
+    "openChat": "Open chat",
+    "subagentDefault": "Subagent",
+    "subagentAlreadyOpen": "This subagent is already open in a tab."
+  },
+  "toasts": {
+    "approvalNeeded": "Approval required",
+    "agentQuestion": "The agent asked a question",
+    "agentThreadFallback": "Agent thread",
+    "agentFallback": "Agent",
+    "agentFinished": "{{agent}} finished the response",
+    "responseFailed": "Response failed",
+    "responseError": "The response ended with an error",
+    "threadBusy": "Thread busy",
+    "threadBusyHint": "The message returned to the queue; resume when the current turn finishes.",
+    "goalRoundFailed": "Could not start the goal round",
+    "messageFailed": "Could not complete the message",
+    "queuePaused": "The queue is paused: restore the agent to continue",
+    "interruptFailed": "Could not interrupt the current response",
+    "selectAgentToStart": "Select an agent to start the conversation",
+    "createConversationFailed": "Could not create the conversation",
+    "deleteFailed": "Could not delete",
+    "renameFailed": "Could not rename",
+    "mainConversationPinned": "The main conversation stays pinned.",
+    "pinFailed": "Could not pin",
+    "reorderFailed": "Could not reorder the conversations",
+    "selectAgentForModel": "Select an agent to change the model",
+    "agentModelUpdated": "Agent model updated",
+    "sessionModelChanged": "Session model changed",
+    "nextResponsesModel": "The next responses will use {{model}}.",
+    "changeModelFailed": "Could not change the model",
+    "changeReasoningFailed": "Could not change the reasoning mode",
+    "attachImportFailed": "Failed to import the attachment",
+    "pasteAttachmentFailed": "Could not paste the attachment",
+    "waitForResponse": "Wait for the current response to finish",
+    "queueFull": "Queue full",
+    "queueFullHint": "This thread already has {{count}} messages in the queue. Wait or clear the queue.",
+    "messageQueued": "Message queued",
+    "messageQueuedHint": "It will be sent when the current response finishes.",
+    "connectCredential": "Connect a credential to send",
+    "connectCredentialGoal": "Connect a credential to continue the goal",
+    "connectCredentialOauth": "Sign in with ChatGPT (Settings → Providers) or add an API key.",
+    "connectCredentialApiKey": "Add this provider's API key in Settings → Providers.",
+    "goalRoundNotRegenerable": "A goal round cannot be regenerated",
+    "goalRoundNotRegenerableHint": "Use \"New round\" on the goal to continue the work.",
+    "regenerateFailed": "Could not regenerate",
+    "editFailed": "Could not edit"
+  },
+  "modelLock": {
+    "locked": {
+      "title": "Model locked in this conversation",
+      "description": "The model cannot be changed after the conversation starts. Adjust the thinking mode with the ✦ button."
+    },
+    "streaming": {
+      "title": "Wait for the current response to finish",
+      "description": "Changing the model becomes available when the current response finishes."
+    }
+  },
+  "errors": {
+    "agentMissing": "the agent no longer exists",
+    "agentRequiredBeforeSend": "Select an agent before sending the message."
+  },
+  "chatView": {
+    "jumpToLatest": "Jump to the end of the conversation"
+  },
+  "artifacts": {
+    "viewAll": "View all ({{count}})",
+    "viewAllAria": "View all {{count}} generated artifacts"
+  }
+}

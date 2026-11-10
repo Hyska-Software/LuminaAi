@@ -1,5 +1,7 @@
 import { useId, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
+import { formatNumber } from '@/lib/i18n/format';
 import type { ChartDatum, ChartSpec } from '@/lib/genui/schema';
 
 export interface ChartSvgProps {
@@ -22,9 +24,15 @@ const PIE_COLORS = [
 function formatValue(value: number, suffix?: string): string {
   const abs = Math.abs(value);
   let text: string;
-  if (abs >= 1_000_000) text = `${(value / 1_000_000).toFixed(1)}M`;
-  else if (abs >= 1000) text = `${(value / 1000).toFixed(abs >= 10_000 ? 0 : 1)}K`;
-  else text = Number.isInteger(value) ? String(value) : value.toFixed(1);
+  if (abs >= 1_000_000) {
+    text = `${formatNumber(value / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+  } else if (abs >= 1000) {
+    text = `${formatNumber(value / 1000, { maximumFractionDigits: abs >= 10_000 ? 0 : 1 })}K`;
+  } else if (Number.isInteger(value)) {
+    text = formatNumber(value);
+  } else {
+    text = formatNumber(value, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
   return suffix ? `${text}${suffix}` : text;
 }
 
@@ -45,14 +53,15 @@ function niceMax(value: number): number {
  * the `chart` primitive of the generative UI. Token-based colors, aria-labeled.
  */
 export function ChartSvg({ spec, className, height = 220 }: ChartSvgProps) {
+  const { t } = useTranslation('genui');
   const gradientId = `zylara-chart-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const data = useMemo(() => spec.data.filter((entry) => Number.isFinite(entry.value)), [spec.data]);
-  const title = spec.title ?? `Gráfico de ${data.length} ${data.length === 1 ? 'item' : 'itens'}`;
+  const title = spec.title ?? t('chart.title', { count: data.length });
 
   if (!data.length) {
     return (
       <div className={cn('flex h-24 items-center justify-center text-xs text-foreground-subtle', className)}>
-        Sem dados para exibir.
+        {t('chart.noData')}
       </div>
     );
   }
@@ -251,11 +260,12 @@ function LineChart({
 }
 
 function PieChart({ data, height }: { data: ChartDatum[]; height: number }) {
+  const { t } = useTranslation('genui');
   const total = data.reduce((sum, entry) => sum + Math.max(0, entry.value), 0);
   if (total <= 0) {
     return (
       <text x={VIEW_WIDTH / 2} y={height / 2} textAnchor="middle" fontSize={12} fill="var(--foreground-subtle)">
-        Valores inválidos para o gráfico.
+        {t('chart.invalidValues')}
       </text>
     );
   }
@@ -296,7 +306,7 @@ function PieChart({ data, height }: { data: ChartDatum[]; height: number }) {
         {formatValue(total)}
       </text>
       <text x={cx} y={cy + 14} textAnchor="middle" fontSize={9} fill="var(--foreground-subtle)">
-        total
+        {t('chart.total')}
       </text>
       {arcs.map((arc, index) => {
         const y = 26 + index * 17;
@@ -308,7 +318,7 @@ function PieChart({ data, height }: { data: ChartDatum[]; height: number }) {
               {truncateLabel(arc.entry.label, 18)}
             </text>
             <text x={VIEW_WIDTH - 8} y={y} fontSize={10} textAnchor="end" fill="var(--foreground-subtle)">
-              {arc.percent.toFixed(0)}%
+              {formatNumber(arc.percent, { maximumFractionDigits: 0 })}%
             </text>
           </g>
         );

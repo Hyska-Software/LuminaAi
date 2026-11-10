@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
 import { Highlight } from 'prism-react-renderer';
 import { prism, SYNTAX_THEME, normalizeLanguage } from '@/lib/highlight';
@@ -21,6 +22,7 @@ export interface CodeBlockProps {
 
 /** Fenced code block with a language header and a copy action. */
 export function CodeBlock({ code, language = 'text', label, className }: CodeBlockProps) {
+  const { t } = useTranslation('chat');
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -34,7 +36,7 @@ export function CodeBlock({ code, language = 'text', label, className }: CodeBlo
   const handleCopy = async () => {
     const ok = await copyText(code);
     if (!ok) {
-      toast.error('Não foi possível copiar o código');
+      toast.error(t('code.copyFailed'));
       return;
     }
     setCopied(true);
@@ -51,7 +53,7 @@ export function CodeBlock({ code, language = 'text', label, className }: CodeBlo
         <button
           type="button"
           onClick={() => void handleCopy()}
-          aria-label={copied ? 'Código copiado' : 'Copiar código'}
+          aria-label={copied ? t('code.copiedAria') : t('code.copyAria')}
           className={cn(
             'ml-auto flex h-8 items-center gap-1 rounded-md px-2 text-[11px] text-foreground-subtle',
             'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
@@ -59,7 +61,7 @@ export function CodeBlock({ code, language = 'text', label, className }: CodeBlo
           )}
         >
           {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
-          <span>{copied ? 'Copiado' : 'Copiar'}</span>
+          <span>{copied ? t('code.copied') : t('code.copy')}</span>
         </button>
       </div>
       <Highlight prism={prism} theme={SYNTAX_THEME} language={normalizeLanguage(language)} code={code}>

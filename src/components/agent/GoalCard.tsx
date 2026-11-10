@@ -14,6 +14,7 @@
  * - Texto longo quebra/trunca (`break-words`, `line-clamp`, `truncate`).
  */
 import { useId } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Target } from 'lucide-react';
 
 import { Badge, Button, ProgressBar } from '@/components/ui';
@@ -63,8 +64,8 @@ const STATUS_ICON_TONE: Record<GoalStatus, string> = {
 
 interface ActionSpec {
   action: GoalCardAction;
-  label: string;
-  ariaLabel: string;
+  labelKey: string;
+  ariaKey: string;
   variant: ButtonVariant;
 }
 
@@ -79,42 +80,42 @@ function buildActions(goal: GoalView): ActionSpec[] {
       if (goal.autoContinue) {
         actions.push({
           action: 'pause',
-          label: 'Pausar',
-          ariaLabel: 'Pausar objetivo',
+          labelKey: 'goal.actions.pause',
+          ariaKey: 'goal.actions.pauseAria',
           variant: 'secondary',
         });
       } else {
         actions.push({
           action: 'arm',
-          label: 'Ativar continuidade',
-          ariaLabel: 'Ativar continuidade',
+          labelKey: 'goal.actions.arm',
+          ariaKey: 'goal.actions.armAria',
           variant: 'secondary',
         });
         actions.push({
           action: 'start_round',
-          label: 'Nova rodada',
-          ariaLabel: 'Nova rodada agora',
+          labelKey: 'goal.actions.startRound',
+          ariaKey: 'goal.actions.startRoundAria',
           variant: 'secondary',
         });
       }
       actions.push({
         action: 'complete',
-        label: 'Concluir',
-        ariaLabel: 'Concluir objetivo',
+        labelKey: 'goal.actions.complete',
+        ariaKey: 'goal.actions.completeAria',
         variant: 'ghost',
       });
       actions.push({
         action: 'edit',
-        label: 'Editar',
-        ariaLabel: 'Editar objetivo',
+        labelKey: 'goal.actions.edit',
+        ariaKey: 'goal.actions.editAria',
         variant: 'ghost',
       });
       break;
     case 'paused':
       actions.push({
         action: 'resume',
-        label: 'Retomar',
-        ariaLabel: 'Retomar objetivo',
+        labelKey: 'goal.actions.resume',
+        ariaKey: 'goal.actions.resumeAria',
         variant: 'secondary',
       });
       if (goal.pauseReason === 'max_rounds') {
@@ -122,23 +123,23 @@ function buildActions(goal: GoalView): ActionSpec[] {
         // dedicada no contrato do card).
         actions.push({
           action: 'edit',
-          label: 'Estender',
-          ariaLabel: 'Estender limite de rodadas',
+          labelKey: 'goal.actions.extend',
+          ariaKey: 'goal.actions.extendAria',
           variant: 'secondary',
         });
       } else {
         actions.push({
           action: 'edit',
-          label: 'Editar',
-          ariaLabel: 'Editar objetivo',
+          labelKey: 'goal.actions.edit',
+          ariaKey: 'goal.actions.editAria',
           variant: 'ghost',
         });
         // Concluir manualmente só faz sentido quando quem pausou foi o usuário.
         if (goal.pauseReason === 'user') {
           actions.push({
             action: 'complete',
-            label: 'Concluir',
-            ariaLabel: 'Concluir objetivo',
+            labelKey: 'goal.actions.complete',
+            ariaKey: 'goal.actions.completeAria',
             variant: 'ghost',
           });
         }
@@ -147,68 +148,27 @@ function buildActions(goal: GoalView): ActionSpec[] {
     case 'completed':
       actions.push({
         action: 'reopen',
-        label: 'Reabrir',
-        ariaLabel: 'Reabrir objetivo',
+        labelKey: 'goal.actions.reopen',
+        ariaKey: 'goal.actions.reopenAria',
         variant: 'secondary',
       });
       break;
     case 'blocked':
       actions.push({
         action: 'resume',
-        label: 'Retomar',
-        ariaLabel: 'Retomar objetivo',
+        labelKey: 'goal.actions.resume',
+        ariaKey: 'goal.actions.resumeAria',
         variant: 'secondary',
       });
       actions.push({
         action: 'complete',
-        label: 'Concluir',
-        ariaLabel: 'Concluir objetivo',
+        labelKey: 'goal.actions.complete',
+        ariaKey: 'goal.actions.completeAria',
         variant: 'secondary',
       });
       break;
   }
   return actions;
-}
-
-/** Orientação curta que acompanha o motivo de pausa (PLAN §10.9). */
-function pauseGuidance(goal: GoalView): string | null {
-  if (goal.status !== 'paused') return null;
-  switch (goal.pauseReason) {
-    case 'max_rounds':
-      return 'Estenda o limite para continuar.';
-    case 'stalled':
-      return 'Objetivo pausado para você decidir.';
-    case 'interrupted':
-      return 'A última rodada foi interrompida. Retome para continuar.';
-    default:
-      return null;
-  }
-}
-
-function completedLabel(completedAt?: number | null): string {
-  if (completedAt == null || !Number.isFinite(completedAt)) return 'Objetivo concluído.';
-  const relative = relativeTime(completedAt);
-  return relative === 'agora' ? 'Concluído agora.' : `Concluído há ${relative}.`;
-}
-
-/** Resumo de rodadas/tokens/custo/tempo (só com o histórico disponível). */
-function summaryParts(goal: GoalView, rounds: GoalRound[]): string[] {
-  const parts = [`${goal.rounds} de ${goal.maxRounds} rodadas`];
-  if (goal.tokens != null && Number.isFinite(goal.tokens)) {
-    parts.push(`~${formatTokens(goal.tokens)} tokens`);
-  }
-  if (goal.cost != null && Number.isFinite(goal.cost)) {
-    parts.push(formatCost(goal.cost));
-  }
-  const totalMs = rounds.reduce(
-    (total, round) =>
-      total + (typeof round.durationMs === 'number' && Number.isFinite(round.durationMs)
-        ? round.durationMs
-        : 0),
-    0,
-  );
-  if (totalMs > 0) parts.push(formatDuration(totalMs));
-  return parts;
 }
 
 function safeMaxRounds(goal: GoalView): number {
@@ -229,16 +189,57 @@ export function GoalCard({
   onAction,
   onOpen,
 }: GoalCardProps) {
+  const { t } = useTranslation('agents');
   const titleId = useId();
-  const title = goal.title.trim() || 'Objetivo';
+  const title = goal.title.trim() || t('goal.fallbackTitle');
   const statusTone = goalStatusTone(goal);
   const statusLabel = goalStatusLabel(goal);
   const roundLabel = goalRoundLabel(goal);
   const maxRounds = safeMaxRounds(goal);
   const progressValue = Math.min(Math.max(goal.rounds, 0), maxRounds);
   const lastNote = goal.lastNote?.trim() ?? '';
-  const guidance = pauseGuidance(goal);
-  const summary = !compact && rounds !== undefined ? summaryParts(goal, rounds) : [];
+
+  const pauseGuidance = (): string | null => {
+    if (goal.status !== 'paused') return null;
+    switch (goal.pauseReason) {
+      case 'max_rounds':
+        return t('goal.guidance.maxRounds');
+      case 'stalled':
+        return t('goal.guidance.stalled');
+      case 'interrupted':
+        return t('goal.guidance.interrupted');
+      default:
+        return null;
+    }
+  };
+
+  const completedLabel = (completedAt?: number | null): string => {
+    if (completedAt == null || !Number.isFinite(completedAt)) return t('goal.completed.body');
+    if (Date.now() - completedAt < 60_000) return t('goal.completed.now');
+    return t('goal.completed.ago', { relative: relativeTime(completedAt) });
+  };
+
+  const summaryParts = (): string[] => {
+    const parts = [t('goal.rounds', { current: goal.rounds, max: goal.maxRounds })];
+    if (goal.tokens != null && Number.isFinite(goal.tokens)) {
+      parts.push(t('goal.tokens', { tokens: formatTokens(goal.tokens) }));
+    }
+    if (goal.cost != null && Number.isFinite(goal.cost)) {
+      parts.push(formatCost(goal.cost));
+    }
+    const totalMs = (rounds ?? []).reduce(
+      (total, round) =>
+        total + (typeof round.durationMs === 'number' && Number.isFinite(round.durationMs)
+          ? round.durationMs
+          : 0),
+      0,
+    );
+    if (totalMs > 0) parts.push(formatDuration(totalMs));
+    return parts;
+  };
+
+  const guidance = pauseGuidance();
+  const summary = !compact && rounds !== undefined ? summaryParts() : [];
 
   // `readOnly`/compacto nunca mostram ação; sem handler também não (nada de
   // botão morto prometendo efeito que não existe).
@@ -278,14 +279,14 @@ export function GoalCard({
           {title}
         </h3>
         <Badge variant={statusTone}>{statusLabel}</Badge>
-        {readOnly && !compact ? <Badge variant="outline">Somente leitura</Badge> : null}
+        {readOnly && !compact ? <Badge variant="outline">{t('goal.readOnly')}</Badge> : null}
         <span className="shrink-0 text-[11px] tabular-nums text-foreground-muted">{roundLabel}</span>
       </header>
 
       {compact ? (
         lastNote ? (
           <p className="min-w-0 break-words text-[11px] leading-relaxed text-foreground-muted">
-            <span className="font-medium">Última nota: </span>
+            <span className="font-medium">{t('goal.lastNoteLabel')} </span>
             {lastNote}
           </p>
         ) : null
@@ -302,13 +303,13 @@ export function GoalCard({
             max={maxRounds}
             size="xs"
             tone={goal.status === 'completed' ? 'success' : 'accent'}
-            label="Progresso do objetivo"
+            label={t('goal.progressAria')}
           />
 
           {goal.status === 'paused' ? (
             <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-warning-soft px-2.5 py-1.5">
               <p className="text-[11px] font-medium text-warning">
-                {goalPauseReasonLabel(goal.pauseReason) ?? 'Objetivo pausado'}
+                {goalPauseReasonLabel(goal.pauseReason) ?? t('goal.pausedFallback')}
               </p>
               {goal.pauseDetail?.trim() ? (
                 <p className="min-w-0 break-words text-[11px] leading-relaxed text-foreground-muted">
@@ -326,7 +327,7 @@ export function GoalCard({
           {goal.status === 'blocked' ? (
             <div className="flex min-w-0 flex-col gap-0.5 rounded-lg bg-danger-soft px-2.5 py-1.5">
               <p className="text-[11px] font-medium text-danger">
-                Bloqueio registrado ({goal.blockerStreak ?? 1} de 3).
+                {t('goal.blockedLabel', { count: goal.blockerStreak ?? 1 })}
               </p>
               {goal.blockerReason?.trim() ? (
                 <p className="min-w-0 break-words text-[11px] leading-relaxed text-foreground-muted">
@@ -344,7 +345,7 @@ export function GoalCard({
 
           {lastNote ? (
             <div className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-background px-2.5 py-1.5">
-              <p className="text-[11px] font-medium text-foreground-muted">Última nota</p>
+              <p className="text-[11px] font-medium text-foreground-muted">{t('goal.lastNote')}</p>
               <p className="min-w-0 break-words text-[11px] leading-relaxed text-foreground-muted">
                 {lastNote}
               </p>
@@ -367,28 +368,28 @@ export function GoalCard({
         <div className="flex flex-wrap items-center gap-2">
           {actions.map((spec) => (
             <Button
-              key={`${spec.action}-${spec.label}`}
+              key={`${spec.action}-${spec.labelKey}`}
               size="sm"
               variant={spec.variant}
-              aria-label={spec.ariaLabel}
+              aria-label={t(spec.ariaKey as never)}
               disabled={busy}
               onClick={() => act(spec.action)}
             >
-              {spec.label}
+              {t(spec.labelKey as never)}
             </Button>
           ))}
           {showOpen ? (
             <Button
               size="sm"
               variant="ghost"
-              aria-label="Abrir objetivo"
+              aria-label={t('goal.actions.openAria')}
               disabled={busy}
               onClick={() => {
                 if (busy) return;
                 onOpen?.();
               }}
             >
-              Abrir objetivo
+              {t('goal.actions.open')}
             </Button>
           ) : null}
         </div>

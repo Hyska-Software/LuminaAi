@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CircleAlert, Copy, FileExclamationPoint } from 'lucide-react';
 import { Highlight } from 'prism-react-renderer';
 import { Spinner } from '@/components/ui';
@@ -130,6 +131,7 @@ function parseDiff(raw: string): ParsedDiff {
  * Binary/large/empty diffs have honest states instead of a fake patch.
  */
 export function DiffView({ path, diff, loading, error, binary = false, className }: DiffViewProps) {
+  const { t } = useTranslation('code');
   const [copied, setCopied] = useState(false);
   const [expandedHunks, setExpandedHunks] = useState<ReadonlySet<number>>(() => new Set());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -175,7 +177,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
   const handleCopyPatch = async () => {
     const ok = await copyText(diff ?? '');
     if (!ok) {
-      toast.error('Não foi possível copiar o patch');
+      toast.error(t('code:diff.copyError'));
       return;
     }
     setCopied(true);
@@ -189,7 +191,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
         <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground" title={path}>
           {path}
         </span>
-        {loading ? <Spinner size="xs" label="Carregando diff" /> : null}
+        {loading ? <Spinner size="xs" label={t('code:diff.loading')} /> : null}
         {hasChanges ? (
           <>
             <span className="shrink-0 text-[11.5px] tabular-nums">
@@ -199,7 +201,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
             <button
               type="button"
               onClick={() => void handleCopyPatch()}
-              aria-label={copied ? 'Patch copiado' : 'Copiar patch'}
+              aria-label={copied ? t('code:diff.copied') : t('code:diff.copy')}
               className="flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <Copy aria-hidden={false} className={cn('size-3.5', copied && 'text-success')} strokeWidth={1.75} />
@@ -213,7 +215,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
           <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
             <CircleAlert aria-hidden className="size-4" strokeWidth={1.75} />
           </span>
-          <p className="text-[12.5px] font-medium text-foreground">Não foi possível carregar o diff</p>
+          <p className="text-[12.5px] font-medium text-foreground">{t('code:diff.errorTitle')}</p>
           <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">{error}</p>
         </div>
       ) : loading && !diff ? (
@@ -231,22 +233,22 @@ export function DiffView({ path, diff, loading, error, binary = false, className
           <span className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
             <FileExclamationPoint aria-hidden className="size-4" strokeWidth={1.75} />
           </span>
-          <p className="text-[12.5px] font-medium text-foreground">Arquivo binário</p>
+          <p className="text-[12.5px] font-medium text-foreground">{t('code:diff.binaryTitle')}</p>
           <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
-            Este arquivo não tem diff de texto. Abra no editor externo para revisar a alteração.
+            {t('code:diff.binaryDescription')}
           </p>
         </div>
       ) : !hasChanges ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-6 py-8 text-center">
-          <p className="text-[12.5px] font-medium text-foreground">Sem diferenças para mostrar</p>
+          <p className="text-[12.5px] font-medium text-foreground">{t('code:diff.emptyTitle')}</p>
           <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
-            O arquivo não tem alterações de texto pendentes.
+            {t('code:diff.emptyDescription')}
           </p>
         </div>
       ) : (
         <div
           role="group"
-          aria-label={`Diff de ${path}`}
+          aria-label={t('code:diff.groupAria', { path })}
           className="min-h-0 flex-1 overflow-auto py-1 font-mono text-[12px] leading-[1.7]"
         >
           {parsed.meta.map((line, index) => (
@@ -265,7 +267,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
               <div key={`hunk-${hunkIndex}`} className="mt-2 first:mt-0">
                 <div
                   tabIndex={0}
-                  aria-label={`Trecho do diff: ${hunk.header}`}
+                  aria-label={t('code:diff.hunkAria', { header: hunk.header })}
                   className="sticky left-0 select-none bg-accent-soft px-3 py-1 text-[11.5px] text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
                 >
                   {hunk.header}
@@ -288,8 +290,8 @@ export function DiffView({ path, diff, loading, error, binary = false, className
                       className="text-[11.5px] font-medium text-accent transition-colors duration-150 hover:text-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                     >
                       {expanded
-                        ? 'Recolher trecho'
-                        : `Ver mais (${hidden} ${hidden === 1 ? 'linha' : 'linhas'})`}
+                        ? t('code:diff.collapseHunk')
+                        : t('code:diff.showMore', { count: hidden })}
                     </button>
                   </div>
                 ) : null}

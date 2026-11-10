@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { BookOpen, Folder, ShieldCheck } from 'lucide-react';
 import {
   Button,
@@ -43,6 +44,7 @@ export function WorkspaceTrustDialog({
   onReadOnly,
   onCancel,
 }: WorkspaceTrustDialogProps) {
+  const { t } = useTranslation('code');
   const confirmRef = useRef<HTMLButtonElement | null>(null);
 
   if (!workspace) return null;
@@ -71,10 +73,8 @@ export function WorkspaceTrustDialog({
           <span className="flex size-10 items-center justify-center rounded-xl border border-border bg-surface-hover text-warning">
             <Folder aria-hidden className="size-5" strokeWidth={1.75} />
           </span>
-          <DialogTitle>Confiar nesta pasta?</DialogTitle>
-          <DialogDescription>
-            O agente poderá ler, editar e executar comandos em:
-          </DialogDescription>
+          <DialogTitle>{t('trust.title')}</DialogTitle>
+          <DialogDescription>{t('trust.description')}</DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-1">
@@ -85,22 +85,21 @@ export function WorkspaceTrustDialog({
             {workspace.path}
           </p>
           <p className="mt-3 text-[12.5px] leading-relaxed text-foreground-muted">
-            As instruções do projeto (<code className="rounded bg-surface-hover px-1 py-0.5 text-[11.5px]">AGENTS.md</code>)
-            e as skills locais serão carregadas no prompt. Você pode mudar a confiança depois nas opções
-            do workspace.
+            <Trans
+              ns="code"
+              i18nKey="trust.body"
+              components={{ code: <code className="rounded bg-surface-hover px-1 py-0.5 text-[11.5px]" /> }}
+            />
           </p>
           <p className="mt-2 flex items-start gap-1.5 text-[12px] leading-relaxed text-foreground-subtle">
             <ShieldCheck aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
-            <span>
-              Abrir em leitura libera apenas leitura: sem edições, sem comandos e sem instruções do
-              repositório.
-            </span>
+            <span>{t('trust.readOnly')}</span>
           </p>
         </div>
 
         <DialogFooter className="mt-4 justify-between">
           <Button variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <div className="flex items-center gap-2">
             <Button
@@ -110,7 +109,7 @@ export function WorkspaceTrustDialog({
               leftIcon={<BookOpen className="size-4" />}
               onClick={onReadOnly}
             >
-              Abrir em Leitura
+              {t('trust.openReadOnly')}
             </Button>
             <Button
               ref={confirmRef}
@@ -121,7 +120,7 @@ export function WorkspaceTrustDialog({
               leftIcon={<ShieldCheck className="size-4" />}
               onClick={onConfirm}
             >
-              Confiar
+              {t('trust.confirm')}
             </Button>
           </div>
         </DialogFooter>

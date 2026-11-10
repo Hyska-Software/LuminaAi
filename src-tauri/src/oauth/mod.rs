@@ -140,7 +140,7 @@ pub fn cancel_all(state: &OAuthState) {
     state.epoch.fetch_add(1, Ordering::SeqCst);
     if let Some(pending) = state.pending.lock().take() {
         pending.cancel.cancel();
-        *pending.result.lock() = Some(Err("login cancelado".to_string()));
+        *pending.result.lock() = Some(Err(crate::i18n::t("oauth.errors.loginCancelled")));
         pending.notify.notify_waiters();
     }
 }
@@ -148,7 +148,7 @@ pub fn cancel_all(state: &OAuthState) {
 fn cancel_other_login(state: &OAuthState) {
     if let Some(pending) = state.pending.lock().take() {
         pending.cancel.cancel();
-        *pending.result.lock() = Some(Err("login substituto iniciado".to_string()));
+        *pending.result.lock() = Some(Err(crate::i18n::t("oauth.errors.loginSuperseded")));
         pending.notify.notify_waiters();
     }
 }
@@ -160,14 +160,22 @@ fn cancel_other_login(state: &OAuthState) {
 fn provider<'a>(catalog: &'a CatalogFile, provider_id: &str) -> Result<&'a ProviderInfo> {
     catalog
         .provider(provider_id)
-        .ok_or_else(|| anyhow!("provedor desconhecido: {provider_id}"))
+        .ok_or_else(|| anyhow!(crate::i18n::t_args(
+            "oauth.errors.providerUnknown",
+            &[("provider_id", provider_id)],
+        )))
 }
 
 fn oauth_info<'a>(provider: &'a ProviderInfo) -> Result<&'a OAuthProviderInfo> {
     provider
         .oauth
         .as_ref()
-        .ok_or_else(|| anyhow!("provedor {} não suporta login ChatGPT", provider.id))
+        .ok_or_else(|| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.oauthUnsupported",
+                &[("provider", &provider.id)],
+            ))
+        })
 }
 
 /* ------------------------------------------------------------------ */
@@ -211,15 +219,12 @@ fn registration_status(
     let (state, hint) = if registration.disconnected || !has_refresh {
         (
             "reauth-required",
-            Some("Entre novamente com o ChatGPT para renovar a sessão.".to_string()),
+            Some(crate::i18n::t("oauth.status.reauthHint")),
         )
     } else if !registration.plan_usage {
         (
             "plan-disabled",
-            Some(
-                "Sua conta está conectada, mas o uso do plano ChatGPT não foi autorizado."
-                    .to_string(),
-            ),
+            Some(crate::i18n::t("oauth.status.planDisabledHint")),
         )
     } else {
         ("signed-in", None)
@@ -334,14 +339,24 @@ async fn jwks(
         .timeout(Duration::from_secs(15))
         .send()
         .await
-        .map_err(|error| anyhow!("falha ao buscar JWKS: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.jwksFetch",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     if !response.status().is_success() {
         return Err(anyhow!("JWKS respondeu HTTP {}", response.status()));
     }
     let document = response
         .json::<serde_json::Value>()
         .await
-        .map_err(|error| anyhow!("JWKS inválido: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.jwksInvalid",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     let keys = jwt::parse_jwks(&document)?;
     *state.jwks.write() = Some((keys.clone(), now));
     Ok(keys)
@@ -383,7 +398,10 @@ pub async fn login_start(
     let host_id = config::ensure_host_id(app)?;
     let (store, load_error) = config::oauth_snapshot(app);
     if let Some(error) = load_error {
-        return Err(anyhow!("arquivo de credenciais inválido: {error}"));
+        return Err(anyhow!(crate::i18n::t_args(
+            "oauth.errors.credentialsFileInvalid",
+            &[("error", &error.to_string())],
+        )));
     }
 
     let existing = active_registration(&store, provider_id);
@@ -523,14 +541,19 @@ fn validate_callback(
     params: &loopback::CallbackParams,
 ) -> Result<String> {
     if params.state.as_deref() != Some(expected_state) {
-        return Err(anyhow!("callback com `state` inválido (possível CSRF)"));
+        return Err(anyhow!(crate::i18n::t(
+            "oauth.errors.callbackInvalidState"
+        )));
     }
     if let Some(error) = params.error.as_deref() {
         let description = params
             .error_description
-            .as_deref()
-            .unwrap_or("autorização recusada");
-        return Err(anyhow!("login não autorizado: {error} ({description})"));
+            .clone()
+            .unwrap_or_else(|| crate::i18n::t("oauth.errors.authorizationDenied"));
+        return Err(anyhow!(crate::i18n::t_args(
+            "oauth.errors.loginUnauthorized",
+            &[("error", error), ("description", &description)],
+        )));
     }
     if params
         .code
@@ -539,20 +562,20 @@ fn validate_callback(
         .filter(|code| !code.is_empty())
         .is_none()
     {
-        return Err(anyhow!("callback sem código de autorização"));
+        return Err(anyhow!(crate::i18n::t("oauth.errors.callbackNoCode")));
     }
     match params.client_id.as_deref() {
         Some(issued) if !issued.is_empty() => {
             if !is_new_registration && issued != expected_client_id {
-                return Err(anyhow!(
-                    "callback trouxe um client_id diferente do registro selecionado"
-                ));
+                return Err(anyhow!(crate::i18n::t(
+                    "oauth.errors.callbackClientMismatch"
+                )));
             }
             Ok(issued.to_string())
         }
-        _ if is_new_registration => Err(anyhow!(
-            "registro incompleto: o callback não trouxe o client_id emitido"
-        )),
+        _ if is_new_registration => Err(anyhow!(crate::i18n::t(
+            "oauth.errors.registrationIncomplete"
+        ))),
         _ => Ok(expected_client_id.to_string()),
     }
 }
@@ -565,20 +588,25 @@ async fn complete_login(
     params: loopback::CallbackParams,
 ) -> Result<ProviderAuthStatus> {
     if params.state.as_deref() != Some(plan.oauth_state.as_str()) {
-        return Err(anyhow!("callback com `state` inválido (possível CSRF)"));
+        return Err(anyhow!(crate::i18n::t(
+            "oauth.errors.callbackInvalidState"
+        )));
     }
     if let Some(error) = params.error.as_deref() {
         let description = params
             .error_description
-            .as_deref()
-            .unwrap_or("autorização recusada");
-        return Err(anyhow!("login não autorizado: {error} ({description})"));
+            .clone()
+            .unwrap_or_else(|| crate::i18n::t("oauth.errors.authorizationDenied"));
+        return Err(anyhow!(crate::i18n::t_args(
+            "oauth.errors.loginUnauthorized",
+            &[("error", error), ("description", &description)],
+        )));
     }
     let code = params
         .code
         .as_deref()
         .filter(|code| !code.is_empty())
-        .ok_or_else(|| anyhow!("callback sem código de autorização"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("oauth.errors.callbackNoCode")))?;
 
     let issued_client_id = validate_callback(
         &plan.oauth_state,
@@ -602,17 +630,17 @@ async fn complete_login(
         .access_token
         .clone()
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| anyhow!("token endpoint não devolveu access_token"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("oauth.errors.tokenNoAccessToken")))?;
     let refresh_token = tokens
         .refresh_token
         .clone()
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| anyhow!("token endpoint não devolveu refresh_token"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("oauth.errors.tokenNoRefreshToken")))?;
     let id_token = tokens
         .id_token
         .clone()
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| anyhow!("token endpoint não devolveu id_token"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("oauth.errors.tokenNoIdToken")))?;
 
     let keys = jwks(state, &http, &plan.discovery).await?;
     let claims = jwt::verify(
@@ -625,9 +653,9 @@ async fn complete_login(
     let subject = claims.subject()?.to_string();
     if let Some(previous_subject) = plan.previous_subject.as_deref() {
         if previous_subject != subject {
-            return Err(anyhow!(
-                "a conta autenticada não é a mesma do registro selecionado; login abortado"
-            ));
+            return Err(anyhow!(crate::i18n::t(
+                "oauth.errors.accountMismatch"
+            )));
         }
     }
 
@@ -681,10 +709,10 @@ pub async fn login_wait(
     let (result, notify, expires_at, cancel) = {
         let pending = state.pending.lock();
         let Some(pending) = pending.as_ref() else {
-            return Err(anyhow!("nenhum login em andamento"));
+            return Err(anyhow!(crate::i18n::t("oauth.errors.noLoginInProgress")));
         };
         if pending.attempt_id != attempt_id {
-            return Err(anyhow!("tentativa de login desconhecida"));
+            return Err(anyhow!(crate::i18n::t("oauth.errors.unknownLoginAttempt")));
         }
         (
             pending.result.clone(),
@@ -702,11 +730,11 @@ pub async fn login_wait(
             };
         }
         if cancel.is_cancelled() {
-            return Err(anyhow!("login cancelado"));
+            return Err(anyhow!(crate::i18n::t("oauth.errors.loginCancelled")));
         }
         if crate::domain::now_ms() > expires_at {
             cancel.cancel();
-            return Err(anyhow!("tempo esgotado aguardando o login no navegador"));
+            return Err(anyhow!(crate::i18n::t("oauth.errors.loginTimeout")));
         }
         tokio::select! {
             _ = notify.notified() => {}
@@ -726,7 +754,7 @@ pub fn login_cancel(state: &OAuthState, attempt_id: &str) -> Result<()> {
     }
     if let Some(current) = pending.take() {
         current.cancel.cancel();
-        *current.result.lock() = Some(Err("login cancelado".to_string()));
+        *current.result.lock() = Some(Err(crate::i18n::t("oauth.errors.loginCancelled")));
         current.notify.notify_waiters();
     }
     Ok(())
@@ -782,23 +810,24 @@ async fn resolve_bearer(
 
     let (store, load_error) = config::oauth_snapshot(app);
     if let Some(error) = load_error {
-        return Err(auth_error(AuthError::reauth(format!(
-            "arquivo de credenciais inválido: {error}"
+        return Err(auth_error(AuthError::reauth(crate::i18n::t_args(
+            "oauth.errors.credentialsFileInvalid",
+            &[("error", &error.to_string())],
         ))));
     }
     let Some(registration) = active_registration(&store, provider_id) else {
         return Err(auth_error(AuthError::missing(
-            "Nenhuma conta ChatGPT conectada para este provedor.",
+            crate::i18n::t("oauth.errors.noAccount"),
         )));
     };
     if !usable(registration) {
         return Err(auth_error(AuthError::reauth(
-            "Sua sessão do ChatGPT não pode ser renovada; entre novamente.",
+            crate::i18n::t("oauth.errors.sessionNotRenewable"),
         )));
     }
     if !registration.plan_usage {
         return Err(auth_error(AuthError::plan_disabled(
-            "O uso do plano ChatGPT não foi autorizado para esta conta.",
+            crate::i18n::t("oauth.errors.planNotAuthorized"),
         )));
     }
     if !force && !registration.access_token.is_empty() {
@@ -817,7 +846,7 @@ async fn resolve_bearer(
     let (store, _) = config::oauth_snapshot(app);
     let Some(current) = active_registration(&store, provider_id) else {
         return Err(auth_error(AuthError::reauth(
-            "Registro do ChatGPT removido; entre novamente.",
+            crate::i18n::t("oauth.errors.registrationRemoved"),
         )));
     };
     if !force
@@ -832,7 +861,7 @@ async fn resolve_bearer(
             return Ok(current.access_token.clone());
         }
         return Err(auth_error(AuthError::reauth(
-            "A sessão foi renovada em outro processo; tente novamente.",
+            crate::i18n::t("oauth.errors.renewedElsewhere"),
         )));
     }
 
@@ -858,11 +887,12 @@ async fn resolve_bearer(
                     Ok(())
                 });
                 return Err(auth_error(AuthError::reauth(
-                    "Sua sessão do ChatGPT expirou; entre novamente para renová-la.",
+                    crate::i18n::t("oauth.errors.sessionExpired"),
                 )));
             }
-            return Err(auth_error(AuthError::network(format!(
-                "Não foi possível renovar a sessão do ChatGPT: {error}"
+            return Err(auth_error(AuthError::network(crate::i18n::t_args(
+                "oauth.errors.refreshFailed",
+                &[("error", &error.to_string())],
             ))));
         }
     };
@@ -871,7 +901,9 @@ async fn resolve_bearer(
         .access_token
         .clone()
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| auth_error(AuthError::network("refresh sem access_token")))?;
+        .ok_or_else(|| auth_error(AuthError::network(crate::i18n::t(
+            "oauth.errors.refreshNoAccessToken",
+        ))))?;
     let new_refresh = refreshed
         .refresh_token
         .clone()
@@ -920,7 +952,9 @@ async fn resolve_bearer(
         // happened between the refresh response and this write. Without this
         // guard the refresh would recreate credentials after "apagar dados".
         if state.epoch() != epoch {
-            anyhow::bail!("credenciais apagadas durante a renovação; entre novamente");
+            anyhow::bail!(crate::i18n::t(
+            "oauth.errors.credentialsErasedDuringRefresh"
+        ));
         }
         if let Some(registrations) = store.registrations.get_mut(provider_id) {
             if let Some(registration) = registrations.get_mut(&client_id) {
@@ -930,14 +964,14 @@ async fn resolve_bearer(
         Ok(())
     })
     .map_err(|_| {
-        auth_error(AuthError::reauth(
-            "As credenciais foram apagadas durante a renovação; entre novamente.",
-        ))
+        auth_error(AuthError::reauth(crate::i18n::t(
+            "oauth.errors.credentialsCleared",
+        )))
     })?;
 
     if !plan_usage {
         return Err(auth_error(AuthError::plan_disabled(
-            "O uso do plano ChatGPT não está autorizado; reautorize em Configurações → Provedores.",
+            crate::i18n::t("oauth.errors.planNotAuthorizedReauthorize"),
         )));
     }
     Ok(access_token)
@@ -993,10 +1027,9 @@ pub async fn sign_out(
     config::clear_oauth_tokens(app, provider_id)?;
     let mut status = status(app, provider_id);
     if !revocation_confirmed {
-        status.hint = Some(
-            "Sessão encerrada localmente; a revogação remota não foi confirmada. Você pode desconectar o app em ChatGPT → Configurações."
-                .to_string(),
-        );
+        status.hint = Some(crate::i18n::t(
+            "oauth.errors.signOutRemoteNotConfirmed",
+        ));
     }
     Ok(status)
 }

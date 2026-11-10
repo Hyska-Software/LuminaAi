@@ -55,9 +55,9 @@ fn attachments_dir(data_dir: &Path) -> PathBuf {
 fn prepare_attachments_dir(data_dir: &Path) -> Result<PathBuf, String> {
     let directory = attachments_dir(data_dir);
     std::fs::create_dir_all(&directory).map_err(|error| {
-        format!(
-            "falha ao preparar a pasta de anexos {}: {error}",
-            directory.display()
+        crate::i18n::t_args(
+            "attachments.errors.prepareDir",
+            &[("path", &directory.display().to_string()), ("error", &error.to_string())],
         )
     })?;
     Ok(directory)
@@ -87,8 +87,9 @@ fn store_attachment(
     };
     let stored_path = attachments_dir.join(&stored_name);
     if let Err(error) = std::fs::write(&stored_path, bytes) {
-        return Err(format!(
-            "{name}: falha ao copiar para a pasta de dados ({error})"
+        return Err(crate::i18n::t_args(
+            "attachments.errors.copyFailed",
+            &[("name", name), ("error", &error.to_string())],
         ));
     }
 
@@ -122,10 +123,12 @@ fn store_attachment(
     };
     if let Err(error) = db.insert_attachment(&attachment) {
         let _ = std::fs::remove_file(&stored_path);
-        return Err(format!(
-            "{}: falha ao salvar no banco ({})",
-            attachment.name,
-            to_error(error)
+        return Err(crate::i18n::t_args(
+            "attachments.errors.saveFailed",
+            &[
+                ("name", &attachment.name),
+                ("error", &crate::commands::attachments::to_error(error)),
+            ],
         ));
     }
     Ok(attachment.info())
@@ -153,25 +156,37 @@ fn import_paths_impl(
         let metadata = match std::fs::metadata(path) {
             Ok(metadata) => metadata,
             Err(error) => {
-                errors.push(format!("{raw_path}: {error}"));
+                errors.push(crate::i18n::t_args(
+                    "attachments.errors.fileError",
+                    &[("path", &raw_path), ("error", &error.to_string())],
+                ));
                 continue;
             }
         };
         if !metadata.is_file() {
-            errors.push(format!("{raw_path}: não é um arquivo"));
+            errors.push(crate::i18n::t_args(
+                "attachments.errors.notFile",
+                &[("path", &raw_path)],
+            ));
             continue;
         }
         if metadata.len() > MAX_ATTACHMENT_BYTES {
-            errors.push(format!(
-                "{name}: excede o limite de {} MB",
-                MAX_ATTACHMENT_BYTES / (1024 * 1024)
+            errors.push(crate::i18n::t_args(
+                "attachments.errors.tooLarge",
+                &[
+                    ("name", &name),
+                    ("limit", &(MAX_ATTACHMENT_BYTES / (1024 * 1024)).to_string()),
+                ],
             ));
             continue;
         }
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
             Err(error) => {
-                errors.push(format!("{name}: falha ao ler o arquivo ({error})"));
+                errors.push(crate::i18n::t_args(
+                    "attachments.errors.readFailed",
+                    &[("name", &name), ("error", &error.to_string())],
+                ));
                 continue;
             }
         };
@@ -182,9 +197,9 @@ fn import_paths_impl(
     }
 
     if imported.is_empty() && !errors.is_empty() {
-        return Err(format!(
-            "nenhum arquivo pôde ser importado:\n- {}",
-            errors.join("\n- ")
+        return Err(crate::i18n::t_args(
+            "attachments.errors.noneImported",
+            &[("errors", &errors.join("\n- "))],
         ));
     }
     if !errors.is_empty() {
@@ -227,7 +242,7 @@ pub(crate) fn resolve_attachments(
         let stored = db
             .get_attachment(id)
             .map_err(to_error)?
-            .ok_or_else(|| format!("o anexo `{id}` não existe"))?;
+            .ok_or_else(|| crate::i18n::t_args("attachments.errors.notFound", &[("attachment_id", id)]))?;
         attachments.push(stored.info());
     }
     Ok(attachments)
@@ -250,7 +265,10 @@ enum ClipboardPayload {
 /// `Ok(None)` means "text only / empty": nothing to attach.
 fn read_clipboard_payload() -> Result<Option<ClipboardPayload>, String> {
     let mut clipboard = arboard::Clipboard::new()
-        .map_err(|error| format!("falha ao acessar a área de transferência: {error}"))?;
+        .map_err(|error| crate::i18n::t_args(
+            "attachments.errors.clipboard",
+            &[("error", &error.to_string())],
+        ))?;
     if let Ok(paths) = clipboard.get().file_list() {
         if !paths.is_empty() {
             return Ok(Some(ClipboardPayload::Files(paths)));
@@ -270,16 +288,16 @@ fn read_clipboard_payload() -> Result<Option<ClipboardPayload>, String> {
 /// RGBA8 → PNG (same encoder used by the artifact thumbnails).
 fn rgba_to_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 {
-        return Err("a imagem da área de transferência não tem dimensões válidas".to_string());
+        return Err(crate::i18n::t("attachments.errors.clipboardDimensions"));
     }
     let expected = width.checked_mul(height).and_then(|pixels| pixels.checked_mul(4));
     if expected != Some(rgba.len()) {
-        return Err("a imagem da área de transferência está corrompida".to_string());
+        return Err(crate::i18n::t("attachments.errors.clipboardCorrupt"));
     }
     let width = u32::try_from(width)
-        .map_err(|_| "a imagem da área de transferência é grande demais".to_string())?;
+        .map_err(|_| crate::i18n::t("attachments.errors.clipboardTooLarge"))?;
     let height = u32::try_from(height)
-        .map_err(|_| "a imagem da área de transferência é grande demais".to_string())?;
+        .map_err(|_| crate::i18n::t("attachments.errors.clipboardTooLarge"))?;
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png)
         .write_image(rgba, width, height, image::ExtendedColorType::Rgba8)
@@ -361,8 +379,11 @@ fn read_attachment_bytes(
     attachments_dir: &Path,
 ) -> Result<Vec<u8>, String> {
     let path = resolve_attachment_path(stored, attachments_dir)
-        .ok_or_else(|| "arquivo do anexo não encontrado no disco".to_string())?;
-    std::fs::read(&path).map_err(|error| format!("falha ao ler o arquivo do anexo: {error}"))
+        .ok_or_else(|| crate::i18n::t("attachments.errors.fileMissing"))?;
+    std::fs::read(&path).map_err(|error| crate::i18n::t_args(
+        "attachments.errors.readFile",
+        &[("error", &error.to_string())],
+    ))
 }
 
 /// Maps the attachment `kind` slug to the artifact preview kind.

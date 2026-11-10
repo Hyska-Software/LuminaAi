@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ChevronDown,
   Copy,
@@ -76,11 +77,12 @@ function ExpandedOutput({
   error: boolean;
   id: string;
 }) {
+  const { t } = useTranslation('chat');
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     const ok = await copyText(body);
     if (!ok) {
-      toast.error('Não foi possível copiar a saída');
+      toast.error(t('tool.copyOutputFailed'));
       return;
     }
     setCopied(true);
@@ -94,12 +96,12 @@ function ExpandedOutput({
       <div className="flex items-center gap-2 border-b border-border px-2.5 py-1">
         <SquareTerminal aria-hidden className="size-3 shrink-0 text-foreground-subtle" />
         <span className="min-w-0 flex-1 text-[10.5px] font-medium uppercase tracking-wide text-foreground-subtle">
-          {error ? 'Saída (falhou)' : 'Saída'}
+          {error ? t('tool.outputFailed') : t('tool.output')}
         </span>
         <button
           type="button"
           onClick={() => void copy()}
-          aria-label="Copiar saída"
+          aria-label={t('tool.copyOutput')}
           className="flex size-6 shrink-0 items-center justify-center rounded text-foreground-subtle transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
         >
           <Copy aria-hidden className={cn('size-3', copied && 'text-success')} />
@@ -116,6 +118,7 @@ function ExpandedOutput({
 }
 
 function ToolImageThumb({ image, index }: { image: ToolImageRef; index: number }) {
+  const { t } = useTranslation('chat');
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -135,7 +138,7 @@ function ToolImageThumb({ image, index }: { image: ToolImageRef; index: number }
   if (failed) {
     return (
       <span className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface px-2 text-[10px] text-foreground-subtle">
-        Imagem indisponível
+        {t('tool.imageUnavailable')}
       </span>
     );
   }
@@ -145,11 +148,11 @@ function ToolImageThumb({ image, index }: { image: ToolImageRef; index: number }
       target="_blank"
       rel="noreferrer"
       className="block overflow-hidden rounded-lg border border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-      aria-label={`Abrir screenshot ${index + 1}`}
+      aria-label={t('tool.openScreenshot', { index: index + 1 })}
     >
       <img
         src={src}
-        alt={`Screenshot retornado pela tool (${index + 1})`}
+        alt={t('tool.screenshotAlt', { index: index + 1 })}
         className="max-h-48 w-full object-contain"
       />
     </a>
@@ -179,6 +182,7 @@ function ToolImages({ images }: { images: ToolImageRef[] }) {
  * comando. Falhas abrem com a saída visível por padrão.
  */
 export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
+  const { t } = useTranslation('chat');
   const detailsId = useId();
   const meta: CodeToolLabel = describeCodeTool(tool);
   const change = fileChangeOf(tool);
@@ -208,7 +212,7 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
       subagentType:
         liveSubagent?.subagentType ?? subagentPresentation?.subagentType ?? 'explore',
       description:
-        liveSubagent?.description ?? subagentPresentation?.description ?? 'Subagente',
+        liveSubagent?.description ?? subagentPresentation?.description ?? t('tool.subagentDefault'),
       providerId: liveSubagent?.providerId ?? subagentPresentation?.providerId ?? null,
       modelId: liveSubagent?.modelId ?? subagentPresentation?.modelId ?? null,
       effort: liveSubagent?.effort ?? subagentPresentation?.effort ?? null,
@@ -216,7 +220,7 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
     };
     const result = useUiStore.getState().openCodeSubagent(target);
     if (result === 'exists') {
-      toast.info('Este subagente já está aberto em uma aba.');
+      toast.info(t('tool.subagentAlreadyOpen'));
     }
   };
 
@@ -313,18 +317,22 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
                 )}
               >
                 {liveSubagent.status === 'running'
-                  ? 'ao vivo'
+                  ? t('tool.statusLive')
                   : liveSubagent.status === 'done'
-                    ? 'concluído'
+                    ? t('tool.statusDone')
                     : liveSubagent.status === 'error'
-                      ? 'falhou'
-                      : 'cancelado'}
+                      ? t('tool.statusError')
+                      : t('tool.statusCancelled')}
               </span>
-              <span className="tabular-nums">{liveSubagent.steps} passos</span>
+              <span className="tabular-nums">{t('tool.steps', { count: liveSubagent.steps })}</span>
               {liveSubagent.usage?.totalTokens != null ? (
-                <span className="tabular-nums">{liveSubagent.usage.totalTokens} tokens</span>
+                <span className="tabular-nums">
+                  {t('tool.tokens', { tokens: liveSubagent.usage.totalTokens })}
+                </span>
               ) : null}
-              {liveSubagent.effort ? <span>esforço {liveSubagent.effort}</span> : null}
+              {liveSubagent.effort ? (
+                <span>{t('tool.effort', { effort: liveSubagent.effort })}</span>
+              ) : null}
               <code className="min-w-0 truncate font-mono text-[10.5px] text-foreground-subtle">
                 {liveSubagent.providerId}/{liveSubagent.modelId}
               </code>
@@ -343,7 +351,7 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
               onClick={openSubagentChat}
               className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
-              Abrir chat
+              {t('tool.openChat')}
             </button>
           ) : null}
         </div>

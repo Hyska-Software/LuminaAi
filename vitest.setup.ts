@@ -2,6 +2,12 @@
  * Vitest setup: jsdom lacks a few browser APIs used by Radix primitives.
  */
 import './src/lib/polyfills';
+import { initI18n, setLanguage } from './src/lib/i18n';
+
+// Existing component tests assert the historical pt-BR copy. New tests that
+// exercise en/es switch language explicitly and restore pt-BR afterwards.
+await initI18n();
+await setLanguage('pt-BR', { persist: false });
 
 if (typeof window !== 'undefined') {
   if (!window.ResizeObserver) {

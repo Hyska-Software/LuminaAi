@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
 import { api } from '../api';
+import { t } from '../i18n';
 import type {
   ApprovalDecision,
   ApprovalRequest,
@@ -484,8 +485,8 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
         planMarkdown: options?.planMarkdown ?? null,
       });
       if (!ok) {
-        toast.error('Esta aprovação já não está disponível', {
-          description: 'Atualizando o estado da sessão…',
+        toast.error(t('code:store.approvalUnavailable'), {
+          description: t('code:store.refreshing'),
         });
         await get().refresh(conversationId);
         return false;
@@ -495,7 +496,7 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       if (options?.choice) await get().refresh(conversationId);
       return ok;
     } catch (error) {
-      toast.error('Não foi possível responder à aprovação', { description: String(error) });
+      toast.error(t('code:store.approvalError'), { description: String(error) });
       return false;
     }
   },
@@ -517,7 +518,7 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       }
       return ok;
     } catch (error) {
-      toast.error('Não foi possível enviar a resposta', { description: String(error) });
+      toast.error(t('code:store.answerError'), { description: String(error) });
       return false;
     }
   },
@@ -540,7 +541,7 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       if (previous) {
         set((state) => ({ byConversation: { ...state.byConversation, [conversationId]: previous } }));
       }
-      toast.error('Não foi possível alterar o modo de permissão', { description: String(error) });
+      toast.error(t('code:store.permissionError'), { description: String(error) });
       return false;
     }
   },
@@ -569,7 +570,7 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
           byConversation: { ...state.byConversation, [conversationId]: previous },
         }));
       }
-      toast.error('Não foi possível alterar o modo Plano', { description: String(error) });
+      toast.error(t('code:store.planModeError'), { description: String(error) });
       return false;
     }
   },
@@ -585,7 +586,7 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       }));
       return true;
     } catch (error) {
-      toast.error('Não foi possível criar o objetivo', { description: String(error) });
+      toast.error(t('code:store.goalCreateError'), { description: String(error) });
       return false;
     }
   },
@@ -623,12 +624,12 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       }
       const message = String(error);
       if (message.includes('GOAL_STALE_REVISION')) {
-        toast.error('O objetivo mudou em outra ação', {
-          description: 'Atualizando o estado da sessão…',
+        toast.error(t('code:store.goalChanged'), {
+          description: t('code:store.refreshing'),
         });
         await get().refresh(conversationId);
       } else {
-        toast.error('Não foi possível atualizar o objetivo', { description: message });
+        toast.error(t('code:store.goalUpdateError'), { description: message });
       }
       return false;
     }
@@ -701,7 +702,7 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
         })),
       }));
     } catch (error) {
-      toast.error('Não foi possível parar o processo', { description: String(error) });
+      toast.error(t('code:store.jobKillError'), { description: String(error) });
     }
   },
 
@@ -709,12 +710,12 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
     try {
       const ok = await api.revertTurn(conversationId, turnId);
       if (ok) {
-        toast.success('Turno revertido');
+        toast.success(t('code:store.turnReverted'));
         await get().refresh(conversationId);
       }
       return ok;
     } catch (error) {
-      toast.error('Não foi possível reverter o turno', { description: String(error) });
+      toast.error(t('code:store.turnRevertError'), { description: String(error) });
       return false;
     }
   },
@@ -723,12 +724,12 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
     try {
       const ok = await api.revertFile(conversationId, path);
       if (ok) {
-        toast.success(`Arquivo revertido: ${path}`);
+        toast.success(t('code:store.fileReverted', { path }));
         await get().refresh(conversationId);
       }
       return ok;
     } catch (error) {
-      toast.error('Não foi possível reverter o arquivo', { description: String(error) });
+      toast.error(t('code:store.fileRevertError'), { description: String(error) });
       return false;
     }
   },
@@ -739,7 +740,7 @@ export const useCodeStore = create<CodeStoreState>()((set, get) => ({
       await get().refresh(conversationId);
       return ok;
     } catch (error) {
-      toast.error('Não foi possível compactar o contexto', { description: String(error) });
+      toast.error(t('code:store.compactError'), { description: String(error) });
       return false;
     }
   },

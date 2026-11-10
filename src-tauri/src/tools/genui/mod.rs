@@ -353,25 +353,35 @@ fn strip_code_fence(source: &str) -> String {
 pub fn summary(analysis: &Analysis) -> String {
     let errors = analysis.error_count();
     let warnings = analysis.warning_count();
+    let warning_label = count_label("tools.genui.warnings", warnings);
     if errors > 0 {
-        format!(
-            "UI inválida: {} {}, {} {}",
-            errors,
-            plural(errors, "erro", "erros"),
-            warnings,
-            plural(warnings, "aviso", "avisos")
+        crate::i18n::t_args(
+            "tools.genui.summary.invalid",
+            &[
+                ("errors", &count_label("tools.genui.errors", errors)),
+                ("warnings", &warning_label),
+            ],
         )
     } else {
-        format!(
-            "UI válida: {} {}, {} {}",
-            analysis.component_count,
-            plural(analysis.component_count, "componente", "componentes"),
-            warnings,
-            plural(warnings, "aviso", "avisos")
+        crate::i18n::t_args(
+            "tools.genui.summary.valid",
+            &[
+                (
+                    "components",
+                    &count_label("tools.genui.components", analysis.component_count),
+                ),
+                ("warnings", &warning_label),
+            ],
         )
     }
 }
 
+/// Localized "N components" noun phrase (counted for plural agreement).
+fn count_label(key: &str, count: usize) -> String {
+    crate::i18n::t_count(key, count, &[("count", &count.to_string())])
+}
+
+#[allow(dead_code)]
 fn plural<'a>(count: usize, singular: &'a str, plural: &'a str) -> &'a str {
     if count == 1 {
         singular
@@ -422,9 +432,7 @@ pub fn run(args: &Value) -> ToolOutcome {
         Some(Value::String(block)) => block.clone(),
         // Robustez: aceitar o objeto/array já parseado em vez do texto.
         Some(Value::Null) | None => {
-            return ToolOutcome::error(
-                "o argumento `block` é obrigatório (JSON completo do bloco `ui`)",
-            )
+            return ToolOutcome::error(crate::i18n::t("tools.genui.blockRequired"))
         }
         Some(other) => compact_json(other),
     };

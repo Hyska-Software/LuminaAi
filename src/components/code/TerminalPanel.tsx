@@ -13,6 +13,7 @@ import {
   useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CircleStop, Eraser, Plus, RotateCcw, SquareTerminal, X } from 'lucide-react';
 // Mandatory: without xterm.css the viewport/screen/char-measure elements fall
 // back to normal DOM flow (visible "WWWW…" measure text and broken rows).
@@ -27,6 +28,7 @@ import {
 import type { TerminalTabInfo } from './terminalManager';
 import { terminalManager } from './terminalManager';
 import { useHorizontalWheelScroll } from './useHorizontalWheelScroll';
+import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 interface TerminalPanelProps {
@@ -36,11 +38,12 @@ interface TerminalPanelProps {
 
 function tabDisplayName(tab: TerminalTabInfo): string {
   if (tab.running) return tab.title;
-  return `${tab.title} (encerrado)`;
+  return t('code:terminal.tabClosed', { title: tab.title });
 }
 
 /** Aba "Terminal" do painel direito: abas de terminais, xterm e foco. */
 export function TerminalPanel({ conversationId, className }: TerminalPanelProps) {
+  const { t } = useTranslation('code');
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -152,7 +155,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
         <div
           ref={tabStripRef}
           role="tablist"
-          aria-label="Terminais abertos"
+          aria-label={t('code:terminal.tabsAria')}
           onMouseDown={(event) => {
             // Suppress WebView2 autoscroll on middle click.
             if (event.button === 1) event.preventDefault();
@@ -188,7 +191,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                   aria-selected={selected}
                   aria-controls="terminal-output"
                   tabIndex={selected ? 0 : -1}
-                  title={tab.cwd ? `${tabDisplayName(tab)} — ${tab.cwd}` : tabDisplayName(tab)}
+                  title={tab.cwd ? t('code:terminal.tabTitleWithCwd', { title: tabDisplayName(tab), cwd: tab.cwd }) : tabDisplayName(tab)}
                   onClick={() => selectTab(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
                   className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -211,8 +214,8 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                 </button>
                 <button
                   type="button"
-                  aria-label={`Fechar ${tab.title}`}
-                  title="Fechar aba e encerrar o shell"
+                  aria-label={t('code:terminal.closeTabAria', { title: tab.title })}
+                  title={t('code:terminal.closeTabTitle')}
                   onClick={() => closeTab(tab)}
                   className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-foreground-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
@@ -226,9 +229,9 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
         <div className="flex shrink-0 items-center gap-0.5">
           {active ? (
             <>
-              <Tooltip content="Limpar terminal" side="bottom">
+              <Tooltip content={t('code:terminal.clear')} side="bottom">
                 <IconButton
-                  label="Limpar terminal"
+                  label={t('code:terminal.clear')}
                   size="sm"
                   className="size-7"
                   onClick={() => terminalManager.clear(conversationId, active.id)}
@@ -237,9 +240,9 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                 </IconButton>
               </Tooltip>
               {active.running ? (
-                <Tooltip content="Matar processo" side="bottom">
+                <Tooltip content={t('code:terminal.kill')} side="bottom">
                   <IconButton
-                    label="Matar processo"
+                    label={t('code:terminal.kill')}
                     size="sm"
                     className="size-7"
                     disabled={active.killing}
@@ -253,9 +256,9 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                   </IconButton>
                 </Tooltip>
               ) : (
-                <Tooltip content="Reiniciar terminal" side="bottom">
+                <Tooltip content={t('code:terminal.restart')} side="bottom">
                   <IconButton
-                    label="Reiniciar terminal"
+                    label={t('code:terminal.restart')}
                     size="sm"
                     className="size-7"
                     disabled={loading}
@@ -269,12 +272,12 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
             </>
           ) : null}
           <Tooltip
-            content={atLimit ? 'Limite de 4 terminais. Feche uma aba para abrir outro.' : 'Novo terminal'}
+            content={atLimit ? t('code:terminal.limitHint', { limit }) : t('code:terminal.newTab')}
             side="bottom"
           >
             <span className="inline-flex">
               <IconButton
-                label="Novo terminal"
+                label={t('code:terminal.newTab')}
                 size="sm"
                 className="size-7"
                 loading={loading}
@@ -303,7 +306,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
               leftIcon={<RotateCcw aria-hidden className="size-3" strokeWidth={1.75} />}
               onClick={() => void terminalManager.open(conversationId)}
             >
-              Tentar novamente
+              {t('common:actions.retry')}
             </Button>
           ) : null}
         </div>
@@ -319,9 +322,9 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
         <div ref={containerRef} className="absolute inset-0" />
         {tabs.length === 0 && !loading ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
-            <p className="text-[13px] font-medium text-foreground">Nenhum terminal aberto</p>
+            <p className="text-[13px] font-medium text-foreground">{t('code:terminal.empty.title')}</p>
             <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
-              O terminal roda no diretório do workspace. O agente usa os próprios comandos e jobs.
+              {t('code:terminal.empty.description')}
             </p>
             <Button
               ref={emptyCtaRef}
@@ -331,14 +334,14 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
               disabled={loading || blocked}
               onClick={() => void terminalManager.open(conversationId)}
             >
-              Abrir terminal
+              {t('code:terminal.open')}
             </Button>
           </div>
         ) : null}
         {loading && tabs.length === 0 ? (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface/85 px-6 text-center">
             <Spinner size="sm" />
-            <p className="text-[12px] text-foreground-muted">Conectando ao shell…</p>
+            <p className="text-[12px] text-foreground-muted">{t('code:terminal.connecting')}</p>
           </div>
         ) : null}
       </div>
@@ -349,7 +352,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
         className="flex h-6 shrink-0 items-center gap-3 border-t border-border px-3 text-[11px] text-foreground-muted"
       >
         <span className="min-w-0 flex-1 truncate" title={active?.cwd || undefined}>
-          {active ? active.cwd || active.title : 'Nenhum terminal ativo'}
+          {active ? active.cwd || active.title : t('code:terminal.noneActive')}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2 tabular-nums">
           {active ? (
@@ -362,11 +365,15 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                     !active.killing && 'motion-safe:animate-pulse',
                   )}
                 />
-                {active.killing ? 'Encerrando…' : `Rodando · ${active.cols}×${active.rows}`}
+                {active.killing
+                  ? t('code:terminal.killing')
+                  : t('code:terminal.running', { cols: active.cols, rows: active.rows })}
               </span>
             ) : (
               <span className="text-warning">
-                Encerrado{active.exitCode !== null ? ` (${active.exitCode})` : ''}
+                {active.exitCode !== null
+                  ? t('code:terminal.exitedCode', { code: active.exitCode })
+                  : t('code:terminal.exited')}
               </span>
             )
           ) : null}

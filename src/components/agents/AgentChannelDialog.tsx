@@ -1,4 +1,5 @@
 import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, ChevronDown, Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
@@ -37,6 +38,7 @@ export function AgentChannelDialog({
   onSaved: (channel: AgentChannel) => void;
   onDeleted?: (channelId: string) => void;
 }) {
+  const { t } = useTranslation('agents');
   const agents = useAgentStore(useShallow(selectActiveAgents));
   const [name, setName] = useState('');
   const [memberIds, setMemberIds] = useState<string[]>([]);
@@ -95,7 +97,7 @@ export function AgentChannelDialog({
 
   const save = async () => {
     if (!name.trim()) {
-      setError('Dê um nome ao canal.');
+      setError(t('channelDialog.nameRequired'));
       return;
     }
     setSaving(true);
@@ -110,7 +112,9 @@ export function AgentChannelDialog({
         ? await api.updateAgentChannel(channel.id, input)
         : await api.createAgentChannel(input);
       onSaved(saved);
-      toast.success(channel ? 'Canal atualizado' : 'Canal criado', { description: saved.name });
+      toast.success(channel ? t('channelDialog.updated') : t('channelDialog.created'), {
+        description: saved.name,
+      });
       onOpenChange(false);
     } catch (caught) {
       setError(String(caught));
@@ -122,14 +126,14 @@ export function AgentChannelDialog({
   const remove = async () => {
     if (!channel) return;
     // eslint-disable-next-line no-alert -- destructive action needs a native confirmation here
-    if (!window.confirm(`Excluir o canal “${channel.name}”? O histórico compartilhado e as threads derivadas serão removidos.`)) {
+    if (!window.confirm(t('channelDialog.deleteConfirm', { name: channel.name }))) {
       return;
     }
     try {
       await api.deleteAgentChannel(channel.id);
       onDeleted?.(channel.id);
       onOpenChange(false);
-      toast.success('Canal excluído');
+      toast.success(t('channelDialog.deleted'));
     } catch (caught) {
       setError(String(caught));
     }
@@ -141,29 +145,29 @@ export function AgentChannelDialog({
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <Users className="size-4 text-accent" />
-            {channel ? 'Editar canal' : 'Novo canal'}
+            {channel ? t('channelDialog.editTitle') : t('channelDialog.newTitle')}
           </DialogTitle>
           <DialogDescription>
-            Um canal é uma thread compartilhada: todos os agentes marcados leem e escrevem nela.
+            {t('channelDialog.description')}
           </DialogDescription>
         </DialogHeader>
         <AgentDialogBody className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="channel-name">Nome</Label>
+            <Label htmlFor="channel-name">{t('channelDialog.name')}</Label>
             <Input
               id="channel-name"
               value={name}
               maxLength={60}
-              placeholder="Ex.: Lançamento"
+              placeholder={t('channelDialog.namePlaceholder')}
               autoFocus
               onChange={(event) => setName(event.target.value)}
             />
           </div>
           <div className="space-y-2">
-            <Label>Participantes</Label>
+            <Label>{t('channelDialog.members')}</Label>
             {agents.length === 0 ? (
               <p className="text-[12px] text-foreground-muted">
-                Crie pelo menos um agente antes de montar um canal.
+                {t('channelDialog.noAgents')}
               </p>
             ) : (
               <div className="grid max-h-56 gap-1.5 overflow-y-auto sm:grid-cols-2">
@@ -191,18 +195,20 @@ export function AgentChannelDialog({
               </div>
             )}
             <p className="text-[10px] text-foreground-subtle">
-              Até 6 agentes. Cada resposta é gerada na thread privada do agente e publicada no canal.
+              {t('channelDialog.membersHint')}
             </p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="channel-leader">Líder (opcional)</Label>
+            <Label htmlFor="channel-leader">{t('channelDialog.leader')}</Label>
             <Popover open={leaderOpen} onOpenChange={setLeaderOpen}>
               <PopoverTrigger asChild>
                 <button
                   type="button"
                   id="channel-leader"
                   disabled={saving || memberAgents.length === 0}
-                  aria-label={`Líder: ${selectedLeader?.name ?? 'Nenhum — todos respondem'}`}
+                  aria-label={t('channelDialog.leaderAria', {
+                    name: selectedLeader?.name ?? t('channelDialog.noLeader'),
+                  })}
                   aria-haspopup="listbox"
                   className={cn(
                     'flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-surface-raised px-2.5 text-left text-sm text-foreground',
@@ -219,7 +225,7 @@ export function AgentChannelDialog({
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate">
-                    {selectedLeader?.name ?? 'Nenhum — todos respondem'}
+                    {selectedLeader?.name ?? t('channelDialog.noLeader')}
                   </span>
                   <ChevronDown
                     aria-hidden
@@ -236,7 +242,7 @@ export function AgentChannelDialog({
               >
                 <div
                   role="listbox"
-                  aria-label="Líder do canal"
+                  aria-label={t('channelDialog.leaderListAria')}
                   className="grid max-h-64 gap-0.5 overflow-y-auto"
                   onKeyDown={handleLeaderListKeyDown}
                 >
@@ -257,7 +263,7 @@ export function AgentChannelDialog({
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-active/70 text-foreground-subtle">
                       <Users aria-hidden className="size-3.5" />
                     </span>
-                    <span className="min-w-0 flex-1 truncate">Nenhum — todos respondem</span>
+                    <span className="min-w-0 flex-1 truncate">{t('channelDialog.noLeader')}</span>
                     {selectedLeader === null ? (
                       <Check aria-hidden className="size-4 shrink-0 text-accent" />
                     ) : null}
@@ -292,8 +298,7 @@ export function AgentChannelDialog({
               </PopoverContent>
             </Popover>
             <p className="text-[10px] text-foreground-subtle">
-              O líder responde primeiro e pode delegar tarefas específicas aos demais membros.
-              Sem líder, o canal responde como hoje (menções ou todos).
+              {t('channelDialog.leaderHint')}
             </p>
           </div>
           {error ? (
@@ -305,11 +310,11 @@ export function AgentChannelDialog({
         <DialogFooter>
           {channel ? (
             <Button variant="ghost" className="mr-auto text-danger" onClick={() => void remove()} disabled={saving}>
-              Excluir canal
+              {t('channelDialog.delete')}
             </Button>
           ) : null}
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -317,7 +322,7 @@ export function AgentChannelDialog({
             onClick={() => void save()}
           >
             {saving ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
-            {channel ? 'Salvar canal' : 'Criar canal'}
+            {channel ? t('channelDialog.save') : t('channelDialog.create')}
           </Button>
         </DialogFooter>
       </DialogContent>

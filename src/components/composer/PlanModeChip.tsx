@@ -11,14 +11,12 @@
  * chips que o hospeda (ao lado do chip `/goal`) fica no `Composer`.
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ListChecks } from 'lucide-react';
 
 import { Tooltip } from '@/components/ui';
 import { useCodeStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
-
-/** Conteúdo do Tooltip do pill (sem `title` nativo — regressão F-20). */
-const PLAN_MODE_TOOLTIP = 'Modo Plano ativo — clique para desativar';
 
 export interface PlanModeChipProps {
   conversationId: string;
@@ -30,6 +28,7 @@ export interface PlanModeChipProps {
  * `planMode` ativo; clicar (em qualquer parte) desativa pelo `codeStore`.
  */
 export function PlanModeChip({ conversationId, className }: PlanModeChipProps) {
+  const { t } = useTranslation('composer');
   const planMode = useCodeStore(
     (state) => state.byConversation[conversationId]?.planMode ?? false,
   );
@@ -48,10 +47,10 @@ export function PlanModeChip({ conversationId, className }: PlanModeChipProps) {
   };
 
   return (
-    <Tooltip content={PLAN_MODE_TOOLTIP} side="top">
+    <Tooltip content={t('planMode.tooltip')} side="top">
       <button
         type="button"
-        aria-label="Desativar modo Plano"
+        aria-label={t('planMode.disable')}
         aria-pressed={true}
         disabled={pending}
         onClick={() => void deactivate()}
@@ -65,7 +64,7 @@ export function PlanModeChip({ conversationId, className }: PlanModeChipProps) {
         )}
       >
         <ListChecks aria-hidden className="size-3.5 shrink-0 text-accent" strokeWidth={1.75} />
-        <span>Plano</span>
+        <span>{t('planMode.label')}</span>
       </button>
     </Tooltip>
   );

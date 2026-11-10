@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Copy, Minus, PanelLeft, Square, X } from 'lucide-react';
 import { IconButton, Kbd, Tooltip } from '@/components/ui';
@@ -37,6 +38,7 @@ const CONTROL_BASE =
  * overlap it on narrower windows.
  */
 export function TitleBar() {
+  const { t } = useTranslation('common');
   const [isMaximized, setIsMaximized] = useState(false);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
 
@@ -115,14 +117,14 @@ export function TitleBar() {
         <Tooltip
           content={
             <span className="flex items-center gap-1.5">
-              Alternar barra lateral
+              {t('shell.titlebar.toggleSidebar')}
               <Kbd>{modKey}</Kbd>
               <Kbd>B</Kbd>
             </span>
           }
           side="bottom"
         >
-          <IconButton label="Alternar barra lateral" size="sm" variant="ghost" onClick={toggleSidebar} className="no-drag">
+          <IconButton label={t('shell.titlebar.toggleSidebar')} size="sm" variant="ghost" onClick={toggleSidebar} className="no-drag">
             <PanelLeft className="size-4" />
           </IconButton>
         </Tooltip>
@@ -149,12 +151,12 @@ export function TitleBar() {
         <UpdateChip />
 
         <div className="ml-1 flex items-center gap-0.5">
-          <button type="button" aria-label="Minimizar" onClick={handleMinimize} className={CONTROL_BASE}>
+          <button type="button" aria-label={t('shell.titlebar.minimize')} onClick={handleMinimize} className={CONTROL_BASE}>
             <Minus className="size-4" strokeWidth={2} />
           </button>
           <button
             type="button"
-            aria-label={isMaximized ? 'Restaurar' : 'Maximizar'}
+            aria-label={isMaximized ? t('shell.titlebar.restore') : t('shell.titlebar.maximize')}
             onClick={() => void handleToggleMaximize()}
             className={CONTROL_BASE}
           >
@@ -162,7 +164,7 @@ export function TitleBar() {
           </button>
           <button
             type="button"
-            aria-label="Fechar"
+            aria-label={t('actions.close')}
             onClick={handleClose}
             className={cn(CONTROL_BASE, 'hover:bg-danger hover:text-background')}
           >

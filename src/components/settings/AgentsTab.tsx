@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Download } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -15,6 +16,7 @@ import { SettingRow, SettingsBlock, SettingsSection } from './shared';
  * the agent editor.
  */
 export function AgentsTab() {
+  const { t } = useTranslation('settings');
   const settings = useAppStore((state) => state.settings);
   const saveSettings = useAppStore((state) => state.saveSettings);
   const [maxConcurrentTurns, setMaxConcurrentTurns] = useState(
@@ -67,26 +69,21 @@ export function AgentsTab() {
   return (
     <div className="flex flex-col gap-6">
       <p className="rounded-xl border border-border bg-surface/50 px-3 py-2 text-[11px] leading-relaxed text-foreground-muted">
-        Modelo, instruções, workspace, permissões e capabilities são definidos
-        individualmente em cada agente, no editor da persona. Esta aba reúne apenas as
-        preferências globais do layout Agentes.
+        {t('agents.intro')}
       </p>
 
-      <SettingsSection
-        title="Execução e fila"
-        description="Quantos turnos podem rodar ao mesmo tempo e o tamanho da fila de cada thread. Turnos além do limite aguardam na fila da própria conversa."
-      >
+      <SettingsSection title={t('agents.queue.title')} description={t('agents.queue.description')}>
         <SettingRow
           vertical
-          label="Turnos simultâneos (global)"
-          description={`Até ${maxConcurrentTurns} turnos rodando ao mesmo tempo em todo o app. O backend também aplica este limite.`}
+          label={t('agents.queue.global.label')}
+          description={t('agents.queue.global.description', { count: maxConcurrentTurns })}
         >
           <Input
             type="number"
             min={1}
             max={32}
             value={maxConcurrentTurns}
-            aria-label="Máximo de turnos simultâneos"
+            aria-label={t('agents.queue.global.aria')}
             onChange={(event) => setMaxConcurrentTurns(Number(event.target.value) || 1)}
             onBlur={() =>
               void saveSettings({
@@ -97,15 +94,15 @@ export function AgentsTab() {
         </SettingRow>
         <SettingRow
           vertical
-          label="Turnos simultâneos por agente"
-          description="Evita que um único agente ocupe todos os slots. Padrão: 1."
+          label={t('agents.queue.perAgent.label')}
+          description={t('agents.queue.perAgent.description')}
         >
           <Input
             type="number"
             min={1}
             max={4}
             value={maxConcurrentPerAgent}
-            aria-label="Máximo de turnos simultâneos por agente"
+            aria-label={t('agents.queue.perAgent.aria')}
             onChange={(event) => setMaxConcurrentPerAgent(Number(event.target.value) || 1)}
             onBlur={() =>
               void saveSettings({
@@ -116,15 +113,15 @@ export function AgentsTab() {
         </SettingRow>
         <SettingRow
           vertical
-          label="Mensagens na fila por thread"
-          description="Quando a fila atinge este tamanho, novas mensagens são recusadas com um aviso."
+          label={t('agents.queue.queueLength.label')}
+          description={t('agents.queue.queueLength.description')}
         >
           <Input
             type="number"
             min={1}
             max={100}
             value={maxQueueLength}
-            aria-label="Máximo de mensagens na fila por thread"
+            aria-label={t('agents.queue.queueLength.aria')}
             onChange={(event) => setMaxQueueLength(Number(event.target.value) || 1)}
             onBlur={() =>
               void saveSettings({
@@ -135,20 +132,17 @@ export function AgentsTab() {
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection
-        title="Orçamento"
-        description="Limite de gasto dos agentes por dia. O backend recusa novos turnos quando o limite é atingido."
-      >
+      <SettingsSection title={t('agents.budget.title')} description={t('agents.budget.description')}>
         <SettingRow
           vertical
-          label="Limite diário por agente (US$)"
-          description="Vazio desliga. O custo acumulado do dia considera todas as threads do agente."
+          label={t('agents.budget.dailyLimit.label')}
+          description={t('agents.budget.dailyLimit.description')}
         >
           <Input
             value={costLimit}
             inputMode="decimal"
-            placeholder="Sem limite"
-            aria-label="Limite diário de custo por agente em dólares"
+            placeholder={t('agents.budget.dailyLimit.placeholder')}
+            aria-label={t('agents.budget.dailyLimit.aria')}
             onChange={(event) => setCostLimit(event.target.value)}
             onBlur={() => {
               const value = Number(costLimit.replace(',', '.'));
@@ -162,82 +156,91 @@ export function AgentsTab() {
       </SettingsSection>
 
       <SettingsSection
-        title="Notificações"
-        description="Avisos de threads de agente em segundo plano. O SO e o toast in-app respeitam estas opções."
+        title={t('agents.notifications.title')}
+        description={t('agents.notifications.description')}
       >
         <SettingRow
-          label="Notificações ativas"
-          description="Desligado, nenhuma notificação de segundo plano é emitida."
+          label={t('agents.notifications.enabled.label')}
+          description={t('agents.notifications.enabled.description')}
         >
           <Switch
             checked={settings.notificationsEnabled ?? true}
             onCheckedChange={(checked) => void saveSettings({ notificationsEnabled: checked })}
-            aria-label="Notificações ativas"
+            aria-label={t('agents.notifications.enabled.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="Não perturbe"
-          description="Mantém os avisos apenas no diálogo Atividade, sem toast nem notificação do SO."
+          label={t('agents.notifications.dnd.label')}
+          description={t('agents.notifications.dnd.description')}
         >
           <Switch
             checked={settings.notificationsDnd ?? false}
             onCheckedChange={(checked) => void saveSettings({ notificationsDnd: checked })}
-            aria-label="Não perturbe"
+            aria-label={t('agents.notifications.dnd.aria')}
           />
         </SettingRow>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <SettingRow label="Aprovações" description="Ações que precisam de você.">
+          <SettingRow
+            label={t('agents.notifications.approvals.label')}
+            description={t('agents.notifications.approvals.description')}
+          >
             <Switch
               checked={settings.notificationsApprovals ?? true}
               onCheckedChange={(checked) =>
                 void saveSettings({ notificationsApprovals: checked })
               }
-              aria-label="Notificar aprovações"
+              aria-label={t('agents.notifications.approvals.aria')}
             />
           </SettingRow>
-          <SettingRow label="Perguntas" description="Perguntas estruturadas do agente.">
+          <SettingRow
+            label={t('agents.notifications.questions.label')}
+            description={t('agents.notifications.questions.description')}
+          >
             <Switch
               checked={settings.notificationsQuestions ?? true}
               onCheckedChange={(checked) =>
                 void saveSettings({ notificationsQuestions: checked })
               }
-              aria-label="Notificar perguntas"
+              aria-label={t('agents.notifications.questions.aria')}
             />
           </SettingRow>
-          <SettingRow label="Conclusões" description="Turnos de agente concluídos.">
+          <SettingRow
+            label={t('agents.notifications.completions.label')}
+            description={t('agents.notifications.completions.description')}
+          >
             <Switch
               checked={settings.notificationsCompletions ?? true}
               onCheckedChange={(checked) =>
                 void saveSettings({ notificationsCompletions: checked })
               }
-              aria-label="Notificar conclusões"
+              aria-label={t('agents.notifications.completions.aria')}
             />
           </SettingRow>
-          <SettingRow label="Tarefas" description="Tarefas que precisam de uma pessoa.">
+          <SettingRow
+            label={t('agents.notifications.tasks.label')}
+            description={t('agents.notifications.tasks.description')}
+          >
             <Switch
               checked={settings.notificationsTasks ?? true}
               onCheckedChange={(checked) => void saveSettings({ notificationsTasks: checked })}
-              aria-label="Notificar tarefas"
+              aria-label={t('agents.notifications.tasks.aria')}
             />
           </SettingRow>
         </div>
       </SettingsSection>
 
-      <SettingsSection
-        title="Navegador controlado"
-        description="Política de hosts do navegador CDP. A denylist vence a allowlist; metadata de nuvem é sempre bloqueado."
-      >
+      <SettingsSection title={t('agents.browser.title')} description={t('agents.browser.description')}>
         <SettingRow
           vertical
-          label="Hosts permitidos"
-          description="Lista separada por vírgula (ex.: github.com, notion.so). Vazio libera hosts públicos."
+          label={t('agents.browser.allowed.label')}
+          description={t('agents.browser.allowed.description')}
         >
           <Input
             defaultValue={(settings.browserAllowedDomains ?? []).join(', ')}
-            aria-label="Hosts permitidos no navegador"
-            placeholder="github.com, notion.so"
+            aria-label={t('agents.browser.allowed.aria')}
+            placeholder={t('agents.browser.allowed.placeholder')}
             onBlur={(event) =>
               void saveSettings({
                 browserAllowedDomains: event.target.value
@@ -250,13 +253,13 @@ export function AgentsTab() {
         </SettingRow>
         <SettingRow
           vertical
-          label="Hosts bloqueados"
-          description="Sempre negados; avaliados antes da allowlist."
+          label={t('agents.browser.blocked.label')}
+          description={t('agents.browser.blocked.description')}
         >
           <Input
             defaultValue={(settings.browserBlockedDomains ?? []).join(', ')}
-            aria-label="Hosts bloqueados no navegador"
-            placeholder="banco.com, admin.interno"
+            aria-label={t('agents.browser.blocked.aria')}
+            placeholder={t('agents.browser.blocked.placeholder')}
             onBlur={(event) =>
               void saveSettings({
                 browserBlockedDomains: event.target.value
@@ -268,44 +271,44 @@ export function AgentsTab() {
           />
         </SettingRow>
         <SettingRow
-          label="Permitir hosts privados"
-          description="Localhost, 127.0.0.1 e redes RFC1918. Desligue para evitar SSRF; necessário para dev servers locais."
+          label={t('agents.browser.privateHosts.label')}
+          description={t('agents.browser.privateHosts.description')}
         >
           <Switch
             checked={settings.browserAllowPrivateHosts ?? true}
             onCheckedChange={(checked) =>
               void saveSettings({ browserAllowPrivateHosts: checked })
             }
-            aria-label="Permitir hosts privados no navegador"
+            aria-label={t('agents.browser.privateHosts.aria')}
           />
         </SettingRow>
         <SettingRow
-          label="Navegador em rotinas"
-          description="Permite ações de navegador em tarefas/rotinas sem card de aprovação. A allowlist/denylist de hosts continua valendo; desktop continua fail-closed."
+          label={t('agents.browser.routines.label')}
+          description={t('agents.browser.routines.description')}
         >
           <Switch
             checked={settings.computerAllowUnattendedBrowser ?? false}
             onCheckedChange={(checked) =>
               void saveSettings({ computerAllowUnattendedBrowser: checked })
             }
-            aria-label="Permitir navegador em rotinas não assistidas"
+            aria-label={t('agents.browser.routines.aria')}
           />
         </SettingRow>
       </SettingsSection>
 
       <SettingsSection
-        title="Apps do desktop"
-        description="Allowlist/denylist por processo ou título da janela, aplicada antes de qualquer clique/teclado. A denylist vence."
+        title={t('agents.desktopApps.title')}
+        description={t('agents.desktopApps.description')}
       >
         <SettingRow
           vertical
-          label="Apps permitidos"
-          description="Separados por vírgula (ex.: notepad, chrome, code). Vazio libera todos, exceto a denylist."
+          label={t('agents.desktopApps.allowed.label')}
+          description={t('agents.desktopApps.allowed.description')}
         >
           <Input
             defaultValue={(settings.computerAllowedApps ?? []).join(', ')}
-            aria-label="Apps permitidos no computador"
-            placeholder="notepad, chrome"
+            aria-label={t('agents.desktopApps.allowed.aria')}
+            placeholder={t('agents.desktopApps.allowed.placeholder')}
             onBlur={(event) =>
               void saveSettings({
                 computerAllowedApps: event.target.value
@@ -318,13 +321,13 @@ export function AgentsTab() {
         </SettingRow>
         <SettingRow
           vertical
-          label="Apps bloqueados"
-          description="Sempre negados; avaliados antes da allowlist."
+          label={t('agents.desktopApps.blocked.label')}
+          description={t('agents.desktopApps.blocked.description')}
         >
           <Input
             defaultValue={(settings.computerBlockedApps ?? []).join(', ')}
-            aria-label="Apps bloqueados no computador"
-            placeholder="1password, banking"
+            aria-label={t('agents.desktopApps.blocked.aria')}
+            placeholder={t('agents.desktopApps.blocked.placeholder')}
             onBlur={(event) =>
               void saveSettings({
                 computerBlockedApps: event.target.value
@@ -338,19 +341,19 @@ export function AgentsTab() {
       </SettingsSection>
 
       <SettingsSection
-        title="Desktop privado (computer use)"
-        description="Desktop isolado em Docker, independente do sandbox de comandos. Estas opções valem quando o agente usa o ambiente “Desktop privado”."
+        title={t('agents.computer.title')}
+        description={t('agents.computer.description')}
       >
         <SettingRow
           vertical
-          label="Imagem do computer use"
-          description="Imagem gráfica publicada no GHCR (Xvfb + Chromium + xdotool + noVNC). Baixe com o botão ou informe outra imagem acessível ao daemon. Para produção, prefira um digest fixo."
+          label={t('agents.computer.image.label')}
+          description={t('agents.computer.image.description')}
         >
           <div className="flex flex-col gap-2">
             <Input
               value={computerDockerImage}
               maxLength={200}
-              aria-label="Imagem Docker do computer use"
+              aria-label={t('agents.computer.image.aria')}
               placeholder={DEFAULT_COMPUTER_DOCKER_IMAGE}
               onChange={(event) => setComputerDockerImage(event.target.value)}
               onBlur={() => {
@@ -373,7 +376,7 @@ export function AgentsTab() {
                 size="sm"
                 variant="secondary"
                 disabled={computerImageBusy || !computerDockerImage.trim()}
-                aria-label="Baixar imagem do computer use"
+                aria-label={t('agents.computer.downloadAria')}
                 onClick={() => {
                   const image = computerDockerImage.trim();
                   if (!image) return;
@@ -384,10 +387,10 @@ export function AgentsTab() {
                   void api
                     .dockerPullImage(image)
                     .then(() =>
-                      toast.success('Imagem do computer use baixada', { description: image }),
+                      toast.success(t('agents.computer.downloaded'), { description: image }),
                     )
                     .catch((error) =>
-                      toast.error('Não foi possível baixar a imagem', {
+                      toast.error(t('agents.computer.downloadFailed'), {
                         description: String(error),
                       }),
                     )
@@ -399,7 +402,7 @@ export function AgentsTab() {
                 ) : (
                   <Download className="mr-1.5 size-3.5" />
                 )}
-                Baixar imagem
+                {t('agents.computer.download')}
               </Button>
               {computerDockerImage.trim() !== DEFAULT_COMPUTER_DOCKER_IMAGE ? (
                 <Button
@@ -411,7 +414,7 @@ export function AgentsTab() {
                     void saveSettings({ computerDockerImage: DEFAULT_COMPUTER_DOCKER_IMAGE });
                   }}
                 >
-                  Usar imagem publicada
+                  {t('agents.computer.usePublished')}
                 </Button>
               ) : null}
             </div>
@@ -419,13 +422,13 @@ export function AgentsTab() {
         </SettingRow>
         <SettingRow
           vertical
-          label="Container do computer use"
-          description="Nome fixo do container gráfico. Ele é criado no primeiro screenshot e mantido entre ações."
+          label={t('agents.computer.container.label')}
+          description={t('agents.computer.container.description')}
         >
           <Input
             defaultValue={settings.computerDockerContainer ?? 'zylara-computer'}
             maxLength={80}
-            aria-label="Nome do container do computer use"
+            aria-label={t('agents.computer.container.aria')}
             onBlur={(event) => {
               const value = event.target.value.trim();
               if (value) void saveSettings({ computerDockerContainer: value });
@@ -435,15 +438,15 @@ export function AgentsTab() {
         <div className="grid gap-3 sm:grid-cols-2">
           <SettingRow
             vertical
-            label="Ações por turno"
-            description="Limite de computer use em um único turno."
+            label={t('agents.computer.actionsPerTurn.label')}
+            description={t('agents.computer.actionsPerTurn.description')}
           >
             <Input
               type="number"
               min={1}
               max={200}
               defaultValue={settings.computerMaxActionsPerTurn ?? 20}
-              aria-label="Máximo de ações de computer use por turno"
+              aria-label={t('agents.computer.actionsPerTurn.aria')}
               onBlur={(event) => {
                 const value = Math.max(1, Math.min(200, Number(event.target.value) || 20));
                 void saveSettings({ computerMaxActionsPerTurn: value });
@@ -452,15 +455,15 @@ export function AgentsTab() {
           </SettingRow>
           <SettingRow
             vertical
-            label="Ações por hora"
-            description="Limite por agente em janela móvel de uma hora."
+            label={t('agents.computer.actionsPerHour.label')}
+            description={t('agents.computer.actionsPerHour.description')}
           >
             <Input
               type="number"
               min={1}
               max={2000}
               defaultValue={settings.computerMaxActionsPerHour ?? 120}
-              aria-label="Máximo de ações de computer use por hora"
+              aria-label={t('agents.computer.actionsPerHour.aria')}
               onBlur={(event) => {
                 const value = Math.max(1, Math.min(2_000, Number(event.target.value) || 120));
                 void saveSettings({ computerMaxActionsPerHour: value });
@@ -471,10 +474,7 @@ export function AgentsTab() {
         <SettingsBlock>
           <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
             <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
-            <p className="text-[11px] leading-relaxed text-warning">
-              Docker Desktop/Engine precisa estar instalado e rodando. O agente controla um display
-              isolado no container; o noVNC fica em loopback, somente para você observar.
-            </p>
+            <p className="text-[11px] leading-relaxed text-warning">{t('agents.computer.warning')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -488,19 +488,19 @@ export function AgentsTab() {
                   .then((count) =>
                     toast.success(
                       count === 0
-                        ? 'Nenhum container Zylara ativo'
-                        : `${count} container(s) removido(s)`,
+                        ? t('agents.computer.cleanupNone')
+                        : t('agents.computer.cleanupRemoved', { count }),
                     ),
                   )
                   .catch((error) =>
-                    toast.error('Não foi possível limpar', {
+                    toast.error(t('agents.computer.cleanupFailed'), {
                       description: String(error),
                     }),
                   )
                   .finally(() => setDockerBusy(false));
               }}
             >
-              Limpar containers
+              {t('agents.computer.cleanup')}
             </Button>
             <Button
               size="sm"
@@ -509,18 +509,22 @@ export function AgentsTab() {
                 void api
                   .platformDiagnostics()
                   .then((diagnostics) =>
-                    toast.info(`Diagnóstico · v${diagnostics.version}`, {
-                      description: `${diagnostics.activeTurns.length} turno(s) ativo(s) · ${diagnostics.openTasks} tarefa(s) aberta(s) · ${diagnostics.activeComputerSessions} sessão(ões) de computer use`,
+                    toast.info(t('agents.computer.diagnosticsTitle', { version: diagnostics.version }), {
+                      description: t('agents.computer.diagnosticsBody', {
+                        turns: diagnostics.activeTurns.length,
+                        tasks: diagnostics.openTasks,
+                        sessions: diagnostics.activeComputerSessions,
+                      }),
                     }),
                   )
                   .catch((error) =>
-                    toast.error('Não foi possível ler o diagnóstico', {
+                    toast.error(t('agents.computer.diagnosticsFailed'), {
                       description: String(error),
                     }),
                   );
               }}
             >
-              Diagnóstico
+              {t('agents.computer.diagnostics')}
             </Button>
           </div>
         </SettingsBlock>

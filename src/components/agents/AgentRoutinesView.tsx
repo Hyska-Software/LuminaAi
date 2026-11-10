@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CalendarDays,
   ChevronDown,
@@ -43,9 +44,10 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
+import { compareText } from '@/lib/i18n/format';
 import {
   ROUTINE_STATUS_META,
-  WEEKDAY_HEADERS,
+  weekdayHeaders,
   buildRoutineCalendar,
   monthGrid,
   monthLabel,
@@ -62,25 +64,25 @@ import { useAgentStore, useChatStore, useUiStore } from '@/lib/store';
 import type { Agent, AgentRoutine } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
-const MONTH_OPTIONS = [
-  'Janeiro',
-  'Fevereiro',
-  'Março',
-  'Abril',
-  'Maio',
-  'Junho',
-  'Julho',
-  'Agosto',
-  'Setembro',
-  'Outubro',
-  'Novembro',
-  'Dezembro',
+const MONTH_KEYS = [
+  'routinesView.months.january',
+  'routinesView.months.february',
+  'routinesView.months.march',
+  'routinesView.months.april',
+  'routinesView.months.may',
+  'routinesView.months.june',
+  'routinesView.months.july',
+  'routinesView.months.august',
+  'routinesView.months.september',
+  'routinesView.months.october',
+  'routinesView.months.november',
+  'routinesView.months.december',
 ] as const;
 
 const VIEW_OPTIONS = [
-  { value: 'day', label: 'Dia' },
-  { value: 'week', label: 'Semana' },
-  { value: 'month', label: 'Mês' },
+  { value: 'day', labelKey: 'routinesView.views.day' },
+  { value: 'week', labelKey: 'routinesView.views.week' },
+  { value: 'month', labelKey: 'routinesView.views.month' },
 ];
 
 function RoutineChip({
@@ -94,15 +96,25 @@ function RoutineChip({
   week: boolean;
   onEdit: (routine: AgentRoutine) => void;
 }) {
+  const { t } = useTranslation('agents');
   const routine = entry.routine;
   const paused = !routine.enabled;
-  const agentName = agent?.name ?? 'Agente removido';
+  const agentName = agent?.name ?? t('routinesView.removedAgent');
   return (
     <button
       type="button"
       onClick={() => onEdit(routine)}
-      aria-label={`${routine.title}, ${entry.timeLabel}, ${agentName}${paused ? ', pausada' : ''}`}
-      title={`${routine.title} · ${agentName} · ${routineScheduleLabel(routine)}`}
+      aria-label={t('routinesView.chipAria', {
+        title: routine.title,
+        time: entry.timeLabel,
+        agent: agentName,
+        paused: paused ? t('routinesView.chipPausedSuffix') : '',
+      })}
+      title={t('routinesView.chipTitle', {
+        title: routine.title,
+        agent: agentName,
+        schedule: routineScheduleLabel(routine),
+      })}
       className={cn(
         'flex w-full items-center gap-1 rounded-md px-1.5 text-left leading-4 transition-colors duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -150,20 +162,23 @@ function RoutineRow({
   onOpenThread: (routine: AgentRoutine) => void;
   onDelete: (routine: AgentRoutine) => void;
 }) {
+  const { t } = useTranslation('agents');
   const meta = routine.lastStatus ? ROUTINE_STATUS_META[routine.lastStatus] : null;
-  const agentName = agent?.name ?? 'Agente removido';
+  const agentName = agent?.name ?? t('routinesView.removedAgent');
   return (
     <article className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised/50 px-3 py-2.5">
       <AgentAvatar size="sm" avatar={agent?.avatar ?? DEFAULT_AGENT_AVATAR} />
       <button
         type="button"
         onClick={() => onEdit(routine)}
-        aria-label={`Editar rotina ${routine.title}`}
+        aria-label={t('routinesView.editAria', { title: routine.title })}
         className="min-w-0 flex-1 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-foreground">{routine.title}</span>
-          {!routine.enabled ? <Badge tone="neutral">Pausada</Badge> : null}
+          {!routine.enabled ? (
+            <Badge tone="neutral">{t('routinesView.paused')}</Badge>
+          ) : null}
           {meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
         </span>
         <span className="mt-0.5 block truncate text-[11px] text-foreground-muted">
@@ -181,11 +196,14 @@ function RoutineRow({
         checked={routine.enabled}
         onCheckedChange={() => onToggle(routine)}
         disabled={busy}
-        aria-label={`${routine.enabled ? 'Pausar' : 'Ativar'} rotina ${routine.title}`}
+        aria-label={t(
+          routine.enabled ? 'routinesView.pauseAria' : 'routinesView.resumeAria',
+          { title: routine.title },
+        )}
       />
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <IconButton label={`Ações da rotina ${routine.title}`} size="sm">
+          <IconButton label={t('routinesView.actionsAria', { title: routine.title })} size="sm">
             <Ellipsis className="size-4" />
           </IconButton>
         </DropdownMenuTrigger>
@@ -195,26 +213,26 @@ function RoutineRow({
             disabled={busy}
             onSelect={() => onRun(routine)}
           >
-            Executar agora
+            {t('routinesView.runNow')}
           </DropdownMenuItem>
           <DropdownMenuItem
             icon={<Pencil className="size-3.5" />}
             onSelect={() => onEdit(routine)}
           >
-            Editar
+            {t('common:actions.edit')}
           </DropdownMenuItem>
           <DropdownMenuItem
             icon={<ScrollText className="size-3.5" />}
             onSelect={() => onRuns(routine)}
           >
-            Execuções
+            {t('routinesView.runs')}
           </DropdownMenuItem>
           <DropdownMenuItem
             icon={<MessageSquare className="size-3.5" />}
             disabled={!routine.conversationId}
             onSelect={() => onOpenThread(routine)}
           >
-            Abrir conversa
+            {t('routinesView.openConversation')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -222,7 +240,7 @@ function RoutineRow({
             icon={<Trash2 className="size-3.5" />}
             onSelect={() => onDelete(routine)}
           >
-            Excluir
+            {t('common:actions.delete')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -231,6 +249,7 @@ function RoutineRow({
 }
 
 export function AgentRoutinesView() {
+  const { t } = useTranslation('agents');
   const [routines, setRoutines] = useState<AgentRoutine[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -321,10 +340,7 @@ export function AgentRoutinesView() {
         const trigger = triggerRank(left) - triggerRank(right);
         if (trigger !== 0) return trigger;
         if (left.enabled !== right.enabled) return left.enabled ? -1 : 1;
-        return (
-          left.nextRunAt - right.nextRunAt ||
-          left.title.localeCompare(right.title, 'pt-BR', { sensitivity: 'base' })
-        );
+        return left.nextRunAt - right.nextRunAt || compareText(left.title, right.title);
       }),
     [filtered],
   );
@@ -333,10 +349,14 @@ export function AgentRoutinesView() {
     effectiveFilter !== 'all' ? agentsById[effectiveFilter] ?? null : null;
   const enabledCount = filtered.filter((routine) => routine.enabled).length;
   const summary = filteredAgent
-    ? `${filtered.length} ${filtered.length === 1 ? 'rotina' : 'rotinas'} de ${filteredAgent.name}`
-    : `${filtered.length} ${filtered.length === 1 ? 'rotina' : 'rotinas'} · ${enabledCount} ${
-        enabledCount === 1 ? 'ativa' : 'ativas'
-      }`;
+    ? t('routinesView.summaryAgent', {
+        count: filtered.length,
+        agent: filteredAgent.name,
+      })
+    : t('routinesView.summary', {
+        count: filtered.length,
+        enabled: enabledCount,
+      });
 
   const openCreate = () => {
     if (creatableAgents.length === 0) return;
@@ -364,7 +384,7 @@ export function AgentRoutinesView() {
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
     } catch (caught) {
-      toast.error('Não foi possível atualizar a rotina', { description: String(caught) });
+      toast.error(t('routinesView.updateError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -378,16 +398,16 @@ export function AgentRoutinesView() {
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
       if (updated.lastStatus === 'queued') {
-        toast.success('Rotina enfileirada', { description: updated.title });
+        toast.success(t('routinesView.queued'), { description: updated.title });
       } else if (updated.lastStatus === 'error') {
-        toast.error('A rotina terminou com erro', {
+        toast.error(t('routinesView.runFailed'), {
           description: updated.lastError ?? updated.title,
         });
       } else {
-        toast.success('Rotina executada', { description: updated.title });
+        toast.success(t('routinesView.ran'), { description: updated.title });
       }
     } catch (caught) {
-      toast.error('Não foi possível executar a rotina', { description: String(caught) });
+      toast.error(t('routinesView.runError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -401,10 +421,10 @@ export function AgentRoutinesView() {
       setRoutines((current) => current.filter((entry) => entry.id !== deleteTarget.id));
       if (editor?.routine?.id === deleteTarget.id) setEditor(null);
       if (runsTarget?.id === deleteTarget.id) setRunsTarget(null);
-      toast.success('Rotina excluída');
+      toast.success(t('routinesView.deleted'));
       setDeleteTarget(null);
     } catch (caught) {
-      toast.error('Não foi possível excluir a rotina', { description: String(caught) });
+      toast.error(t('routinesView.deleteError'), { description: String(caught) });
     } finally {
       setDeleting(false);
     }
@@ -445,11 +465,11 @@ export function AgentRoutinesView() {
 
   const renderMonth = () => (
     <section
-      aria-label={`Calendário de ${rangeLabel('month', anchor)}`}
+      aria-label={t('routinesView.monthCalendarAria', { range: rangeLabel('month', anchor) })}
       className="overflow-hidden rounded-2xl border border-border bg-border"
     >
       <div className="grid grid-cols-7 gap-px bg-border">
-        {WEEKDAY_HEADERS.map((label) => (
+        {weekdayHeaders().map((label) => (
           <div
             key={label}
             className="bg-surface px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle"
@@ -472,7 +492,7 @@ export function AgentRoutinesView() {
                 type="button"
                 onClick={() => openDay(day)}
                 aria-current={day.isToday ? 'date' : undefined}
-                aria-label={`Abrir ${rangeLabel('day', day.date)} na visão de dia`}
+                aria-label={t('routinesView.openDayAria', { range: rangeLabel('day', day.date) })}
                 className={cn(
                   'flex size-5 items-center justify-center rounded-full text-[11px] tabular-nums transition-colors duration-150',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -500,10 +520,10 @@ export function AgentRoutinesView() {
                   <button
                     type="button"
                     onClick={() => openDay(day)}
-                    aria-label={`Ver mais ${entries.length - visible.length} rotinas de ${rangeLabel(
-                      'day',
-                      day.date,
-                    )}`}
+                    aria-label={t('routinesView.moreAria', {
+                      count: entries.length - visible.length,
+                      range: rangeLabel('day', day.date),
+                    })}
                     className="w-full rounded px-1.5 text-left text-[10px] text-foreground-subtle hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
                     +{entries.length - visible.length}
@@ -519,7 +539,7 @@ export function AgentRoutinesView() {
 
   const renderWeek = () => (
     <section
-      aria-label={`Calendário de ${rangeLabel('week', anchor)}`}
+      aria-label={t('routinesView.weekCalendarAria', { range: rangeLabel('week', anchor) })}
       className="overflow-hidden rounded-2xl border border-border bg-border"
     >
       <div className="grid grid-cols-7 gap-px bg-border">
@@ -528,14 +548,14 @@ export function AgentRoutinesView() {
             <button
               type="button"
               onClick={() => openDay(day)}
-              aria-label={`Abrir ${rangeLabel('day', day.date)} na visão de dia`}
+              aria-label={t('routinesView.openDayAria', { range: rangeLabel('day', day.date) })}
               className={cn(
                 'flex w-full items-center justify-between gap-1 text-[10px] font-semibold uppercase tracking-wider',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                 day.isToday ? 'text-accent' : 'text-foreground-subtle',
               )}
             >
-              <span>{WEEKDAY_HEADERS[index]}</span>
+              <span>{weekdayHeaders()[index]}</span>
               <span
                 className={cn(
                   'flex size-5 items-center justify-center rounded-full text-[11px] tabular-nums',
@@ -572,7 +592,7 @@ export function AgentRoutinesView() {
       <section className="rounded-2xl border border-border bg-surface-raised/40 p-2">
         {entries.length === 0 ? (
           <p className="px-3 py-8 text-center text-[12px] text-foreground-subtle">
-            Nenhuma rotina agendada para este dia.
+            {t('routinesView.noRoutinesForDay')}
           </p>
         ) : (
           <div className="space-y-0.5">
@@ -587,7 +607,7 @@ export function AgentRoutinesView() {
                   key={`${routine.id}-${entry.at}`}
                   type="button"
                   onClick={() => openEdit(routine)}
-                  aria-label={`Editar rotina ${routine.title}`}
+                  aria-label={t('routinesView.editAria', { title: routine.title })}
                   className={cn(
                     'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-surface-hover',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -606,7 +626,8 @@ export function AgentRoutinesView() {
                       {routine.title}
                     </span>
                     <span className="block truncate text-[11px] text-foreground-muted">
-                      {agent?.name ?? 'Agente removido'} · {routineScheduleLabel(routine)}
+                      {agent?.name ?? t('routinesView.removedAgent')} ·{' '}
+                      {routineScheduleLabel(routine)}
                     </span>
                   </span>
                   {meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
@@ -625,12 +646,12 @@ export function AgentRoutinesView() {
         <div className="flex w-full flex-col gap-3 px-5 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight">Rotinas</h1>
+              <h1 className="text-xl font-semibold tracking-tight">{t('routinesView.title')}</h1>
               <p className="mt-0.5 text-[12px] text-foreground-muted">{summary}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <NativeSelect
-                aria-label="Filtrar rotinas por agente"
+                aria-label={t('routinesView.filterAria')}
                 value={effectiveFilter}
                 wrapperClassName="w-52 shrink-0"
                 className="h-8 text-[12px]"
@@ -640,23 +661,27 @@ export function AgentRoutinesView() {
                   )
                 }
               >
-                <option value="all">Todos os agentes</option>
+                <option value="all">{t('routinesView.allAgents')}</option>
                 {filterAgents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                    {agent.archivedAt !== null ? ' · arquivado' : ''}
+                    {agent.archivedAt !== null
+                      ? t('routineEditor.archivedAgent', { name: agent.name })
+                      : agent.name}
                   </option>
                 ))}
               </NativeSelect>
               <SegmentedControl
                 size="sm"
-                ariaLabel="Visão do calendário"
-                options={VIEW_OPTIONS}
+                ariaLabel={t('routinesView.viewAria')}
+                options={VIEW_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: t(option.labelKey as never),
+                }))}
                 value={mode}
                 onChange={(value) => setMode(value as RoutineCalendarMode)}
               />
               <IconButton
-                label="Recarregar rotinas"
+                label={t('routinesView.reloadAria')}
                 size="sm"
                 loading={loading}
                 onClick={() => void load()}
@@ -668,12 +693,12 @@ export function AgentRoutinesView() {
                 size="sm"
                 disabled={creatableAgents.length === 0}
                 title={
-                  creatableAgents.length === 0 ? 'Crie um agente primeiro' : undefined
+                  creatableAgents.length === 0 ? t('routinesView.createAgentFirst') : undefined
                 }
                 onClick={openCreate}
               >
                 <Plus className="mr-1.5 size-4" />
-                Nova rotina
+                {t('routinesView.newRoutine')}
               </Button>
             </div>
           </div>
@@ -685,10 +710,10 @@ export function AgentRoutinesView() {
               onClick={() => setAnchor(new Date())}
             >
               <CalendarDays className="mr-1.5 size-4" />
-              Hoje
+              {t('routinesView.today')}
             </Button>
             <IconButton
-              label="Período anterior"
+              label={t('routinesView.previousPeriod')}
               size="sm"
               onClick={() => shift(-1)}
             >
@@ -701,7 +726,7 @@ export function AgentRoutinesView() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      aria-label="Escolher mês e ano"
+                      aria-label={t('routinesView.chooseMonthAria')}
                       className="text-[15px] font-semibold tracking-tight text-foreground"
                     >
                       {monthLabel(anchor)}
@@ -710,15 +735,15 @@ export function AgentRoutinesView() {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
                     <DropdownMenuLabel>{anchor.getFullYear()}</DropdownMenuLabel>
-                    {MONTH_OPTIONS.map((label, index) => (
+                    {MONTH_KEYS.map((key, index) => (
                       <DropdownMenuItem
-                        key={label}
+                        key={key}
                         checked={anchor.getMonth() === index}
                         onSelect={() =>
                           setAnchor(new Date(anchor.getFullYear(), index, 1))
                         }
                       >
-                        {label}
+                        {t(key as never)}
                       </DropdownMenuItem>
                     ))}
                     <DropdownMenuSeparator />
@@ -729,7 +754,7 @@ export function AgentRoutinesView() {
                         )
                       }
                     >
-                      Ano anterior ({anchor.getFullYear() - 1})
+                      {t('routinesView.previousYear', { year: anchor.getFullYear() - 1 })}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() =>
@@ -738,7 +763,7 @@ export function AgentRoutinesView() {
                         )
                       }
                     >
-                      Próximo ano ({anchor.getFullYear() + 1})
+                      {t('routinesView.nextYear', { year: anchor.getFullYear() + 1 })}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -749,7 +774,7 @@ export function AgentRoutinesView() {
               )}
             </div>
             <IconButton
-              label="Próximo período"
+              label={t('routinesView.nextPeriod')}
               size="sm"
               onClick={() => shift(1)}
             >
@@ -766,7 +791,7 @@ export function AgentRoutinesView() {
               role="alert"
               className="mb-4 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger"
             >
-              <p className="font-medium">Não foi possível carregar as rotinas.</p>
+              <p className="font-medium">{t('routinesView.loadError')}</p>
               <p className="mt-0.5 text-[11px] opacity-80">{error}</p>
               <Button
                 size="sm"
@@ -774,7 +799,7 @@ export function AgentRoutinesView() {
                 className="mt-1 px-0"
                 onClick={() => void load()}
               >
-                Tentar novamente
+                {t('common:actions.retry')}
               </Button>
             </div>
           ) : null}
@@ -784,8 +809,8 @@ export function AgentRoutinesView() {
               role="status"
               className="flex min-h-60 items-center justify-center gap-2 text-[13px] text-foreground-muted"
             >
-              <Spinner size="sm" label="Carregando rotinas" />
-              Carregando rotinas…
+              <Spinner size="sm" label={t('routinesView.loadingAria')} />
+              {t('routinesView.loading')}
             </div>
           ) : (
             <div className="space-y-5">
@@ -797,7 +822,7 @@ export function AgentRoutinesView() {
                     id="routines-list-heading"
                     className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle"
                   >
-                    Todas as rotinas
+                    {t('routinesView.allRoutines')}
                   </h2>
                   <span className="text-[11px] text-foreground-subtle">
                     {rowRoutines.length}
@@ -806,11 +831,10 @@ export function AgentRoutinesView() {
                 {rowRoutines.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-border px-4 py-8 text-center">
                     <p className="text-[13px] font-medium text-foreground">
-                      Nenhuma rotina para este filtro.
+                      {t('routinesView.emptyTitle')}
                     </p>
                     <p className="mt-1 text-[12px] text-foreground-muted">
-                      Crie uma rotina para o agente executar sozinho enquanto o app estiver
-                      aberto.
+                      {t('routinesView.emptyDescription')}
                     </p>
                     {creatableAgents.length > 0 ? (
                       <Button
@@ -820,7 +844,7 @@ export function AgentRoutinesView() {
                         onClick={openCreate}
                       >
                         <Plus className="mr-1.5 size-4" />
-                        Nova rotina
+                        {t('routinesView.newRoutine')}
                       </Button>
                     ) : null}
                   </div>
@@ -879,11 +903,11 @@ export function AgentRoutinesView() {
       >
         <DialogContent className="max-w-md">
           <DialogHeader className="pb-4 pr-12">
-            <DialogTitle>Excluir rotina?</DialogTitle>
+            <DialogTitle>{t('routinesView.deleteTitle')}</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `“${deleteTarget.title}” será removida permanentemente. A conversa principal do agente é preservada.`
-                : 'Esta ação não pode ser desfeita.'}
+                ? t('routinesView.deleteDescription', { title: deleteTarget.title })
+                : t('routinesView.deleteIrreversible')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -892,7 +916,7 @@ export function AgentRoutinesView() {
               disabled={deleting}
               onClick={() => setDeleteTarget(null)}
             >
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button
               variant="danger"
@@ -904,7 +928,7 @@ export function AgentRoutinesView() {
               ) : (
                 <Trash2 className="mr-1.5 size-3.5" />
               )}
-              Excluir
+              {t('common:actions.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

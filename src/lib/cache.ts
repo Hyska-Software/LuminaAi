@@ -3,6 +3,7 @@
  * (docs/goals/prompt-cache/PLAN.md §4.7/§7). No React and no I/O: everything here
  * is unit-testable and must never invent a number the provider did not report.
  */
+import { t } from './i18n';
 import type {
   CacheBreakReason,
   CacheSample,
@@ -18,61 +19,84 @@ export interface CacheTone {
   description: string;
 }
 
-const CACHE_STATE_META: Record<CacheState, CacheTone> = {
-  cold: {
-    label: 'Frio',
-    tone: 'muted',
-    description: 'Primeiro request do epoch: ainda não há prefixo para reutilizar.',
-  },
-  warming: {
-    label: 'Aquecendo',
-    tone: 'accent',
-    description: 'O provedor ainda está gravando o prefixo no cache.',
-  },
-  stable: {
-    label: 'Estável',
-    tone: 'success',
-    description: 'Requests em regime estão lendo o prefixo do cache.',
-  },
-  degraded: {
-    label: 'Cache caiu',
-    tone: 'warning',
-    description: 'O prefixo persistente mudou e o cache foi invalidado.',
-  },
-  unsupported: {
-    label: 'Não reportado',
-    tone: 'muted',
-    description: 'O provedor/gateway não reporta cache para este modelo.',
-  },
-  provider_policy: {
-    label: 'Política do provedor',
-    tone: 'muted',
-    description: 'O provedor não reutiliza este request por regra própria de cache.',
-  },
-};
-
+/**
+ * Copy is resolved at call time so the indicator follows a runtime language
+ * switch; the tone is a stable, non-translated token.
+ */
 export function cacheStateMeta(state: CacheState | null | undefined): CacheTone {
-  return CACHE_STATE_META[state ?? 'cold'] ?? CACHE_STATE_META.cold;
+  switch (state ?? 'cold') {
+    case 'warming':
+      return {
+        label: t('code:cache.state.warming.label'),
+        tone: 'accent',
+        description: t('code:cache.state.warming.description'),
+      };
+    case 'stable':
+      return {
+        label: t('code:cache.state.stable.label'),
+        tone: 'success',
+        description: t('code:cache.state.stable.description'),
+      };
+    case 'degraded':
+      return {
+        label: t('code:cache.state.degraded.label'),
+        tone: 'warning',
+        description: t('code:cache.state.degraded.description'),
+      };
+    case 'unsupported':
+      return {
+        label: t('code:cache.state.unsupported.label'),
+        tone: 'muted',
+        description: t('code:cache.state.unsupported.description'),
+      };
+    case 'provider_policy':
+      return {
+        label: t('code:cache.state.provider_policy.label'),
+        tone: 'muted',
+        description: t('code:cache.state.provider_policy.description'),
+      };
+    case 'cold':
+    default:
+      return {
+        label: t('code:cache.state.cold.label'),
+        tone: 'muted',
+        description: t('code:cache.state.cold.description'),
+      };
+  }
 }
 
-const BREAK_LABELS: Record<CacheBreakReason, string> = {
-  first_request: 'Primeiro request do epoch',
-  system_prompt: 'Prompt de sistema mudou',
-  tool_definitions: 'Definições de ferramentas mudaram',
-  history_rewrite: 'Histórico foi reescrito',
-  head_trim: 'Histórico antigo foi cortado',
-  compaction: 'Contexto compactado',
-  model_switch: 'Modelo ou provedor mudou',
-  protocol_fallback: 'Protocolo de wire mudou',
-  attachments: 'Anexos mudaram',
-  config_change: 'Configuração mudou',
-  ttl_expired: 'Cache expirou (TTL)',
-  provider_policy: 'Regra do provedor',
-};
-
 export function cacheBreakLabel(reason: CacheBreakReason | null | undefined): string | null {
-  if (!reason) return null;
-  return BREAK_LABELS[reason] ?? String(reason);
+  switch (reason) {
+    case 'first_request':
+      return t('code:cache.break.first_request');
+    case 'system_prompt':
+      return t('code:cache.break.system_prompt');
+    case 'tool_definitions':
+      return t('code:cache.break.tool_definitions');
+    case 'history_rewrite':
+      return t('code:cache.break.history_rewrite');
+    case 'head_trim':
+      return t('code:cache.break.head_trim');
+    case 'compaction':
+      return t('code:cache.break.compaction');
+    case 'model_switch':
+      return t('code:cache.break.model_switch');
+    case 'protocol_fallback':
+      return t('code:cache.break.protocol_fallback');
+    case 'attachments':
+      return t('code:cache.break.attachments');
+    case 'config_change':
+      return t('code:cache.break.config_change');
+    case 'ttl_expired':
+      return t('code:cache.break.ttl_expired');
+    case 'provider_policy':
+      return t('code:cache.break.provider_policy');
+    case null:
+    case undefined:
+      return null;
+    default:
+      return String(reason);
+  }
 }
 
 export function clampPercent(value: number | null | undefined): number | null {

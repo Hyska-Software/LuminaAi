@@ -7,6 +7,7 @@
  * (`goal_can_continue`); aqui evitamos IPC/turno quando a resposta local já é
  * não.
  */
+import { t } from './i18n';
 import type { GoalPauseReason, GoalRound, GoalStatus, GoalView, TurnKind } from './types';
 
 /** Entrada da decisão de autocontinuação (snapshot do `codeStore` + chatStore). */
@@ -57,20 +58,22 @@ export function canStartGoalRound(input: Omit<GoalContinuationInput, 'layoutMode
   return goal.status === 'active' && goal.rounds < goal.maxRounds;
 }
 
-/** Rótulo do status do objetivo para pill/badge/cards. */
+/** Rótulo do status do objetivo para pill/badge/cards (resolvido no render). */
 export function goalStatusLabel(goal: GoalView, streaming = false): string {
-  if (streaming && goal.status === 'active') return 'Trabalhando';
+  if (streaming && goal.status === 'active') return t('code:goal.status.working');
   switch (goal.status) {
     case 'active':
-      return goal.autoContinue ? 'Automático' : 'Manual';
+      return goal.autoContinue
+        ? t('code:goal.status.automatic')
+        : t('code:goal.status.manual');
     case 'paused':
-      return 'Pausado';
+      return t('code:goal.status.paused');
     case 'completed':
-      return 'Concluído';
+      return t('code:goal.status.completed');
     case 'blocked':
-      return 'Bloqueado';
+      return t('code:goal.status.blocked');
     default:
-      return 'Objetivo';
+      return t('code:goal.status.fallback');
   }
 }
 
@@ -78,15 +81,15 @@ export function goalStatusLabel(goal: GoalView, streaming = false): string {
 export function goalPauseReasonLabel(reason: GoalPauseReason | null | undefined): string | null {
   switch (reason) {
     case 'user':
-      return 'Pausado por você';
+      return t('code:goal.pause.user');
     case 'error':
-      return 'Pausado após um erro';
+      return t('code:goal.pause.error');
     case 'max_rounds':
-      return 'Limite de rodadas atingido';
+      return t('code:goal.pause.max_rounds');
     case 'stalled':
-      return 'Sem progresso em 3 rodadas';
+      return t('code:goal.pause.stalled');
     case 'interrupted':
-      return 'Rodada anterior interrompida';
+      return t('code:goal.pause.interrupted');
     default:
       return null;
   }
@@ -95,7 +98,7 @@ export function goalPauseReasonLabel(reason: GoalPauseReason | null | undefined)
 /** Linha de rodada (`3 de 25`); sem objetivo devolve string vazia. */
 export function goalRoundLabel(goal: GoalView | null | undefined): string {
   if (!goal) return '';
-  return `Rodada ${goal.rounds} de ${goal.maxRounds}`;
+  return t('code:goal.round', { current: goal.rounds, max: goal.maxRounds });
 }
 
 /** Número da próxima rodada (1-based, limitado ao orçamento). */
@@ -123,31 +126,33 @@ export function goalIsRunning(
 export function goalContinuationReasonLabel(reason: string | null | undefined): string {
   switch (reason) {
     case 'no_goal':
-      return 'Defina um objetivo para esta sessão.';
+      return t('code:goal.continuation.no_goal');
     case 'not_code':
-      return 'O objetivo só existe em sessões do layout Code.';
+      return t('code:goal.continuation.not_code');
     case 'completed':
-      return 'Objetivo concluído.';
+      return t('code:goal.continuation.completed');
     case 'blocked':
-      return 'Objetivo bloqueado.';
+      return t('code:goal.continuation.blocked');
     case 'paused':
-      return 'Objetivo pausado.';
+      return t('code:goal.continuation.paused');
     case 'not_armed':
-      return 'Continuidade automática desativada.';
+      return t('code:goal.continuation.not_armed');
     case 'max_rounds':
-      return 'Limite de rodadas atingido.';
+      return t('code:goal.continuation.max_rounds');
     case 'plan_mode':
-      return 'Modo Plano ativo: aprove o plano para continuar.';
+      return t('code:goal.continuation.plan_mode');
     case 'pending_approval':
-      return 'Há uma aprovação ou pergunta pendente.';
+      return t('code:goal.continuation.pending_approval');
     case 'busy':
-      return 'Já existe um turno em andamento nesta sessão.';
+      return t('code:goal.continuation.busy');
     case 'no_workspace':
-      return 'Abra uma pasta para trabalhar no objetivo.';
+      return t('code:goal.continuation.no_workspace');
     case 'interrupted':
-      return 'A última rodada foi interrompida. Retome para continuar.';
+      return t('code:goal.continuation.interrupted');
     default:
-      return reason ? `Não foi possível continuar: ${reason}` : 'Não foi possível continuar.';
+      return reason
+        ? t('code:goal.continuation.unknown', { reason })
+        : t('code:goal.continuation.fallback');
   }
 }
 
@@ -155,9 +160,11 @@ export function goalContinuationReasonLabel(reason: string | null | undefined): 
 export function goalProgressSummary(goal: GoalView, rounds: readonly GoalRound[] = []): string {
   const finished = rounds.filter((round) => round.outcome != null);
   const totalMs = finished.reduce((total, round) => total + (round.durationMs ?? 0), 0);
-  const parts = [`${goal.rounds}/${goal.maxRounds} rodadas`];
-  if (finished.length > 0) parts.push(`${finished.length} concluídas`);
-  if (totalMs > 0) parts.push(`${Math.round(totalMs / 1000)}s`);
+  const parts = [t('code:goal.progress.rounds', { rounds: goal.rounds, max: goal.maxRounds })];
+  if (finished.length > 0) {
+    parts.push(t('code:goal.progress.finished', { count: finished.length }));
+  }
+  if (totalMs > 0) parts.push(t('code:goal.progress.duration', { seconds: Math.round(totalMs / 1000) }));
   return parts.join(' · ');
 }
 

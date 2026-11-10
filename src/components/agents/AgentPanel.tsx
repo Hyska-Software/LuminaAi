@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Activity,
   CalendarClock,
   Database,
   Globe2,
-  Loader2,
   Monitor,
   PanelRightClose,
   Settings,
@@ -35,11 +35,11 @@ import type { Agent, AgentChannel, Conversation } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { TASK_ATTENTION_STATUSES } from './agentTaskStatus';
 
-const PANEL_TABS: ReadonlyArray<{ id: AgentPanelTab; label: string; icon: LucideIcon }> = [
-  { id: 'screen', label: 'Tela', icon: Monitor },
-  { id: 'routines', label: 'Rotinas', icon: CalendarClock },
-  { id: 'browser', label: 'Navegador', icon: Globe2 },
-  { id: 'data', label: 'Dados', icon: Database },
+const PANEL_TABS: ReadonlyArray<{ id: AgentPanelTab; labelKey: string; icon: LucideIcon }> = [
+  { id: 'screen', labelKey: 'panel.tabs.screen', icon: Monitor },
+  { id: 'routines', labelKey: 'panel.tabs.routines', icon: CalendarClock },
+  { id: 'browser', labelKey: 'panel.tabs.browser', icon: Globe2 },
+  { id: 'data', labelKey: 'panel.tabs.data', icon: Database },
 ];
 
 export interface AgentPanelContext {
@@ -57,6 +57,7 @@ const PANEL_BODY_ID = 'agent-panel-body';
  * Code panel.
  */
 export function AgentPanel() {
+  const { t } = useTranslation('agents');
   const open = useUiStore((state) => state.agentPanelOpen);
   const tab = useUiStore((state) => state.agentPanelTab);
   const setTab = useUiStore((state) => state.setAgentPanelTab);
@@ -82,8 +83,8 @@ export function AgentPanel() {
     ? conversations.find((entry) => entry.id === activeId) ?? null
     : null;
   const channel = useMemo<AgentChannel | null>(
-    () => (activeChannelId ? ({ id: activeChannelId, name: 'Canal' } as AgentChannel) : null),
-    [activeChannelId],
+    () => (activeChannelId ? ({ id: activeChannelId, name: t('panel.channelFallbackName') } as AgentChannel) : null),
+    [activeChannelId, t],
   );
 
   const loadActivityCount = useCallback(async () => {
@@ -167,7 +168,7 @@ export function AgentPanel() {
   };
 
   const visibleTabs = channel
-    ? ([{ id: 'data', label: 'Canal', icon: Database }] as const)
+    ? ([{ id: 'data', labelKey: 'panel.channelTab', icon: Database }] as const)
     : PANEL_TABS;
   const activeTab = channel ? 'data' : tab;
   const compactTabs = layout.width < 430;
@@ -226,7 +227,7 @@ export function AgentPanel() {
         />
       ) : null}
       <aside
-        aria-label="Painel do agente"
+        aria-label={t('panel.aria')}
         style={{ width: panelWidth }}
         className={cn(
           'z-50 flex h-full shrink-0 flex-col bg-surface',
@@ -238,11 +239,12 @@ export function AgentPanel() {
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
           role="tablist"
-          aria-label="Conteúdo do painel do agente"
+          aria-label={t('panel.tabsAria')}
           className="flex min-w-0 flex-1 items-center gap-0.5"
         >
           {visibleTabs.map((entry) => {
             const selected = activeTab === entry.id;
+            const label = t(entry.labelKey as never);
             const Icon = entry.icon;
             return (
               <button
@@ -259,8 +261,8 @@ export function AgentPanel() {
                 }}
                 onClick={() => selectTab(entry.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, entry.id)}
-                aria-label={entry.label}
-                title={entry.label}
+                aria-label={label}
+                title={label}
                 className={cn(
                   'flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium',
                   'transition-colors duration-150',
@@ -272,21 +274,25 @@ export function AgentPanel() {
                 )}
               >
                 <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
-                {compactTabs ? null : entry.label}
+                {compactTabs ? null : label}
               </button>
             );
           })}
         </div>
         {agent ? (
-          <Tooltip content="Editar agente" side="bottom">
-            <IconButton label="Editar agente" size="sm" onClick={context?.onEdit}>
+          <Tooltip content={t('panel.editAgent')} side="bottom">
+            <IconButton label={t('panel.editAgent')} size="sm" onClick={context?.onEdit}>
               <Settings aria-hidden className="size-3.5" />
             </IconButton>
           </Tooltip>
         ) : null}
-        <Tooltip content="Atividade" side="bottom">
+        <Tooltip content={t('activityDialog.title')} side="bottom">
           <IconButton
-            label={`Atividade${activityCount > 0 ? `: ${activityCount} pendente(s)` : ''}`}
+            label={
+              activityCount > 0
+                ? t('panel.activityWithCount', { count: activityCount })
+                : t('activityDialog.title')
+            }
             size="sm"
             onClick={() => setActivityOpen(true)}
             className="relative"
@@ -299,8 +305,8 @@ export function AgentPanel() {
             ) : null}
           </IconButton>
         </Tooltip>
-        <Tooltip content="Recolher painel" side="bottom">
-          <IconButton label="Recolher painel" size="sm" onClick={() => setOpen(false)}>
+        <Tooltip content={t('panel.collapse')} side="bottom">
+          <IconButton label={t('panel.collapse')} size="sm" onClick={() => setOpen(false)}>
             <PanelRightClose className="size-4" />
           </IconButton>
         </Tooltip>
@@ -314,10 +320,9 @@ export function AgentPanel() {
       >
         {channel ? (
           <div className="flex flex-col gap-2 p-3 text-[12px] text-foreground-muted">
-            <p className="font-medium text-foreground">Canal compartilhado</p>
+            <p className="font-medium text-foreground">{t('panel.sharedChannel')}</p>
             <p>
-              As abas Tela/Rotinas/Navegador ficam disponíveis ao abrir a thread de um agente
-              membro.
+              {t('panel.sharedChannelHint')}
             </p>
           </div>
         ) : activeTab === 'screen' && context ? (
@@ -330,7 +335,7 @@ export function AgentPanel() {
           <AgentPanelData context={context} />
         ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-center text-[12px] text-foreground-muted">
-            Selecione um agente para ver os detalhes.
+            {t('panel.selectAgent')}
           </div>
         )}
       </div>
@@ -342,7 +347,7 @@ export function AgentPanel() {
           min={SIDE_PANEL_WIDTH_MIN}
           max={layout.maxWidth}
           step={SIDE_PANEL_WIDTH_STEP}
-          label="Redimensionar painel do agente"
+          label={t('panel.resizeAria')}
           className="absolute inset-y-0 -left-2 z-10"
           onResize={handleResize}
           onResizeEnd={handleResizeEnd}

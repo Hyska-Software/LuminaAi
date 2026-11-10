@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { i18n, t } from '@/lib/i18n';
 
 interface Props {
   children: ReactNode;
@@ -17,9 +18,22 @@ export class ErrorBoundary extends Component<Props, State> {
     return { error };
   }
 
+  componentDidMount() {
+    // Class components do not re-render on language changes by themselves.
+    i18n.on('languageChanged', this.handleLanguageChange);
+  }
+
+  componentWillUnmount() {
+    i18n.off('languageChanged', this.handleLanguageChange);
+  }
+
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('UI crashed', error, info.componentStack);
   }
+
+  private handleLanguageChange = () => {
+    if (this.state.error) this.forceUpdate();
+  };
 
   render() {
     if (!this.state.error) return this.props.children;
@@ -29,10 +43,9 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="mb-4 flex size-10 items-center justify-center rounded-xl bg-danger-soft text-danger">
             <AlertTriangle className="size-5" />
           </div>
-          <h1 className="text-lg font-semibold tracking-tight">Algo quebrou por aqui</h1>
+          <h1 className="text-lg font-semibold tracking-tight">{t('common:errors.boundaryTitle')}</h1>
           <p className="mt-2 text-sm text-foreground-muted">
-            A interface encontrou um erro inesperado. Você pode recarregar a janela — suas conversas
-            estão salvas localmente.
+            {t('common:errors.boundaryDescription')}
           </p>
           <pre className="mt-4 max-h-32 overflow-auto rounded-lg bg-surface p-3 text-xs text-foreground-muted">
             {this.state.error.message}
@@ -44,14 +57,14 @@ export class ErrorBoundary extends Component<Props, State> {
               className="inline-flex h-9 items-center gap-2 rounded-lg bg-foreground px-3.5 text-sm font-medium text-background transition-colors hover:opacity-90"
             >
               <RotateCcw className="size-4" />
-              Recarregar
+              {t('common:errors.reload')}
             </button>
             <button
               type="button"
               onClick={() => this.setState({ error: null })}
               className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-3.5 text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-hover"
             >
-              Tentar novamente
+              {t('common:actions.retry')}
             </button>
           </div>
         </div>

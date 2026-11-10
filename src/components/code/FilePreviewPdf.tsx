@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   ChevronLeft,
@@ -48,6 +49,7 @@ export interface FilePreviewPdfProps {
  * workbench de código (o preview de artefatos não é reutilizado aqui).
  */
 export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfProps) {
+  const { t } = useTranslation('code');
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -162,10 +164,10 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
         <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
           <AlertTriangle aria-hidden className="size-4" strokeWidth={1.75} />
         </span>
-        <p className="text-[13px] font-medium text-foreground">Não foi possível renderizar o PDF</p>
+        <p className="text-[13px] font-medium text-foreground">{t('code:pdf.errorTitle')}</p>
         <p className="max-w-sm text-xs leading-relaxed text-foreground-muted">{error}</p>
         <Button size="sm" variant="secondary" onClick={() => setAttempt((value) => value + 1)}>
-          Tentar novamente
+          {t('common:actions.retry')}
         </Button>
       </div>
     );
@@ -217,11 +219,11 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
     <div className={cn('flex h-full min-h-0 flex-col', className)}>
       <div
         role="toolbar"
-        aria-label="Controles do PDF"
+        aria-label={t('code:pdf.toolbar')}
         className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-raised px-2 py-1.5"
       >
         <IconButton
-          label="Página anterior"
+          label={t('code:pdf.prev')}
           size="sm"
           disabled={!ready || pageNumber <= 1}
           onClick={() => goToPage(pageNumber - 1)}
@@ -232,10 +234,10 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
           aria-live="polite"
           className="min-w-[104px] text-center text-[11px] tabular-nums text-foreground-muted"
         >
-          {ready ? `Página ${pageNumber} de ${numPages}` : 'Carregando…'}
+          {ready ? t('code:pdf.pageInfo', { page: pageNumber, total: numPages }) : t('code:pdf.loading')}
         </span>
         <IconButton
-          label="Próxima página"
+          label={t('code:pdf.next')}
           size="sm"
           disabled={!ready || pageNumber >= numPages}
           onClick={() => goToPage(pageNumber + 1)}
@@ -244,7 +246,7 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
         </IconButton>
         <span aria-hidden className="mx-1 h-4 w-px bg-border" />
         <IconButton
-          label="Diminuir zoom"
+          label={t('code:pdf.zoomOut')}
           size="sm"
           disabled={!ready || zoom <= MIN_ZOOM}
           onClick={() => setZoom((value) => clampZoom(value - ZOOM_STEP))}
@@ -258,7 +260,7 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
           {Math.round(zoom * 100)}%
         </span>
         <IconButton
-          label="Aumentar zoom"
+          label={t('code:pdf.zoomIn')}
           size="sm"
           disabled={!ready || zoom >= MAX_ZOOM}
           onClick={() => setZoom((value) => clampZoom(value + ZOOM_STEP))}
@@ -266,9 +268,9 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
           <ZoomIn aria-hidden className="size-4" strokeWidth={1.8} />
         </IconButton>
         <span aria-hidden className="mx-1 h-4 w-px bg-border" />
-        <Tooltip content="Ajustar à largura" side="bottom">
+        <Tooltip content={t('code:pdf.fitWidth')} side="bottom">
           <IconButton
-            label="Ajustar à largura"
+            label={t('code:pdf.fitWidth')}
             size="sm"
             disabled={!ready}
             onClick={() => setZoom(1)}
@@ -277,36 +279,36 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
           </IconButton>
         </Tooltip>
         {rendering ? (
-          <Spinner size="xs" className="ml-auto text-foreground-subtle" label="Renderizando página" />
+          <Spinner size="xs" className="ml-auto text-foreground-subtle" label={t('code:pdf.rendering')} />
         ) : null}
       </div>
 
       <div
         ref={scrollRef}
         role="region"
-        aria-label={`Prévia do PDF ${path}`}
+        aria-label={t('code:pdf.region', { path })}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         className="min-h-0 flex-1 overflow-auto bg-surface p-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
       >
         {!ready ? (
           <div className="flex h-full flex-col items-center justify-center gap-2">
-            <Spinner size="md" className="text-accent" label="Carregando PDF" />
-            <span className="text-xs text-foreground-muted">Carregando PDF…</span>
+            <Spinner size="md" className="text-accent" label={t('code:pdf.loadingPdf')} />
+            <span className="text-xs text-foreground-muted">{t('code:pdf.loadingPdfText')}</span>
           </div>
         ) : (
           <div className="relative flex min-h-full justify-center">
             <canvas
               ref={canvasRef}
               role="img"
-              aria-label={`Página ${pageNumber} de ${numPages} do PDF ${path}`}
+              aria-label={t('code:pdf.canvasAria', { page: pageNumber, total: numPages, path })}
               className="h-auto max-w-none rounded-md border border-border bg-background shadow-sm"
             />
             {renderError ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background px-4 text-center">
                 <AlertTriangle aria-hidden className="size-4 text-danger" strokeWidth={1.75} />
                 <p className="text-xs text-foreground-muted">
-                  Não foi possível renderizar esta página.
+                  {t('code:pdf.renderError')}
                 </p>
                 <p className="max-w-sm text-[11px] leading-relaxed text-foreground-subtle">
                   {renderError}

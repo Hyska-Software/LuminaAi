@@ -364,7 +364,7 @@ pub fn select_asset_for(
 
 /// Parses the combined `release.json` (single artifact list for all platforms).
 pub fn candidate_from_manifest(raw: &str, base: &str) -> Result<ReleaseCandidate> {
-    let manifest: ReleaseManifest = serde_json::from_str(raw).context("release.json inválido")?;
+    let manifest: ReleaseManifest = serde_json::from_str(raw).context(crate::i18n::t("update.errors.invalidManifest"))?;
     if !manifest.product.trim().is_empty() && !manifest.product.eq_ignore_ascii_case("Zylara") {
         bail!(
             "release.json pertence a outro produto: {}",
@@ -373,7 +373,10 @@ pub fn candidate_from_manifest(raw: &str, base: &str) -> Result<ReleaseCandidate
     }
     let version = normalize_version(&manifest.version);
     if !safe_version(&version) {
-        bail!("versão inválida no release.json: {}", manifest.version);
+        bail!(crate::i18n::t_args(
+            "update.errors.invalidManifestVersion",
+            &[("version", &manifest.version)],
+        ));
     }
     let asset = select_asset_for(
         std::env::consts::OS,
@@ -393,13 +396,16 @@ pub fn candidate_from_manifest(raw: &str, base: &str) -> Result<ReleaseCandidate
 
 /// Parses the REST API fallback. Drafts and prereleases are ignored.
 pub fn candidate_from_api(raw: &str, base: &str) -> Result<Option<ReleaseCandidate>> {
-    let release: GithubRelease = serde_json::from_str(raw).context("resposta da API inválida")?;
+    let release: GithubRelease = serde_json::from_str(raw).context(crate::i18n::t("update.errors.invalidApiResponse"))?;
     if release.draft || release.prerelease {
         return Ok(None);
     }
     let version = normalize_version(&release.tag_name);
     if !safe_version(&version) {
-        bail!("tag inválida na API: {}", release.tag_name);
+        bail!(crate::i18n::t_args(
+            "update.errors.invalidApiTag",
+            &[("tag", &release.tag_name)],
+        ));
     }
     let artifacts: Vec<ManifestArtifact> = release
         .assets
@@ -502,7 +508,7 @@ pub async fn latest_release(client: &reqwest::Client) -> Result<Option<ReleaseCa
 pub async fn release_notes(client: &reqwest::Client, version: &str) -> Result<UpdateNotes> {
     let version = normalize_version(version);
     if !safe_version(&version) {
-        bail!("versão inválida: {version}");
+        bail!(crate::i18n::t_args("update.errors.invalidVersion", &[("version", &version)]));
     }
     let base = web_base();
     let fallback = UpdateNotes {
@@ -517,7 +523,7 @@ pub async fn release_notes(client: &reqwest::Client, version: &str) -> Result<Up
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
-        .context("falha ao consultar as notas da versão")?;
+        .context(crate::i18n::t("update.errors.notesFetch"))?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(fallback);
     }
@@ -528,7 +534,7 @@ pub async fn release_notes(client: &reqwest::Client, version: &str) -> Result<Up
     if body.len() > 4 * MANIFEST_LIMIT {
         bail!("resposta da API maior que o esperado");
     }
-    let release: GithubRelease = serde_json::from_str(&body).context("resposta da API inválida")?;
+    let release: GithubRelease = serde_json::from_str(&body).context(crate::i18n::t("update.errors.invalidApiResponse"))?;
     let notes = release
         .body
         .map(|body| body.trim().to_string())

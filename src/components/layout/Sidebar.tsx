@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   Code,
@@ -133,6 +134,7 @@ function ConversationRow({
   onExport,
   onDelete,
 }: ConversationRowProps) {
+  const { t } = useTranslation('common');
   if (renaming) {
     return (
       <div
@@ -156,7 +158,7 @@ function ConversationRow({
               onCancelRename();
             }
           }}
-          aria-label="Renomear conversa"
+          aria-label={t('shell.sidebar.renameAria')}
           className={cn(
             'h-8 w-full min-w-0 rounded-lg border border-accent bg-background px-2',
             'text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent/30',
@@ -194,7 +196,7 @@ function ConversationRow({
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            aria-label="Opções da conversa"
+            aria-label={t('shell.sidebar.optionsAria')}
             onClick={(event) => event.stopPropagation()}
             className={cn(
               'absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md',
@@ -218,23 +220,23 @@ function ConversationRow({
               icon={conversation.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
               onSelect={onTogglePin}
             >
-              {conversation.pinned ? 'Desafixar' : 'Fixar'}
+              {conversation.pinned ? t('shell.menu.unpin') : t('shell.menu.pin')}
             </MenuEntry>
             <MenuEntry icon={<Pencil className="size-3.5" />} onSelect={onStartRename}>
-              Renomear
+              {t('shell.menu.rename')}
             </MenuEntry>
             <MenuEntry icon={<Download className="size-3.5" />} onSelect={onExport}>
-              Exportar
+              {t('shell.menu.export')}
             </MenuEntry>
             <MenuEntry
               icon={conversation.codeLinked ? <Unlink className="size-3.5" /> : <Code className="size-3.5" />}
               onSelect={onToggleCodeLink}
             >
-              {conversation.codeLinked ? 'Remover do Code' : 'Usar no Code'}
+              {conversation.codeLinked ? t('shell.menu.removeFromCode') : t('shell.menu.useInCode')}
             </MenuEntry>
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <MenuEntry icon={<Trash className="size-3.5" />} danger onSelect={onDelete}>
-              Excluir
+              {t('actions.delete')}
             </MenuEntry>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -245,6 +247,7 @@ function ConversationRow({
 
 /** Conversation sidebar (DESIGN §5): new chat, search, grouped history and footer. */
 export function Sidebar({ className, onClose }: SidebarProps) {
+  const { t, i18n } = useTranslation('common');
   const conversations = useChatStore((state) => state.conversations);
   const conversationsLoading = useChatStore((state) => state.conversationsLoading);
   const activeId = useChatStore((state) => state.activeId);
@@ -264,7 +267,8 @@ export function Sidebar({ className, onClose }: SidebarProps) {
   // sessions belong to their own listing (the shared ones still live here).
   const groups = useMemo(
     () => groupConversations(filterConversationsForLayout(conversations, 'chat')),
-    [conversations],
+    // Group labels are translated, so a language switch must rebuild them.
+    [conversations, i18n.language],
   );
 
   const handleNewChat = () => {
@@ -322,21 +326,26 @@ export function Sidebar({ className, onClose }: SidebarProps) {
     const ok = await useChatStore.getState().setConversationCodeLinked(conversation.id, linked);
     if (!ok) {
       toast.error(
-        linked ? 'Não foi possível adicionar a sessão ao Code' : 'Não foi possível remover a sessão do Code',
+        linked ? t('shell.toasts.codeLinkAddError') : t('shell.toasts.codeLinkRemoveError'),
       );
       return;
     }
-    toast.success(linked ? 'Sessão adicionada ao Code' : 'Sessão removida do Code', {
-      description: linked ? 'Agora ela aparece nos dois layouts.' : 'Ela continua disponível no Chat.',
-    });
+    toast.success(
+      linked ? t('shell.toasts.codeLinkAdded') : t('shell.toasts.codeLinkRemoved'),
+      {
+        description: linked
+          ? t('shell.toasts.codeLinkAddedDescription')
+          : t('shell.toasts.codeLinkRemovedDescription'),
+      },
+    );
   };
 
   const handleExport = async (conversation: Conversation) => {
     try {
       const path = await api.exportConversation(conversation.id, 'markdown');
-      if (path) toast.success('Conversa exportada', { description: path });
+      if (path) toast.success(t('shell.toasts.exported'), { description: path });
     } catch (error) {
-      toast.error('Não foi possível exportar', { description: String(error) });
+      toast.error(t('shell.toasts.exportError'), { description: String(error) });
     }
   };
 
@@ -349,7 +358,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
 
   return (
     <aside
-      aria-label="Conversas"
+      aria-label={t('shell.sidebar.aria')}
       className={cn('flex h-full w-full min-w-0 flex-col bg-surface', className)}
     >
       <div className="flex items-center gap-1.5 px-3 pb-1.5 pt-3">
@@ -360,10 +369,10 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           leftIcon={<SquarePen className="size-4" />}
           className="h-9 flex-1 justify-start rounded-xl px-3 text-[13px] font-medium"
         >
-          Novo chat
+          {t('shell.sidebar.newChat')}
         </Button>
         {onClose ? (
-          <IconButton label="Fechar barra lateral" size="sm" onClick={onClose}>
+          <IconButton label={t('shell.sidebar.close')} size="sm" onClick={onClose}>
             <X className="size-4" />
           </IconButton>
         ) : null}
@@ -373,8 +382,8 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           A Biblioteca é sempre visível; Skills depende do painel habilitado. */}
       <NavViewItem
         icon={<Library className="size-4" />}
-        label="Biblioteca"
-        ariaLabel="Abrir biblioteca"
+        label={t('shell.sidebar.library')}
+        ariaLabel={t('shell.sidebar.openLibrary')}
         active={activeView === 'library'}
         onSelect={handleOpenLibrary}
       />
@@ -382,8 +391,8 @@ export function Sidebar({ className, onClose }: SidebarProps) {
       {skillsPanelEnabled ? (
         <NavViewItem
           icon={<Sparkles className="size-4" />}
-          label="Skills"
-          ariaLabel="Gerenciar skills"
+          label={t('shell.sidebar.skills')}
+          ariaLabel={t('shell.sidebar.manageSkills')}
           active={activeView === 'skills'}
           onSelect={handleOpenSkills}
         />
@@ -399,7 +408,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
         )}
       >
         <Search className="size-4 shrink-0" />
-        <span className="min-w-0 truncate">Buscar conversas</span>
+        <span className="min-w-0 truncate">{t('shell.sidebar.search')}</span>
         <span className="ml-auto flex shrink-0 items-center gap-0.5">
           <Kbd>{modKey}</Kbd>
           <Kbd>K</Kbd>
@@ -408,20 +417,20 @@ export function Sidebar({ className, onClose }: SidebarProps) {
 
       <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-2">
         {conversationsLoading && conversations.length === 0 ? (
-          <div className="flex flex-col gap-2 px-1 py-3" role="status" aria-label="Carregando conversas">
+          <div className="flex flex-col gap-2 px-1 py-3" role="status" aria-label={t('shell.sidebar.loading')}>
             {[0, 1, 2, 3].map((index) => (
               <div key={index} className="h-7 animate-pulse rounded-lg bg-surface-hover motion-reduce:animate-none" />
             ))}
           </div>
         ) : groups.length === 0 ? (
           <p className="px-2 py-6 text-center text-xs leading-relaxed text-foreground-subtle">
-            Nenhuma conversa ainda.
+            {t('shell.sidebar.emptyTitle')}
             <br />
-            Comece um novo chat.
+            {t('shell.sidebar.emptyHint')}
           </p>
         ) : (
           groups.map((group) => (
-            <section key={group.label} aria-label={group.label} className="mb-1">
+            <section key={group.id} aria-label={group.label} className="mb-1">
               <h2 className="px-2 pb-1 pt-3 text-[11px] font-medium text-foreground-subtle">{group.label}</h2>
               <SortableList
                 ids={group.conversations.map((conversation) => conversation.id)}
@@ -472,7 +481,7 @@ export function Sidebar({ className, onClose }: SidebarProps) {
           )}
         >
           <Settings className="size-4" />
-          <span>Configurações</span>
+          <span>{t('shell.sidebar.settings')}</span>
           <span className="ml-auto text-[11px] tabular-nums text-foreground-subtle">
             {appInfo?.version ? `v${appInfo.version}` : ''}
           </span>
@@ -482,18 +491,19 @@ export function Sidebar({ className, onClose }: SidebarProps) {
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => (open ? undefined : setDeleteTarget(null))}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Excluir conversa</DialogTitle>
+            <DialogTitle>{t('shell.deleteDialog.title')}</DialogTitle>
           </DialogHeader>
           <DialogDescription className="px-6 pb-4">
-            {deleteTarget ? `“${deleteTarget.title}” será removida permanentemente.` : ''} Esta ação não pode ser
-            desfeita.
+            {deleteTarget
+              ? t('shell.deleteDialog.description', { title: deleteTarget.title })
+              : ''}
           </DialogDescription>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(null)}>
-              Cancelar
+              {t('actions.cancel')}
             </Button>
             <Button variant="danger" size="sm" onClick={() => void handleConfirmDelete()}>
-              Excluir
+              {t('actions.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

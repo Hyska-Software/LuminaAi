@@ -109,7 +109,7 @@ pub async fn get_cache_stats(
 ) -> Result<CacheStatsView, String> {
     let conversation_id = conversation_id.trim().to_string();
     if conversation_id.is_empty() {
-        return Err("conversa inválida para estatísticas de cache".into());
+        return Err(crate::i18n::t("cache.errors.invalidConversation").into());
     }
     let limit = limit.unwrap_or(50).clamp(1, 500);
     let db = &state.db;
@@ -132,7 +132,7 @@ pub async fn get_cache_stats(
         .get_conversation(&conversation_id)
         .ok()
         .flatten()
-        .ok_or_else(|| "conversa não encontrada".to_string())?;
+        .ok_or_else(|| crate::i18n::t("cache.errors.conversationNotFound"))?;
     let provider = state.catalog.provider(&conversation.provider_id);
     let model = state
         .catalog

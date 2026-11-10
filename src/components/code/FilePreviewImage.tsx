@@ -7,6 +7,7 @@ import {
   type KeyboardEvent,
   type SyntheticEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FileWarning, Maximize2, Minimize2, ZoomIn, ZoomOut } from 'lucide-react';
 import { Badge, Button, IconButton } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -111,6 +112,7 @@ export function FilePreviewImage({
   dataBase64,
   className,
 }: FilePreviewImageProps) {
+  const { t } = useTranslation('code');
   const [zoom, setZoom] = useState(1);
   const [mode, setMode] = useState<ViewMode>('fit');
   const [measured, setMeasured] = useState<{ width: number; height: number } | null>(null);
@@ -234,7 +236,7 @@ export function FilePreviewImage({
     <div className={cn('flex h-full min-h-0 flex-col', className)}>
       <div
         role="toolbar"
-        aria-label="Controles da imagem"
+        aria-label={t('code:image.controls')}
         className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-raised px-2 py-1.5"
       >
         <Badge tone="accent" size="sm" title={formatLabel}>
@@ -245,13 +247,13 @@ export function FilePreviewImage({
             'px-1 text-[11px] tabular-nums',
             dimensions ? 'text-foreground-muted' : 'text-foreground-subtle',
           )}
-          title="Dimensões da imagem em pixels"
+          title={t('code:image.dimensionsTitle')}
         >
           {dimensions ?? '—'}
         </span>
         <span aria-hidden className="mx-1 h-4 w-px bg-border" />
         <IconButton
-          label="Diminuir zoom"
+          label={t('code:image.zoomOut')}
           size="sm"
           disabled={mode === 'custom' && zoom <= MIN_ZOOM}
           onClick={zoomOut}
@@ -265,7 +267,7 @@ export function FilePreviewImage({
           {Math.round(baseScale * 100)}%
         </span>
         <IconButton
-          label="Aumentar zoom"
+          label={t('code:image.zoomIn')}
           size="sm"
           disabled={mode === 'custom' && zoom >= MAX_ZOOM}
           onClick={zoomIn}
@@ -280,7 +282,7 @@ export function FilePreviewImage({
           onClick={fitToWindow}
           leftIcon={<Minimize2 aria-hidden className="size-3.5" strokeWidth={1.8} />}
         >
-          Ajustar à janela
+          {t('code:image.fit')}
         </Button>
         <Button
           size="sm"
@@ -289,7 +291,7 @@ export function FilePreviewImage({
           onClick={actualSize}
           leftIcon={<Maximize2 aria-hidden className="size-3.5" strokeWidth={1.8} />}
         >
-          Tamanho real
+          {t('code:image.actual')}
         </Button>
       </div>
 
@@ -302,18 +304,17 @@ export function FilePreviewImage({
             <FileWarning aria-hidden className="size-4" strokeWidth={1.75} />
           </span>
           <p className="text-[12.5px] font-medium text-foreground">
-            Não foi possível decodificar a imagem
+            {t('code:image.failedTitle')}
           </p>
           <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
-            O navegador não consegue exibir este formato. Use "Recarregar arquivo" ou abra no
-            editor externo.
+            {t('code:image.failedDescription')}
           </p>
         </div>
       ) : (
         <div
           ref={stageRef}
           role="region"
-          aria-label={`Visualização da imagem ${path}`}
+          aria-label={t('code:image.region', { path })}
           tabIndex={0}
           onKeyDown={handleKeyDown}
           style={CHECKERBOARD}

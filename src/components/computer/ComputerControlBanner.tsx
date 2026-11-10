@@ -1,4 +1,5 @@
 import { MonitorStop, Square } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 
 import { useActiveComputerSessions } from './useActiveComputerSessions';
@@ -17,6 +18,7 @@ export function ComputerControlBanner({
 }: {
   hideConversationId?: string | null;
 }) {
+  const { t } = useTranslation('common');
   const { sessions, clear } = useActiveComputerSessions();
   const agents = useAgentStore((state) => state.agentsById);
   const conversations = useChatStore((state) => state.conversations);
@@ -36,9 +38,9 @@ export function ComputerControlBanner({
       await api.stopAllComputerSessions();
       await stopAllTurns();
       clear();
-      toast.success('Computer use interrompido');
+      toast.success(t('computer.stopped'));
     } catch (error) {
-      toast.error('Não foi possível parar', { description: String(error) });
+      toast.error(t('computer.stopFailed'), { description: String(error) });
     }
   };
 
@@ -52,10 +54,10 @@ export function ComputerControlBanner({
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-[12px] font-medium text-foreground">
-          Zylara está controlando o computador
+          {t('computer.bannerTitle')}
         </p>
         <p className="truncate text-[11px] text-foreground-muted">
-          {agent?.name ?? 'Agente'} · {conversation?.title ?? session.conversationId} ·{' '}
+          {agent?.name ?? t('computer.unknownAgent')} · {conversation?.title ?? session.conversationId} ·{' '}
           {session.backend}
         </p>
         <button
@@ -68,12 +70,12 @@ export function ComputerControlBanner({
             void openConversation(session.conversationId);
           }}
         >
-          Abrir thread
+          {t('computer.openThread')}
         </button>
       </div>
       <Button size="sm" variant="danger" onClick={() => void stopAll()}>
         <Square className="mr-1.5 size-3.5" />
-        Parar
+        {t('actions.stop')}
       </Button>
     </div>
   );

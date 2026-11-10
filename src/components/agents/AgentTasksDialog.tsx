@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Ban, Loader2, Play, Plus, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
@@ -19,21 +20,19 @@ import {
   Textarea,
 } from '@/components/ui';
 import { api } from '@/lib/api';
+import { formatCurrency, formatDateTime } from '@/lib/i18n/format';
 import { selectActiveAgents, useAgentStore } from '@/lib/store';
 import type { Agent, AgentTask, AgentTaskStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import {
   TASK_RESUMABLE_STATUSES,
-  TASK_STATUS_META,
+  taskStatusMeta,
 } from './agentTaskStatus';
 
 function taskTone(status: string): string {
-  return TASK_STATUS_META[status as AgentTaskStatus]?.tone ?? 'text-foreground-muted';
+  return taskStatusMeta(status as AgentTaskStatus).tone;
 }
 
-function taskLabel(status: string): string {
-  return TASK_STATUS_META[status as AgentTaskStatus]?.label ?? status;
-}
 export function AgentTasksDialog({
   agent,
   open,
@@ -43,6 +42,7 @@ export function AgentTasksDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation('agents');
   const agents = useAgentStore(useShallow(selectActiveAgents));
   const [tasks, setTasks] = useState<AgentTask[]>([]);
   const [loading, setLoading] = useState(false);
@@ -91,11 +91,11 @@ export function AgentTasksDialog({
 
   const create = async () => {
     if (!form.toAgentId || !form.title.trim() || !form.brief.trim()) {
-      toast.error('Preencha agente destino, título e brief');
+      toast.error(t('tasks.create.validation'));
       return;
     }
     if (form.toAgentId === agent?.id) {
-      toast.error('Escolha outro agente como dono da tarefa');
+      toast.error(t('tasks.create.otherAgent'));
       return;
     }
     setCreating(true);
@@ -115,9 +115,9 @@ export function AgentTasksDialog({
         brief: '',
         acceptance: '',
       }));
-      toast.success('Tarefa criada', { description: task.title });
+      toast.success(t('tasks.created'), { description: task.title });
     } catch (caught) {
-      toast.error('Não foi possível criar a tarefa', { description: String(caught) });
+      toast.error(t('tasks.createError'), { description: String(caught) });
     } finally {
       setCreating(false);
     }
@@ -128,9 +128,9 @@ export function AgentTasksDialog({
     try {
       const updated = await api.runAgentTaskNow(task.id);
       setTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success('Tarefa iniciada', { description: task.title });
+      toast.success(t('tasks.started'), { description: task.title });
     } catch (caught) {
-      toast.error('A tarefa não iniciou', { description: String(caught) });
+      toast.error(t('tasks.startError'), { description: String(caught) });
       await load();
     } finally {
       setBusyId(null);
@@ -142,9 +142,9 @@ export function AgentTasksDialog({
     try {
       const updated = await api.resumeAgentTask(task.id);
       setTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success('Tarefa retomada', { description: task.title });
+      toast.success(t('tasks.resumed'), { description: task.title });
     } catch (caught) {
-      toast.error('Não foi possível retomar', { description: String(caught) });
+      toast.error(t('tasks.resumeError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -155,9 +155,9 @@ export function AgentTasksDialog({
     try {
       const updated = await api.cancelAgentTask(task.id);
       setTasks((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success('Tarefa cancelada', { description: task.title });
+      toast.success(t('tasks.cancelled'), { description: task.title });
     } catch (caught) {
-      toast.error('Não foi possível cancelar', { description: String(caught) });
+      toast.error(t('tasks.cancelError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -169,10 +169,9 @@ export function AgentTasksDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader className="pb-4 pr-12">
-          <DialogTitle>Tarefas de {agent.name}</DialogTitle>
+          <DialogTitle>{t('tasks.forAgent', { name: agent.name })}</DialogTitle>
           <DialogDescription>
-            Trabalho delegado com dono, orçamento e thread própria. Tarefas rodam em segundo
-            plano sob o limite de concorrência do app.
+            {t('tasks.dialogDescription')}
           </DialogDescription>
         </DialogHeader>
 
@@ -180,7 +179,7 @@ export function AgentTasksDialog({
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
-                Tarefas
+                {t('tasks.heading')}
               </h3>
               <Button size="sm" variant="ghost" onClick={() => void load()} disabled={loading}>
                 {loading ? (
@@ -188,7 +187,7 @@ export function AgentTasksDialog({
                 ) : (
                   <RefreshCw className="mr-1.5 size-3.5" />
                 )}
-                Atualizar
+                {t('tasks.refresh')}
               </Button>
             </div>
             {error ? (
@@ -197,10 +196,12 @@ export function AgentTasksDialog({
               </p>
             ) : tasks.length === 0 ? (
               <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-[12px] text-foreground-subtle">
-                Nenhuma tarefa ainda. Crie uma para este agente ou use `delegate_task` em um canal.
+                {t('tasks.emptyHint')}
               </p>
             ) : (
-              tasks.map((task) => (
+              tasks.map((task) => {
+                const meta = taskStatusMeta(task.status);
+                return (
                 <article
                   key={task.id}
                   className="rounded-xl border border-border bg-surface/50 p-3"
@@ -211,20 +212,25 @@ export function AgentTasksDialog({
                       <p className="truncate text-[13px] font-medium text-foreground">
                         {task.title}
                       </p>
-                      <p className={cn('text-[11px]', taskTone(task.status))}>
-                        {taskLabel(task.status)} · {task.handoffCount} handoff(s)
+                      <p className={cn('text-[11px]', meta.tone)}>
+                        {t(meta.labelKey as never)} · {t('tasks.handoffs', { count: task.handoffCount })}
                       </p>
                       <p className="mt-1 line-clamp-2 text-[11px] text-foreground-muted">
                         {task.brief}
                       </p>
                       <p className="mt-1 text-[10px] text-foreground-subtle">
-                        Orçamento: {task.maxTurns} turnos · US$ {task.maxCost.toFixed(2)} ·{' '}
-                        {task.resultArtifactIds.length} artefato(s)
-                        {task.deadlineAt ? ` · prazo ${new Date(task.deadlineAt).toLocaleString()}` : ''}
+                        {t('tasks.budget', {
+                          turns: task.maxTurns,
+                          cost: formatCurrency(task.maxCost),
+                          artifacts: task.resultArtifactIds.length,
+                        })}
+                        {task.deadlineAt
+                          ? ` · ${t('tasks.deadline', { date: formatDateTime(new Date(task.deadlineAt)) })}`
+                          : ''}
                       </p>
                       {task.result ? (
                         <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-[11px] text-foreground-muted">
-                          Resultado: {task.result}
+                          {t('tasks.result', { result: task.result })}
                         </p>
                       ) : null}
                     </div>
@@ -241,7 +247,7 @@ export function AgentTasksDialog({
                       ) : (
                         <Play className="mr-1.5 size-3.5" />
                       )}
-                      Executar
+                      {t('tasks.run')}
                     </Button>
                     {TASK_RESUMABLE_STATUSES.includes(task.status) ? (
                       <Button
@@ -251,7 +257,7 @@ export function AgentTasksDialog({
                         onClick={() => void resume(task)}
                       >
                         <Play className="mr-1.5 size-3.5" />
-                        Retomar
+                        {t('tasks.resume')}
                       </Button>
                     ) : null}
                     <Button
@@ -261,20 +267,21 @@ export function AgentTasksDialog({
                       onClick={() => void cancel(task)}
                     >
                       <Ban className="mr-1.5 size-3.5" />
-                      Cancelar
+                      {t('tasks.cancel')}
                     </Button>
                   </div>
                 </article>
-              ))
+                );
+              })
             )}
           </section>
 
           <section className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
-              Nova tarefa
+              {t('tasks.newTask')}
             </h3>
             <div className="space-y-1.5">
-              <Label htmlFor="task-owner">Agente dono</Label>
+              <Label htmlFor="task-owner">{t('tasks.form.owner')}</Label>
               <NativeSelect
                 id="task-owner"
                 value={form.toAgentId}
@@ -288,36 +295,36 @@ export function AgentTasksDialog({
               </NativeSelect>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="task-title">Título</Label>
+              <Label htmlFor="task-title">{t('tasks.form.title')}</Label>
               <Input
                 id="task-title"
                 value={form.title}
                 maxLength={120}
-                placeholder="Revisar o relatório trimestral"
+                placeholder={t('tasks.form.titlePlaceholder')}
                 onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="task-brief">Brief</Label>
+              <Label htmlFor="task-brief">{t('tasks.form.brief')}</Label>
               <Textarea
                 id="task-brief"
                 rows={3}
                 maxLength={16000}
                 value={form.brief}
                 className="min-h-20 resize-y text-[12px]"
-                placeholder="O que deve ser feito, com que contexto e restrições."
+                placeholder={t('tasks.form.briefPlaceholder')}
                 onChange={(event) => setForm((current) => ({ ...current, brief: event.target.value }))}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="task-acceptance">Critério de aceite</Label>
+              <Label htmlFor="task-acceptance">{t('tasks.form.acceptance')}</Label>
               <Textarea
                 id="task-acceptance"
                 rows={2}
                 maxLength={8000}
                 value={form.acceptance}
                 className="min-h-14 resize-y text-[12px]"
-                placeholder="Como saber que está pronto (teste, link, diff…)."
+                placeholder={t('tasks.form.acceptancePlaceholder')}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, acceptance: event.target.value }))
                 }
@@ -325,7 +332,7 @@ export function AgentTasksDialog({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
-                <Label htmlFor="task-turns">Turnos</Label>
+                <Label htmlFor="task-turns">{t('tasks.form.turns')}</Label>
                 <Input
                   id="task-turns"
                   type="number"
@@ -338,7 +345,7 @@ export function AgentTasksDialog({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="task-cost">Custo (US$)</Label>
+                <Label htmlFor="task-cost">{t('tasks.form.cost')}</Label>
                 <Input
                   id="task-cost"
                   type="number"
@@ -358,18 +365,17 @@ export function AgentTasksDialog({
               ) : (
                 <Plus className="mr-1.5 size-3.5" />
               )}
-              Criar tarefa
+              {t('tasks.createTask')}
             </Button>
             <p className="text-[10px] leading-relaxed text-foreground-subtle">
-              O dono recebe uma thread dedicada e o resultado aparece no canal quando houver um.
-              Tarefas não assistidas falham fechado em aprovações.
+              {t('tasks.form.footnote')}
             </p>
           </section>
         </AgentDialogBody>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Fechar
+            {t('common:actions.close')}
           </Button>
         </DialogFooter>
       </DialogContent>

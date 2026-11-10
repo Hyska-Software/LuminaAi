@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { asStringArray, propArray, propObjectArray, propString, type GenUIValue } from '@/lib/genui';
@@ -35,6 +36,7 @@ function readOptions(props: Record<string, GenUIValue> | undefined): GenUIChoice
  * nunca dispara um turno sozinho. Por isso não há toast no envio.
  */
 export function GenUIChoices({ props }: GenUIChoicesProps) {
+  const { t } = useTranslation('genui');
   const labelId = `${useId().replace(/[^a-zA-Z0-9_-]/g, '')}-choices-label`;
   const options = readOptions(props);
   const layout = propString(props, 'layout', 'list') === 'segmented' ? 'segmented' : 'list';
@@ -72,7 +74,7 @@ export function GenUIChoices({ props }: GenUIChoicesProps) {
   const submit = () => {
     if (!selectedCount) return;
     // Sempre um único espaço entre prefixo e lista, com ou sem espaço no fim.
-    const prefix = submitPrefix.trimEnd() || 'Seleção:';
+    const prefix = submitPrefix.trimEnd() || t('choices.defaultPrefix');
     void runGenUIAction({ label: submitLabel, prompt: `${prefix} ${selectedLabels.join(', ')}` });
   };
 
@@ -130,7 +132,7 @@ export function GenUIChoices({ props }: GenUIChoicesProps) {
     <div
       role="group"
       aria-labelledby={label ? labelId : undefined}
-      aria-label={label ? undefined : 'Escolhas'}
+      aria-label={label ? undefined : t('choices.group')}
       data-selected-count={selectedCount}
       className="flex min-w-0 flex-col gap-2.5"
     >

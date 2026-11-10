@@ -8,6 +8,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { LibraryArtifact } from '@/lib/types';
 import { cn, formatBytes } from '@/lib/utils';
 import {
@@ -36,11 +37,6 @@ export interface LibraryCardProps extends LibraryCardActions {
   artifact: LibraryArtifact;
 }
 
-/** Accessible name shared by the grid card and the list row (name + kind + origin). */
-function cardLabel(artifact: LibraryArtifact, kindLabel: string): string {
-  return `Abrir ${artifact.name} — ${kindLabel} · ${libraryArtifactOrigin(artifact)}`;
-}
-
 interface FavoriteButtonProps {
   artifact: LibraryArtifact;
   onClick: () => void;
@@ -48,10 +44,15 @@ interface FavoriteButtonProps {
 }
 
 function FavoriteButton({ artifact, onClick, className }: FavoriteButtonProps) {
+  const { t } = useTranslation('library');
   const favorite = artifact.favorite === true;
   return (
     <IconButton
-      label={favorite ? `Desfavoritar ${artifact.name}` : `Favoritar ${artifact.name}`}
+      label={
+        favorite
+          ? t('library:card.unfavorite', { name: artifact.name })
+          : t('library:card.favorite', { name: artifact.name })
+      }
       size="sm"
       active={favorite}
       onClick={onClick}
@@ -74,6 +75,7 @@ function FavoriteButton({ artifact, onClick, className }: FavoriteButtonProps) {
 }
 
 function ActionsMenu({ artifact, actions }: { artifact: LibraryArtifact; actions: LibraryCardActions }) {
+  const { t } = useTranslation('library');
   const favorite = artifact.favorite === true;
   const item = (label: string, icon: ReactNode, onSelect: () => void, danger = false) => (
     <DropdownMenuItem
@@ -88,7 +90,11 @@ function ActionsMenu({ artifact, actions }: { artifact: LibraryArtifact; actions
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <IconButton label={`Ações de ${artifact.name}`} size="sm" className="text-foreground-subtle">
+        <IconButton
+          label={t('library:card.actionsAria', { name: artifact.name })}
+          size="sm"
+          className="text-foreground-subtle"
+        >
           <MoreHorizontal aria-hidden className="size-4" />
         </IconButton>
       </DropdownMenuTrigger>
@@ -96,16 +102,16 @@ function ActionsMenu({ artifact, actions }: { artifact: LibraryArtifact; actions
         <DropdownMenuLabel className="max-w-52 truncate normal-case tracking-normal text-foreground-muted">
           {artifact.name}
         </DropdownMenuLabel>
-        {item('Renomear', <Pencil aria-hidden />, actions.onRename)}
+        {item(t('library:card.rename'), <Pencil aria-hidden />, actions.onRename)}
         {item(
-          favorite ? 'Desfavoritar' : 'Favoritar',
+          favorite ? t('library:card.unfavoriteAction') : t('library:card.favoriteAction'),
           favorite ? <StarOff aria-hidden /> : <Star aria-hidden />,
           actions.onToggleFavorite,
         )}
-        {item('Salvar como…', <Download aria-hidden />, actions.onSave)}
-        {item('Abrir', <ExternalLink aria-hidden />, actions.onOpenExternal)}
+        {item(t('library:card.saveAs'), <Download aria-hidden />, actions.onSave)}
+        {item(t('library:card.open'), <ExternalLink aria-hidden />, actions.onOpenExternal)}
         <DropdownMenuSeparator />
-        {item('Excluir', <Trash2 aria-hidden />, actions.onDelete, true)}
+        {item(t('library:card.delete'), <Trash2 aria-hidden />, actions.onDelete, true)}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -118,6 +124,7 @@ function ActionsMenu({ artifact, actions }: { artifact: LibraryArtifact; actions
  * controls are siblings layered above it, so no interactive element is nested.
  */
 export function LibraryCard({ artifact, ...actions }: LibraryCardProps) {
+  const { t } = useTranslation('library');
   const meta = artifactKindMeta(artifact.kind);
   const Icon = meta.icon;
   const origin = libraryArtifactOrigin(artifact);
@@ -127,7 +134,11 @@ export function LibraryCard({ artifact, ...actions }: LibraryCardProps) {
       <button
         type="button"
         onClick={actions.onOpen}
-        aria-label={cardLabel(artifact, meta.label)}
+        aria-label={t('library:card.openAria', {
+          name: artifact.name,
+          kind: meta.label,
+          origin,
+        })}
         className="flex min-w-0 flex-1 flex-col rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
       >
         <span className="flex items-start gap-2 pb-2 pl-3 pr-16 pt-3">
@@ -176,6 +187,7 @@ export function LibraryCard({ artifact, ...actions }: LibraryCardProps) {
 
 /** List row (PLAN §4.2): same information as the card, laid out horizontally. */
 export function LibraryRow({ artifact, ...actions }: LibraryCardProps) {
+  const { t } = useTranslation('library');
   const meta = artifactKindMeta(artifact.kind);
   const Icon = meta.icon;
   const origin = libraryArtifactOrigin(artifact);
@@ -185,7 +197,11 @@ export function LibraryRow({ artifact, ...actions }: LibraryCardProps) {
       <button
         type="button"
         onClick={actions.onOpen}
-        aria-label={cardLabel(artifact, meta.label)}
+        aria-label={t('library:card.openAria', {
+          name: artifact.name,
+          kind: meta.label,
+          origin,
+        })}
         className="flex min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
         <span

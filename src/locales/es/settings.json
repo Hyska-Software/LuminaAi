@@ -1,0 +1,714 @@
+{
+  "general": {
+    "appearance": {
+      "title": "Apariencia",
+      "description": "Tema, idioma y tamaño del texto de la interfaz."
+    },
+    "theme": {
+      "label": "Tema",
+      "description": "«Sistema» sigue la preferencia de tu sistema operativo.",
+      "aria": "Tema de la interfaz",
+      "light": "Claro",
+      "dark": "Oscuro",
+      "system": "Sistema"
+    },
+    "language": {
+      "label": "Idioma",
+      "description": "Idioma de la interfaz.",
+      "aria": "Idioma de la interfaz"
+    },
+    "fontSize": {
+      "label": "Tamaño del texto",
+      "description": "{{percent}}% del tamaño predeterminado: afecta a toda la interfaz.",
+      "aria": "Tamaño del texto"
+    },
+    "layouts": {
+      "title": "Diseños",
+      "description": "Elige qué modos aparecen en el selector de la barra de título. Con un solo diseño activo, el selector se oculta; al menos uno permanece activo.",
+      "toggleAria": "Diseño {{name}}"
+    },
+    "behavior": {
+      "title": "Comportamiento",
+      "description": "Cómo el compositor envía y muestra los mensajes."
+    },
+    "sendWith": {
+      "label": "Enviar con",
+      "description": "Shift+Enter siempre inserta una línea nueva.",
+      "aria": "Tecla para enviar un mensaje"
+    },
+    "reduceMotion": {
+      "label": "Reducir movimiento",
+      "description": "Desactiva animaciones de transformación, brillo y transiciones largas.",
+      "aria": "Reducir movimiento"
+    },
+    "showTokenUsage": {
+      "label": "Mostrar uso de tokens",
+      "description": "Muestra tokens y coste estimado bajo cada respuesta.",
+      "aria": "Mostrar uso de tokens"
+    },
+    "thinkingCollapsed": {
+      "label": "Razonamiento contraído por defecto",
+      "description": "El bloque de razonamiento y pasos del agente empieza cerrado y no se abre solo durante la transmisión. Puedes expandirlo en cualquier momento.",
+      "aria": "Razonamiento contraído por defecto"
+    }
+  },
+  "tabs": {
+    "general": "General",
+    "providers": "Proveedores",
+    "model": "Modelo predeterminado",
+    "instructions": "Instrucciones",
+    "tools": "Herramientas",
+    "agents": "Agentes",
+    "data": "Datos",
+    "about": "Acerca de"
+  },
+  "dialog": {
+    "title": "Configuración",
+    "description": "Preferencias de Zylara",
+    "autoSave": "Se guarda automáticamente",
+    "openTab": "Configuración › {{tab}}"
+  },
+  "toasts": {
+    "openFolderFailed": "No se pudo abrir la carpeta"
+  },
+  "providers": {
+    "securityNote": "Las claves de API (OpenCode/Anthropic) y la sesión de ChatGPT se guardan solo en el backend (<code>secrets.json</code> en app-data) y nunca se exponen a la interfaz. También detectamos las variables de entorno de los proveedores y el inicio de sesión existente de OpenCode CLI.",
+    "storeErrorTitle": "La última acción falló",
+    "dismiss": "Descartar",
+    "secretsErrorTitle": "No se pudo leer el archivo de secretos",
+    "secretsErrorBody": "No se cambió ninguna clave. El archivo original se conservó; corrige o elimina el contenido no válido desde la carpeta de datos antes de guardar nuevas credenciales. Detalle: {{error}}",
+    "openDataDir": "Abrir carpeta de datos",
+    "keySource": {
+      "settings": "Configurada",
+      "env": "Variable de entorno",
+      "opencode-cli": "OpenCode CLI",
+      "chatgpt": "Cuenta de ChatGPT",
+      "none": "Ausente"
+    },
+    "keyMissing": "Clave ausente",
+    "apiKeyAria": "Clave de API de {{name}}",
+    "keyPlaceholder": {
+      "replace": "Pega una nueva clave para reemplazar…",
+      "openai": "Pega tu clave de API de OpenAI…",
+      "anthropic": "Pega tu clave de API de Anthropic (sk-ant-…)…",
+      "opencode": "Pega tu clave de API de OpenCode Console…",
+      "generic": "Pega tu clave de API de {{name}}…"
+    },
+    "test": "Probar conexión",
+    "testOkLatency_one": "Conectado · {{latency}} ms · {{count}} modelo",
+    "testOkLatency_other": "Conectado · {{latency}} ms · {{count}} modelos",
+    "testOkNoLatency_one": "Conectado · {{count}} modelo",
+    "testOkNoLatency_other": "Conectado · {{count}} modelos",
+    "testFailed": "No se pudo conectar con el proveedor.",
+    "planNotice": {
+      "title": "Estás usando tu plan de ChatGPT",
+      "body": "Las solicitudes elegibles consumen el límite compartido de tu plan de ChatGPT: el mismo grupo que usan ChatGPT y otras apps. Puedes consultar el uso en ChatGPT en cualquier momento.",
+      "dismiss": "Entendido"
+    },
+    "account": {
+      "pending": "Esperando…",
+      "plan": "Plan de ChatGPT",
+      "connected": "Cuenta conectada",
+      "planDisabled": "Plan no activado",
+      "reauth": "Sesión expirada",
+      "none": "Sin cuenta"
+    },
+    "manageUsage": "Gestionar uso",
+    "console": "Consola",
+    "login": {
+      "pendingTitle": "Esperando al navegador…",
+      "pendingSpinner": "Esperando al navegador",
+      "pendingBody": "Completa el inicio de sesión en ChatGPT. Esta ventana se actualiza automáticamente cuando vuelves a Zylara.",
+      "copyLink": "Copiar enlace",
+      "copiedLink": "Enlace copiado",
+      "openAgain": "Abrir de nuevo",
+      "browserNotOpenedTitle": "El navegador no se abrió automáticamente",
+      "browserNotOpenedBody": "Copia el enlace y pégalo en tu navegador. Esta ventana sigue esperando la confirmación del inicio de sesión.",
+      "errorDetails": "Detalles del error",
+      "browserHint": "Si el navegador no se abre, usa <b>Copiar enlace</b> y pega la dirección en tu navegador.",
+      "showLink": "Mostrar enlace de inicio de sesión"
+    },
+    "planDisabled": {
+      "title": "El uso del plan de ChatGPT no está activado",
+      "body": "Tu cuenta está conectada, pero las solicitudes aún no usan el plan. Activa el uso (consentimiento) para seguir usando los modelos sin coste por token.",
+      "activate": "Activar uso del plan",
+      "hideKey": "Ocultar clave de API",
+      "useKey": "Usar clave de API"
+    },
+    "reauth": {
+      "title": "La sesión de ChatGPT expiró",
+      "hintFallback": "Vuelve a iniciar sesión para renovar la credencial. Se reutiliza el registro de la cuenta.",
+      "reconnect": "Volver a conectar"
+    },
+    "signedOut": {
+      "continue": "Continuar con ChatGPT",
+      "body": "Las solicitudes elegibles usan tu plan de ChatGPT: el límite se comparte entre apps, Codex y ChatGPT Work. Sin plan, el mismo proveedor acepta una clave de API <code>sk-…</code> de la plataforma."
+    },
+    "signedIn": {
+      "signOut": "Salir",
+      "useKeyAlternative": "Usar clave de API como alternativa"
+    },
+    "accountDetails": {
+      "summary": "Detalles de la cuenta",
+      "clientId": "ID de cliente",
+      "hostId": "ID de host",
+      "scopes": "Ámbitos",
+      "expires": "Caduca el",
+      "tokensNote": "Los tokens de acceso y de actualización permanecen solo en el backend y nunca se envían a la interfaz."
+    },
+    "toasts": {
+      "successTitle": "Cuenta de ChatGPT conectada",
+      "successPlan": "Las solicitudes elegibles usan tu plan de ChatGPT.",
+      "successNoPlan": "El uso del plan no está activado para esta cuenta.",
+      "planDisabled": "La cuenta se conectó, pero el uso del plan no está activado. Usa \"Activar uso del plan\".",
+      "signOutTitle": "Cuenta desconectada",
+      "signOutBody": "Los tokens se revocaron. La próxima conexión reutiliza el mismo registro de cliente.",
+      "copiedTitle": "Enlace de inicio de sesión copiado",
+      "copyFailed": "No se pudo copiar el enlace",
+      "copyFailedBody": "Abre \"Mostrar enlace de inicio de sesión\" y copia la dirección manualmente.",
+      "keySaved": "Clave guardada",
+      "keySaveFailed": "No se pudo guardar la clave",
+      "keyRemoved": "Clave eliminada",
+      "keyStillDetected": "Clave guardada eliminada",
+      "keyStillDetectedBody": "Todavía hay una clave detectada mediante {{source}}."
+    },
+    "privacyFooter": "Zylara no envía tus credenciales a ningún servidor propio: las solicitudes van directamente al proveedor elegido. Al eliminar una clave guardada en la configuración, la detección por entorno/CLI vuelve a aplicarse si existe. Salir de ChatGPT revoca el token de actualización y conserva solo el registro de la cuenta para la próxima conexión.",
+    "description": {
+      "opencode-go": "Suscripción OpenCode Go: modelos abiertos de alto rendimiento con límites mensuales.",
+      "opencode-zen": "OpenCode Console (pay-as-you-go): catálogo curado de modelos de varios proveedores.",
+      "openai": "Modelos de OpenAI usando el plan de ChatGPT de tu cuenta (Sign in with ChatGPT) o una clave de API de la plataforma.",
+      "anthropic": "Modelos Claude mediante la API oficial de Anthropic: facturación por token en tu cuenta (pay-as-you-go)."
+    },
+    "notes": {
+      "opencode-go": {
+        "0": "Envía el encabezado x-opencode-session para mejorar el enrutamiento y el almacenamiento en caché del prompt.",
+        "1": "Los modelos marcados como \"contributor\" pueden usar tus datos para entrenamiento."
+      },
+      "opencode-zen": {
+        "0": "Funciona con créditos de OpenCode Console.",
+        "1": "Los modelos gratuitos requieren el cliente OpenCode."
+      },
+      "openai": {
+        "0": "El uso consume el límite de tu plan de ChatGPT (el mismo grupo compartido por apps, Codex y ChatGPT Work).",
+        "1": "Las cuentas Plus comparten la ventana de 5 h; Pro no tiene ese límite. También pueden aplicarse límites específicos de esta app.",
+        "2": "La lista de modelos es específica de la cuenta: usa \"Actualizar modelos\" después de iniciar sesión."
+      },
+      "anthropic": {
+        "0": "Facturación por token en tu cuenta de Anthropic (pay-as-you-go): este proveedor no usa suscripción/plan.",
+        "1": "Crea o revisa la clave de API en https://platform.claude.com/settings/keys.",
+        "2": "La lista de la cuenta se obtiene de GET /v1/models; usa \"Actualizar modelos\" para combinar novedades.",
+        "3": "Versión de la API fijada en anthropic-version: 2026-10-21 (sin encabezados beta)."
+      }
+    }
+  },
+  "model": {
+    "title": "Modelo predeterminado",
+    "description": "Se usa en conversaciones nuevas y como selección inicial del compositor.",
+    "startedWarning": "La conversación actual ya se inició. Los cambios siguientes solo se aplican a las próximas conversaciones.",
+    "provider": {
+      "label": "Proveedor",
+      "description": "OpenCode Go (suscripción), OpenCode Zen (créditos) u OpenAI (plan de ChatGPT o clave de API).",
+      "aria": "Proveedor predeterminado"
+    },
+    "model": {
+      "label": "Modelo",
+      "description": "Los modelos no disponibles no aparecen en esta lista.",
+      "aria": "Modelo predeterminado"
+    },
+    "estimated": "Estimado",
+    "estimatedTitle": "Modelo listado por tu cuenta: capacidades estimadas.",
+    "context": "{{window}} de contexto",
+    "includedInPlan": "Incluido en el plan de ChatGPT",
+    "reasoningNote": "El valor predeterminado de razonamiento se aplica al modelo elegido; los modelos sin compatibilidad ignoran esta configuración.",
+    "missingModel": "El modelo guardado ({{model}}) no está en el catálogo actual.",
+    "tip": "Consejo",
+    "tipBody": "También puedes cambiar de modelo desde el selector de la parte superior de la ventana o desde el compositor, sin cambiar el valor predeterminado de las próximas conversaciones."
+  },
+  "instructions": {
+    "title": "Instrucciones del sistema",
+    "description": "Un prompt personalizado adjunto a todas las conversaciones, además de las instrucciones predeterminadas de Zylara.",
+    "aria": "Instrucciones del sistema",
+    "placeholder": "Ej.: «Responde en español, con concisión. Usa tablas cuando tenga sentido y cita fuentes al usar la búsqueda.»\n\nDéjalo en blanco para usar solo las instrucciones predeterminadas de Zylara (idioma, herramientas, formato de UI generativa y seguridad).",
+    "counter": "{{value}} / {{max}} caracteres",
+    "saving": "Guardando…",
+    "saved": "Guardado",
+    "autoSave": "Guardado automático",
+    "footer": "Las instrucciones personalizadas no sustituyen las reglas internas de seguridad, el formato de UI generativa ni la política de artefactos: solo orientan el tono y el estilo de las respuestas."
+  },
+  "tools": {
+    "agent": {
+      "title": "Herramientas del agente",
+      "description": "Lo que el modelo puede hacer durante una respuesta.",
+      "webSearch": {
+        "label": "Búsqueda web",
+        "description": "Permite buscar en internet y citar las fuentes en el chat.",
+        "aria": "Activar búsqueda web"
+      },
+      "fileCreation": {
+        "label": "Crear archivos",
+        "description": "Permite generar artefactos (documentos, hojas de cálculo, código, HTML).",
+        "aria": "Activar creación de archivos"
+      },
+      "attachments": {
+        "label": "Enviar adjuntos al modelo",
+        "description": "Incluye el texto extraído y las imágenes de los adjuntos en el contexto.",
+        "aria": "Enviar adjuntos al modelo"
+      },
+      "autoTitle": {
+        "label": "Generar título automático",
+        "description": "Crea un título corto para la conversación en el primer turno.",
+        "aria": "Generar título automático"
+      }
+    },
+    "cache": {
+      "title": "Caché del prompt",
+      "description": "Cómo Zylara reutiliza el prefijo del prompt en los proveedores que miden la caché.",
+      "indicator": {
+        "label": "Mostrar indicador",
+        "description": "Muestra el acierto de caché en tiempo real en el medidor de contexto de Code y en el compositor del Chat. Desactivarlo solo oculta el indicador: la medición continúa.",
+        "aria": "Mostrar indicador de caché"
+      },
+      "anthropicTtl": {
+        "label": "TTL de la caché (Anthropic)",
+        "description": "Cuánto tiempo el prefijo permanece en caché en la API de Anthropic. 1 h cuesta 2× al escribir y reduce renovaciones a mitad del turno; 5 min cuesta 1,25×.",
+        "aria": "TTL de la caché de Anthropic",
+        "oneHour": "1 hora (predeterminado)",
+        "fiveMinutes": "5 minutos"
+      },
+      "openaiRetention": {
+        "label": "Retención de la caché (OpenAI)",
+        "description": "Cuánto tiempo OpenAI mantiene el prefijo en caché. Automático deja que el proveedor decida.",
+        "aria": "Retención de la caché de OpenAI",
+        "auto": "Automático",
+        "memory": "En memoria",
+        "day": "24 horas"
+      }
+    },
+    "execution": {
+      "title": "Ejecución",
+      "description": "Límites del bucle del agente y creatividad del modelo.",
+      "maxSteps": {
+        "label": "Máximo de pasos",
+        "description_one": "El agente ejecuta hasta {{count}} paso (herramienta → respuesta) por turno.",
+        "description_other": "El agente ejecuta hasta {{count}} pasos (herramienta → respuesta) por turno.",
+        "aria": "Máximo de pasos del agente"
+      },
+      "temperature": {
+        "label": "Personalizar temperatura",
+        "description": "Cuando está desactivado, cada proveedor usa su propio valor predeterminado.",
+        "sliderDescription": "Los valores bajos son más deterministas; los altos, más creativos.",
+        "aria": "Temperatura"
+      }
+    },
+    "codeExecution": {
+      "title": "Ejecución de código",
+      "description": "Permite al agente ejecutar scripts para crear documentos, hojas de cálculo, presentaciones e imágenes.",
+      "enable": {
+        "label": "Permitir ejecución de código",
+        "description": "Opt-in: el modelo solo recibe la herramienta de ejecución cuando esto está activado.",
+        "aria": "Activar ejecución de código"
+      },
+      "warning": "El código se ejecuta en esta máquina con tus permisos y acceso a la red: <b>no es un sandbox del sistema</b>. Las claves de API de la aplicación no se reenvían y cada ejecución tiene un límite de tiempo, pero actívalo solo si confías en lo que el modelo va a ejecutar.",
+      "timeout": {
+        "label": "Tiempo límite de ejecución",
+        "description_one": "Cada script se interrumpe tras {{count}} segundo.",
+        "description_other": "Cada script se interrumpe tras {{count}} segundos.",
+        "aria": "Tiempo límite de ejecución"
+      }
+    },
+    "sandbox": {
+      "title": "Sandbox de comandos",
+      "description": "Dónde se ejecutan los comandos del agente de código. El valor predeterminado se ejecuta en esta máquina; Docker aísla el proceso con el espacio de trabajo montado en /workspace.",
+      "environment": {
+        "label": "Entorno",
+        "description": "La terminal interactiva del panel sigue siendo local; esta opción se aplica a las herramientas run_command/run_checks y a los trabajos del agente.",
+        "aria": "Entorno de ejecución de los comandos del agente",
+        "local": "Este equipo",
+        "docker": "Docker"
+      },
+      "image": {
+        "label": "Imagen de Docker",
+        "description": "Debe existir en el Docker local (la app no descarga imágenes automáticamente). Ej.: node:22-bookworm, python:3.12, ubuntu:24.04.",
+        "aria": "Imagen de Docker de los comandos del agente"
+      },
+      "network": {
+        "label": "Red en el contenedor",
+        "description": "Desactivado, el comando se ejecuta con --network none. Actívalo solo cuando la tarea necesite descargar dependencias o acceder a internet.",
+        "aria": "Permitir red en el contenedor de Docker"
+      },
+      "memory": {
+        "label": "Memoria (MB)",
+        "description": "Límite del sandbox de Docker.",
+        "aria": "Memoria del sandbox de Docker en MB"
+      },
+      "cpus": {
+        "label": "CPUs",
+        "description": "Límite de CPU del sandbox.",
+        "aria": "CPUs del sandbox de Docker"
+      },
+      "pids": {
+        "label": "PIDs",
+        "description": "Límite de procesos del sandbox.",
+        "aria": "Límite de PIDs del sandbox de Docker"
+      },
+      "readOnlyRoot": {
+        "label": "Rootfs de solo lectura",
+        "description": "El espacio de trabajo en /workspace sigue siendo escribible; el resto del contenedor es de solo lectura.",
+        "aria": "Montar el rootfs del contenedor como solo lectura"
+      },
+      "warning": "Docker Desktop/Engine debe estar instalado y en ejecución. El espacio de trabajo se monta en <code>/workspace</code>; el contenedor puede leer y cambiar esos archivos, pero no tiene acceso al resto del equipo. Aun así, revisa lo que ejecuta el agente.",
+      "validate": "Validar imagen",
+      "invalidImage": "Imagen de Docker no válida",
+      "pullAria": "Descargar imagen de los comandos",
+      "download": "Descargar imagen",
+      "available": "Imagen disponible: {{image}}",
+      "pullFailed": "No se pudo descargar la imagen"
+    },
+    "codeSessions": {
+      "title": "Sesiones de código",
+      "description": "Valores predeterminados de las nuevas sesiones del diseño Code y cómo el workbench muestra los cambios.",
+      "permission": {
+        "label": "Modo de permiso predeterminado",
+        "description": "Toda sesión nueva de Code empieza en este modo. Puedes cambiarlo desde el chip de permiso del compositor en cualquier momento; el cambio aquí se aplica a las próximas sesiones.",
+        "aria": "Modo de permiso predeterminado de las nuevas sesiones de Code",
+        "read_only": "Lectura",
+        "review": "Revisar",
+        "edit": "Editar",
+        "autonomous": "Autónomo"
+      },
+      "diff": {
+        "label": "Abrir diff de archivos",
+        "description": "Elige dónde se abre, al hacer clic, el diff de un archivo de la pestaña Cambios.",
+        "aria": "Dónde abrir el diff de los archivos",
+        "tab": "En una pestaña del chat (predeterminado)",
+        "panel": "En el panel lateral"
+      }
+    },
+    "environment": {
+      "title": "Entorno de código",
+      "description": "Detectado en esta máquina; nada se instala automáticamente.",
+      "checking": "Comprobando el entorno de código",
+      "checkingShort": "Comprobando el entorno…",
+      "errorTitle": "No se pudo comprobar el entorno",
+      "retry": "Comprobar de nuevo",
+      "notFound": "No encontrado",
+      "versionUnknown": "versión desconocida",
+      "sourceConfigured": "ruta configurada",
+      "sourcePath": "detectado en PATH",
+      "python": {
+        "label": "Python",
+        "description": "Intérprete usado por los scripts que generan documentos y hojas de cálculo."
+      },
+      "node": {
+        "label": "Node.js",
+        "description": "Intérprete usado para ejecutar scripts de JavaScript."
+      },
+      "packages": {
+        "title": "Paquetes opcionales",
+        "description": "Amplían los formatos compatibles con los scripts de Python. Los helpers incluidos usan solo la biblioteca estándar.",
+        "available": "disponible",
+        "unavailable": "no instalado",
+        "none": "Ningún paquete opcional comprobado.",
+        "installHint": "Para instalar los paquetes opcionales, ejecuta:",
+        "copyInstall": "Copiar comando de instalación",
+        "nothingInstalled": "Nada se instala automáticamente."
+      }
+    },
+    "skills": {
+      "title": "Skills",
+      "description": "Instrucciones y scripts que el agente puede consultar para tareas especializadas.",
+      "panel": {
+        "label": "Panel de skills en la barra lateral",
+        "description": "Muestra el elemento Skills en la barra lateral. Cuando está desactivado, la gestión sigue disponible aquí.",
+        "aria": "Mostrar panel de skills en la barra lateral"
+      },
+      "loading": "Cargando skills",
+      "loadingShort": "Cargando skills…",
+      "error": "No se pudieron cargar las skills. Intenta comprobar el entorno de nuevo.",
+      "count_one": "{{count}} skill",
+      "count_other": "{{count}} skills",
+      "ofZylara": "{{count}} de Zylara",
+      "external_one": "{{count}} externa",
+      "external_other": "{{count}} externas",
+      "bundled_one": "{{count}} incluida",
+      "bundled_other": "{{count}} incluidas",
+      "other_one": "{{count}} otra",
+      "other_other": "{{count}} otras",
+      "manage": "Gestionar skills",
+      "openFolder": "Abrir carpeta de skills",
+      "openFolderFailed": "No se pudo abrir la carpeta de skills",
+      "copied": "Comando copiado",
+      "copyFailed": "No se pudo copiar el comando",
+      "disabled": "Desactivada",
+      "empty": "No se encontraron skills."
+    }
+  },
+  "agents": {
+    "intro": "El modelo, las instrucciones, el espacio de trabajo, los permisos y las capacidades se definen individualmente en cada agente, en el editor de la persona. Esta pestaña solo reúne las preferencias globales del diseño Agentes.",
+    "queue": {
+      "title": "Ejecución y cola",
+      "description": "Cuántos turnos pueden ejecutarse a la vez y el tamaño de la cola de cada hilo. Los turnos por encima del límite esperan en la cola de su propia conversación.",
+      "global": {
+        "label": "Turnos simultáneos (global)",
+        "description": "Hasta {{count}} turnos ejecutándose a la vez en toda la app. El backend también aplica este límite.",
+        "aria": "Máximo de turnos simultáneos"
+      },
+      "perAgent": {
+        "label": "Turnos simultáneos por agente",
+        "description": "Evita que un solo agente ocupe todos los espacios. Predeterminado: 1.",
+        "aria": "Máximo de turnos simultáneos por agente"
+      },
+      "queueLength": {
+        "label": "Mensajes en cola por hilo",
+        "description": "Cuando la cola alcanza este tamaño, los mensajes nuevos se rechazan con un aviso.",
+        "aria": "Máximo de mensajes en cola por hilo"
+      }
+    },
+    "budget": {
+      "title": "Presupuesto",
+      "description": "Límite de gasto diario de los agentes. El backend rechaza nuevos turnos al alcanzar el límite.",
+      "dailyLimit": {
+        "label": "Límite diario por agente (US$)",
+        "description": "Vacío lo desactiva. El coste acumulado del día considera todos los hilos del agente.",
+        "placeholder": "Sin límite",
+        "aria": "Límite diario de coste por agente en dólares"
+      }
+    },
+    "notifications": {
+      "title": "Notificaciones",
+      "description": "Avisos de hilos de agente en segundo plano. El sistema operativo y el toast de la app respetan estas opciones.",
+      "enabled": {
+        "label": "Notificaciones activas",
+        "description": "Desactivado, no se emite ninguna notificación en segundo plano.",
+        "aria": "Notificaciones activas"
+      },
+      "dnd": {
+        "label": "No molestar",
+        "description": "Mantiene los avisos solo en el diálogo Actividad, sin toast ni notificación del sistema.",
+        "aria": "No molestar"
+      },
+      "approvals": {
+        "label": "Aprobaciones",
+        "description": "Acciones que te necesitan.",
+        "aria": "Notificar aprobaciones"
+      },
+      "questions": {
+        "label": "Preguntas",
+        "description": "Preguntas estructuradas del agente.",
+        "aria": "Notificar preguntas"
+      },
+      "completions": {
+        "label": "Finalizaciones",
+        "description": "Turnos de agente completados.",
+        "aria": "Notificar finalizaciones"
+      },
+      "tasks": {
+        "label": "Tareas",
+        "description": "Tareas que necesitan a una persona.",
+        "aria": "Notificar tareas"
+      }
+    },
+    "browser": {
+      "title": "Navegador controlado",
+      "description": "Política de hosts del navegador CDP. La denylist prevalece sobre la allowlist; los metadatos de nube siempre se bloquean.",
+      "allowed": {
+        "label": "Hosts permitidos",
+        "description": "Lista separada por comas (ej.: github.com, notion.so). Vacío permite hosts públicos.",
+        "aria": "Hosts permitidos en el navegador",
+        "placeholder": "github.com, notion.so"
+      },
+      "blocked": {
+        "label": "Hosts bloqueados",
+        "description": "Siempre denegados; se evalúan antes de la allowlist.",
+        "aria": "Hosts bloqueados en el navegador",
+        "placeholder": "banco.com, admin.interno"
+      },
+      "privateHosts": {
+        "label": "Permitir hosts privados",
+        "description": "Localhost, 127.0.0.1 y redes RFC1918. Desactívalo para evitar SSRF; necesario para servidores de desarrollo locales.",
+        "aria": "Permitir hosts privados en el navegador"
+      },
+      "routines": {
+        "label": "Navegador en rutinas",
+        "description": "Permite acciones de navegador en tareas/rutinas sin tarjeta de aprobación. La allowlist/denylist de hosts sigue aplicándose; el escritorio sigue fail-closed.",
+        "aria": "Permitir navegador en rutinas no asistidas"
+      }
+    },
+    "desktopApps": {
+      "title": "Apps de escritorio",
+      "description": "Allowlist/denylist por proceso o título de ventana, aplicada antes de cualquier clic/teclado. La denylist prevalece.",
+      "allowed": {
+        "label": "Apps permitidas",
+        "description": "Separadas por comas (ej.: notepad, chrome, code). Vacío permite todas, excepto la denylist.",
+        "aria": "Apps permitidas en el equipo",
+        "placeholder": "notepad, chrome"
+      },
+      "blocked": {
+        "label": "Apps bloqueadas",
+        "description": "Siempre denegadas; se evalúan antes de la allowlist.",
+        "aria": "Apps bloqueadas en el equipo",
+        "placeholder": "1password, banking"
+      }
+    },
+    "computer": {
+      "title": "Escritorio privado (computer use)",
+      "description": "Escritorio aislado en Docker, independiente del sandbox de comandos. Estas opciones se aplican cuando el agente usa el entorno «Escritorio privado».",
+      "image": {
+        "label": "Imagen de computer use",
+        "description": "Imagen gráfica publicada en GHCR (Xvfb + Chromium + xdotool + noVNC). Descárgala con el botón o indica otra imagen accesible al daemon. Para producción, prefiere un digest fijo.",
+        "aria": "Imagen de Docker de computer use"
+      },
+      "download": "Descargar imagen",
+      "downloadAria": "Descargar imagen de computer use",
+      "downloaded": "Imagen de computer use descargada",
+      "downloadFailed": "No se pudo descargar la imagen",
+      "usePublished": "Usar imagen publicada",
+      "container": {
+        "label": "Contenedor de computer use",
+        "description": "Nombre fijo del contenedor gráfico. Se crea en la primera captura y se mantiene entre acciones.",
+        "aria": "Nombre del contenedor de computer use"
+      },
+      "actionsPerTurn": {
+        "label": "Acciones por turno",
+        "description": "Límite de computer use en un solo turno.",
+        "aria": "Máximo de acciones de computer use por turno"
+      },
+      "actionsPerHour": {
+        "label": "Acciones por hora",
+        "description": "Límite por agente en una ventana móvil de una hora.",
+        "aria": "Máximo de acciones de computer use por hora"
+      },
+      "warning": "Docker Desktop/Engine debe estar instalado y en ejecución. El agente controla una pantalla aislada en el contenedor; noVNC queda en loopback, solo para que la observes.",
+      "cleanup": "Limpiar contenedores",
+      "cleanupNone": "Ningún contenedor de Zylara activo",
+      "cleanupRemoved_one": "{{count}} contenedor eliminado",
+      "cleanupRemoved_other": "{{count}} contenedores eliminados",
+      "cleanupFailed": "No se pudo limpiar",
+      "diagnostics": "Diagnóstico",
+      "diagnosticsTitle": "Diagnóstico · v{{version}}",
+      "diagnosticsBody": "{{turns}} turno(s) activo(s) · {{tasks}} tarea(s) abierta(s) · {{sessions}} sesión(es) de computer use",
+      "diagnosticsFailed": "No se pudo leer el diagnóstico"
+    }
+  },
+  "data": {
+    "storage": {
+      "title": "Almacenamiento",
+      "description": "Todo permanece solo en esta máquina.",
+      "folder": {
+        "label": "Carpeta de datos",
+        "description": "Conversaciones (SQLite), adjuntos, artefactos y configuración."
+      },
+      "open": "Abrir carpeta",
+      "location": "Ubicación"
+    },
+    "danger": {
+      "title": "Zona de peligro",
+      "description": "Estas acciones son permanentes y no se pueden deshacer.",
+      "clearTitle": "Borrar todos los datos",
+      "clearDescription": "Elimina conversaciones, mensajes, adjuntos, artefactos y las claves de API guardadas.",
+      "clearAction": "Borrar datos…",
+      "confirmTitle": "¿Seguro que quieres borrar los datos?",
+      "confirmBody": "Las conversaciones, los adjuntos, los artefactos, la configuración y las claves de API se eliminarán de esta máquina.",
+      "finalTitle": "Confirmación final",
+      "finalBody": "Esta es la última confirmación. Una vez borradas, las conversaciones no se pueden recuperar.",
+      "continue": "Continuar",
+      "deleteAll": "Borrar todo definitivamente"
+    },
+    "toasts": {
+      "clearedTitle": "Datos borrados",
+      "clearedDescription": "La configuración volvió a los valores predeterminados.",
+      "clearFailed": "No se pudieron borrar los datos"
+    }
+  },
+  "about": {
+    "title": "Acerca de Zylara",
+    "description": "Chat de escritorio local-first con OpenCode Go, Zen, OpenAI (ChatGPT) y Anthropic.",
+    "stack": "Tauri 2 · React 19 · Tailwind CSS 4",
+    "tauri": {
+      "label": "Tauri",
+      "description": "Runtime de la aplicación de escritorio"
+    },
+    "platform": {
+      "label": "Plataforma"
+    },
+    "catalog": {
+      "label": "Catálogo de modelos",
+      "description": "Generado el {{date}}",
+      "value": "v{{version}} · {{count}} modelos"
+    },
+    "storage": {
+      "label": "Almacenamiento",
+      "description": "Local-first: nada sale de tu máquina a menos que lo envíes.",
+      "value": "SQLite + archivos locales"
+    },
+    "links": {
+      "title": "Enlaces",
+      "description": "Se abre en el navegador predeterminado, nunca dentro de la app.",
+      "opencode": {
+        "label": "OpenCode",
+        "description": "Sitio oficial de los proveedores Go y Zen.",
+        "action": "Abrir sitio"
+      },
+      "console": {
+        "label": "Consola de OpenCode",
+        "description": "Gestiona la suscripción, los créditos y las claves de API.",
+        "action": "Abrir consola"
+      },
+      "chatgpt": {
+        "label": "ChatGPT (OpenAI)",
+        "description": "Inicia sesión con tu cuenta de ChatGPT y consulta el uso del plan.",
+        "action": "Abrir ChatGPT"
+      },
+      "usage": {
+        "label": "Uso del plan de ChatGPT",
+        "description": "Límites y consumo compartidos de tu plan.",
+        "action": "Gestionar uso"
+      },
+      "repository": {
+        "label": "Repositorio",
+        "description": "Código fuente, versiones y novedades del proyecto.",
+        "action": "Abrir GitHub"
+      }
+    },
+    "footer": "Zylara puede cometer errores. Verifica la información importante. Las claves de API permanecen en el backend local y nunca se exponen a la interfaz."
+  },
+  "update": {
+    "title": "Actualizaciones",
+    "description": "Descarga e instala versiones publicadas en GitHub. La descarga se verifica con SHA-256 y la instalación siempre la confirmas tú.",
+    "current": {
+      "label": "Versión actual",
+      "description": "Versión de Zylara en ejecución."
+    },
+    "auto": {
+      "label": "Actualizaciones automáticas",
+      "description": "Comprueba al abrir y cada hora mientras la app esté abierta. Descargar e instalar siguen siendo decisiones tuyas.",
+      "aria": "Buscar actualizaciones automáticamente"
+    },
+    "status": {
+      "label": "Estado",
+      "checking": "Buscando actualizaciones…",
+      "downloading": "Descargando actualización…",
+      "verifying": "Verificando la integridad de la descarga…",
+      "installing": "Abriendo el instalador…",
+      "downloadError": "Error al descargar la actualización",
+      "available": "Actualización disponible",
+      "upToDate": "Tienes la versión más reciente",
+      "checkError": "No se pudieron buscar actualizaciones",
+      "idleChecked": "Todo actualizado",
+      "idle": "Ninguna comprobación completada todavía"
+    },
+    "detail": {
+      "lastResult": "{{error}} Mostrando el último resultado.",
+      "availableWithAsset": "{{checked}} · para {{platform}}.",
+      "availableNoAsset": "{{checked}} · sin instalador para esta plataforma.",
+      "recentCheck": "Comprobación reciente",
+      "idle": "Zylara consulta GitHub en busca de versiones estables. Nada se instala sin tu confirmación."
+    },
+    "noConnection": "Sin conexión",
+    "checkNow": "Comprobar ahora",
+    "viewOnGithub": "Ver en GitHub",
+    "skip": "Omitir esta versión",
+    "skipped": "La versión v{{version}} está omitida.",
+    "unskip": "Mostrar de nuevo"
+  }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { entryKey, type ModelListEntry, type ModelListGroup } from '@/lib/modelMenu';
 import { cn } from '@/lib/utils';
 import { ModelRow, modelOptionId } from './ModelRow';
@@ -25,11 +26,12 @@ export interface ModelListProps {
 }
 
 function DefaultEmptyState() {
+  const { t } = useTranslation('models');
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
       <Search aria-hidden className="size-5 text-foreground-subtle" />
-      <p className="text-[13px] font-medium text-foreground">Nenhum modelo encontrado</p>
-      <p className="text-xs text-foreground-muted">Tente outro termo ou limpe os filtros.</p>
+      <p className="text-[13px] font-medium text-foreground">{t('list.emptyTitle')}</p>
+      <p className="text-xs text-foreground-muted">{t('list.emptyHint')}</p>
     </div>
   );
 }

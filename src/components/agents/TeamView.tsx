@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Archive, ArchiveRestore, BarChart3, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
@@ -8,7 +9,12 @@ import { AgentBuilderDialog } from './AgentBuilderDialog';
 import { AgentDialogBody } from './AgentDialogBody';
 import { AgentTemplatesDialog } from './AgentTemplatesDialog';
 import { formatUsageCost, formatUsageTokens, modelLabel, relativeTime } from './agentUtils';
-import { AGENT_TEMPLATES, templateCapabilities, type AgentTemplate } from '@/lib/agentTemplates';
+import {
+  AGENT_TEMPLATES,
+  localizedAgentTemplate,
+  templateCapabilities,
+  type AgentTemplate,
+} from '@/lib/agentTemplates';
 import { api } from '@/lib/api';
 import {
   Button,
@@ -45,13 +51,14 @@ function AgentCard({
   onEdit: () => void;
   onArchive: () => void;
 }) {
+  const { t } = useTranslation('agents');
   const providers = useAppStore((state) => state.providers);
   return (
     <article className="group flex min-h-44 flex-col rounded-2xl border border-border bg-surface-raised/60 p-4 transition-colors hover:border-border-strong hover:bg-surface-raised">
       <button
         type="button"
         onClick={onOpen}
-        aria-label={`Abrir agente ${agent.name}`}
+        aria-label={t('team.openAgentAria', { name: agent.name })}
         className="flex min-w-0 items-start gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
         <AgentAvatar avatar={agent.avatar} />
@@ -63,31 +70,36 @@ function AgentCard({
         </span>
       </button>
       <p className="mt-3 line-clamp-2 min-h-10 text-[13px] leading-relaxed text-foreground-muted">
-        {agent.description || 'Sem descrição.'}
+        {agent.description || t('team.noDescription')}
       </p>
       <p className="mt-3 truncate text-[11px] text-foreground-subtle">
         {modelLabel(providers, agent.providerId, agent.modelId)}
       </p>
       <p className="mt-1 truncate text-[11px] text-foreground-subtle">
-        {agent.threadCount === 1 ? '1 conversa' : `${agent.threadCount} conversas`}
-        {agent.lastActiveAt ? ` · ${relativeTime(agent.lastActiveAt)}` : ' · sem atividade'}
+        {t('team.threads', { count: agent.threadCount })}
+        {agent.lastActiveAt
+          ? ` · ${relativeTime(agent.lastActiveAt)}`
+          : ` · ${t('team.noActivity')}`}
       </p>
       {usage && usage.turns > 0 ? (
         <p className="mt-1 truncate text-[11px] text-foreground-subtle">
-          {formatUsageTokens(usage.totalTokens)} tokens · {formatUsageCost(usage.cost)}
+          {t('home.tokensCost', {
+            tokens: formatUsageTokens(usage.totalTokens),
+            cost: formatUsageCost(usage.cost),
+          })}
         </p>
       ) : null}
       <div className="mt-auto flex items-center gap-2 pt-4">
         <Button size="sm" onClick={onTalk}>
-          Conversar
+          {t('team.talk')}
         </Button>
         <Button size="sm" variant="ghost" onClick={onEdit}>
-          Editar
+          {t('common:actions.edit')}
         </Button>
         <IconButton
           size="sm"
-          label={`Arquivar agente ${agent.name}`}
-          title="Arquivar"
+          label={t('team.archiveAria', { name: agent.name })}
+          title={t('team.archive')}
           className="ml-auto"
           onClick={onArchive}
         >
@@ -99,6 +111,7 @@ function AgentCard({
 }
 
 export function TeamView() {
+  const { t } = useTranslation('agents');
   const [builderOpen, setBuilderOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
@@ -155,21 +168,22 @@ export function TeamView() {
     const selection = useAppStore.getState().selection;
     const provider = providers.find((entry) => entry.id === selection.providerId) ?? providers[0];
     if (!provider) {
-      toast.error('Nenhum provedor configurado');
+      toast.error(t('team.noProvider'));
       return;
     }
+    const localized = localizedAgentTemplate(template);
     try {
       const agent = await createAgent({
-        name: template.name,
-        role: template.role,
-        description: template.description,
+        name: localized.name,
+        role: localized.role,
+        description: localized.description,
         avatar: template.avatar,
-        department: template.department,
+        department: localized.department,
         providerId: provider.id,
         modelId: provider.defaultModelId,
         reasoning: null,
-        instructions: template.instructions,
-        starters: template.starters,
+        instructions: localized.instructions,
+        starters: localized.starters,
         capabilities: templateCapabilities(template),
         memoryEnabled: template.memoryEnabled ?? false,
         workspaceId: null,
@@ -179,33 +193,33 @@ export function TeamView() {
       setActiveAgentId(agent.id);
       clearActiveConversation();
       setTemplatesOpen(false);
-      toast.success('Agente criado a partir do template', { description: agent.name });
+      toast.success(t('team.createdFromTemplate'), { description: agent.name });
     } catch (error) {
-      toast.error('Não foi possível criar o agente', { description: String(error) });
+      toast.error(t('team.createError'), { description: String(error) });
     }
   };
 
   const archiveAgent = async (agent: Agent) => {
     try {
       await archive(agent.id);
-      toast.success('Agente arquivado', {
+      toast.success(t('team.archived'), {
         description: agent.name,
         action: {
-          label: 'Desfazer',
+          label: t('team.undo'),
           onClick: () => void restore(agent.id),
         },
       });
     } catch (error) {
-      toast.error('Não foi possível arquivar o agente', { description: String(error) });
+      toast.error(t('team.archiveError'), { description: String(error) });
     }
   };
 
   const restoreAgent = async (agent: Agent) => {
     try {
       await restore(agent.id);
-      toast.success('Agente restaurado', { description: agent.name });
+      toast.success(t('team.restored'), { description: agent.name });
     } catch (error) {
-      toast.error('Não foi possível restaurar o agente', { description: String(error) });
+      toast.error(t('team.restoreError'), { description: String(error) });
     }
   };
 
@@ -217,9 +231,9 @@ export function TeamView() {
       await useChatStore.getState().refreshConversations();
       setActiveAgentId(imported.id);
       clearActiveConversation();
-      toast.success('Agente importado', { description: imported.name });
+      toast.success(t('team.imported'), { description: imported.name });
     } catch (error) {
-      toast.error('Não foi possível importar o agente', { description: String(error) });
+      toast.error(t('team.importError'), { description: String(error) });
     }
   };
 
@@ -228,10 +242,10 @@ export function TeamView() {
     try {
       await remove(deleteTarget.id);
       await useChatStore.getState().refreshConversations();
-      toast.success('Agente excluído', { description: deleteTarget.name });
+      toast.success(t('team.deleted'), { description: deleteTarget.name });
       setDeleteTarget(null);
     } catch (error) {
-      toast.error('Não foi possível excluir o agente', { description: String(error) });
+      toast.error(t('team.deleteError'), { description: String(error) });
     }
   };
 
@@ -257,46 +271,48 @@ export function TeamView() {
             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-border bg-surface-raised text-accent">
               <Sparkles className="size-6" />
             </div>
-            <h1 className="mt-5 text-2xl font-semibold tracking-tight">Monte sua equipe</h1>
+            <h1 className="mt-5 text-2xl font-semibold tracking-tight">{t('team.emptyTitle')}</h1>
             <p className="mx-auto mt-2 max-w-md text-[14px] leading-relaxed text-foreground-muted">
-              Cada agente tem identidade, instruções, modelo e conversas próprias. Comece por um
-              template ou crie do zero.
+              {t('team.emptyDescription')}
             </p>
             <div className="mt-6 grid gap-3 text-left sm:grid-cols-3">
-              {AGENT_TEMPLATES.slice(0, 3).map((template) => (
-                <button
-                  key={template.id}
-                  type="button"
-                  onClick={() => void createFromTemplate(template)}
-                  className="rounded-xl border border-border bg-surface-raised/60 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                >
-                  <AgentAvatar avatar={template.avatar} size="md" />
-                  <span className="mt-2 block text-[13px] font-medium">{template.name}</span>
-                  <span className="mt-1 block text-[12px] leading-relaxed text-foreground-muted">
-                    {template.description}
-                  </span>
-                </button>
-              ))}
+              {AGENT_TEMPLATES.slice(0, 3).map((template) => {
+                const localized = localizedAgentTemplate(template);
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => void createFromTemplate(template)}
+                    className="rounded-xl border border-border bg-surface-raised/60 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  >
+                    <AgentAvatar avatar={template.avatar} size="md" />
+                    <span className="mt-2 block text-[13px] font-medium">{localized.name}</span>
+                    <span className="mt-1 block text-[12px] leading-relaxed text-foreground-muted">
+                      {localized.description}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <Button onClick={() => openEditor({ mode: 'create' })}>
                 <Plus className="mr-1.5 size-4" />
-                Criar meu primeiro agente
+                {t('team.createFirst')}
               </Button>
               <Button variant="secondary" onClick={() => setBuilderOpen(true)}>
                 <Sparkles className="mr-1.5 size-4" />
-                Criar com IA
+                {t('team.createWithAi')}
               </Button>
               <Button variant="ghost" onClick={() => setTemplatesOpen(true)}>
-                Ver todos os templates
+                {t('team.seeTemplates')}
               </Button>
               <Button variant="ghost" onClick={() => setAgentView('stats')}>
                 <BarChart3 className="mr-1.5 size-4" />
-                Estatísticas
+                {t('team.stats')}
               </Button>
               <Button variant="ghost" onClick={() => void importAgent()}>
                 <Upload className="mr-1.5 size-4" />
-                Importar
+                {t('team.import')}
               </Button>
             </div>
           </div>
@@ -305,30 +321,30 @@ export function TeamView() {
         <div className="mx-auto w-full max-w-5xl px-6 py-8">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">Equipe</h1>
+              <h1 className="text-xl font-semibold tracking-tight">{t('team.title')}</h1>
               <p className="mt-1 text-[13px] text-foreground-muted">
-                Agentes que você pode chamar a qualquer momento.
+                {t('team.subtitle')}
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setAgentView('stats')}>
                 <BarChart3 className="mr-1.5 size-4" />
-                Estatísticas
+                {t('team.stats')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => void importAgent()}>
                 <Upload className="mr-1.5 size-4" />
-                Importar
+                {t('team.import')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setTemplatesOpen(true)}>
-                Templates
+                {t('team.templates')}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setBuilderOpen(true)}>
                 <Sparkles className="mr-1.5 size-4" />
-                Criar com IA
+                {t('team.createWithAi')}
               </Button>
               <Button variant="primary" size="sm" onClick={() => openEditor({ mode: 'create' })}>
                 <Plus className="mr-1.5 size-4" />
-                Criar agente
+                {t('team.createAgent')}
               </Button>
             </div>
           </div>
@@ -355,13 +371,13 @@ export function TeamView() {
         <section className="mx-auto w-full max-w-5xl px-6 pb-10">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <h2 className="text-base font-semibold tracking-tight">Arquivados</h2>
+              <h2 className="text-base font-semibold tracking-tight">{t('team.archivedTitle')}</h2>
               <p className="mt-1 text-[12px] text-foreground-muted">
-                Arquivar preserva o histórico e as conversas.
+                {t('team.archivedDescription')}
               </p>
             </div>
             <span className="text-[11px] text-foreground-subtle">
-              {archived.length === 1 ? '1 agente' : `${archived.length} agentes`}
+              {t('team.archivedCount', { count: archived.length })}
             </span>
           </div>
           <div className="mt-4 space-y-2">
@@ -374,17 +390,16 @@ export function TeamView() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-medium">{agent.name}</p>
                   <p className="truncate text-[11px] text-foreground-muted">
-                    {agent.role} ·{' '}
-                    {agent.threadCount === 1 ? '1 conversa' : `${agent.threadCount} conversas`}
+                    {agent.role} · {t('team.threads', { count: agent.threadCount })}
                   </p>
                 </div>
                 <Button size="sm" variant="ghost" onClick={() => void restoreAgent(agent)}>
                   <ArchiveRestore className="mr-1.5 size-3.5" />
-                  Restaurar
+                  {t('team.restore')}
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(agent)}>
                   <Trash2 className="mr-1.5 size-3.5" />
-                  Excluir
+                  {t('common:actions.delete')}
                 </Button>
               </div>
             ))}
@@ -402,26 +417,28 @@ export function TeamView() {
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader className="pb-4 pr-12">
-            <DialogTitle>Excluir agente?</DialogTitle>
+            <DialogTitle>{t('team.deleteTitle')}</DialogTitle>
             <DialogDescription>
               {deleteTarget
                 ? deleteTarget.archivedAt !== null && deleteThreads > 0
-                  ? `“${deleteTarget.name}” será removido permanentemente junto com ${deleteThreads} outra(s) conversa(s). A conversa principal também é apagada.`
-                  : `“${deleteTarget.name}” será removido permanentemente. A conversa principal é removida junto.`
-                : 'Esta ação não pode ser desfeita.'}
+                  ? t('team.deleteDescriptionWithThreads', {
+                      name: deleteTarget.name,
+                      count: deleteThreads,
+                    })
+                  : t('team.deleteDescription', { name: deleteTarget.name })
+                : t('team.deleteIrreversible')}
             </DialogDescription>
           </DialogHeader>
           {deleteBlocked ? (
             <AgentDialogBody>
               <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
-                Este agente tem {deleteThreads} outra(s) conversa(s). Arquive-o para manter o
-                histórico; a exclusão definitiva só é permitida sem outras conversas.
+                {t('team.deleteBlocked', { name: deleteTarget?.name, count: deleteThreads })}
               </p>
             </AgentDialogBody>
           ) : null}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button
               variant="danger"
@@ -429,7 +446,7 @@ export function TeamView() {
               onClick={() => void confirmDelete()}
             >
               <Trash2 className="mr-1.5 size-3.5" />
-              Excluir
+              {t('common:actions.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

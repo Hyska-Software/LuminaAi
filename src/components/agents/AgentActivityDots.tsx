@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { useReduceMotion } from '@/components/layout/hooks';
 import { cn } from '@/lib/utils';
 
@@ -8,14 +10,15 @@ export interface AgentActivityDotsProps {
 
 /** Three-dot working mark shared by the sidebar rows and the thread header. */
 export function AgentActivityDots({
-  label = 'Respondendo',
+  label,
   className,
 }: AgentActivityDotsProps) {
+  const { t } = useTranslation('agents');
   const reduceMotion = useReduceMotion();
   return (
     <span
       role="status"
-      aria-label={label}
+      aria-label={label ?? t('activity.responding')}
       data-motion={reduceMotion ? 'reduced' : 'animated'}
       className={cn('inline-flex shrink-0 items-center gap-0.5', className)}
     >

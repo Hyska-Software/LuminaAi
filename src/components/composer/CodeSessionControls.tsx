@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import {
   FileSearch,
@@ -23,27 +24,26 @@ import {
   Tooltip,
 } from '@/components/ui';
 import { JobsBar, PlanCard, SubagentList, TodoCard } from '@/components/agent';
-import { AUTONOMOUS_MODE_WARNING, AUTONOMOUS_MODE_WARNING_TITLE } from '@/lib/permissionModes';
+import { AUTONOMOUS_MODE_WARNING_KEY, AUTONOMOUS_MODE_WARNING_TITLE_KEY } from '@/lib/permissionModes';
 import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { PermissionMode } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { GoalControls } from './GoalControls';
 
-/** Rótulos pt-BR do modo de permissão da sessão (WORKBENCH §4/§6). */
-const PERMISSION_LABELS: Record<PermissionMode, string> = {
-  read_only: 'Leitura',
-  review: 'Revisar',
-  edit: 'Editar',
-  autonomous: 'Autônomo',
+/** Translation keys of the session permission labels (WORKBENCH §4/§6). */
+const PERMISSION_LABEL_KEYS: Record<PermissionMode, string> = {
+  read_only: 'permissions.readOnly.label',
+  review: 'permissions.review.label',
+  edit: 'permissions.edit.label',
+  autonomous: 'permissions.autonomous.label',
 };
 
-/** Descrições idênticas às do antigo chip do cabeçalho do Code. */
-const PERMISSION_DESCRIPTIONS: Record<PermissionMode, string> = {
-  read_only: 'O agente só pode ler arquivos e consultar o workspace.',
-  review: 'O agente pode propor edições, mas cada escrita pede aprovação.',
-  edit: 'O agente pode editar arquivos; comandos pedem aprovação.',
-  autonomous:
-    'O agente executa comandos, edições, acesso a segredos e controle do computador sem pedir confirmação.',
+/** Translation keys of the permission descriptions (same as the old header chip). */
+const PERMISSION_DESCRIPTION_KEYS: Record<PermissionMode, string> = {
+  read_only: 'permissions.readOnly.description',
+  review: 'permissions.review.description',
+  edit: 'permissions.edit.description',
+  autonomous: 'permissions.autonomous.description',
 };
 
 const PERMISSION_ICONS: Record<PermissionMode, LucideIcon> = {
@@ -68,8 +68,8 @@ const PILL_CLASS_NAME =
 const PLAN_ICON_BUTTON_CLASS_NAME =
   'flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
 
-const PLAN_TITLE_ON = 'Modo Plano ativo: o agente planeja antes de editar';
-const PLAN_TITLE_OFF = 'Ativar modo Plano (planejar antes de editar)';
+const PLAN_TITLE_ON_KEY = 'session.planTitleOn';
+const PLAN_TITLE_OFF_KEY = 'session.planTitleOff';
 
 export interface CodeSessionControlsProps {
   conversationId: string;
@@ -98,6 +98,8 @@ export function CodeSessionControls({
   goalIntent,
   onToggleGoalIntent,
 }: CodeSessionControlsProps) {
+  const { t } = useTranslation('code');
+  const { t: tc } = useTranslation('composer');
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const fallbackPermissionMode = useChatStore(
     (state) =>
@@ -119,14 +121,16 @@ export function CodeSessionControls({
   const todos = session?.todos ?? [];
   const jobs = session?.jobs ?? [];
   const PermissionIcon = PERMISSION_ICONS[permissionMode];
-  const planTitle = planMode ? PLAN_TITLE_ON : PLAN_TITLE_OFF;
+  const permissionLabel = tc(PERMISSION_LABEL_KEYS[permissionMode]);
+  const permissionDescription = tc(PERMISSION_DESCRIPTION_KEYS[permissionMode]);
+  const planTitle = tc(planMode ? PLAN_TITLE_ON_KEY : PLAN_TITLE_OFF_KEY);
   const planStateLabel =
     plan?.state === 'planning'
-      ? 'Em preparação'
+      ? tc('session.planState.planning')
       : plan?.state === 'reviewing'
-        ? 'Aguardando aprovação'
+        ? tc('session.planState.reviewing')
         : plan?.state === 'approved'
-          ? 'Aprovado'
+          ? tc('session.planState.approved')
           : null;
 
   const changePermissionMode = async (mode: PermissionMode) => {
@@ -135,8 +139,8 @@ export function CodeSessionControls({
     try {
       const changed = await setPermissionMode(conversationId, mode);
       if (changed && mode === 'autonomous') {
-        toast.warning(AUTONOMOUS_MODE_WARNING_TITLE, {
-          description: AUTONOMOUS_MODE_WARNING,
+        toast.warning(t(AUTONOMOUS_MODE_WARNING_TITLE_KEY), {
+          description: t(AUTONOMOUS_MODE_WARNING_KEY),
         });
       }
     } finally {
@@ -161,8 +165,8 @@ export function CodeSessionControls({
           <button
             type="button"
             aria-haspopup="menu"
-            aria-label={`Modo de permissão: ${PERMISSION_LABELS[permissionMode]}`}
-            title={PERMISSION_DESCRIPTIONS[permissionMode]}
+            aria-label={tc('session.permissionAria', { mode: permissionLabel })}
+            title={permissionDescription}
             disabled={permissionBusy}
             className={cn(
               PILL_CLASS_NAME,
@@ -172,13 +176,11 @@ export function CodeSessionControls({
             )}
           >
             <PermissionIcon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-            <span className="truncate @max-[42rem]:hidden">
-              {PERMISSION_LABELS[permissionMode]}
-            </span>
+            <span className="truncate @max-[42rem]:hidden">{permissionLabel}</span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-64">
-          <DropdownMenuLabel>Modo de permissão</DropdownMenuLabel>
+          <DropdownMenuLabel>{tc('session.permissionMenu')}</DropdownMenuLabel>
           {PERMISSION_ORDER.map((mode) => {
             const ModeIcon = PERMISSION_ICONS[mode];
             return (
@@ -188,7 +190,7 @@ export function CodeSessionControls({
                 checked={mode === permissionMode}
                 onSelect={() => void changePermissionMode(mode)}
               >
-                {PERMISSION_LABELS[mode]}
+                {tc(PERMISSION_LABEL_KEYS[mode])}
               </DropdownMenuItem>
             );
           })}
@@ -199,7 +201,7 @@ export function CodeSessionControls({
               permissionMode === 'autonomous' ? 'text-warning' : 'text-foreground-muted',
             )}
           >
-            {PERMISSION_DESCRIPTIONS[permissionMode]}
+            {permissionDescription}
           </p>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -207,7 +209,9 @@ export function CodeSessionControls({
       <Tooltip content={planTitle} side="top">
         <button
           type="button"
-          aria-label={`Modo Plano: ${planMode ? 'ativado' : 'desativado'}`}
+          aria-label={tc('session.planAria', {
+            state: tc(planMode ? 'session.planStateOn' : 'session.planStateOff'),
+          })}
           aria-pressed={planMode}
           disabled={planBusy}
           onClick={() => void togglePlanMode()}
@@ -240,8 +244,8 @@ export function CodeSessionControls({
         <PopoverTrigger asChild>
           <button
             type="button"
-            aria-label="Plano, tarefas e trabalhos em segundo plano"
-            title="Plano, tarefas e trabalhos em segundo plano"
+            aria-label={tc('session.planTitle')}
+            title={tc('session.planTitle')}
             className={cn(PILL_CLASS_NAME, 'justify-center bg-transparent px-2')}
           >
             <ListTodo aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
@@ -253,7 +257,10 @@ export function CodeSessionControls({
             {jobs.length > 0 ? (
               <span
                 className="flex items-center gap-0.5 text-[11px] tabular-nums text-foreground-muted"
-                title={`${jobs.filter((job) => job.status === 'running').length} rodando · ${jobs.length} no total`}
+                title={tc('session.jobsTitle', {
+                  running: jobs.filter((job) => job.status === 'running').length,
+                  total: jobs.length,
+                })}
               >
                 <SquareTerminal aria-hidden className="size-3 shrink-0" strokeWidth={1.75} />
                 {jobs.length}
@@ -265,7 +272,7 @@ export function CodeSessionControls({
           <div className="flex max-h-96 flex-col gap-2 overflow-y-auto overscroll-contain p-2">
             {planStateLabel ? (
               <p className="px-1 text-[11px] font-medium text-foreground-muted">
-                Plano · {planStateLabel}
+                {tc('session.planWithState', { state: planStateLabel })}
               </p>
             ) : null}
             {plan ? (
@@ -282,21 +289,21 @@ export function CodeSessionControls({
                   useUiStore.getState().openCodePlan({
                     conversationId,
                     markdown,
-                    title: 'Plano',
+                    title: tc('plan.title'),
                     updatedAt: view.updatedAt,
                   });
                 }}
               />
             ) : (
               <p className="px-1 text-[12px] leading-relaxed text-foreground-muted">
-                Nenhum plano nesta sessão.
+                {tc('session.noPlan')}
               </p>
             )}
             {todos.length > 0 ? (
               <TodoCard todos={todos} scrollable={false} />
             ) : (
               <p className="px-1 text-[12px] leading-relaxed text-foreground-muted">
-                Nenhuma tarefa registrada.
+                {tc('session.noTasks')}
               </p>
             )}
             <div className="border-t border-border pt-2">
@@ -312,7 +319,7 @@ export function CodeSessionControls({
                 />
               ) : (
                 <p className="px-1 text-[12px] leading-relaxed text-foreground-muted">
-                  Nenhum trabalho em segundo plano.
+                  {tc('session.noJobs')}
                 </p>
               )}
             </div>

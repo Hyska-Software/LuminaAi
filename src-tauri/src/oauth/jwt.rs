@@ -39,7 +39,12 @@ struct RawJwk {
 /// are ignored; a JWKS with zero usable keys is an error).
 pub fn parse_jwks(document: &Value) -> Result<Vec<Jwk>> {
     let raw: RawJwks = serde_json::from_value(document.clone())
-        .map_err(|error| anyhow!("JWKS inválido: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.jwksInvalid",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     let keys: Vec<Jwk> = raw
         .keys
         .into_iter()
@@ -52,7 +57,7 @@ pub fn parse_jwks(document: &Value) -> Result<Vec<Jwk>> {
         })
         .collect();
     if keys.is_empty() {
-        return Err(anyhow!("JWKS sem chaves RSA utilizáveis"));
+        return Err(anyhow!(crate::i18n::t("oauth.errors.jwtJwksNoRsa")));
     }
     Ok(keys)
 }
@@ -117,7 +122,7 @@ pub fn validate_claims(
         ));
     }
     if !claims.audience_contains(client_id) {
-        return Err(anyhow!("ID token não destinado a este client_id"));
+        return Err(anyhow!(crate::i18n::t("oauth.errors.jwtWrongAudience")));
     }
     match claims.exp {
         Some(exp) if exp + 60 >= now_secs => {}
@@ -125,7 +130,7 @@ pub fn validate_claims(
         None => return Err(anyhow!("ID token sem `exp`")),
     }
     if claims.nonce.as_deref() != Some(expected_nonce) {
-        return Err(anyhow!("nonce do ID token não confere"));
+        return Err(anyhow!(crate::i18n::t("oauth.errors.jwtNonce")));
     }
     claims.subject()?;
     Ok(())
@@ -139,25 +144,40 @@ pub fn verify(
     client_id: &str,
     expected_nonce: &str,
 ) -> Result<Claims> {
-    let header = decode_header(id_token).map_err(|error| anyhow!("ID token malformado: {error}"))?;
+    let header = decode_header(id_token).map_err(|error| {
+        anyhow!(crate::i18n::t_args(
+            "oauth.errors.jwtMalformed",
+            &[("error", &error.to_string())],
+        ))
+    })?;
     let candidate = if header.kid.as_deref().is_some_and(|kid| !kid.is_empty()) {
         jwks.iter()
             .find(|key| Some(key.kid.as_str()) == header.kid.as_deref())
-            .ok_or_else(|| anyhow!("chave do ID token (`kid`) não está no JWKS"))?
+            .ok_or_else(|| anyhow!(crate::i18n::t("oauth.errors.jwtKidNotFound")))?
     } else if jwks.len() == 1 {
         &jwks[0]
     } else {
-        return Err(anyhow!("ID token sem `kid` e JWKS com múltiplas chaves"));
+        return Err(anyhow!(crate::i18n::t("oauth.errors.jwtMissingKid")));
     };
 
     let key = DecodingKey::from_rsa_components(&candidate.n, &candidate.e)
-        .map_err(|error| anyhow!("chave JWKS inválida: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.jwtKeyInvalid",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     let mut validation = Validation::new(Algorithm::RS256);
     validation.leeway = 60;
     validation.set_audience(&[client_id]);
     validation.set_issuer(&[issuer.trim_end_matches('/')]);
     let decoded = decode::<Claims>(id_token, &key, &validation)
-        .map_err(|error| anyhow!("ID token rejeitado: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.jwtRejected",
+                &[("error", &error.to_string())],
+            ))
+        })?;
 
     let now = chrono::Utc::now().timestamp();
     validate_claims(&decoded.claims, issuer, client_id, expected_nonce, now)?;

@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   ArrowRight,
@@ -41,6 +42,7 @@ import { cn } from '@/lib/utils';
  * mirrors it and never shares the app origin.
  */
 export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
+  const { t } = useTranslation('agents');
   const { agent, conversation } = context;
   const updateAgent = useAgentStore((state) => state.update);
   const [status, setStatus] = useState<BrowserStatus | null>(null);
@@ -205,9 +207,9 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
         await api.browserSessionClose(conversationId).catch(() => undefined);
       }
       setStatus(null);
-      toast.success(next ? 'Navegador liberado' : 'Navegador desligado');
+      toast.success(next ? t('browser.enabled') : t('browser.disabled'));
     } catch (error) {
-      toast.error('Não foi possível alterar o navegador', { description: String(error) });
+      toast.error(t('browser.toggleError'), { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -222,11 +224,11 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
         !paused && urlDraft.trim() && urlDraft.trim() !== 'about:blank' ? urlDraft.trim() : null,
       );
       setStatus(next);
-      toast.success('Navegador aberto', {
-        description: 'A página aparece aqui no painel; nenhuma janela externa é aberta.',
+      toast.success(t('browser.opened'), {
+        description: t('browser.openedHint'),
       });
     } catch (error) {
-      toast.error('Não foi possível abrir o navegador', { description: String(error) });
+      toast.error(t('browser.openError'), { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -239,9 +241,9 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
       await api.browserSessionClose(conversationId);
       setStatus(null);
       setFrame(null);
-      toast.success('Navegador encerrado');
+      toast.success(t('browser.closed'));
     } catch (error) {
-      toast.error('Não foi possível encerrar', { description: String(error) });
+      toast.error(t('browser.closeError'), { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -256,7 +258,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
       await loadStatus();
       window.setTimeout(() => void loadFrame(), 250);
     } catch (error) {
-      toast.error('URL inválida ou bloqueada', { description: String(error) });
+      toast.error(t('browser.invalidUrl'), { description: String(error) });
     } finally {
       setTabBusy(false);
     }
@@ -271,7 +273,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
       await loadStatus();
       window.setTimeout(() => void loadFrame(), 250);
     } catch (error) {
-      toast.error('Não foi possível navegar', { description: String(error) });
+      toast.error(t('browser.navigateError'), { description: String(error) });
     } finally {
       setTabBusy(false);
     }
@@ -285,7 +287,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
       await api.browserNewTab(conversationId, generation.value, 'about:blank');
       await loadStatus();
     } catch (error) {
-      toast.error('Não foi possível criar a aba', { description: String(error) });
+      toast.error(t('browser.newTabError'), { description: String(error) });
     } finally {
       setTabBusy(false);
     }
@@ -299,7 +301,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
       await api.browserCloseTab(conversationId, tabId, generation.value);
       await loadStatus();
     } catch (error) {
-      toast.error('Não foi possível fechar a aba', { description: String(error) });
+      toast.error(t('browser.closeTabError'), { description: String(error) });
     } finally {
       setTabBusy(false);
     }
@@ -312,7 +314,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
       await api.browserActivateTab(conversationId, tabId, generation.value);
       await loadStatus();
     } catch (error) {
-      toast.error('Não foi possível ativar a aba', { description: String(error) });
+      toast.error(t('browser.activateTabError'), { description: String(error) });
     }
   };
 
@@ -321,15 +323,15 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
     setBusy(true);
     try {
       const result = await api.browserTakeControl(conversationId);
-      if (!result.generation) throw new Error('Geração de controle indisponível');
+      if (!result.generation) throw new Error(t('browser.controlGenerationUnavailable'));
       if (currentConversation.current !== conversationId) return;
       controlGeneration.current = { conversationId, value: result.generation };
       setPaused(true);
-      toast.info('Você está no controle', {
-        description: 'O agente fica pausado até você devolver o controle.',
+      toast.info(t('screen.youControl'), {
+        description: t('browser.agentPausedHint'),
       });
     } catch (error) {
-      toast.error('Não foi possível assumir o controle', { description: String(error) });
+      toast.error(t('screen.takeControlError'), { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -340,15 +342,17 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
     setBusy(true);
     try {
       const generation = controlGeneration.current;
-      if (!generation || generation.conversationId !== conversationId) throw new Error('Geração de controle indisponível');
+      if (!generation || generation.conversationId !== conversationId) {
+        throw new Error(t('browser.controlGenerationUnavailable'));
+      }
       releasePressedInputs();
       await inputQueue.current;
       await api.releaseComputerControl(conversationId, 'browser', generation.value);
       if (controlGeneration.current?.value === generation.value) controlGeneration.current = null;
       setPaused(false);
-      toast.success('Controle devolvido ao agente');
+      toast.success(t('screen.controlReleased'));
     } catch (error) {
-      toast.error('Não foi possível devolver o controle', { description: String(error) });
+      toast.error(t('screen.releaseError'), { description: String(error) });
     } finally {
       setBusy(false);
     }
@@ -379,7 +383,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
     const tabId = status?.activeTab ?? null;
     inputQueue.current = inputQueue.current.then(async () => {
       try { await api.browserHumanInput(conversationId, tabId, kind, params, generation.value); }
-      catch (error) { if (!move) toast.error('Entrada não enviada', { description: String(error) }); }
+      catch (error) { if (!move) toast.error(t('browser.inputError'), { description: String(error) }); }
       finally { if (move) movePending.current = false; }
     });
   };
@@ -391,7 +395,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
     const tabId = status?.activeTab ?? null;
     inputQueue.current = inputQueue.current.then(async () => {
       try { await api.browserInsertText(conversationId, text, generation.value, tabId); }
-      catch (error) { toast.error('Texto não enviado', { description: String(error) }); }
+      catch (error) { toast.error(t('browser.textError'), { description: String(error) }); }
     });
   };
 
@@ -453,18 +457,21 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
         <div className="flex items-center gap-2">
           <Globe2 className="size-4 shrink-0 text-accent" />
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium text-foreground">Navegador</p>
+            <p className="text-[13px] font-medium text-foreground">{t('panel.tabs.browser')}</p>
             <p className="truncate text-[11px] text-foreground-muted">
               {status?.running
-                ? `${status.tabs.length} aba(s) · ${status.executable ?? 'Chromium/Edge'}`
-                : `Deixe ${agent.name} usar um navegador controlado.`}
+                ? t('browser.tabsSummary', {
+                    count: status.tabs.length,
+                    executable: status.executable ?? 'Chromium/Edge',
+                  })
+                : t('browser.enableHint', { name: agent.name })}
             </p>
           </div>
           <Switch
             checked={enabled}
             onCheckedChange={(checked) => void toggleBrowser(checked)}
             disabled={busy}
-            aria-label={`Deixar ${agent.name} usar um navegador`}
+            aria-label={t('browser.toggleAria', { name: agent.name })}
           />
         </div>
         <AgentWorkspaceNotice agent={agent} conversation={conversation} />
@@ -476,7 +483,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                 variant="ghost"
                 disabled={!status?.running || tabBusy || !paused}
                 onClick={() => void history('back')}
-                aria-label="Voltar"
+                aria-label={t('browser.back')}
               >
                 <ArrowLeft className="size-3.5" />
               </Button>
@@ -485,7 +492,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                 variant="ghost"
                 disabled={!status?.running || tabBusy || !paused}
                 onClick={() => void history('forward')}
-                aria-label="Avançar"
+                aria-label={t('browser.forward')}
               >
                 <ArrowRight className="size-3.5" />
               </Button>
@@ -494,7 +501,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                 variant="ghost"
                 disabled={!status?.running || tabBusy || !paused}
                 onClick={() => void history('reload')}
-                aria-label="Recarregar"
+                aria-label={t('browser.reload')}
               >
                 <RefreshCw className={cn('size-3.5', tabBusy && 'animate-spin')} />
               </Button>
@@ -509,8 +516,8 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                     void navigate();
                   }
                 }}
-                placeholder={status?.running ? 'Pesquisar ou digitar URL' : 'https://…'}
-                aria-label="Barra de endereço do navegador"
+                placeholder={status?.running ? t('browser.addressPlaceholder') : 'https://…'}
+                aria-label={t('browser.addressAria')}
                 className="h-8 min-w-0 flex-1 text-[11px]"
               />
               <Button
@@ -518,7 +525,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                 variant="ghost"
                 disabled={!status?.running || tabBusy || !paused || !urlDraft.trim()}
                 onClick={() => void navigate()}
-                aria-label="Ir para o endereço"
+                aria-label={t('browser.goAria')}
               >
                 {tabBusy ? <Loader2 className="size-3.5 animate-spin" /> : <ExternalLink className="size-3.5" />}
               </Button>
@@ -541,13 +548,13 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                     className="min-w-0 truncate focus-visible:outline-none"
                     title={tab.title}
                   >
-                    {tab.title || 'Nova aba'}
+                    {tab.title || t('browser.newTab')}
                   </button>
                   <button
                     type="button"
                     onClick={() => void closeTab(tab.id)}
                     disabled={tabBusy || !paused}
-                    aria-label={`Fechar ${tab.title || 'aba'}`}
+                    aria-label={t('browser.closeTabAria', { title: tab.title || t('browser.tabFallback') })}
                     className="shrink-0 rounded p-0.5 hover:bg-surface-active focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
                   >
                     <X className="size-2.5" />
@@ -559,7 +566,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                 variant="ghost"
                 disabled={!status?.running || tabBusy || !paused}
                 onClick={() => void newTab()}
-                aria-label="Nova aba"
+                aria-label={t('browser.newTab')}
               >
                 <Plus className="size-3.5" />
               </Button>
@@ -573,47 +580,53 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised/30 p-6 text-center">
             <Globe2 className="size-6 text-foreground-subtle" />
             <p className="text-[12px] text-foreground-muted">
-              Abra uma conversa com {agent.name} para usar o navegador.
+              {t('browser.openConversation', { name: agent.name })}
             </p>
           </div>
         ) : !enabled ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised/30 p-6 text-center">
             <ShieldAlert className="size-6 text-foreground-subtle" />
             <p className="text-[12px] text-foreground-muted">
-              O navegador está desligado para este agente.
+              {t('browser.disabledHint')}
             </p>
             <Button size="sm" variant="secondary" onClick={() => void toggleBrowser(true)}>
-              Ativar navegador
+              {t('browser.enable')}
             </Button>
           </div>
         ) : !status?.running ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-surface-raised/20 p-6 text-center">
             <Globe2 className="size-6 text-foreground-subtle" />
             <p className="text-[12px] text-foreground-muted">
-              Nenhuma sessão aberta.
+              {t('browser.noSession')}
             </p>
             <p className="max-w-64 text-[11px] text-foreground-subtle">
-              O Zylara abre um Chromium/Edge isolado em segundo plano, com perfil próprio por
-              conversa. A página aparece aqui, sem janela externa.
+              {t('browser.noSessionHint')}
             </p>
             <Button size="sm" disabled={busy} onClick={() => void openSession()}>
               {busy ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Globe2 className="mr-1.5 size-3.5" />}
-              Abrir navegador
+              {t('browser.open')}
             </Button>
           </div>
         ) : (
           <>
             <div className={cn('relative flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-background', paused && 'focus-within:ring-2 focus-within:ring-accent', expanded && 'fixed inset-2 z-[100] flex-col shadow-2xl')}>
               {expanded ? <div className="flex h-10 w-full shrink-0 items-center gap-2 border-b border-border px-3">
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">Navegador de {agent.name}</span>
-                <span className="text-[11px] text-foreground-muted">{paused ? 'Você está no controle' : 'Somente visualização'} · {frame && clock - frame.capturedAt < 8000 ? 'Ao vivo' : 'Imagem desatualizada'}</span>
-                <Button ref={expandedControlButton} size="sm" variant="secondary" disabled={busy || otherControl} onClick={() => (paused ? void releaseControl() : void takeControl())}>{paused ? 'Devolver ao agente' : 'Assumir o controle'}</Button>
-                <Button size="sm" variant="ghost" aria-label="Sair da visualização expandida" onClick={() => setExpanded(false)}><Minimize2 className="size-4" /></Button>
+                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{t('browser.expandedTitle', { name: agent.name })}</span>
+                <span className="text-[11px] text-foreground-muted">
+                  {t('browser.expandedStatus', {
+                    control: paused ? t('screen.youControl') : t('browser.viewOnly'),
+                    live: frame && clock - frame.capturedAt < 8000
+                      ? t('screen.live')
+                      : t('screen.staleFrame'),
+                  })}
+                </span>
+                <Button ref={expandedControlButton} size="sm" variant="secondary" disabled={busy || otherControl} onClick={() => (paused ? void releaseControl() : void takeControl())}>{paused ? t('screen.giveBack') : t('screen.takeControl')}</Button>
+                <Button size="sm" variant="ghost" aria-label={t('screen.exitExpanded')} onClick={() => setExpanded(false)}><Minimize2 className="size-4" /></Button>
               </div> : null}
               {frame ? (
                 <img
                   src={frame.dataUrl}
-                  alt={`Página controlada por ${agent.name}: ${frame.title}`}
+                  alt={t('browser.frameAlt', { name: agent.name, title: frame.title })}
                   onPointerDown={(event) => pointerPreview(event, 'mousePressed')}
                   onPointerMove={(event) => pointerPreview(event, 'mouseMoved')}
                   onPointerUp={(event) => pointerPreview(event, 'mouseReleased')}
@@ -629,10 +642,10 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
               ) : frameError ? (
                 <div className="flex flex-col items-center gap-1 p-4 text-center">
                   <ShieldAlert className="size-5 text-warning" />
-                  <p className="text-[11px] text-foreground-muted">Sem frame da página.</p>
+                  <p className="text-[11px] text-foreground-muted">{t('browser.noFrame')}</p>
                   <p className="break-words text-[10px] text-danger">{frameError}</p>
                   <Button size="sm" variant="ghost" onClick={() => void loadFrame()}>
-                    Tentar de novo
+                    {t('common:actions.retry')}
                   </Button>
                 </div>
               ) : (
@@ -640,7 +653,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
               )}
               <textarea
                 ref={keyboardTarget}
-                aria-label="Teclado do navegador controlado"
+                aria-label={t('browser.keyboardAria')}
                 tabIndex={paused ? 0 : -1}
                 className="absolute bottom-0 left-0 size-px opacity-0"
                 onKeyDown={(event) => keyPreview(event, 'keyDown')}
@@ -652,15 +665,19 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
               {paused ? (
                 <Badge tone="warning" className="absolute left-2 top-2">
                   <Lock className="mr-1 size-2.5" />
-                  Controle humano
+                  {t('browser.humanControl')}
                 </Badge>
               ) : null}
-              {!expanded ? <Button size="sm" variant="secondary" aria-label="Expandir navegador" className="absolute right-2 top-2" onClick={() => setExpanded(true)}><Expand className="size-3.5" /></Button> : null}
+              {!expanded ? <Button size="sm" variant="secondary" aria-label={t('browser.expand')} className="absolute right-2 top-2" onClick={() => setExpanded(true)}><Expand className="size-3.5" /></Button> : null}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <span role="status" className="text-[10px] text-foreground-muted">{frame && clock - frame.capturedAt < 8000 ? 'Ao vivo' : 'Imagem desatualizada'}</span>
+              <span role="status" className="text-[10px] text-foreground-muted">
+                {frame && clock - frame.capturedAt < 8000
+                  ? t('screen.live')
+                  : t('screen.staleFrame')}
+              </span>
               <Badge tone="neutral">
-                {activeTab?.title || frame?.title || 'Nova aba'}
+                {activeTab?.title || frame?.title || t('browser.newTab')}
               </Badge>
               <span className="min-w-0 flex-1 truncate text-[10px] text-foreground-subtle">
                 {activeTab?.url ?? frame?.url ?? ''}
@@ -679,20 +696,20 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                 ) : (
                   <Lock className="mr-1.5 size-3.5" />
                 )}
-                {paused ? 'Devolver ao agente' : 'Assumir o controle'}
+                {paused ? t('screen.giveBack') : t('screen.takeControl')}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => void closeSession()} disabled={busy}>
                 <Square className="mr-1.5 size-3.5" />
-                Encerrar
+                {t('browser.end')}
               </Button>
             </div>
             <p className="text-[10px] leading-relaxed text-foreground-subtle">
               {otherControl
-                ? 'Devolva o controle do desktop antes de assumir o navegador.'
+                ? t('browser.releaseDesktopFirst')
                 : paused
-                ? 'Controle humano: clique na página para digitar. Ctrl+Alt+Shift+Q libera o teclado.'
+                ? t('browser.humanControlHint')
                 : status.downloadDir
-                  ? `Downloads: ${status.downloadDir}`
+                  ? t('browser.downloads', { dir: status.downloadDir })
                   : null}
             </p>
             <ComputerActivity conversationId={conversationId} />

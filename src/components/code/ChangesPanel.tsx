@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   CircleAlert,
@@ -22,6 +23,8 @@ import {
   Spinner,
 } from '@/components/ui';
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
+import { compareText } from '@/lib/i18n/format';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type {
@@ -94,14 +97,17 @@ export interface ChangesPanelProps {
   className?: string;
 }
 
-const GROUPS: ReadonlyArray<{ id: ChangeGroup; label: string }> = [
-  { id: 'staged', label: 'Preparados' },
-  { id: 'unstaged', label: 'Não preparados' },
-  { id: 'untracked', label: 'Novos' },
-  { id: 'session', label: 'Da sessão' },
-  { id: 'commit', label: 'Commit' },
-  { id: 'branch', label: 'Branch' },
-];
+const GROUPS = ['staged', 'unstaged', 'untracked', 'session', 'commit', 'branch'] as const;
+
+/** Stable catalog key per change group. */
+const GROUP_KEYS = {
+  staged: 'code:changes.groups.staged',
+  unstaged: 'code:changes.groups.unstaged',
+  untracked: 'code:changes.groups.untracked',
+  session: 'code:changes.groups.session',
+  commit: 'code:changes.groups.commit',
+  branch: 'code:changes.groups.branch',
+} as const;
 
 const KIND_STATUS: Record<FileChangeKind, string> = {
   created: 'A',
@@ -152,41 +158,41 @@ function emptyCopyFor(
 ): { title: string; description: string } {
   if (!hasWorkspace) {
     return {
-      title: 'Nenhum workspace selecionado',
-      description: 'Abra uma pasta para ver as alterações do código.',
+      title: t('code:changes.empty.noWorkspace.title'),
+      description: t('code:changes.empty.noWorkspace.description'),
     };
   }
   switch (filter.kind) {
     case 'last-turn':
       return {
-        title: 'Nenhuma alteração no último turno',
-        description: 'As edições do agente no último turno aparecem aqui.',
+        title: t('code:changes.empty.lastTurn.title'),
+        description: t('code:changes.empty.lastTurn.description'),
       };
     case 'staged':
       return {
-        title: 'Nenhum arquivo marcado para commit',
-        description: 'Marque arquivos na lista de não marcados para prepará-los.',
+        title: t('code:changes.empty.staged.title'),
+        description: t('code:changes.empty.staged.description'),
       };
     case 'unstaged':
       return {
-        title: 'Nenhum arquivo fora do stage',
-        description: 'As alterações ainda não preparadas aparecem aqui.',
+        title: t('code:changes.empty.unstaged.title'),
+        description: t('code:changes.empty.unstaged.description'),
       };
     case 'commit':
       return {
-        title: 'Nenhum arquivo neste commit',
-        description: 'O commit selecionado não alterou arquivos.',
+        title: t('code:changes.empty.commit.title'),
+        description: t('code:changes.empty.commit.description'),
       };
     case 'branch':
       return {
-        title: `Nenhuma diferença em relação a ${filter.base}`,
-        description: 'As alterações desde o ponto comum com essa branch aparecem aqui.',
+        title: t('code:changes.empty.branch.title', { base: filter.base }),
+        description: t('code:changes.empty.branch.description'),
       };
     case 'uncommitted':
     default:
       return {
-        title: 'Nenhuma alteração pendente',
-        description: 'As edições do agente e as mudanças do git aparecem aqui.',
+        title: t('code:changes.empty.uncommitted.title'),
+        description: t('code:changes.empty.uncommitted.description'),
       };
   }
 }
@@ -281,7 +287,7 @@ export function buildChangeRows(
     });
   }
 
-  return [...rows.values()].sort((a, b) => a.path.localeCompare(b.path, 'pt-BR'));
+  return [...rows.values()].sort((a, b) => compareText(a.path, b.path));
 }
 
 /**
@@ -310,6 +316,7 @@ export function ChangesPanel({
   compact = false,
   className,
 }: ChangesPanelProps) {
+  const { t } = useTranslation('code');
   const rows = useMemo(() => buildChangeRows(gitStatus, sessionChanges), [gitStatus, sessionChanges]);
   const isRepo = gitStatus?.isRepo ?? false;
   const conflicted = (gitStatus?.conflicted.length ?? 0) > 0;
@@ -382,7 +389,7 @@ export function ChangesPanel({
         removed: file.removed,
         knownDiff: file.diff,
       }))
-      .sort((a, b) => a.path.localeCompare(b.path, 'pt-BR'));
+      .sort((a, b) => compareText(a.path, b.path));
   }, [commitDetail]);
 
   const branchRows = useMemo<ChangeRow[]>(() => {
@@ -398,7 +405,7 @@ export function ChangesPanel({
         removed: file.removed,
         base: branchCompare.mergeBase,
       }))
-      .sort((a, b) => a.path.localeCompare(b.path, 'pt-BR'));
+      .sort((a, b) => compareText(a.path, b.path));
   }, [branchCompare]);
 
   const visibleRows = useMemo<ChangeRow[]>(() => {
@@ -454,7 +461,7 @@ export function ChangesPanel({
         setCommitDetail(detail);
       } catch (error) {
         if (run !== commitRun.current) return;
-        setCommitError(describeError(error, 'Não foi possível carregar o commit.'));
+        setCommitError(describeError(error, t('code:changes.loadCommitError')));
       } finally {
         if (run === commitRun.current) setCommitLoading(false);
       }
@@ -476,7 +483,7 @@ export function ChangesPanel({
         setBranchCompare(compare);
       } catch (error) {
         if (run !== branchRun.current) return;
-        setBranchError(describeError(error, 'Não foi possível comparar com a branch.'));
+        setBranchError(describeError(error, t('code:changes.compareError')));
       } finally {
         if (run === branchRun.current) setBranchLoading(false);
       }
@@ -496,7 +503,7 @@ export function ChangesPanel({
       setBranches(result ?? { current: null, branches: [] });
     } catch (error) {
       if (run !== branchesRun.current) return;
-      setBranchesError(describeError(error, 'Não foi possível carregar as branches.'));
+      setBranchesError(describeError(error, t('code:changes.loadBranchesError')));
     } finally {
       if (run === branchesRun.current) setBranchesLoading(false);
     }
@@ -523,12 +530,12 @@ export function ChangesPanel({
       }
       const base = pickBranchBase(result?.branches ?? [], result?.current ?? null);
       if (!base) {
-        toast.info('Não há outra branch para comparar');
+        toast.info(t('code:changes.noOtherBranchToast'));
         return;
       }
       setExplicitFilter({ kind: 'branch', base });
     } catch (error) {
-      toast.error(describeError(error, 'Não foi possível carregar as branches'));
+      toast.error(describeError(error, t('code:changes.loadBranchesToastError')));
     } finally {
       setBranchButtonBusy(false);
     }
@@ -591,7 +598,7 @@ export function ChangesPanel({
       }
       if (!workspaceId) {
         setDiffText('');
-        setDiffError('Abra um workspace para ver o diff.');
+        setDiffError(t('code:changes.noWorkspaceDiff'));
         return;
       }
       setDiffText('');
@@ -604,7 +611,7 @@ export function ChangesPanel({
         setDiffText(text ?? '');
       } catch (error) {
         if (run !== diffRun.current) return;
-        setDiffError(describeError(error, 'Não foi possível carregar o diff.'));
+        setDiffError(describeError(error, t('code:changes.loadDiffError')));
       } finally {
         if (run === diffRun.current) setDiffLoading(false);
       }
@@ -628,7 +635,7 @@ export function ChangesPanel({
       else await api.gitUnstage(workspaceId, [row.path]);
       onRefresh?.();
     } catch (error) {
-      toast.error(describeError(error, 'Não foi possível atualizar o stage'));
+      toast.error(describeError(error, t('code:changes.stageError')));
     } finally {
       setBusyPath(null);
     }
@@ -650,20 +657,21 @@ export function ChangesPanel({
       } else {
         await api.gitUnstage(workspaceId, paths);
       }
-      const noun = count === 1 ? 'arquivo' : 'arquivos';
       toast.success(
-        action === 'stage'
-          ? `${count} ${noun} ${count === 1 ? 'preparado' : 'preparados'}`
-          : `${count} ${noun} ${count === 1 ? 'removido do stage' : 'removidos do stage'}`,
+        t(action === 'stage' ? 'code:changes.stageSuccess' : 'code:changes.unstageSuccess', {
+          count,
+        }),
       );
       onRefresh?.();
     } catch (error) {
       toast.error(
         describeError(
           error,
-          action === 'stage'
-            ? 'Não foi possível preparar os arquivos'
-            : 'Não foi possível desmarcar os arquivos',
+          t(
+            action === 'stage'
+              ? 'code:changes.stageAllError'
+              : 'code:changes.unstageAllError',
+          ),
         ),
       );
     } finally {
@@ -680,12 +688,12 @@ export function ChangesPanel({
       } else {
         await api.gitDiscard(workspaceId, [confirmRow.path]);
       }
-      toast.success('Arquivo revertido');
+      toast.success(t('code:changes.revertSuccess'));
       if (selected?.path === confirmRow.path) closeDiff();
       setConfirmRow(null);
       onRefresh?.();
     } catch (error) {
-      toast.error(describeError(error, 'Não foi possível reverter o arquivo'));
+      toast.error(describeError(error, t('code:changes.revertError')));
     } finally {
       setReverting(false);
     }
@@ -704,7 +712,7 @@ export function ChangesPanel({
       stagedPaths={stagedPaths}
       added={totals.added}
       removed={totals.removed}
-      blockedReason={conflicted ? 'Resolva os conflitos de merge antes de commitar' : null}
+      blockedReason={conflicted ? t('code:changes.blockedReason') : null}
       onRefresh={onRefresh}
     />
   );
@@ -715,10 +723,10 @@ export function ChangesPanel({
   const detail = selected && !onOpenDiffTab ? (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
-        <IconButton label="Voltar para alterações" size="sm" onClick={closeDiff}>
+        <IconButton label={t('code:changes.back')} size="sm" onClick={closeDiff}>
           <ArrowLeft aria-hidden className="size-4" strokeWidth={1.75} />
         </IconButton>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-muted">Diff do arquivo</span>
+        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-muted">{t('code:changes.diffHeader')}</span>
       </div>
       <DiffView
         path={selected.path}
@@ -748,8 +756,8 @@ export function ChangesPanel({
           <div className="flex items-start gap-2 border-b border-border bg-surface px-3 py-2 text-[11.5px] text-foreground-muted">
             <GitBranch aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
             <span>
-              <span className="font-medium text-foreground">Não é um repositório Git.</span> As
-              alterações da sessão continuam disponíveis; inicialize um repositório para commitar.
+              <span className="font-medium text-foreground">{t('code:changes.notRepoTitle')}</span>{' '}
+              {t('code:changes.notRepoDescription')}
             </span>
           </div>
         ) : null}
@@ -760,7 +768,7 @@ export function ChangesPanel({
             className="flex items-start gap-2 border-b border-border bg-warning-soft px-3 py-2 text-[11.5px] text-warning"
           >
             <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
-            <span>Conflitos de merge — resolva antes de commitar.</span>
+            <span>{t('code:changes.conflicts')}</span>
           </div>
         ) : null}
 
@@ -834,7 +842,7 @@ export function ChangesPanel({
                 compact && 'sr-only',
               )}
             >
-              {visibleRows.length} {visibleRows.length === 1 ? 'arquivo' : 'arquivos'}
+              {t('code:changes.count', { count: visibleRows.length })}
             </span>
             {visibleStagedPaths.length > 0 ? (
               <Button
@@ -846,7 +854,7 @@ export function ChangesPanel({
                 leftIcon={<Minus aria-hidden className="size-3.5" strokeWidth={2} />}
                 onClick={() => void mutateAll('unstage')}
               >
-                Desmarcar tudo
+                {t('code:changes.unstageAll')}
               </Button>
             ) : null}
             {visibleStageablePaths.length > 0 ? (
@@ -858,13 +866,13 @@ export function ChangesPanel({
                 disabled={bulkBusy !== null || busyPath !== null || conflicted}
                 title={
                   conflicted
-                    ? 'Resolva os conflitos de merge antes de preparar tudo'
-                    : 'Adiciona as alterações visíveis ao stage'
+                    ? t('code:changes.stageAllConflictTitle')
+                    : t('code:changes.stageAllTitle')
                 }
                 leftIcon={<Plus aria-hidden className="size-3.5" strokeWidth={2} />}
                 onClick={() => void mutateAll('stage')}
               >
-                Preparar tudo
+                {t('code:changes.stageAll')}
               </Button>
             ) : null}
           </div>
@@ -896,33 +904,38 @@ export function ChangesPanel({
                 leftIcon={<GitBranch aria-hidden className="size-3.5" strokeWidth={1.75} />}
                 onClick={() => void openBranchDiff()}
               >
-                Ver diff da branch
+                {t('code:changes.branchButton')}
               </Button>
             ) : null}
           </div>
         ) : (
           <div>
-            {GROUPS.map((group) => {
-              const groupRows = visibleRows.filter((row) => row.group === group.id);
+            {GROUPS.map((groupId) => {
+              const groupRows = visibleRows.filter((row) => row.group === groupId);
               if (groupRows.length === 0) return null;
               const label =
-                group.id === 'commit' && activeFilter.kind === 'commit'
-                  ? `Commit ${shortHash(activeFilter.hash)}`
-                  : group.id === 'branch' && activeFilter.kind === 'branch'
-                    ? `Branch ${activeFilter.base}`
-                    : group.label;
+                groupId === 'commit' && activeFilter.kind === 'commit'
+                  ? t('code:changesFilter.label.commit', { hash: shortHash(activeFilter.hash) })
+                  : groupId === 'branch' && activeFilter.kind === 'branch'
+                    ? t('code:changesFilter.label.branch', { name: activeFilter.base })
+                    : t(GROUP_KEYS[groupId]);
               return (
-                <section key={group.id} aria-label={label} className="border-b border-border">
+                <section key={groupId} aria-label={label} className="border-b border-border">
                   <h3 className="sticky top-0 z-10 flex h-7 items-center gap-1.5 bg-surface px-3 text-[10.5px] font-medium uppercase tracking-wider text-foreground-subtle">
                     {label}
                     <span className="tabular-nums">({groupRows.length})</span>
                   </h3>
                   <ul>
                     {groupRows.map((row) => {
-                      const badge = row.origin === 'both' ? 'sessão + git' : row.origin === 'session' ? 'sessão' : null;
+                      const badge =
+                        row.origin === 'both'
+                          ? t('code:changes.badge.sessionGitTitle')
+                          : row.origin === 'session'
+                            ? t('code:changes.badge.sessionTitle')
+                            : null;
                       return (
                         <li
-                          key={`${group.id}-${row.path}`}
+                          key={`${groupId}-${row.path}`}
                           className="group flex h-7 items-center gap-1 pr-1 hover:bg-surface-hover"
                         >
                           <button
@@ -948,10 +961,12 @@ export function ChangesPanel({
                               <Badge
                                 variant="accent"
                                 size="sm"
-                                title={`Origem: ${badge}`}
+                                title={t('code:changes.origin', { origin: badge })}
                                 className="shrink-0"
                               >
-                                {row.origin === 'both' ? 'agente + git' : 'agente'}
+                                {row.origin === 'both'
+                                  ? t('code:changes.badge.both')
+                                  : t('code:changes.badge.session')}
                               </Badge>
                             ) : null}
                             {row.added !== undefined || row.removed !== undefined ? (
@@ -966,7 +981,7 @@ export function ChangesPanel({
                             <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
                               {row.group === 'staged' ? (
                                 <IconButton
-                                  label={`Remover ${row.path} do stage`}
+                                  label={t('code:changes.unstageFile', { path: row.path })}
                                   size="sm"
                                   disabled={busyPath === row.path || bulkBusy !== null}
                                   onClick={() => void mutate(row, 'unstage')}
@@ -975,7 +990,7 @@ export function ChangesPanel({
                                 </IconButton>
                               ) : (
                                 <IconButton
-                                  label={`Preparar ${row.path}`}
+                                  label={t('code:changes.stageFile', { path: row.path })}
                                   size="sm"
                                   disabled={busyPath === row.path || bulkBusy !== null || !isRepo}
                                   onClick={() => void mutate(row, 'stage')}
@@ -984,7 +999,7 @@ export function ChangesPanel({
                                 </IconButton>
                               )}
                               <IconButton
-                                label={`Reverter ${row.path}`}
+                                label={t('code:changes.revertFile', { path: row.path })}
                                 size="sm"
                                 disabled={busyPath === row.path || bulkBusy !== null}
                                 onClick={() => setConfirmRow(row)}
@@ -1015,18 +1030,19 @@ export function ChangesPanel({
       >
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Reverter arquivo?</DialogTitle>
+            <DialogTitle>{t('code:changes.revertDialog.title')}</DialogTitle>
           </DialogHeader>
           <DialogDescription className="px-6 pb-4">
-            {confirmRow ? `As alterações em ${confirmRow.path} voltam ao estado anterior. ` : ''}
-            Esta ação não pode ser desfeita.
+            {confirmRow
+              ? t('code:changes.revertDialog.description', { path: confirmRow.path })
+              : t('code:changes.revertDialog.descriptionGeneric')}
           </DialogDescription>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setConfirmRow(null)}>
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button variant="danger" size="sm" loading={reverting} onClick={() => void confirmRevert()}>
-              Reverter
+              {t('code:changes.revertDialog.confirm')}
             </Button>
           </DialogFooter>
         </DialogContent>

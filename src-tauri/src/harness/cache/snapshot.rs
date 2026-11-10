@@ -144,6 +144,7 @@ pub fn config_hash(
             "systemPromptOverride": options.system_prompt_override.as_deref().unwrap_or(""),
         },
         "settings": {
+            "locale": settings.locale,
             "systemPrompt": settings.system_prompt,
             "codeTimeoutSecs": settings.code_timeout_secs,
             "webSearchEnabled": settings.web_search_enabled,
@@ -176,6 +177,7 @@ pub fn code_config_hash(
     shell_enabled: bool,
     delegation_depth: u32,
     system_prompt_override: Option<&str>,
+    locale: &str,
     tools: &[ToolDefinition],
 ) -> String {
     let project = project.map(|project| {
@@ -204,6 +206,7 @@ pub fn code_config_hash(
         "shellEnabled": shell_enabled,
         "delegationDepth": delegation_depth,
         "systemPromptOverride": system_prompt_override.unwrap_or(""),
+        "locale": locale,
         "toolsHash": tools_hash(tools),
     });
     stable_hash(&canonical.to_string())
@@ -457,6 +460,7 @@ mod tests {
             true,
             0,
             None,
+            "pt-BR",
             &tools,
         );
         // Estável com os mesmos inputs.
@@ -472,6 +476,7 @@ mod tests {
                 true,
                 0,
                 None,
+                "pt-BR",
                 &tools,
             )
         );
@@ -491,6 +496,7 @@ mod tests {
                 true,
                 0,
                 None,
+                "pt-BR",
                 &tools
             )
         );
@@ -511,6 +517,7 @@ mod tests {
                 true,
                 0,
                 None,
+                "pt-BR",
                 &tools
             )
         );
@@ -526,6 +533,7 @@ mod tests {
                 false,
                 1,
                 Some("foco em testes"),
+                "pt-BR",
                 &tools
             )
         );
@@ -541,7 +549,25 @@ mod tests {
                 true,
                 0,
                 None,
+                "pt-BR",
                 &[tool("read_file")]
+            )
+        );
+        // The UI language is part of the prompt, so it invalidates the snapshot.
+        assert_ne!(
+            base,
+            code_config_hash(
+                &model(),
+                Some("demo"),
+                Some("C:/dev/zylara"),
+                Some("# Regras do projeto"),
+                Some(&project),
+                "Windows",
+                true,
+                0,
+                None,
+                "en",
+                &tools
             )
         );
     }

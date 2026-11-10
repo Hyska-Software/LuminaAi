@@ -11,6 +11,7 @@
  * App); o pedido chega por `requestCacheDiagnostics()` (evento de janela).
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Activity, Copy, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -26,14 +27,17 @@ import {
   Spinner,
 } from '@/components/ui';
 import { api } from '@/lib/api';
-import { cacheBreakLabel, cacheStateMeta, formatCacheHit } from '@/lib/cache';
+import { formatCacheHit } from '@/lib/cache';
+import { formatDateTime } from '@/lib/i18n/format';
 import { useAppStore, useChatStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
 import type { CacheSample, CacheStatsView } from '@/lib/types';
 import { cn, copyText, formatTokens, relativeTime } from '@/lib/utils';
 import {
   buildCacheDiagnostics,
+  cacheBreakLabel,
   cacheStateBadgeTone,
+  cacheStateLabel,
   formatCacheTtl,
   type CacheDiagnosticsView,
 } from './cacheDiagnostics';
@@ -79,26 +83,26 @@ function SampleBreakLabel({ sample }: { sample: CacheSample }) {
 }
 
 const SAMPLE_HEADERS = [
-  'Passo',
-  'Lido',
-  'Gravado',
-  'Novo',
-  'Cache hit',
-  'Teto',
-  'Estado',
-  'Motivo',
+  'cache.diagnostics.headers.step',
+  'cache.diagnostics.headers.read',
+  'cache.diagnostics.headers.written',
+  'cache.diagnostics.headers.new',
+  'cache.diagnostics.headers.hit',
+  'cache.diagnostics.headers.ceiling',
+  'cache.diagnostics.headers.state',
+  'cache.diagnostics.headers.reason',
 ] as const;
 
 function SamplesTable({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
+  const { t } = useTranslation('agents');
   if (diagnostics.samples.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-surface px-4 py-5 text-center">
         <p className="text-[12px] font-medium text-foreground">
-          Sem amostras de cache nesta conversa
+          {t('cache.diagnostics.empty.title')}
         </p>
         <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-foreground-muted">
-          O provedor ainda não reportou usage de cache ou nenhum request foi concluído. O número
-          aparece depois do primeiro request do turno.
+          {t('cache.diagnostics.empty.body')}
         </p>
       </div>
     );
@@ -110,12 +114,12 @@ function SamplesTable({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
     <>
       <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
         <table className="w-full border-collapse text-left text-[11px]">
-          <caption className="sr-only">Amostras recentes de cache</caption>
+          <caption className="sr-only">{t('cache.diagnostics.tableCaption')}</caption>
           <thead className="sticky top-0 bg-surface">
             <tr className="text-[10px] uppercase tracking-wider text-foreground-subtle">
               {SAMPLE_HEADERS.map((header) => (
                 <th key={header} scope="col" className="whitespace-nowrap px-2 py-1.5 font-medium">
-                  {header}
+                  {t(header)}
                 </th>
               ))}
             </tr>
@@ -126,7 +130,7 @@ function SamplesTable({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
                 <th
                   scope="row"
                   className="whitespace-nowrap px-2 py-1.5 text-left font-medium tabular-nums text-foreground"
-                  title={new Date(sample.at).toLocaleString('pt-BR')}
+                  title={formatDateTime(new Date(sample.at))}
                 >
                   {sample.step}
                 </th>
@@ -146,7 +150,7 @@ function SamplesTable({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
                   {formatCacheHit(sample.ceilingPercent)}
                 </td>
                 <td className="whitespace-nowrap px-2 py-1.5 text-foreground-muted">
-                  {cacheStateMeta(sample.state).label}
+                  {cacheStateLabel(sample.state)}
                 </td>
                 <td className="max-w-[190px] truncate px-2 py-1.5">
                   <SampleBreakLabel sample={sample} />
@@ -157,14 +161,14 @@ function SamplesTable({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
         </table>
       </div>
       <p className="mt-1.5 text-[10.5px] leading-snug text-foreground-subtle">
-        Acerto = tokens lidos do cache ÷ tokens de entrada do request. Números reportados pelo
-        provedor, não estimativas locais.
+        {t('cache.diagnostics.tableNote')}
       </p>
     </>
   );
 }
 
 function BreaksSection({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
+  const { t } = useTranslation('agents');
   const last = diagnostics.lastBreak;
   const previous = diagnostics.breaks.slice(1);
   return (
@@ -173,11 +177,11 @@ function BreaksSection({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
         id="cache-diagnostics-breaks"
         className="mb-2 text-[13px] font-semibold text-foreground"
       >
-        Quebras recentes
+        {t('cache.diagnostics.breaks.title')}
       </h3>
       {!last ? (
         <p className="text-[11px] leading-relaxed text-foreground-muted">
-          Nenhuma quebra de prefixo registrada nas amostras recentes.
+          {t('cache.diagnostics.breaks.empty')}
         </p>
       ) : (
         <div className="flex flex-col gap-1.5">
@@ -185,7 +189,10 @@ function BreaksSection({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
               <span className="font-medium text-foreground">{last.label}</span>
               <span className="tabular-nums text-foreground-subtle">
-                passo {last.step} · {relativeTime(last.at)}
+                {t('cache.diagnostics.breakEntry', {
+                  step: last.step,
+                  time: relativeTime(last.at),
+                })}
               </span>
             </div>
             {last.detail ? (
@@ -203,7 +210,10 @@ function BreaksSection({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
                 >
                   <span className="font-medium text-foreground">{entry.label}</span>
                   <span className="tabular-nums text-foreground-subtle">
-                    passo {entry.step} · {relativeTime(entry.at)}
+                    {t('cache.diagnostics.breakEntry', {
+                      step: entry.step,
+                      time: relativeTime(entry.at),
+                    })}
                   </span>
                 </li>
               ))}
@@ -221,6 +231,7 @@ export interface CacheDiagnosticsDialogProps {
 }
 
 export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsDialogProps) {
+  const { t } = useTranslation('agents');
   const conversationId = useChatStore((state) => state.activeId);
   const conversation = useChatStore((state) =>
     state.conversations.find((entry) => entry.id === state.activeId),
@@ -258,7 +269,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
         if (cancelled) return;
         const message = cause instanceof Error ? cause.message : String(cause);
         setError(message);
-        toast.error('Não foi possível carregar o diagnóstico de cache', {
+        toast.error(t('cache.diagnostics.loadError'), {
           description: message,
         });
       })
@@ -268,7 +279,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
     return () => {
       cancelled = true;
     };
-  }, [open, conversationId, reloadToken]);
+  }, [open, conversationId, reloadToken, t]);
 
   const diagnostics = useMemo(
     () =>
@@ -281,7 +292,6 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
     [view, live, conversation?.providerId, conversation?.modelId],
   );
 
-  const meta = cacheStateMeta(diagnostics.state);
   const providerLabel =
     providers.find((provider) => provider.id === diagnostics.providerId)?.shortName ??
     diagnostics.providerId ??
@@ -311,8 +321,8 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
       samples: diagnostics.samples,
     };
     const ok = await copyText(JSON.stringify(payload, null, 2));
-    if (ok) toast.success('Diagnóstico de cache copiado');
-    else toast.error('Não foi possível copiar o diagnóstico');
+    if (ok) toast.success(t('cache.diagnostics.copied'));
+    else toast.error(t('cache.diagnostics.copyError'));
   };
 
   const emptyConversation = !conversationId;
@@ -324,19 +334,21 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Activity aria-hidden className="size-4 shrink-0 text-accent" strokeWidth={2} />
-            Diagnóstico de cache
+            {t('cache.diagnostics.title')}
           </DialogTitle>
           <DialogDescription>
-            Amostras por request, quebras de prefixo e usage bruto da conversa ativa.
+            {t('cache.diagnostics.description')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
           {emptyConversation ? (
             <div className="rounded-xl border border-border bg-surface px-4 py-5 text-center">
-              <p className="text-[12px] font-medium text-foreground">Nenhuma conversa aberta</p>
+              <p className="text-[12px] font-medium text-foreground">
+                {t('cache.diagnostics.noConversation.title')}
+              </p>
               <p className="mt-1 text-[11px] leading-relaxed text-foreground-muted">
-                Abra uma conversa para ver as amostras de cache e o diagnóstico de prefixo.
+                {t('cache.diagnostics.noConversation.body')}
               </p>
             </div>
           ) : initialLoading ? (
@@ -347,14 +359,14 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
               <Spinner
                 size="sm"
                 className="text-accent"
-                label="Carregando diagnóstico de cache"
+                label={t('cache.diagnostics.loadingAria')}
               />
-              Carregando diagnóstico…
+              {t('cache.diagnostics.loading')}
             </div>
           ) : error && !diagnostics.hasData ? (
             <div className="rounded-xl border border-danger/30 bg-danger-soft p-3">
               <p className="text-[12px] font-medium text-foreground">
-                Não foi possível carregar o diagnóstico de cache
+                {t('cache.diagnostics.loadError')}
               </p>
               <p className="mt-0.5 break-words text-[11px] leading-relaxed text-foreground-muted">
                 {error}
@@ -366,7 +378,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
                 loading={loading}
                 onClick={reload}
               >
-                Tentar novamente
+                {t('common:actions.retry')}
               </Button>
             </div>
           ) : (
@@ -376,13 +388,13 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
                   role="status"
                   className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[11px] text-foreground-muted"
                 >
-                  Não foi possível atualizar pelo backend; exibindo os dados ao vivo.
+                  {t('cache.diagnostics.staleBackend')}
                   <button
                     type="button"
                     onClick={reload}
                     className="font-medium text-accent underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
-                    Tentar novamente
+                    {t('common:actions.retry')}
                   </button>
                 </div>
               ) : null}
@@ -390,11 +402,10 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
               {!diagnostics.hasData ? (
                 <div className="rounded-xl border border-border bg-surface px-4 py-5 text-center">
                   <p className="text-[12px] font-medium text-foreground">
-                    Sem amostras de cache nesta conversa
+                    {t('cache.diagnostics.empty.title')}
                   </p>
                   <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-foreground-muted">
-                    O provedor ainda não reportou usage de cache ou nenhum request foi concluído. O
-                    número aparece depois do primeiro request do turno.
+                    {t('cache.diagnostics.empty.body')}
                   </p>
                 </div>
               ) : (
@@ -404,46 +415,46 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
                       id="cache-diagnostics-summary"
                       className="mb-2 text-[13px] font-semibold text-foreground"
                     >
-                      Resumo
+                      {t('cache.diagnostics.summary')}
                     </h3>
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
                       <SummaryItem
-                        label="Provedor"
+                        label={t('cache.diagnostics.fields.provider')}
                         value={providerLabel}
                         title={diagnostics.providerId ?? undefined}
                       />
                       <SummaryItem
-                        label="Modelo"
+                        label={t('cache.diagnostics.fields.model')}
                         value={diagnostics.modelId ?? '—'}
                         title={diagnostics.modelId ?? undefined}
                         mono
                       />
                       <SummaryItem
-                        label="Protocolo"
+                        label={t('cache.diagnostics.fields.protocol')}
                         value={diagnostics.protocol ?? '—'}
                         title={diagnostics.protocol ?? undefined}
                         mono
                       />
-                      <SummaryItem label="Epoch" value={`#${diagnostics.epoch}`} />
+                      <SummaryItem label={t('cache.diagnostics.fields.epoch')} value={`#${diagnostics.epoch}`} />
                       <SummaryItem
-                        label="Último request"
+                        label={t('cache.diagnostics.fields.lastRequest')}
                         value={formatCacheHit(diagnostics.hit)}
                       />
                       <SummaryItem
-                        label="Sessão (ponderada)"
+                        label={t('cache.diagnostics.fields.session')}
                         value={formatCacheHit(diagnostics.sessionHit)}
                       />
                       <SummaryItem
-                        label="Acerto estável"
+                        label={t('cache.diagnostics.fields.steady')}
                         value={formatCacheHit(diagnostics.steadyHit)}
                       />
                       <SummaryItem
-                        label="Teto do request"
+                        label={t('cache.diagnostics.fields.ceiling')}
                         value={formatCacheHit(diagnostics.ceiling)}
                       />
                       <SummaryItem label="TTL" value={formatCacheTtl(diagnostics.ttlSeconds)} />
                       <SummaryItem
-                        label="Mínimo cacheável"
+                        label={t('cache.diagnostics.fields.minCacheable')}
                         value={
                           diagnostics.minCacheableTokens != null
                             ? `~${formatTokens(diagnostics.minCacheableTokens)}`
@@ -451,14 +462,14 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
                         }
                       />
                       <SummaryItem
-                        label="Amostras"
+                        label={t('cache.diagnostics.fields.samples')}
                         value={`${Math.max(diagnostics.totalSamples, diagnostics.samples.length)}`}
                       />
                       <SummaryItem
-                        label="Estado"
+                        label={t('cache.diagnostics.fields.state')}
                         value={
                           <Badge tone={cacheStateBadgeTone(diagnostics.state)}>
-                            {meta.label}
+                            {cacheStateLabel(diagnostics.state)}
                           </Badge>
                         }
                       />
@@ -472,7 +483,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
                       id="cache-diagnostics-samples"
                       className="mb-2 text-[13px] font-semibold text-foreground"
                     >
-                      Amostras recentes
+                      {t('cache.diagnostics.recentSamples')}
                     </h3>
                     <SamplesTable diagnostics={diagnostics} />
                   </section>
@@ -491,7 +502,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
             onClick={reload}
             leftIcon={<RefreshCw aria-hidden className="size-3.5" />}
           >
-            Atualizar
+            {t('cache.diagnostics.refresh')}
           </Button>
           <Button
             size="sm"
@@ -500,7 +511,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
             onClick={() => void copyJson()}
             leftIcon={<Copy aria-hidden className="size-3.5" />}
           >
-            Copiar JSON
+            {t('cache.diagnostics.copyJson')}
           </Button>
         </DialogFooter>
       </DialogContent>

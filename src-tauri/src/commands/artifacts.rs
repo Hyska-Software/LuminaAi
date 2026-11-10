@@ -25,7 +25,12 @@ fn to_error(error: impl std::fmt::Display) -> String {
 
 fn read_artifact_file(path: &str) -> Result<Vec<u8>, String> {
     std::fs::read(path)
-        .map_err(|error| format!("falha ao ler o arquivo do artefato ({path}): {error}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "artifacts.errors.readFileWithPath",
+                &[("path", path), ("error", &error.to_string())],
+            )
+        })
 }
 
 /* ------------------------------------------------------------------ */
@@ -65,21 +70,35 @@ pub fn list_library_artifacts(state: State<'_, AppState>) -> Result<Vec<LibraryA
 fn import_library_file(db: &Db, data_dir: &Path, raw: &str) -> Result<Artifact, String> {
     let source = Path::new(raw);
     let metadata = std::fs::metadata(source)
-        .map_err(|error| format!("não foi possível ler `{raw}`: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "artifacts.errors.readFile",
+                &[("path", raw), ("error", &error.to_string())],
+            )
+        })?;
     if !metadata.is_file() {
-        return Err(format!(
-            "`{raw}` não é um arquivo regular e não pode ser enviado à biblioteca"
+        return Err(crate::i18n::t_args(
+            "artifacts.errors.notRegularFile",
+            &[("path", raw)],
         ));
     }
     if metadata.len() > MAX_LIBRARY_IMPORT_BYTES {
-        return Err(format!(
-            "`{raw}` tem {} MiB e excede o limite de {} MiB por arquivo da biblioteca",
-            metadata.len() / (1024 * 1024),
-            MAX_LIBRARY_IMPORT_BYTES / (1024 * 1024)
+        return Err(crate::i18n::t_args(
+            "artifacts.errors.fileTooLarge",
+            &[
+                ("path", raw),
+                ("size", &(metadata.len() / (1024 * 1024)).to_string()),
+                ("limit", &(MAX_LIBRARY_IMPORT_BYTES / (1024 * 1024)).to_string()),
+            ],
         ));
     }
     write_artifact_file(db, data_dir, None, source)
-        .map_err(|error| format!("falha ao importar `{raw}` para a biblioteca: {error:#}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "artifacts.errors.importFailed",
+                &[("path", raw), ("error", &format!("{error:#}"))],
+            )
+        })
 }
 
 /// Importa até [`MAX_LIBRARY_IMPORT_FILES`] arquivos, em best-effort: um
@@ -123,9 +142,9 @@ fn read_prefix(path: &Path) -> Result<Vec<u8>, String> {
     use std::io::Read as _;
 
     let mut file = std::fs::File::open(path).map_err(|error| {
-        format!(
-            "o arquivo do artefato não está acessível ({}): {error}",
-            path.display()
+        crate::i18n::t_args(
+            "artifacts.errors.fileNotAccessible",
+            &[("path", &path.display().to_string()), ("error", &error.to_string())],
         )
     })?;
     let mut buffer = vec![0u8; CLASSIFY_PREFIX_BYTES];
@@ -135,9 +154,9 @@ fn read_prefix(path: &Path) -> Result<Vec<u8>, String> {
             Ok(0) => break,
             Ok(read) => filled += read,
             Err(error) => {
-                return Err(format!(
-                    "falha ao ler o arquivo do artefato ({}): {error}",
-                    path.display()
+                return Err(crate::i18n::t_args(
+                    "artifacts.errors.readFileWithPath",
+                    &[("path", &path.display().to_string()), ("error", &error.to_string())],
                 ))
             }
         }
@@ -161,10 +180,13 @@ fn file_extension(name: &str) -> Option<String> {
 fn renamed_file_name(requested: &str, current_name: &str) -> Result<String, String> {
     let requested = requested.trim();
     if requested.is_empty() {
-        return Err("o nome do arquivo não pode ficar vazio".to_string());
+        return Err(crate::i18n::t("artifacts.errors.emptyName"));
     }
     if requested == "." || requested == ".." {
-        return Err(format!("nome de arquivo inválido: `{requested}`"));
+        return Err(crate::i18n::t_args(
+            "artifacts.errors.invalidName",
+            &[("name", requested)],
+        ));
     }
     let mut name = sanitize_filename(requested);
     if file_extension(&name).is_none() {
@@ -185,7 +207,7 @@ fn rename_artifact_impl(db: &Db, id: &str, name: &str) -> Result<Artifact, Strin
     let stored = db
         .get_artifact(id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("artefato não encontrado: {id}"))?;
+        .ok_or_else(|| crate::i18n::t_args("artifacts.errors.notFound", &[("artifact_id", &id)]))?;
     let current_path = PathBuf::from(&stored.path);
     let current_name = current_path
         .file_name()
@@ -195,13 +217,17 @@ fn rename_artifact_impl(db: &Db, id: &str, name: &str) -> Result<Artifact, Strin
     let directory = current_path
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| format!("caminho inválido para o artefato {id}: {}", stored.path))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "artifacts.errors.invalidPath",
+            &[("artifact_id", id), ("path", &stored.path)],
+        ))?;
     let final_name = renamed_file_name(name, &current_name)?;
     let target_path = directory.join(&final_name);
     let same_path = target_path == current_path;
     if !same_path && target_path.exists() {
-        return Err(format!(
-            "já existe um arquivo chamado `{final_name}` na pasta do artefato"
+        return Err(crate::i18n::t_args(
+            "artifacts.errors.nameConflict",
+            &[("name", &final_name)],
         ));
     }
 
@@ -210,7 +236,12 @@ fn rename_artifact_impl(db: &Db, id: &str, name: &str) -> Result<Artifact, Strin
     let (_, mime_type, kind, language) = classify_file(&final_name, &head);
     if !same_path {
         std::fs::rename(&current_path, &target_path)
-            .map_err(|error| format!("falha ao renomear o arquivo do artefato: {error}"))?;
+            .map_err(|error| {
+                crate::i18n::t_args(
+                    "artifacts.errors.renameFailed",
+                    &[("error", &error.to_string())],
+                )
+            })?;
     }
     let new_path = target_path.to_string_lossy().into_owned();
     let updated = db.update_artifact_rename(
@@ -227,7 +258,7 @@ fn rename_artifact_impl(db: &Db, id: &str, name: &str) -> Result<Artifact, Strin
             if !same_path {
                 let _ = std::fs::rename(&target_path, &current_path);
             }
-            Err(format!("artefato não encontrado: {id}"))
+            Err(crate::i18n::t_args("artifacts.errors.notFound", &[("artifact_id", &id)]))
         }
         Err(error) => {
             if !same_path {
@@ -250,7 +281,7 @@ pub fn rename_artifact(
 fn set_artifact_favorite_impl(db: &Db, id: &str, favorite: bool) -> Result<Artifact, String> {
     db.set_artifact_favorite(id, favorite)
         .map_err(to_error)?
-        .ok_or_else(|| format!("artefato não encontrado: {id}"))
+        .ok_or_else(|| crate::i18n::t_args("artifacts.errors.notFound", &[("artifact_id", &id)]))
 }
 
 #[tauri::command]
@@ -287,7 +318,7 @@ pub(crate) fn render_thumbnail<R: BufRead + Seek>(reader: R) -> Result<ArtifactT
     let rgba = thumbnail.into_rgba8();
     let (width, height) = (rgba.width(), rgba.height());
     if width == 0 || height == 0 {
-        return Err("a imagem não tem dimensões válidas".to_string());
+        return Err(crate::i18n::t("artifacts.errors.invalidImageDimensions"));
     }
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png)
@@ -497,25 +528,48 @@ pub fn preview_for(kind: &ArtifactKind, bytes: &[u8]) -> Result<ArtifactPreview,
     match kind {
         ArtifactKind::Docx => docx_html(bytes)
             .map(|html| ArtifactPreview::Docx { html })
-            .map_err(|error| format!("falha ao gerar a prévia do DOCX: {error:#}")),
+            .map_err(|error| {
+                crate::i18n::t_args(
+                    "artifacts.errors.previewDocx",
+                    &[("error", &format!("{error:#}"))],
+                )
+            }),
         ArtifactKind::Xlsx => xlsx_sheets(bytes)
             .map(|sheets| ArtifactPreview::Xlsx { sheets })
-            .map_err(|error| format!("falha ao gerar a prévia da planilha: {error:#}")),
+            .map_err(|error| {
+                crate::i18n::t_args(
+                    "artifacts.errors.previewSheet",
+                    &[("error", &format!("{error:#}"))],
+                )
+            }),
         ArtifactKind::Pptx => pptx_slides(bytes)
             .map(|slides| ArtifactPreview::Pptx { slides })
-            .map_err(|error| format!("falha ao gerar a prévia da apresentação: {error:#}")),
+            .map_err(|error| {
+                crate::i18n::t_args(
+                    "artifacts.errors.previewSlides",
+                    &[("error", &format!("{error:#}"))],
+                )
+            }),
         ArtifactKind::Image => image_preview(bytes)
-            .map_err(|error| format!("falha ao gerar a prévia da imagem: {error:#}")),
+            .map_err(|error| {
+                crate::i18n::t_args(
+                    "artifacts.errors.previewImage",
+                    &[("error", &format!("{error:#}"))],
+                )
+            }),
         ArtifactKind::Archive => archive_preview(bytes)
-            .map_err(|error| format!("falha ao ler o arquivo compactado: {error:#}")),
+            .map_err(|error| {
+                crate::i18n::t_args(
+                    "artifacts.errors.previewArchive",
+                    &[("error", &format!("{error:#}"))],
+                )
+            }),
         ArtifactKind::Binary => Ok(binary_preview(bytes)),
         ArtifactKind::Pdf => Ok(ArtifactPreview::Unsupported {
-            reason: "o PDF é renderizado no visualizador (pdf.js) a partir do conteúdo base64"
-                .to_string(),
+            reason: crate::i18n::t("artifacts.preview.pdfViewer"),
         }),
         ArtifactKind::Audio | ArtifactKind::Video => Ok(ArtifactPreview::Unsupported {
-            reason: "áudio e vídeo são reproduzidos no player nativo a partir do conteúdo base64"
-                .to_string(),
+            reason: crate::i18n::t("artifacts.preview.mediaPlayer"),
         }),
         ArtifactKind::Markdown
         | ArtifactKind::Code
@@ -524,8 +578,7 @@ pub fn preview_for(kind: &ArtifactKind, bytes: &[u8]) -> Result<ArtifactPreview,
         | ArtifactKind::Csv
         | ArtifactKind::Json
         | ArtifactKind::Svg => Ok(ArtifactPreview::Unsupported {
-            reason: "artefatos textuais são exibidos como texto/HTML por get_artifact_content"
-                .to_string(),
+            reason: crate::i18n::t("artifacts.preview.textViaContent"),
         }),
     }
 }
@@ -566,7 +619,7 @@ pub fn save_artifact(
     suggested_name: Option<String>,
 ) -> Result<Option<String>, String> {
     let Some(stored) = state.db.get_artifact(&id).map_err(to_error)? else {
-        return Err(format!("artefato não encontrado: {id}"));
+        return Err(crate::i18n::t_args("artifacts.errors.notFound", &[("artifact_id", &id)]));
     };
     let bytes = read_artifact_file(&stored.path)?;
     let file_name = suggested_name
@@ -592,26 +645,40 @@ pub fn save_artifact(
     };
     let path = selected
         .into_path()
-        .map_err(|error| format!("caminho de destino inválido: {error}"))?;
-    std::fs::write(&path, bytes)
-        .map_err(|error| format!("falha ao gravar {}: {error}", path.display()))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "artifacts.errors.invalidDestination",
+                &[("error", &error.to_string())],
+            )
+        })?;
+    std::fs::write(&path, bytes).map_err(|error| {
+        crate::i18n::t_args(
+            "artifacts.errors.writeFailed",
+            &[("path", &path.display().to_string()), ("error", &error.to_string())],
+        )
+    })?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
 pub fn open_artifact(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
     let Some(stored) = state.db.get_artifact(&id).map_err(to_error)? else {
-        return Err(format!("artefato não encontrado: {id}"));
+        return Err(crate::i18n::t_args("artifacts.errors.notFound", &[("artifact_id", &id)]));
     };
     if !Path::new(&stored.path).exists() {
-        return Err(format!(
-            "o arquivo do artefato não existe mais no disco: {}",
-            stored.path
+        return Err(crate::i18n::t_args(
+            "artifacts.errors.fileGone",
+            &[("path", &stored.path)],
         ));
     }
     app.opener()
         .open_path(stored.path, None::<&str>)
-        .map_err(|error| format!("falha ao abrir o artefato: {error}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "artifacts.errors.openFailed",
+                &[("error", &error.to_string())],
+            )
+        })
 }
 
 #[tauri::command]

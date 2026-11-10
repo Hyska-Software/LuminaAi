@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Check, Loader2, Sparkles, WandSparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -17,9 +19,13 @@ import { api } from '@/lib/api';
 import { useAgentStore, useAppStore } from '@/lib/store';
 import type { Agent, AgentChange, AgentRevision } from '@/lib/types';
 
-function changeValue(value: unknown): string {
+type Translate = TFunction<'agents'>;
+
+function changeValue(value: unknown, t: Translate): string {
   if (typeof value === 'string') return value;
-  if (typeof value === 'boolean') return value ? 'Ligada' : 'Desligada';
+  if (typeof value === 'boolean') {
+    return value ? t('revision.changeValue.on') : t('revision.changeValue.off');
+  }
   if (Array.isArray(value)) {
     return value
       .map((entry) => (typeof entry === 'string' ? entry : JSON.stringify(entry)))
@@ -30,8 +36,9 @@ function changeValue(value: unknown): string {
 }
 
 function ChangeBlock({ change }: { change: AgentChange }) {
-  const before = changeValue(change.before);
-  const after = changeValue(change.after);
+  const { t } = useTranslation('agents');
+  const before = changeValue(change.before, t);
+  const after = changeValue(change.after, t);
   const long = before.length > 160 || after.length > 160;
   return (
     <div className="rounded-xl border border-border bg-surface/50 p-3">
@@ -41,7 +48,7 @@ function ChangeBlock({ change }: { change: AgentChange }) {
       <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
         <div className="min-w-0">
           <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle">
-            Antes
+            {t('revision.before')}
           </p>
           <pre
             className={`whitespace-pre-wrap break-words rounded-lg border border-border/70 bg-surface px-2 py-1.5 text-[11px] leading-relaxed text-foreground-muted ${
@@ -53,7 +60,7 @@ function ChangeBlock({ change }: { change: AgentChange }) {
         </div>
         <div className="min-w-0">
           <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-accent">
-            Depois
+            {t('revision.after')}
           </p>
           <pre
             className={`whitespace-pre-wrap break-words rounded-lg border border-accent/30 bg-accent-soft/30 px-2 py-1.5 text-[11px] leading-relaxed text-foreground ${
@@ -68,10 +75,10 @@ function ChangeBlock({ change }: { change: AgentChange }) {
   );
 }
 
-const EXAMPLES = [
-  'Deixe o tom mais direto e sem rodeios.',
-  'Adicione uma instrução para citar fontes sempre que pesquisar.',
-  'Transforme as sugestões em perguntas curtas de diagnóstico.',
+const EXAMPLE_KEYS = [
+  'revision.examples.direct',
+  'revision.examples.sources',
+  'revision.examples.questions',
 ];
 
 /**
@@ -88,6 +95,7 @@ export function AgentRevisionDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation('agents');
   const selection = useAppStore((state) => state.selection);
   const update = useAgentStore((state) => state.update);
   const [prompt, setPrompt] = useState('');
@@ -114,7 +122,7 @@ export function AgentRevisionDialog({
     const value = prompt.trim();
     if (!value) return;
     if (!selection.providerId || !selection.modelId) {
-      toast.error('Selecione um modelo no composer antes de editar com IA');
+      toast.error(t('revision.selectModel'));
       return;
     }
     setLoading(true);
@@ -139,7 +147,7 @@ export function AgentRevisionDialog({
     setApplying(true);
     try {
       const updated = await update(revision.agentId, revision.after);
-      toast.success('Agente atualizado', { description: updated.name });
+      toast.success(t('editor.updated'), { description: updated.name });
       onOpenChange(false);
     } catch (caught) {
       setError(String(caught));
@@ -154,11 +162,10 @@ export function AgentRevisionDialog({
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <WandSparkles className="size-4 text-accent" />
-            Editar {agent?.name ?? 'agente'} com IA
+            {t('revision.title', { name: agent?.name ?? t('agentFallback') })}
           </DialogTitle>
           <DialogDescription>
-            Descreva a mudança. A IA propõe um patch; você revisa o diff antes de aplicar. Rotas,
-            permissões, workspace e capacidades não mudam por aqui.
+            {t('revision.description')}
           </DialogDescription>
         </DialogHeader>
 
@@ -169,24 +176,27 @@ export function AgentRevisionDialog({
             maxLength={4000}
             autoFocus
             className="min-h-20 resize-y"
-            placeholder="Ex.: deixe as respostas mais curtas e sempre termine com o próximo passo."
-            aria-label="Pedido de alteração do agente"
+            placeholder={t('revision.placeholder')}
+            aria-label={t('revision.aria')}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void propose();
             }}
           />
           <div className="flex flex-wrap gap-1.5">
-            {EXAMPLES.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => setPrompt(example)}
-                className="max-w-full rounded-full border border-border bg-surface-raised px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-              >
-                <span className="line-clamp-1">{example}</span>
-              </button>
-            ))}
+            {EXAMPLE_KEYS.map((key) => {
+              const example = t(key as never);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setPrompt(example)}
+                  className="max-w-full rounded-full border border-border bg-surface-raised px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <span className="line-clamp-1">{example}</span>
+                </button>
+              );
+            })}
           </div>
 
           {error ? (
@@ -201,13 +211,13 @@ export function AgentRevisionDialog({
           {revision ? (
             revision.changes.length === 0 ? (
               <p className="rounded-xl border border-border bg-surface-raised px-3 py-4 text-center text-[12px] text-foreground-muted">
-                O modelo não propôs nenhuma alteração. Tente ser mais específico.
+                {t('revision.noChanges')}
               </p>
             ) : (
               <div className="space-y-2">
                 <p className="flex items-center gap-1.5 text-[11px] font-medium text-foreground-muted">
                   <Sparkles className="size-3.5 text-accent" />
-                  {revision.changes.length} campo(s) alterado(s) — nada foi salvo ainda
+                  {t('revision.changedFields', { count: revision.changes.length })}
                 </p>
                 {revision.changes.map((change) => (
                   <ChangeBlock key={change.field} change={change} />
@@ -219,7 +229,7 @@ export function AgentRevisionDialog({
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading || applying}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <Button
             variant="secondary"
@@ -231,7 +241,7 @@ export function AgentRevisionDialog({
             ) : (
               <Sparkles className="mr-1.5 size-4" />
             )}
-            {revision ? 'Gerar outra proposta' : 'Gerar revisão'}
+            {revision ? t('revision.proposeAnother') : t('revision.propose')}
           </Button>
           <Button
             variant="primary"
@@ -243,7 +253,7 @@ export function AgentRevisionDialog({
             ) : (
               <Check className="mr-1.5 size-4" />
             )}
-            Aplicar revisão
+            {t('revision.apply')}
           </Button>
         </DialogFooter>
       </DialogContent>

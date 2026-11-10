@@ -1,4 +1,6 @@
+import { useTranslation } from 'react-i18next';
 import { Info } from 'lucide-react';
+import { t } from '@/lib/i18n';
 import type { SlidePreview } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui';
@@ -25,13 +27,13 @@ function SlideCard({ slide, position }: { slide: SlidePreview; position: number 
     <li className="overflow-hidden rounded-xl border border-border bg-background">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-1.5">
         <span className="text-[11px] font-medium tabular-nums text-foreground-muted">
-          Slide {position}
+          {t('artifacts:pptx.slide', { position })}
         </span>
-        {notes ? <Badge tone="muted">com notas</Badge> : null}
+        {notes ? <Badge tone="muted">{t('artifacts:pptx.withNotes')}</Badge> : null}
       </div>
       <div className="flex aspect-video flex-col gap-2 overflow-auto p-5">
         <p className="text-[14px] font-semibold leading-snug text-foreground">
-          {title ?? 'Slide sem texto'}
+          {title ?? t('artifacts:pptx.slideNoText')}
         </p>
         {bullets.length ? (
           <ul className="list-disc space-y-1 pl-5 text-[12px] leading-relaxed text-foreground-muted">
@@ -43,7 +45,7 @@ function SlideCard({ slide, position }: { slide: SlidePreview; position: number 
       </div>
       {notes ? (
         <div className="border-t border-border px-3 py-2 text-[11px] leading-relaxed text-foreground-subtle">
-          <span className="font-medium text-foreground-muted">Notas do apresentador: </span>
+          <span className="font-medium text-foreground-muted">{t('artifacts:pptx.notes')} </span>
           {notes}
         </div>
       ) : null}
@@ -57,10 +59,11 @@ function SlideCard({ slide, position }: { slide: SlidePreview; position: number 
  * original layout/theme is not reproduced (see the notice at the top).
  */
 export function PptxPreview({ content, className }: ArtifactViewProps) {
+  const { t: translate } = useTranslation('artifacts');
   const { state, retry } = useArtifactPreview(content.artifact.id);
 
   if (state.status === 'loading') {
-    return <PreviewLoading label="Carregando apresentação…" className={className} />;
+    return <PreviewLoading label={translate('artifacts:pptx.loading')} className={className} />;
   }
   if (state.status === 'error') {
     return <PreviewError message={state.message} onRetry={retry} className={className} />;
@@ -77,7 +80,7 @@ export function PptxPreview({ content, className }: ArtifactViewProps) {
     );
   }
   if (!preview.slides.length) {
-    return <PreviewEmpty message="Apresentação sem slides para exibir." className={className} />;
+    return <PreviewEmpty message={translate('artifacts:pptx.empty')} className={className} />;
   }
 
   return (
@@ -87,9 +90,9 @@ export function PptxPreview({ content, className }: ArtifactViewProps) {
         className="mb-3 flex items-start gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-[11px] leading-relaxed text-foreground-muted"
       >
         <Info aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground-subtle" />
-        Prévia simplificada: mostra o texto dos slides, sem o layout e o tema originais.
+        {translate('artifacts:pptx.simplified')}
       </p>
-      <ol aria-label="Slides da apresentação" className="flex flex-col gap-3">
+      <ol aria-label={translate('artifacts:pptx.slidesAria')} className="flex flex-col gap-3">
         {preview.slides.map((slide, index) => (
           <SlideCard key={`${slide.index}-${index}`} slide={slide} position={index + 1} />
         ))}

@@ -1,4 +1,5 @@
 import { ArrowLeft, ArrowUpDown, ChevronDown, LayoutGrid, List, Search, Upload, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import {
   Button,
   DropdownMenu,
@@ -13,29 +14,6 @@ import { LIBRARY_SORTS, librarySortLabel, type LibrarySortId } from './filters';
 
 export type LibraryViewMode = 'grid' | 'list';
 
-const VIEW_OPTIONS = [
-  {
-    value: 'grid',
-    title: 'Grade',
-    label: (
-      <span className="inline-flex items-center">
-        <LayoutGrid aria-hidden className="size-4" strokeWidth={1.9} />
-        <span className="sr-only">Grade</span>
-      </span>
-    ),
-  },
-  {
-    value: 'list',
-    title: 'Lista',
-    label: (
-      <span className="inline-flex items-center">
-        <List aria-hidden className="size-4" strokeWidth={1.9} />
-        <span className="sr-only">Lista</span>
-      </span>
-    ),
-  },
-];
-
 interface LibrarySearchProps {
   query: string;
   onQueryChange: (value: string) => void;
@@ -43,6 +21,7 @@ interface LibrarySearchProps {
 
 /** Pill search box over the whole library (name, kind and origin conversation). */
 function LibrarySearch({ query, onQueryChange }: LibrarySearchProps) {
+  const { t } = useTranslation('library');
   return (
     <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised pl-2.5 pr-0.5 transition-colors focus-within:border-border-strong focus-within:ring-2 focus-within:ring-accent/20 sm:w-64">
       <Search aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
@@ -50,13 +29,13 @@ function LibrarySearch({ query, onQueryChange }: LibrarySearchProps) {
         type="search"
         value={query}
         onChange={(event) => onQueryChange(event.target.value)}
-        aria-label="Pesquisar na biblioteca"
-        placeholder="Pesquisar na biblioteca"
+        aria-label={t('library:header.searchAria')}
+        placeholder={t('library:header.searchPlaceholder')}
         className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-foreground-subtle [&::-webkit-search-cancel-button]:appearance-none"
       />
       {query ? (
         <IconButton
-          label="Limpar busca"
+          label={t('library:header.clearSearch')}
           size="sm"
           className="size-7 rounded-full"
           onClick={() => onQueryChange('')}
@@ -74,6 +53,7 @@ interface SortMenuProps {
 }
 
 function SortMenu({ sort, onSortChange }: SortMenuProps) {
+  const { t } = useTranslation('library');
   const label = librarySortLabel(sort);
   return (
     <DropdownMenu>
@@ -81,7 +61,7 @@ function SortMenu({ sort, onSortChange }: SortMenuProps) {
         <Button
           size="sm"
           variant="secondary"
-          aria-label={`Ordenar: ${label}`}
+          aria-label={t('library:header.sortAria', { label })}
           leftIcon={<ArrowUpDown aria-hidden className="size-3.5" />}
           rightIcon={<ChevronDown aria-hidden className="size-3.5" />}
         >
@@ -89,14 +69,14 @@ function SortMenu({ sort, onSortChange }: SortMenuProps) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel>Ordenar por</DropdownMenuLabel>
+        <DropdownMenuLabel>{t('library:header.sortMenu')}</DropdownMenuLabel>
         {LIBRARY_SORTS.map((option) => (
           <DropdownMenuItem
             key={option.id}
             checked={option.id === sort}
             onSelect={() => onSortChange(option.id)}
           >
-            {option.label}
+            {librarySortLabel(option.id)}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -132,6 +112,29 @@ export function LibraryHeader({
   onUpload,
   onBack,
 }: LibraryHeaderProps) {
+  const { t } = useTranslation('library');
+  const viewOptions = [
+    {
+      value: 'grid',
+      title: t('library:header.grid'),
+      label: (
+        <span className="inline-flex items-center">
+          <LayoutGrid aria-hidden className="size-4" strokeWidth={1.9} />
+          <span className="sr-only">{t('library:header.grid')}</span>
+        </span>
+      ),
+    },
+    {
+      value: 'list',
+      title: t('library:header.list'),
+      label: (
+        <span className="inline-flex items-center">
+          <List aria-hidden className="size-4" strokeWidth={1.9} />
+          <span className="sr-only">{t('library:header.list')}</span>
+        </span>
+      ),
+    },
+  ];
   return (
     <header className="shrink-0 border-b border-border bg-surface">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-6 pb-4 pt-4">
@@ -142,18 +145,17 @@ export function LibraryHeader({
             leftIcon={<ArrowLeft aria-hidden className="size-4" />}
             onClick={onBack}
           >
-            Voltar ao chat
+            {t('library:header.back')}
           </Button>
         </div>
 
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <div className="min-w-0 flex-1">
             <h1 className="text-[19px] font-semibold leading-6 tracking-tight text-foreground">
-              Biblioteca
+              {t('library:header.title')}
             </h1>
             <p className="mt-0.5 text-[13px] leading-relaxed text-foreground-muted">
-              Todos os arquivos das suas conversas e os que você enviar. O agente pode consultá-los
-              durante a conversa.
+              {t('library:header.description')}
             </p>
           </div>
 
@@ -162,8 +164,8 @@ export function LibraryHeader({
             <SortMenu sort={sort} onSortChange={onSortChange} />
             <SegmentedControl
               size="sm"
-              ariaLabel="Modo de visualização"
-              options={VIEW_OPTIONS}
+              ariaLabel={t('library:header.viewAria')}
+              options={viewOptions}
               value={view}
               onChange={(value) => onViewChange(value === 'list' ? 'list' : 'grid')}
             />
@@ -174,7 +176,7 @@ export function LibraryHeader({
               leftIcon={<Upload aria-hidden className="size-3.5" />}
               onClick={onUpload}
             >
-              {importing ? 'Enviando arquivos…' : 'Enviar arquivos'}
+              {importing ? t('library:header.uploading') : t('library:header.upload')}
             </Button>
           </div>
         </div>

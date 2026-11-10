@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./external', () => ({ openExternalUrl: mocks.openExternalUrl }));
 
 // Imported after the mock above.
+import { i18n } from '@/lib/i18n';
 import { TurnErrorBanner } from './TurnErrorBanner';
 import {
   AUTH_REQUIRED_TITLE,
@@ -34,7 +35,7 @@ describe('TurnErrorBanner', () => {
     );
 
     const alert = screen.getByRole('alert');
-    expect(within(alert).getByText(PLAN_LIMIT_TITLE)).toBeTruthy();
+    expect(within(alert).getByText(i18n.t(PLAN_LIMIT_TITLE))).toBeTruthy();
     expect(within(alert).getByText(/pode ser do plano ou deste app/i)).toBeTruthy();
 
     fireEvent.click(within(alert).getByRole('button', { name: 'Gerenciar uso' }));
@@ -47,11 +48,11 @@ describe('TurnErrorBanner', () => {
     expect(within(alert).queryByText(/%/)).toBeNull();
   });
 
-  it('não duplica o título quando o hint do backend já começa com ele', () => {
+  it('usa o hint do backend como corpo, sem repetir o título', () => {
     render(
       <TurnErrorBanner
         code="subscription_sharing_usage_limit_exceeded"
-        hint='Limite de uso atingido — pode ser do plano ou deste app. Use "Gerenciar uso".'
+        hint='pode ser do plano ou deste app. Use "Gerenciar uso".'
         onOpenProviders={vi.fn()}
       />,
     );
@@ -68,7 +69,7 @@ describe('TurnErrorBanner', () => {
     expect(screen.queryByRole('alert')).toBeNull();
 
     rerender(<TurnErrorBanner code="rate_limited" planProvider onOpenProviders={vi.fn()} />);
-    expect(screen.getByText(PLAN_LIMIT_TITLE)).toBeTruthy();
+    expect(screen.getByText(i18n.t(PLAN_LIMIT_TITLE))).toBeTruthy();
   });
 
   it('mostra credencial necessária com CTA para Provedores (auth_required)', () => {
@@ -82,7 +83,7 @@ describe('TurnErrorBanner', () => {
     );
 
     const alert = screen.getByRole('alert');
-    expect(within(alert).getByText(AUTH_REQUIRED_TITLE)).toBeTruthy();
+    expect(within(alert).getByText(i18n.t(AUTH_REQUIRED_TITLE))).toBeTruthy();
     expect(
       within(alert).getByText('Entre novamente com o ChatGPT para renovar sua sessão.'),
     ).toBeTruthy();
@@ -101,8 +102,8 @@ describe('TurnErrorBanner', () => {
     );
 
     const alert = screen.getByRole('alert');
-    expect(within(alert).getByText(PLAN_NOT_ELIGIBLE_TITLE)).toBeTruthy();
-    expect(within(alert).getByText(PLAN_NOT_ELIGIBLE_BODY)).toBeTruthy();
+    expect(within(alert).getByText(i18n.t(PLAN_NOT_ELIGIBLE_TITLE))).toBeTruthy();
+    expect(within(alert).getByText(i18n.t(PLAN_NOT_ELIGIBLE_BODY))).toBeTruthy();
     expect(within(alert).queryByRole('button', { name: /tentar novamente/i })).toBeNull();
     expect(within(alert).queryByRole('button', { name: /gerenciar uso/i })).toBeNull();
   });

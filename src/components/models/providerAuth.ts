@@ -5,6 +5,7 @@
  * the catalog provider metadata; nothing here ever sees a token.
  */
 import { providerAuth } from '@/lib/catalog';
+import { t } from '@/lib/i18n';
 import { keyStatusLabel } from '@/lib/modelMenu';
 import type { ProviderAuthStatus, ProviderInfo, ProviderKeyStatus } from '@/lib/types';
 
@@ -26,9 +27,11 @@ export function providerTabTitle(
   authStatus: ProviderAuthStatus | undefined,
 ): string {
   if (providerAuth(provider) === 'oauth') {
-    if (authStatus?.state === 'signed-in' && authStatus.planUsage) return 'Plano ChatGPT conectado';
-    if (authStatus?.state === 'signed-in') return 'Conta ChatGPT conectada';
-    if (authStatus?.state === 'reauth-required') return 'Sessão do ChatGPT expirada';
+    if (authStatus?.state === 'signed-in' && authStatus.planUsage) {
+      return t('models:keys.chatgptPlan');
+    }
+    if (authStatus?.state === 'signed-in') return t('models:keys.chatgpt');
+    if (authStatus?.state === 'reauth-required') return t('models:keys.chatgptExpired');
   }
   return keyStatusLabel(key);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Lock } from 'lucide-react';
 import {
   defaultReasoningFor,
@@ -34,6 +35,7 @@ function reasoningDefaultOf(selection: ReasoningSelection | null): Settings['rea
 }
 
 export function ModelTab() {
+  const { t } = useTranslation('settings');
   const settings = useAppStore((state) => state.settings);
   const selection = useAppStore((state) => state.selection);
   const storeProviders = useAppStore((state) => state.providers);
@@ -123,28 +125,24 @@ export function ModelTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection
-        title="Modelo padrão"
-        description="Usado em novas conversas e como seleção inicial do composer."
-      >
+      <SettingsSection title={t('model.title')} description={t('model.description')}>
         {started ? (
           <SettingsBlock>
             <p className="flex items-start gap-2 text-[11px] leading-relaxed text-warning">
               <Lock aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-              A conversa atual já foi iniciada. As alterações abaixo valem apenas para as próximas
-              conversas.
+              {t('model.startedWarning')}
             </p>
           </SettingsBlock>
         ) : null}
 
         <SettingRow
-          label="Provedor"
-          description="OpenCode Go (assinatura), OpenCode Zen (créditos) ou OpenAI (plano ChatGPT ou API key)."
+          label={t('model.provider.label')}
+          description={t('model.provider.description')}
         >
           <NativeSelect
             value={activeProvider?.id ?? ''}
             onChange={(event) => handleProviderChange(event.target.value)}
-            aria-label="Provedor padrão"
+            aria-label={t('model.provider.aria')}
             wrapperClassName="w-[220px]"
           >
             {providerList.map((provider) => (
@@ -155,11 +153,11 @@ export function ModelTab() {
           </NativeSelect>
         </SettingRow>
 
-        <SettingRow label="Modelo" description="Modelos indisponíveis não aparecem nesta lista.">
+        <SettingRow label={t('model.model.label')} description={t('model.model.description')}>
           <NativeSelect
             value={resolvedModelId}
             onChange={(event) => handleModelChange(event.target.value)}
-            aria-label="Modelo padrão"
+            aria-label={t('model.model.aria')}
             wrapperClassName="w-[220px]"
           >
             {availableModels.map((entry) => (
@@ -176,13 +174,13 @@ export function ModelTab() {
               <div className="flex flex-wrap items-center gap-2">
                 <CapabilityBadges model={model} max={5} />
                 {model.estimated ? (
-                  <Badge tone="outline" title="Modelo listado pela sua conta: capacidades estimadas.">
-                    Estimado
+                  <Badge tone="outline" title={t('model.estimatedTitle')}>
+                    {t('model.estimated')}
                   </Badge>
                 ) : null}
                 <span className="text-[11px] tabular-nums text-foreground-subtle">
-                  {formatContextWindow(model.contextWindow)} contexto ·{' '}
-                  {includedInPlan ? 'Incluído no plano ChatGPT' : formatPrice(model.cost)}
+                  {t('model.context', { window: formatContextWindow(model.contextWindow) })} ·{' '}
+                  {includedInPlan ? t('model.includedInPlan') : formatPrice(model.cost)}
                 </span>
               </div>
               <ThinkingSelector
@@ -195,24 +193,22 @@ export function ModelTab() {
                 }}
               />
               <p className="text-[11px] leading-relaxed text-foreground-subtle">
-                O padrão de raciocínio é aplicado ao modelo escolhido; modelos sem suporte ignoram essa
-                configuração.
+                {t('model.reasoningNote')}
               </p>
             </div>
           </SettingsBlock>
         ) : (
           <SettingsBlock>
             <p className="text-xs text-foreground-muted">
-              O modelo salvo ({settings.defaultModel}) não está no catálogo atual.
+              {t('model.missingModel', { model: settings.defaultModel })}
             </p>
           </SettingsBlock>
         )}
       </SettingsSection>
 
       <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 text-[11px] leading-relaxed text-foreground-muted">
-        <Badge tone="muted">Dica</Badge>
-        Você também pode trocar de modelo pelo seletor no topo da janela ou pelo composer, sem alterar
-        o padrão das próximas conversas.
+        <Badge tone="muted">{t('model.tip')}</Badge>
+        {t('model.tipBody')}
       </div>
     </div>
   );

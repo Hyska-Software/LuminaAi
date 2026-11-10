@@ -11,6 +11,10 @@
  * Toasts ficam com o renderer (GenUIActions) para não duplicar feedback.
  */
 import { copyText } from '@/lib/utils';
+import { i18n } from '@/lib/i18n';
+
+/** Resolved per call so the current locale is always applied. */
+const t = i18n.getFixedT(null, 'genui');
 
 export interface GenUIActionItem {
   label?: string;
@@ -30,7 +34,7 @@ export async function runGenUIAction(item: GenUIActionItem): Promise<GenUIAction
 
   if (prompt) {
     if (typeof window === 'undefined') {
-      return { ok: false, message: 'Não foi possível preparar a sugestão.' };
+      return { ok: false, message: t('actions.errors.prepareSuggestion') };
     }
     window.dispatchEvent(new CustomEvent<string>('zylara:suggest', { detail: prompt }));
     return { ok: true };
@@ -40,8 +44,8 @@ export async function runGenUIAction(item: GenUIActionItem): Promise<GenUIAction
     const copied = await copyText(copy);
     return copied
       ? { ok: true }
-      : { ok: false, message: 'Não foi possível copiar para a área de transferência.' };
+      : { ok: false, message: t('actions.errors.copy') };
   }
 
-  return { ok: false, message: 'Esta ação não tem conteúdo para executar.' };
+  return { ok: false, message: t('actions.errors.empty') };
 }

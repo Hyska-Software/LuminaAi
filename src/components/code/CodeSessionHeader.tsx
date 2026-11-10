@@ -6,6 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Bot,
   Copy,
@@ -37,6 +38,7 @@ import {
   Tooltip,
 } from '@/components/ui';
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import { filterConversationsForLayout } from '@/lib/conversations';
 import { goalIsRunning, goalPauseReasonLabel } from '@/lib/goalRunner';
 import {
@@ -59,7 +61,6 @@ import { NO_WORKSPACE_KEY, openFolder, useWorkspaces } from './useWorkspaces';
 
 /** Synthetic tab shown when the Code layout has no active conversation. */
 const NEW_SESSION_ID = '__new_session__';
-const NEW_SESSION_TITLE = 'Nova sessão';
 /** Synthetic center tab for an open file diff (WORKBENCH §7.2). */
 const CODE_DIFF_TAB_ID = '__code_diff__';
 /** Synthetic center tab for the commit history (WORKBENCH §7.2). */
@@ -77,11 +78,11 @@ const CODE_FILE_TAB_PREFIX = '__code_file__:';
 /** Prefix for retained subagent chat tabs (one per child conversation). */
 const CODE_SUBAGENT_TAB_PREFIX = '__code_subagent__:';
 
-const SUBAGENT_TYPE_LABELS: Record<string, string> = {
-  explore: 'exploração',
-  review: 'revisão',
-  general: 'geral',
-};
+const SUBAGENT_TYPE_KEYS = {
+  explore: 'code:header.subagent.explore',
+  review: 'code:header.subagent.review',
+  general: 'code:header.subagent.general',
+} as const;
 
 /** DOM id da aba de um arquivo aberto. */
 function codeFileTabDomId(tab: CodeFileTab): string {
@@ -132,7 +133,10 @@ interface SessionTab {
 }
 
 function sessionTitle(conversations: Conversation[], id: string): string {
-  return conversations.find((conversation) => conversation.id === id)?.title ?? NEW_SESSION_TITLE;
+  return (
+    conversations.find((conversation) => conversation.id === id)?.title ??
+    t('code:header.newSession')
+  );
 }
 
 const GOAL_BADGE_TONE = {
@@ -154,23 +158,29 @@ interface GoalBadgeProps {
  * Clicar abre a aba central "Objetivo" (`openCodeGoal`).
  */
 function GoalBadge({ goal, running, onOpen }: GoalBadgeProps) {
+  const { t } = useTranslation('code');
   const tone =
     goal.status === 'paused' ? 'warning' : goal.status === 'blocked' ? 'danger' : 'accent';
   const pauseLabel = goalPauseReasonLabel(goal.pauseReason);
   const ariaLabel = running
-    ? `Abrir objetivo: rodada ${goal.rounds} de ${goal.maxRounds} em andamento`
+    ? t('code:header.goalBadge.running', { current: goal.rounds, max: goal.maxRounds })
     : goal.status === 'paused'
-      ? `Abrir objetivo: pausado${pauseLabel ? ` (${pauseLabel})` : ''}`
+      ? pauseLabel
+        ? t('code:header.goalBadge.pausedWithReason', { reason: pauseLabel })
+        : t('code:header.goalBadge.paused')
       : goal.status === 'blocked'
-        ? 'Abrir objetivo: bloqueado'
-        : `Abrir objetivo: ativo, rodada ${goal.rounds} de ${goal.maxRounds}${
-            goal.autoContinue ? ', continuidade automática' : ', continuidade manual'
-          }`;
+        ? t('code:header.goalBadge.blocked')
+        : t(
+            goal.autoContinue
+              ? 'code:header.goalBadge.activeAuto'
+              : 'code:header.goalBadge.activeManual',
+            { current: goal.rounds, max: goal.maxRounds },
+          );
   const visible =
     goal.status === 'paused'
-      ? 'Pausado'
+      ? t('code:header.goalBadge.visiblePaused')
       : goal.status === 'blocked'
-        ? 'Bloqueado'
+        ? t('code:header.goalBadge.visibleBlocked')
         : `${goal.rounds}/${goal.maxRounds}`;
 
   return (
@@ -223,9 +233,10 @@ function WorkspaceChip({
   onBind,
   onToggleTrust,
 }: WorkspaceChipProps) {
+  const { t } = useTranslation('code');
   const { workspaces } = useWorkspaces();
   const Icon = workspace ? (workspace.git ? FolderGit2 : Folder) : FolderOpen;
-  const label = workspace ? workspace.name : 'Sem workspace';
+  const label = workspace ? workspace.name : t('code:header.workspace.none');
   const branch = workspace?.git?.branch;
 
   return (
@@ -236,12 +247,19 @@ function WorkspaceChip({
           aria-haspopup="menu"
           aria-label={
             workspace
-              ? `Workspace ${workspace.name}${branch ? `, branch ${branch}` : ''}${
-                  workspace.git?.dirty ? ', alterações não commitadas' : ''
-                }`
-              : 'Sem workspace — abrir pasta'
+              ? branch
+                ? workspace.git?.dirty
+                  ? t('code:header.workspace.ariaWithBranchDirty', {
+                      name: workspace.name,
+                      branch,
+                    })
+                  : t('code:header.workspace.ariaWithBranch', { name: workspace.name, branch })
+                : workspace.git?.dirty
+                  ? t('code:header.workspace.ariaDirty', { name: workspace.name })
+                  : t('code:header.workspace.aria', { name: workspace.name })
+              : t('code:header.workspace.ariaNone')
           }
-          title={workspace?.path ?? 'Abrir uma pasta para o agente trabalhar'}
+          title={workspace?.path ?? t('code:header.workspace.openFolderTitle')}
           className={chipClassName}
         >
           <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
@@ -256,7 +274,7 @@ function WorkspaceChip({
           {workspace?.git?.dirty ? (
             <span
               aria-hidden
-              title="Alterações não commitadas"
+              title={t('code:header.workspace.dirty')}
               className="size-1.5 shrink-0 rounded-full bg-warning"
             />
           ) : null}
@@ -269,41 +287,43 @@ function WorkspaceChip({
               {workspace.name}
             </DropdownMenuLabel>
             <DropdownMenuItem icon={<RefreshCw className="size-4" />} onSelect={onRefresh}>
-              Atualizar
+              {t('code:header.workspace.refresh')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<ExternalLink className="size-4" />} onSelect={onOpenExplorer}>
-              Abrir no Explorer
+              {t('code:header.workspace.openExplorer')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<Copy className="size-4" />} onSelect={onCopyPath}>
-              Copiar caminho
+              {t('code:header.workspace.copyPath')}
             </DropdownMenuItem>
             <DropdownMenuItem
               icon={<ShieldCheck className="size-4" />}
               onSelect={onToggleTrust}
               disabled={busy}
             >
-              {workspace.trusted ? 'Revogar confiança' : 'Confiar na pasta'}
+              {workspace.trusted
+                ? t('code:header.workspace.revokeTrust')
+                : t('code:header.workspace.trust')}
             </DropdownMenuItem>
           </>
         ) : (
           <>
             <DropdownMenuLabel className="normal-case tracking-normal text-foreground-muted">
-              Nenhuma pasta vinculada
+              {t('code:header.workspace.noneLinked')}
             </DropdownMenuLabel>
             <DropdownMenuItem icon={<FolderOpen className="size-4" />} onSelect={onOpenFolder}>
-              Abrir pasta…
+              {t('code:header.workspace.openFolder')}
             </DropdownMenuItem>
           </>
         )}
 
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>Trocar workspace</DropdownMenuLabel>
+        <DropdownMenuLabel>{t('code:header.workspace.switch')}</DropdownMenuLabel>
         <DropdownMenuItem
           icon={<Folder className="size-4" />}
           checked={!workspace}
           onSelect={() => onBind(null)}
         >
-          Sem workspace
+          {t('code:header.workspace.none')}
         </DropdownMenuItem>
         {workspaces.map((entry) => (
           <DropdownMenuItem
@@ -327,6 +347,7 @@ function WorkspaceChip({
  * cabeçalho é o único chrome sempre montado no layout Code.
  */
 export function CodeSessionHeader() {
+  const { t } = useTranslation('code');
   const activeId = useChatStore((state) => state.activeId);
   const conversations = useChatStore((state) => state.conversations);
   const codePanelOpen = useUiStore((state) => state.codePanelOpen);
@@ -397,7 +418,7 @@ export function CodeSessionHeader() {
   const activeConversation = activeId
     ? codeConversations.find((conversation) => conversation.id === activeId)
     : undefined;
-  const title = activeConversation?.title ?? NEW_SESSION_TITLE;
+  const title = activeConversation?.title ?? t('code:header.newSession');
   // Aprovação/pergunta pendente precisa ser descobrível mesmo com o card fora
   // da viewport (WORKBENCH §9: badge âmbar na aba/header).
   const pendingApprovals = useCodeStore((state) => {
@@ -609,7 +630,7 @@ export function CodeSessionHeader() {
       await useChatStore.getState().refreshConversations();
       if (workspaceId) useUiStore.getState().setActiveWorkspace(workspaceId);
     } catch (error) {
-      toast.error('Não foi possível trocar o workspace da sessão', {
+      toast.error(t('code:header.toast.bindWorkspaceError'), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -621,8 +642,8 @@ export function CodeSessionHeader() {
 
   const handleCopyPath = async () => {
     if (!workspace) return;
-    if (await copyText(workspace.path)) toast.success('Caminho copiado');
-    else toast.error('Não foi possível copiar o caminho');
+    if (await copyText(workspace.path)) toast.success(t('code:header.toast.pathCopied'));
+    else toast.error(t('code:header.toast.copyPathError'));
   };
 
   const handleTrustToggle = () => {
@@ -633,14 +654,17 @@ export function CodeSessionHeader() {
       .setWorkspaceTrusted(workspace.id, next)
       .then(async () => {
         await refreshContext(workspace.id);
-        toast.success(next ? 'Pasta confiada' : 'Confiança revogada', {
-          description: next
-            ? 'O agente pode ler, editar e executar comandos.'
-            : 'O agente volta ao modo leitura neste workspace.',
-        });
+        toast.success(
+          next ? t('code:header.toast.trusted') : t('code:header.toast.trustRevoked'),
+          {
+            description: next
+              ? t('code:header.toast.trustedDescription')
+              : t('code:header.toast.trustRevokedDescription'),
+          },
+        );
       })
       .catch((error: unknown) => {
-        toast.error('Não foi possível atualizar a confiança da pasta', {
+        toast.error(t('code:header.toast.trustError'), {
           description: error instanceof Error ? error.message : String(error),
         });
       })
@@ -665,7 +689,9 @@ export function CodeSessionHeader() {
     }
   };
 
-  const panelLabel = codePanelOpen ? 'Ocultar painel de arquivos' : 'Mostrar painel de arquivos';
+  const panelLabel = codePanelOpen
+    ? t('code:header.panel.hide')
+    : t('code:header.panel.show');
   const panelButton = (
     <IconButton
       label={panelLabel}
@@ -692,9 +718,9 @@ export function CodeSessionHeader() {
         {pendingApprovals > 0 ? (
           <Badge
             variant="warning"
-            title={`${pendingApprovals} ${pendingApprovals === 1 ? 'pedido aguardando' : 'pedidos aguardando'} sua decisão`}
+            title={t('code:header.pendingApproval', { count: pendingApprovals })}
           >
-            Aguardando aprovação
+            {t('code:header.pendingApprovalBadge')}
           </Badge>
         ) : null}
 
@@ -726,9 +752,9 @@ export function CodeSessionHeader() {
               {panelButton}
             </Tooltip>
           ) : (
-            <Tooltip content="Aumente a janela para ver o painel de arquivos" side="bottom">
+            <Tooltip content={t('code:header.panel.widen')} side="bottom">
               {/* Disabled buttons swallow pointer events: hover the wrapper so the hint stays discoverable. */}
-              <span className="inline-flex" title="Aumente a janela para ver o painel de arquivos">
+              <span className="inline-flex" title={t('code:header.panel.widen')}>
                 {panelButton}
               </span>
             </Tooltip>
@@ -742,7 +768,7 @@ export function CodeSessionHeader() {
         <div
           ref={tabStripRef}
           role="tablist"
-          aria-label="Sessões abertas"
+          aria-label={t('code:header.sessionsTablist')}
           onMouseDown={(event) => {
             // Suppress WebView2 autoscroll on middle click.
             if (event.button === 1) event.preventDefault();
@@ -752,10 +778,10 @@ export function CodeSessionHeader() {
           {showNewSessionTab ? (
             <div
               role="tab"
-              aria-label={NEW_SESSION_TITLE}
+              aria-label={t('code:header.newSession')}
               aria-selected
               aria-controls={SESSION_PANEL_ID}
-              title={NEW_SESSION_TITLE}
+              title={t('code:header.newSession')}
               tabIndex={0}
               className={cn(
                 'flex h-8 max-w-44 shrink-0 select-none items-center rounded-lg',
@@ -763,7 +789,7 @@ export function CodeSessionHeader() {
                 'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
               )}
             >
-              <span className="truncate">{NEW_SESSION_TITLE}</span>
+              <span className="truncate">{t('code:header.newSession')}</span>
             </div>
           ) : (
             tabs.map((tab) => {
@@ -800,7 +826,7 @@ export function CodeSessionHeader() {
                   </button>
                   <button
                     type="button"
-                    aria-label={`Fechar ${tab.title}`}
+                    aria-label={t('code:header.closeTab', { title: tab.title })}
                     tabIndex={-1}
                     onClick={() => closeTab(tab.id)}
                     className={cn(
@@ -823,7 +849,9 @@ export function CodeSessionHeader() {
               codeSubagentTabKey(codeSubagentTab) ===
                 codeSubagentTabKey(subagentTab);
             const live = liveSubagents?.[subagentTab.taskCallId];
-            const label = `Subagente ${subagentTab.description}`;
+            const label = t('code:header.subagent.tabLabel', {
+              description: subagentTab.description,
+            });
             return (
               <div
                 key={id}
@@ -861,15 +889,16 @@ export function CodeSessionHeader() {
                     strokeWidth={1.75}
                   />
                   <span className="truncate">
-                    {SUBAGENT_TYPE_LABELS[subagentTab.subagentType] ??
-                      subagentTab.subagentType}{' '}
+                    {subagentTab.subagentType in SUBAGENT_TYPE_KEYS
+                      ? t(SUBAGENT_TYPE_KEYS[subagentTab.subagentType as keyof typeof SUBAGENT_TYPE_KEYS])
+                      : subagentTab.subagentType}{' '}
                     · {subagentTab.description}
                   </span>
                   {live?.status === 'running' ? <Spinner size="xs" /> : null}
                 </button>
                 <button
                   type="button"
-                  aria-label={`Fechar ${label}`}
+                  aria-label={t('code:header.closeTab', { title: label })}
                   tabIndex={-1}
                   onClick={() => closeTab(id)}
                   className={cn(
@@ -905,10 +934,10 @@ export function CodeSessionHeader() {
                 <button
                   type="button"
                   role="tab"
-                  aria-label={`Arquivo ${fileTab.path}`}
+                  aria-label={t('code:header.fileTab', { path: fileTab.path })}
                   aria-selected={selected}
                   aria-controls="code-file-panel"
-                  title={`Arquivo ${fileTab.path}`}
+                  title={t('code:header.fileTab', { path: fileTab.path })}
                   tabIndex={selected ? 0 : -1}
                   ref={addTabRef(id)}
                   onClick={() => selectTab(id)}
@@ -923,7 +952,7 @@ export function CodeSessionHeader() {
                 </button>
                 <button
                   type="button"
-                  aria-label={`Fechar ${name}`}
+                  aria-label={t('code:header.closeTab', { title: name })}
                   tabIndex={-1}
                   onClick={() => closeTab(id)}
                   className={cn(
@@ -951,10 +980,10 @@ export function CodeSessionHeader() {
               <button
                 type="button"
                 role="tab"
-                aria-label="Plano aprovado da sessão"
+                aria-label={t('code:header.planTab.label')}
                 aria-selected={codeView === 'plan'}
                 aria-controls="code-plan-panel"
-                title="Plano aprovado da sessão"
+                title={t('code:header.planTab.label')}
                 tabIndex={codeView === 'plan' ? 0 : -1}
                 ref={addTabRef(CODE_PLAN_TAB_ID)}
                 onClick={() => selectTab(CODE_PLAN_TAB_ID)}
@@ -964,12 +993,14 @@ export function CodeSessionHeader() {
                   'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                 )}
               >
-                <FileIcon path="Plano.md" className="size-3.5 shrink-0" />
-                <span className="truncate">{codePlanTab.title ?? 'Plano'}</span>
+                <FileIcon path={t('code:plan.previewPath')} className="size-3.5 shrink-0" />
+                <span className="truncate">
+                  {codePlanTab.title ?? t('code:header.planTab.visible')}
+                </span>
               </button>
               <button
                 type="button"
-                aria-label="Fechar plano"
+                aria-label={t('code:header.planTab.close')}
                 tabIndex={-1}
                 onClick={() => closeTab(CODE_PLAN_TAB_ID)}
                 className={cn(
@@ -996,10 +1027,10 @@ export function CodeSessionHeader() {
               <button
                 type="button"
                 role="tab"
-                aria-label="Objetivo da sessão"
+                aria-label={t('code:header.goalTab.label')}
                 aria-selected={codeView === 'goal'}
                 aria-controls="code-goal-panel"
-                title="Objetivo da sessão"
+                title={t('code:header.goalTab.label')}
                 tabIndex={codeView === 'goal' ? 0 : -1}
                 ref={addTabRef(CODE_GOAL_TAB_ID)}
                 onClick={() => selectTab(CODE_GOAL_TAB_ID)}
@@ -1010,11 +1041,11 @@ export function CodeSessionHeader() {
                 )}
               >
                 <Target aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="truncate">Objetivo</span>
+                <span className="truncate">{t('code:header.goalTab.visible')}</span>
               </button>
               <button
                 type="button"
-                aria-label="Fechar objetivo"
+                aria-label={t('code:header.goalTab.close')}
                 tabIndex={-1}
                 onClick={() => closeTab(CODE_GOAL_TAB_ID)}
                 className={cn(
@@ -1041,10 +1072,10 @@ export function CodeSessionHeader() {
               <button
                 type="button"
                 role="tab"
-                aria-label={`Diff de ${codeDiffTab.path}`}
+                aria-label={t('code:header.diffTab.label', { path: codeDiffTab.path })}
                 aria-selected={codeView === 'diff'}
                 aria-controls="code-diff-panel"
-                title={`Diff: ${codeDiffTab.path}`}
+                title={t('code:header.diffTab.title', { path: codeDiffTab.path })}
                 tabIndex={codeView === 'diff' ? 0 : -1}
                 ref={addTabRef(CODE_DIFF_TAB_ID)}
                 onClick={() => selectTab(CODE_DIFF_TAB_ID)}
@@ -1055,11 +1086,11 @@ export function CodeSessionHeader() {
                 )}
               >
                 <FileDiff aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="truncate">Diff</span>
+                <span className="truncate">{t('code:header.diffTab.visible')}</span>
               </button>
               <button
                 type="button"
-                aria-label={`Fechar diff de ${codeDiffTab.path}`}
+                aria-label={t('code:header.diffTab.close', { path: codeDiffTab.path })}
                 tabIndex={-1}
                 onClick={() => closeTab(CODE_DIFF_TAB_ID)}
                 className={cn(
@@ -1086,10 +1117,10 @@ export function CodeSessionHeader() {
               <button
                 type="button"
                 role="tab"
-                aria-label="Histórico de commits"
+                aria-label={t('code:header.commitsTab.label')}
                 aria-selected={codeView === 'commits'}
                 aria-controls="code-commits-panel"
-                title="Histórico de commits"
+                title={t('code:header.commitsTab.label')}
                 tabIndex={codeView === 'commits' ? 0 : -1}
                 ref={addTabRef(CODE_COMMITS_TAB_ID)}
                 onClick={() => selectTab(CODE_COMMITS_TAB_ID)}
@@ -1100,11 +1131,11 @@ export function CodeSessionHeader() {
                 )}
               >
                 <History aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="truncate">Commits</span>
+                <span className="truncate">{t('code:header.commitsTab.visible')}</span>
               </button>
               <button
                 type="button"
-                aria-label="Fechar histórico de commits"
+                aria-label={t('code:header.commitsTab.close')}
                 tabIndex={-1}
                 onClick={() => closeTab(CODE_COMMITS_TAB_ID)}
                 className={cn(
@@ -1119,8 +1150,8 @@ export function CodeSessionHeader() {
           ) : null}
         </div>
 
-        <Tooltip content="Nova sessão" side="bottom">
-          <IconButton ref={plusRef} label="Nova sessão" size="sm" onClick={createSession}>
+        <Tooltip content={t('code:header.newSession')} side="bottom">
+          <IconButton ref={plusRef} label={t('code:header.newSession')} size="sm" onClick={createSession}>
             <Plus className="size-4" />
           </IconButton>
         </Tooltip>

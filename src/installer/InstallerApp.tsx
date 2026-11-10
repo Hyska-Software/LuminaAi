@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open } from '@tauri-apps/plugin-dialog';
+import { useTranslation } from 'react-i18next';
 import {
   AlertTriangle,
   ArrowRight,
@@ -22,7 +23,9 @@ import {
   X,
 } from 'lucide-react';
 
-import { Badge, Button, IconButton, Input, ProgressBar, Separator, Spinner } from '@/components/ui';
+import { Badge, Button, IconButton, Input, NativeSelect, ProgressBar, Separator, Spinner } from '@/components/ui';
+import { getLanguage, setLanguage, t as translate, type AppLocale } from '@/lib/i18n';
+import { SUPPORTED_LANGUAGES } from '@/lib/i18n/languages';
 import { cn, formatBytes } from '@/lib/utils';
 import { tauriInstallerApi } from './api';
 import {
@@ -49,7 +52,7 @@ import type {
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') return error;
-  return 'Não foi possível concluir a operação.';
+  return translate('installer:errors.generic');
 }
 
 function closeWindow(): void {
@@ -57,9 +60,29 @@ function closeWindow(): void {
 }
 
 export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriInstallerApi }) {
+  const { t } = useTranslation('installer');
   const [context, setContext] = React.useState<InstallerContext | null>(null);
   const [state, setState] = React.useState<InstallerUiState | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [language, setLanguageState] = React.useState<AppLocale>(() => getLanguage());
+
+  // The renderer picks its locale; the backend needs it to localize steps,
+  // errors and the window title.
+  React.useEffect(() => {
+    void api.setLanguage(getLanguage()).catch(() => {});
+  }, [api]);
+
+  const changeLanguage = React.useCallback(
+    (code: AppLocale) => {
+      void setLanguage(code, { persist: false })
+        .then(() => {
+          setLanguageState(code);
+          return api.setLanguage(code);
+        })
+        .catch(() => {});
+    },
+    [api],
+  );
 
   React.useEffect(() => {
     let active = true;
@@ -127,13 +150,19 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
 
   if (loadError) {
     return (
-      <InstallerShell mode="install" title="Zylara Setup" onClose={closeWindow}>
+      <InstallerShell
+        mode="install"
+        title={t('window.install')}
+        language={language}
+        onLanguageChange={changeLanguage}
+        onClose={closeWindow}
+      >
         <div className="mx-auto max-w-lg rounded-2xl border border-danger/30 bg-danger-soft p-6">
           <AlertTriangle className="mb-3 size-6 text-danger" />
-          <h1 className="text-lg font-semibold text-foreground">Não foi possível abrir o instalador</h1>
+          <h1 className="text-lg font-semibold text-foreground">{t('errors.loadTitle')}</h1>
           <p className="mt-2 text-sm leading-relaxed text-foreground-muted">{loadError}</p>
           <Button className="mt-5" variant="secondary" onClick={closeWindow}>
-            Fechar
+            {t('common.close')}
           </Button>
         </div>
       </InstallerShell>
@@ -142,10 +171,16 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
 
   if (!state || !context) {
     return (
-      <InstallerShell mode="install" title="Zylara Setup" onClose={closeWindow}>
+      <InstallerShell
+        mode="install"
+        title={t('window.install')}
+        language={language}
+        onLanguageChange={changeLanguage}
+        onClose={closeWindow}
+      >
         <div className="flex items-center gap-3 text-sm text-foreground-muted">
-          <Spinner label="Carregando instalador" />
-          Preparando o instalador…
+          <Spinner label={t('loading.spinner')} />
+          {t('loading.preparing')}
         </div>
       </InstallerShell>
     );
@@ -154,10 +189,12 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
   return (
     <InstallerShell
       mode={state.mode}
-      title={state.mode === 'uninstall' ? 'Desinstalar Zylara' : 'Zylara Setup'}
+      title={state.mode === 'uninstall' ? t('window.uninstall') : t('window.install')}
       version={context.version}
       context={context}
       state={state}
+      language={language}
+      onLanguageChange={changeLanguage}
       onClose={closeWindow}
     >
       {state.screen === 'welcome' ? (
@@ -186,7 +223,7 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
               directory: true,
               multiple: false,
               defaultPath: state.draft.path,
-              title: 'Escolha a pasta de instalação',
+              title: t('location.browseTitle'),
             });
             if (typeof selected === 'string') update({ type: 'path', path: selected });
           }}
@@ -275,15 +312,15 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
 /* Chrome                                                              */
 /* ------------------------------------------------------------------ */
 
-const SCREEN_LABELS: Record<InstallerScreen, string> = {
-  welcome: 'Boas-vindas',
-  scope: 'Escopo',
-  location: 'Destino',
-  options: 'Opções',
-  progress: 'Instalação',
-  finish: 'Concluído',
-  confirmUninstall: 'Remover',
-  error: 'Erro',
+const SCREEN_LABEL_KEYS: Record<InstallerScreen, string> = {
+  welcome: 'screens.welcome',
+  scope: 'screens.scope',
+  location: 'screens.location',
+  options: 'screens.options',
+  progress: 'screens.progress',
+  finish: 'screens.finish',
+  confirmUninstall: 'screens.confirmUninstall',
+  error: 'screens.error',
 };
 
 function flowScreens(context: InstallerContext): InstallerScreen[] {
@@ -298,6 +335,8 @@ function InstallerShell({
   version,
   context,
   state,
+  language,
+  onLanguageChange,
   onClose,
   children,
 }: {
@@ -306,9 +345,12 @@ function InstallerShell({
   version?: string;
   context?: InstallerContext;
   state?: InstallerUiState;
+  language: AppLocale;
+  onLanguageChange?: (code: AppLocale) => void;
   onClose?: () => void;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation('installer');
   const screens = context ? flowScreens(context) : [];
   const currentIndex = state ? screens.indexOf(state.screen === 'error' ? 'progress' : state.screen) : 0;
 
@@ -320,14 +362,29 @@ function InstallerShell({
           <span className="text-[13px] font-medium tracking-tight text-foreground">{title}</span>
           {version ? <Badge variant="outline">v{version}</Badge> : null}
         </div>
-        <IconButton
-          label="Fechar instalador"
-          size="sm"
-          onClick={onClose ?? closeWindow}
-          disabled={state?.screen === 'progress' && state.starting}
-        >
-          <X className="size-4" strokeWidth={1.9} />
-        </IconButton>
+        <div className="flex items-center gap-2">
+          <NativeSelect
+            aria-label={t('language.label')}
+            value={language}
+            onChange={(event) => onLanguageChange?.(event.target.value as AppLocale)}
+            wrapperClassName="w-[170px]"
+            className="h-8 text-[12px]"
+          >
+            {SUPPORTED_LANGUAGES.map((option) => (
+              <option key={option.code} value={option.code}>
+                {option.nativeName}
+              </option>
+            ))}
+          </NativeSelect>
+          <IconButton
+            label={t('shell.close')}
+            size="sm"
+            onClick={onClose ?? closeWindow}
+            disabled={state?.screen === 'progress' && state.starting}
+          >
+            <X className="size-4" strokeWidth={1.9} />
+          </IconButton>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -337,12 +394,12 @@ function InstallerShell({
             <div>
               <p className="text-[15px] font-semibold tracking-tight">Zylara</p>
               <p className="text-[11px] text-foreground-subtle">
-                {mode === 'uninstall' ? 'Desinstalação' : 'Instalador'}
+                {mode === 'uninstall' ? t('shell.mode.uninstall') : t('shell.mode.install')}
               </p>
             </div>
           </div>
 
-          <nav aria-label="Etapas" className="mt-8">
+          <nav aria-label={t('shell.steps')} className="mt-8">
             <ol className="space-y-1">
               {screens.map((screen, index) => {
                 const active = index === currentIndex;
@@ -365,7 +422,7 @@ function InstallerShell({
                         active ? 'font-medium text-foreground' : 'text-foreground-muted',
                       )}
                     >
-                      {SCREEN_LABELS[screen]}
+                      {t(SCREEN_LABEL_KEYS[screen])}
                     </span>
                   </li>
                 );
@@ -377,9 +434,9 @@ function InstallerShell({
             <div className="flex items-start gap-2.5">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" strokeWidth={1.9} />
               <div>
-                <p className="text-[12px] font-medium text-foreground">Instalação local</p>
+                <p className="text-[12px] font-medium text-foreground">{t('shell.local.title')}</p>
                 <p className="mt-1 text-[11px] leading-relaxed text-foreground-muted">
-                  Seus dados ficam neste computador. Nada é enviado para nós.
+                  {t('shell.local.description')}
                 </p>
               </div>
             </div>
@@ -572,6 +629,7 @@ function Footer({
 /* ------------------------------------------------------------------ */
 
 function WelcomeScreen({ context, onContinue }: { context: InstallerContext; onContinue: () => void }) {
+  const { t } = useTranslation('installer');
   const update = context.existing != null;
   return (
     <>
@@ -582,14 +640,12 @@ function WelcomeScreen({ context, onContinue }: { context: InstallerContext; onC
         </div>
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">
-            {update ? 'Atualização' : 'Bem-vindo'}
+            {update ? t('welcome.eyebrowUpdate') : t('welcome.eyebrowWelcome')}
           </p>
           <h1 className="mt-1 text-[26px] font-semibold leading-tight tracking-tight">
-            {update ? 'Atualize o Zylara' : 'Instale o Zylara'}
+            {update ? t('welcome.titleUpdate') : t('welcome.titleInstall')}
           </h1>
-          <p className="mt-1 text-sm text-foreground-muted">
-            Chat desktop com agentes, documentos e código.
-          </p>
+          <p className="mt-1 text-sm text-foreground-muted">{t('welcome.subtitle')}</p>
         </div>
       </div>
 
@@ -597,39 +653,60 @@ function WelcomeScreen({ context, onContinue }: { context: InstallerContext; onC
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-foreground">
-              {update ? `Versão ${context.version} disponível` : `Versão ${context.version}`}
+              {update
+                ? t('welcome.versionAvailable', { version: context.version })
+                : t('welcome.version', { version: context.version })}
             </p>
             <p className="mt-1 text-[12.5px] text-foreground-muted">
               {update
-                ? `Instalação atual: ${context.existing?.version} em ${context.existing?.path}`
-                : 'A instalação leva menos de um minuto.'}
+                ? t('welcome.currentInstall', {
+                    version: context.existing?.version ?? '',
+                    path: context.existing?.path ?? '',
+                  })
+                : t('welcome.duration')}
             </p>
           </div>
           <Badge variant={update ? 'accent' : 'success'} size="md">
-            {update ? 'Atualizar' : 'Pronto'}
+            {update ? t('welcome.badgeUpdate') : t('welcome.badgeReady')}
           </Badge>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <WelcomeFeature icon={<Sparkles className="size-4" />} title="Seus modelos" description="OpenCode, OpenAI e Anthropic em um só lugar." />
-          <WelcomeFeature icon={<LockKeyhole className="size-4" />} title="Local-first" description="Conversas e arquivos ficam no seu computador." />
-          <WelcomeFeature icon={<HardDrive className="size-4" />} title="Completo" description="Biblioteca, código, terminal e skills inclusos." />
-          <WelcomeFeature icon={<Download className="size-4" />} title="Atualização simples" description="Execute o novo instalador quando quiser." />
+          <WelcomeFeature
+            icon={<Sparkles className="size-4" />}
+            title={t('welcome.features.models.title')}
+            description={t('welcome.features.models.description')}
+          />
+          <WelcomeFeature
+            icon={<LockKeyhole className="size-4" />}
+            title={t('welcome.features.local.title')}
+            description={t('welcome.features.local.description')}
+          />
+          <WelcomeFeature
+            icon={<HardDrive className="size-4" />}
+            title={t('welcome.features.complete.title')}
+            description={t('welcome.features.complete.description')}
+          />
+          <WelcomeFeature
+            icon={<Download className="size-4" />}
+            title={t('welcome.features.updates.title')}
+            description={t('welcome.features.updates.description')}
+          />
         </div>
       </div>
 
       {context.existing ? (
         <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-[12.5px] text-foreground-muted">
-          Atualizar mantém suas conversas, arquivos, configurações e chaves de API.
+          {t('welcome.keepData')}
         </div>
       ) : null}
 
-      <Footer hint="Ao continuar, você poderá escolher onde e para quem instalar.">
+      <Footer hint={t('welcome.hint')}>
         <Button variant="ghost" onClick={closeWindow}>
-          Cancelar
+          {t('common.cancel')}
         </Button>
         <Button variant="primary" onClick={onContinue} rightIcon={<ArrowRight className="size-4" />}>
-          {update ? 'Atualizar Zylara' : 'Continuar'}
+          {update ? t('welcome.update') : t('welcome.continue')}
         </Button>
       </Footer>
     </>
@@ -661,27 +738,28 @@ function ScopeScreen({
   onBack: () => void;
   onContinue: () => void;
 }) {
+  const { t } = useTranslation('installer');
   return (
     <>
       <ScreenHeader
-        eyebrow="Etapa 1 de 3"
-        title="Para quem vamos instalar?"
-        description="Escolha o escopo. A opção por usuário não pede administrador; a opção para todos deixa o Zylara disponível para qualquer conta deste computador."
+        eyebrow={t('scope.eyebrow')}
+        title={t('scope.title')}
+        description={t('scope.description')}
       />
 
-      <div role="radiogroup" aria-label="Escopo da instalação" className="space-y-3">
+      <div role="radiogroup" aria-label={t('scope.radiogroup')} className="space-y-3">
         <SelectCard
           selected={state.draft.scope === 'user'}
           onClick={() => onScope('user')}
-          title="Apenas para mim"
-          description={`Instala em ${context.defaultPathUser}. Não exige permissão de administrador.`}
+          title={t('scope.user.title')}
+          description={t('scope.user.description', { path: context.defaultPathUser })}
           icon={<User className="size-4" />}
         />
         <SelectCard
           selected={state.draft.scope === 'machine'}
           onClick={() => onScope('machine')}
-          title="Para todos os usuários"
-          description={`Instala em ${context.defaultPathMachine}. O Windows pedirá permissão de administrador.`}
+          title={t('scope.machine.title')}
+          description={t('scope.machine.description', { path: context.defaultPathMachine })}
           icon={<Users className="size-4" />}
           disabled={!context.canElevate && !context.isAdmin}
         />
@@ -691,7 +769,7 @@ function ScopeScreen({
         <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-warning" />
           <p className="text-[12.5px] leading-relaxed text-foreground-muted">
-            Ao continuar, o instalador vai reabrir com permissões de administrador para criar atalhos e registrar o app para todos.
+            {t('scope.elevateWarning')}
           </p>
         </div>
       ) : null}
@@ -700,18 +778,21 @@ function ScopeScreen({
         <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="text-[12.5px] leading-relaxed text-foreground-muted">
-            <p className="font-medium text-danger">Já existe uma instalação em outro escopo.</p>
+            <p className="font-medium text-danger">{t('scope.conflicting.title')}</p>
             <p className="mt-1">
-              {scopeLabel(context.conflicting.scope)} em {context.conflicting.path} (v{context.conflicting.version}).
-              Remova essa instalação antes de continuar.
+              {t('scope.conflicting.description', {
+                scope: scopeLabel(context.conflicting.scope),
+                path: context.conflicting.path,
+                version: context.conflicting.version,
+              })}
             </p>
           </div>
         </div>
       ) : null}
 
-      <Footer hint="Você poderá mudar a pasta na próxima etapa.">
+      <Footer hint={t('scope.hint')}>
         <Button variant="ghost" onClick={onBack} leftIcon={<ChevronLeft className="size-4" />}>
-          Voltar
+          {t('common.back')}
         </Button>
         <Button
           variant="primary"
@@ -719,7 +800,7 @@ function ScopeScreen({
           onClick={onContinue}
           rightIcon={<ArrowRight className="size-4" />}
         >
-          Continuar
+          {t('common.continue')}
         </Button>
       </Footer>
     </>
@@ -742,17 +823,18 @@ function LocationScreen({
   onContinue: () => void;
 }) {
   const problem = pathError(state.draft.path);
+  const { t } = useTranslation('installer');
   return (
     <>
       <ScreenHeader
-        eyebrow="Etapa 2 de 3"
-        title="Onde instalar?"
-        description="A pasta será criada se ainda não existir. O Zylara precisa de uma unidade local para o banco de dados e os checkpoints."
+        eyebrow={t('location.eyebrow')}
+        title={t('location.title')}
+        description={t('location.description')}
       />
 
       <div className="rounded-2xl border border-border bg-surface-raised p-5">
         <label htmlFor="install-path" className="mb-2 block text-[12.5px] font-medium text-foreground">
-          Pasta de instalação
+          {t('location.label')}
         </label>
         <div className="flex gap-2">
           <Input
@@ -764,42 +846,42 @@ function LocationScreen({
             autoComplete="off"
           />
           <Button variant="secondary" onClick={() => void onBrowse()} leftIcon={<FolderOpen className="size-4" />}>
-            Procurar…
+            {t('location.browse')}
           </Button>
         </div>
         {problem ? <p className="mt-2 text-[12px] text-danger">{problem}</p> : null}
 
         <div className="mt-5 grid grid-cols-2 gap-3 text-[12.5px]">
           <div className="rounded-lg bg-surface px-3 py-2.5">
-            <p className="text-foreground-subtle">Escopo</p>
+            <p className="text-foreground-subtle">{t('location.scope')}</p>
             <p className="mt-0.5 font-medium text-foreground">{scopeLabel(state.draft.scope)}</p>
           </div>
           <div className="rounded-lg bg-surface px-3 py-2.5">
-            <p className="text-foreground-subtle">Espaço necessário</p>
+            <p className="text-foreground-subtle">{t('location.required')}</p>
             <p className="mt-0.5 font-medium text-foreground">{formatBytes(context.requiredBytes)}</p>
           </div>
         </div>
 
         {context.freeBytes != null ? (
           <p className="mt-2 text-[12px] text-foreground-subtle">
-            {formatBytes(context.freeBytes)} livres na unidade de destino.
+            {t('location.free', { size: formatBytes(context.freeBytes) })}
           </p>
         ) : null}
 
         {state.draft.scope === 'machine' ? (
           <p className="mt-4 flex items-center gap-2 text-[12px] text-foreground-muted">
             <ShieldCheck className="size-3.5 text-warning" />
-            A pasta em Program Files exige administrador.
+            {t('location.adminWarning')}
           </p>
         ) : null}
       </div>
 
-      <Footer hint="Seus dados de conversas ficam separados da pasta do aplicativo.">
+      <Footer hint={t('location.hint')}>
         <Button variant="ghost" onClick={onBack} leftIcon={<ChevronLeft className="size-4" />}>
-          Voltar
+          {t('common.back')}
         </Button>
         <Button variant="primary" disabled={Boolean(problem)} onClick={onContinue} rightIcon={<ArrowRight className="size-4" />}>
-          Continuar
+          {t('common.continue')}
         </Button>
       </Footer>
     </>
@@ -822,15 +904,19 @@ function OptionsScreen({
   onInstall: () => void;
 }) {
   const update = context.existing != null;
+  const { t } = useTranslation('installer');
   return (
     <>
       <ScreenHeader
-        eyebrow={update ? 'Atualização' : 'Etapa 3 de 3'}
-        title={update ? 'Confirme a atualização' : 'Ajuste os detalhes'}
+        eyebrow={update ? t('options.eyebrowUpdate') : t('options.eyebrow')}
+        title={update ? t('options.titleUpdate') : t('options.title')}
         description={
           update
-            ? `O Zylara ${context.version} será instalado sobre a versão ${context.existing?.version}. Seus dados serão preservados.`
-            : 'Escolha como o Zylara deve aparecer no Windows. Você pode mudar os atalhos depois na pasta de instalação.'
+            ? t('options.descriptionUpdate', {
+                version: context.version,
+                existingVersion: context.existing?.version ?? '',
+              })
+            : t('options.description')
         }
       />
 
@@ -838,10 +924,13 @@ function OptionsScreen({
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="text-[12.5px] leading-relaxed text-foreground-muted">
-            <p className="font-medium text-danger">Existe outra instalação do Zylara.</p>
+            <p className="font-medium text-danger">{t('options.conflicting.title')}</p>
             <p className="mt-0.5">
-              {scopeLabel(context.conflicting.scope)} em {context.conflicting.path} (v
-              {context.conflicting.version}). Remova essa instalação antes de continuar.
+              {t('options.conflicting.description', {
+                scope: scopeLabel(context.conflicting.scope),
+                path: context.conflicting.path,
+                version: context.conflicting.version,
+              })}
             </p>
           </div>
         </div>
@@ -851,13 +940,13 @@ function OptionsScreen({
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <div className="min-w-0 flex-1">
-            <p className="text-[12.5px] font-medium text-foreground">O Zylara está aberto</p>
+            <p className="text-[12.5px] font-medium text-foreground">{t('options.running.title')}</p>
             <p className="mt-0.5 text-[12px] leading-relaxed text-foreground-muted">
-              Feche o aplicativo antes de continuar para evitar arquivos bloqueados.
+              {t('options.running.description')}
             </p>
           </div>
           <Button size="sm" variant="secondary" onClick={() => void onCloseApp()}>
-            Fechar agora
+            {t('options.running.close')}
           </Button>
         </div>
       ) : null}
@@ -866,20 +955,20 @@ function OptionsScreen({
         <OptionRow
           checked={state.draft.desktopShortcut}
           onChange={(value) => onOption('desktopShortcut', value)}
-          title="Atalho na área de trabalho"
-          description="Cria um atalho para abrir o Zylara."
+          title={t('options.desktopShortcut.title')}
+          description={t('options.desktopShortcut.description')}
         />
         <OptionRow
           checked={state.draft.startMenuShortcut}
           onChange={(value) => onOption('startMenuShortcut', value)}
-          title="Atalho no Menu Iniciar"
-          description="Adiciona o Zylara ao menu Iniciar e à pesquisa do Windows."
+          title={t('options.startMenuShortcut.title')}
+          description={t('options.startMenuShortcut.description')}
         />
         <OptionRow
           checked={state.draft.launchAfterInstall}
           onChange={(value) => onOption('launchAfterInstall', value)}
-          title="Abrir o Zylara ao concluir"
-          description="Inicia o aplicativo assim que a instalação terminar."
+          title={t('options.launchAfterInstall.title')}
+          description={t('options.launchAfterInstall.description')}
         />
       </div>
 
@@ -888,10 +977,11 @@ function OptionsScreen({
           <HardDrive className="mt-0.5 size-4 shrink-0 text-foreground-subtle" />
           <div className="text-[12px] leading-relaxed text-foreground-muted">
             <p>
-              <span className="font-medium text-foreground">Destino:</span> {state.draft.path}
+              <span className="font-medium text-foreground">{t('options.destination')}</span> {state.draft.path}
             </p>
             <p className="mt-0.5">
-              <span className="font-medium text-foreground">Escopo:</span> {scopeLabel(state.draft.scope)}
+              <span className="font-medium text-foreground">{t('options.scope')}</span>{' '}
+              {scopeLabel(state.draft.scope)}
             </p>
           </div>
         </div>
@@ -900,12 +990,12 @@ function OptionsScreen({
       <Footer
         hint={
           state.draft.scope === 'machine' && !context.isAdmin
-            ? 'Ao instalar, o Windows pedirá permissão de administrador.'
-            : 'A instalação não remove nem altera suas conversas existentes.'
+            ? t('options.hintElevate')
+            : t('options.hintDefault')
         }
       >
         <Button variant="ghost" onClick={onBack} leftIcon={<ChevronLeft className="size-4" />}>
-          Voltar
+          {t('common.back')}
         </Button>
         <Button
           variant="primary"
@@ -913,7 +1003,7 @@ function OptionsScreen({
           disabled={Boolean(context.conflicting)}
           leftIcon={<Download className="size-4" />}
         >
-          {update ? 'Atualizar agora' : 'Instalar Zylara'}
+          {update ? t('options.installUpdate') : t('options.install')}
         </Button>
       </Footer>
     </>
@@ -930,18 +1020,19 @@ function ProgressScreen({
   onOpenLog: () => void;
 }) {
   const done = state.steps.filter((step) => step.status === 'done' || step.status === 'skipped').length;
+  const { t } = useTranslation('installer');
   return (
     <>
       <ScreenHeader
-        eyebrow={state.mode === 'uninstall' ? 'Removendo' : 'Instalando'}
-        title={state.mode === 'uninstall' ? 'Removendo o Zylara' : 'Instalando o Zylara'}
-        description="Mantenha esta janela aberta. O instalador está aplicando as alterações com segurança."
+        eyebrow={state.mode === 'uninstall' ? t('progress.eyebrowUninstall') : t('progress.eyebrow')}
+        title={state.mode === 'uninstall' ? t('progress.titleUninstall') : t('progress.title')}
+        description={t('progress.description')}
       />
 
       <div className="rounded-2xl border border-border bg-surface-raised p-5">
         <div className="flex items-center justify-between gap-4">
           <p className="text-sm font-medium text-foreground" aria-live="polite">
-            {state.progressMessage || 'Preparando…'}
+            {state.progressMessage || t('progress.preparing')}
           </p>
           <Badge variant="outline" size="md">
             {done}/{state.steps.length}
@@ -951,7 +1042,7 @@ function ProgressScreen({
           className="mt-3"
           size="md"
           value={state.progress}
-          label={state.mode === 'uninstall' ? 'Progresso da desinstalação' : 'Progresso da instalação'}
+          label={state.mode === 'uninstall' ? t('progress.progressUninstall') : t('progress.progress')}
         />
 
         <ol className="mt-5 space-y-2.5">
@@ -994,7 +1085,7 @@ function ProgressScreen({
           <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 text-[12px] font-medium text-foreground-muted hover:text-foreground">
             <span className="flex items-center gap-2">
               <FileText className="size-3.5" />
-              Detalhes da instalação
+              {t('progress.details')}
             </span>
             <span className="flex items-center gap-2">
               <button
@@ -1005,20 +1096,20 @@ function ProgressScreen({
                   onOpenLog();
                 }}
               >
-                Abrir log
+                {t('common.openLog')}
               </button>
               <ArrowRight className="size-3.5 transition-transform group-open:rotate-90" />
             </span>
           </summary>
           <pre className="max-h-40 overflow-auto border-t border-border px-3.5 py-2.5 font-mono text-[10.5px] leading-relaxed text-foreground-subtle">
-            {state.logLines.length ? state.logLines.join('\n') : 'Sem detalhes ainda.'}
+            {state.logLines.length ? state.logLines.join('\n') : t('progress.noDetails')}
           </pre>
         </details>
       </div>
 
-      <Footer hint="Você pode cancelar antes de a cópia dos arquivos começar.">
+      <Footer hint={t('progress.hint')}>
         <Button variant="ghost" onClick={onCancel} loading={state.cancelling} disabled={state.progress >= 30}>
-          Cancelar
+          {t('common.cancel')}
         </Button>
       </Footer>
     </>
@@ -1038,6 +1129,7 @@ function FinishScreen({
 }) {
   const uninstall = state.mode === 'uninstall';
   const launched = state.outcome?.launched ?? false;
+  const { t } = useTranslation('installer');
   return (
     <>
       <div className="flex flex-col items-center py-8 text-center">
@@ -1045,16 +1137,20 @@ function FinishScreen({
           <Check className="size-8" strokeWidth={2.2} />
         </div>
         <h1 className="mt-5 text-[24px] font-semibold tracking-tight">
-          {uninstall ? 'Zylara removido' : launched ? 'Tudo pronto' : 'Instalação concluída'}
+          {uninstall
+            ? t('finish.titleUninstall')
+            : launched
+              ? t('finish.titleLaunched')
+              : t('finish.titleDone')}
         </h1>
         <p className="mt-2 max-w-[48ch] text-sm leading-relaxed text-foreground-muted">
           {uninstall
             ? state.draft.purgeData
-              ? 'O aplicativo e os dados do usuário foram removidos deste computador.'
-              : 'O aplicativo foi removido. Suas conversas, arquivos e configurações foram preservados.'
+              ? t('finish.descriptionUninstallPurge')
+              : t('finish.descriptionUninstall')
             : launched
-              ? 'O Zylara foi instalado e já está aberto. Bom trabalho!'
-              : 'O Zylara está pronto para usar. Você pode abri-lo agora ou pela área de trabalho.'}
+              ? t('finish.descriptionLaunched')
+              : t('finish.descriptionDone')}
         </p>
         {state.outcome?.installPath ? (
           <p className="mt-4 max-w-full break-all rounded-lg bg-surface px-3 py-2 font-mono text-[11px] text-foreground-subtle">
@@ -1066,16 +1162,16 @@ function FinishScreen({
       <div className="flex justify-center gap-2">
         {!uninstall ? (
           <Button variant="primary" onClick={() => void onLaunch()} leftIcon={<Sparkles className="size-4" />}>
-            {launched ? 'Abrir Zylara' : 'Abrir Zylara agora'}
+            {launched ? t('finish.openLaunched') : t('finish.open')}
           </Button>
         ) : null}
         {!uninstall ? (
           <Button variant="secondary" onClick={() => void onOpenFolder()} leftIcon={<FolderOpen className="size-4" />}>
-            Abrir pasta
+            {t('finish.openFolder')}
           </Button>
         ) : null}
         <Button variant="ghost" onClick={onClose}>
-          Fechar
+          {t('common.close')}
         </Button>
       </div>
     </>
@@ -1096,12 +1192,13 @@ function UninstallScreen({
   onClose: () => void;
 }) {
   const [confirming, setConfirming] = React.useState(false);
+  const { t } = useTranslation('installer');
   return (
     <>
       <ScreenHeader
-        eyebrow="Desinstalação"
-        title="Remover o Zylara?"
-        description="O aplicativo será removido deste computador. Você pode escolher se as conversas, arquivos e configurações também devem ser apagados."
+        eyebrow={t('uninstall.eyebrow')}
+        title={t('uninstall.title')}
+        description={t('uninstall.description')}
       />
 
       <div className="rounded-2xl border border-border bg-surface-raised p-5">
@@ -1121,14 +1218,14 @@ function UninstallScreen({
           checked={state.draft.purgeData}
           onChange={onPurge}
           tone="danger"
-          label="Remover também meus dados"
-          description="Apaga conversas, anexos, artefatos, configurações e chaves de API salvas neste computador. Esta ação não pode ser desfeita."
+          label={t('uninstall.purge.label')}
+          description={t('uninstall.purge.description')}
         />
         {state.draft.purgeData ? (
           <div className="mt-2 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger-soft px-3.5 py-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
             <p className="text-[12px] leading-relaxed text-foreground-muted">
-              As chaves de API serão apagadas. Você precisará configurá-las novamente se reinstalar o Zylara.
+              {t('uninstall.purgeWarning')}
             </p>
           </div>
         ) : null}
@@ -1137,14 +1234,14 @@ function UninstallScreen({
       <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-[12px] leading-relaxed text-foreground-muted">
         {state.draft.purgeData
           ? confirming
-            ? 'Confirme novamente para apagar o aplicativo e todos os dados do usuário atual. Esta ação é definitiva.'
-            : 'No próximo passo você confirma a remoção dos dados. Seus arquivos ainda estão protegidos até lá.'
-          : 'Suas conversas, arquivos e configurações serão mantidos por padrão.'}
+            ? t('uninstall.infoConfirm')
+            : t('uninstall.infoNext')
+          : t('uninstall.infoDefault')}
       </div>
 
-      <Footer hint="A remoção do aplicativo não afeta outras contas deste computador.">
+      <Footer hint={t('uninstall.hint')}>
         <Button variant="ghost" onClick={onClose}>
-          Cancelar
+          {t('common.cancel')}
         </Button>
         <Button
           variant="danger"
@@ -1157,7 +1254,7 @@ function UninstallScreen({
           }}
           leftIcon={<RotateCcw className="size-4" />}
         >
-          {state.draft.purgeData && confirming ? 'Confirmar remoção' : 'Remover Zylara'}
+          {state.draft.purgeData && confirming ? t('uninstall.confirm') : t('uninstall.remove')}
         </Button>
       </Footer>
     </>
@@ -1175,21 +1272,22 @@ function ErrorScreen({
   onOpenLog: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation('installer');
   return (
     <>
       <ScreenHeader
-        eyebrow="Algo deu errado"
-        title={state.mode === 'uninstall' ? 'Não foi possível remover' : 'Não foi possível instalar'}
-        description="A operação foi interrompida. Veja os detalhes abaixo e tente novamente."
+        eyebrow={t('errorScreen.eyebrow')}
+        title={state.mode === 'uninstall' ? t('errorScreen.titleUninstall') : t('errorScreen.title')}
+        description={t('errorScreen.description')}
       />
 
       <div className="rounded-2xl border border-danger/30 bg-danger-soft p-5">
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 size-5 shrink-0 text-danger" />
           <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">O instalador encontrou um problema</p>
+            <p className="text-sm font-medium text-foreground">{t('errorScreen.problem')}</p>
             <p className="mt-2 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-foreground-muted">
-              {state.error ?? 'Erro desconhecido.'}
+              {state.error ?? t('errorScreen.unknown')}
             </p>
           </div>
         </div>
@@ -1198,23 +1296,23 @@ function ErrorScreen({
       {state.outcome?.logPath || state.logLines.length ? (
         <details className="mt-4 rounded-xl border border-border bg-surface-raised">
           <summary className="cursor-pointer list-none px-4 py-3 text-[12px] font-medium text-foreground-muted hover:text-foreground">
-            Detalhes técnicos
+            {t('errorScreen.technical')}
           </summary>
           <pre className="max-h-48 overflow-auto border-t border-border px-4 py-3 font-mono text-[10.5px] leading-relaxed text-foreground-subtle">
-            {state.logLines.join('\n') || 'Consulte o log completo.'}
+            {state.logLines.join('\n') || t('errorScreen.logFallback')}
           </pre>
         </details>
       ) : null}
 
-      <Footer hint="O log completo fica na pasta temporária do Windows.">
+      <Footer hint={t('errorScreen.hint')}>
         <Button variant="ghost" onClick={onClose}>
-          Fechar
+          {t('common.close')}
         </Button>
         <Button variant="secondary" onClick={onOpenLog} leftIcon={<ExternalLink className="size-4" />}>
-          Abrir log
+          {t('common.openLog')}
         </Button>
         <Button variant="primary" onClick={onRetry} leftIcon={<RotateCcw className="size-4" />}>
-          Tentar novamente
+          {t('errorScreen.retry')}
         </Button>
       </Footer>
     </>

@@ -430,7 +430,7 @@ pub async fn open_url(
     let parsed = url::Url::parse(raw_url.trim())
         .map_err(|error| anyhow::anyhow!("COMPUTER_URL_INVALID: {error}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
-        anyhow::bail!("COMPUTER_URL_INVALID: apenas http/https são permitidos");
+        anyhow::bail!(crate::i18n::t("computer.errors.urlScheme"));
     }
     match backend(settings) {
         ComputerBackend::Local => {
@@ -605,7 +605,7 @@ pub async fn key(
 ) -> anyhow::Result<()> {
     let combo = combo.trim();
     if combo.is_empty() || combo.chars().count() > 80 {
-        anyhow::bail!("COMPUTER_KEY_INVALID: combinação vazia ou grande demais");
+        anyhow::bail!(crate::i18n::t("computer.errors.keyCombo"));
     }
     match backend(settings) {
         ComputerBackend::Local => {
@@ -1020,7 +1020,9 @@ pub async fn focus(
             {
                 let pid = window_id
                     .parse::<u32>()
-                    .map_err(|_| anyhow::anyhow!("COMPUTER_WINDOW_INVALID: id inválido"))?;
+                    .map_err(|_| anyhow::anyhow!(crate::i18n::t(
+                        "computer.errors.windowId"
+                    )))?;
                 let script = format!(
                     "(New-Object -ComObject WScript.Shell).AppActivate({pid}) | Out-Null"
                 );
@@ -1100,7 +1102,7 @@ pub async fn remove_container(
 pub async fn verify_stream_support(settings: &Settings, data_dir: &Path, conversation_id: &str) -> anyhow::Result<()> {
     let result = docker_exec(settings, data_dir, conversation_id, "command -v socat >/dev/null && test -x /usr/local/bin/zylara-clear-input && test -f /tmp/x11vnc-view.log && test -f /tmp/x11vnc-control.log").await?;
     if result.exit_code != Some(0) {
-        anyhow::bail!("COMPUTER_STREAM_IMAGE_OUTDATED: atualize a imagem do Desktop privado em Configurações → Agentes e reinicie a sessão");
+        anyhow::bail!(crate::i18n::t("computer.errors.imageOutdated"));
     }
     Ok(())
 }
@@ -1123,10 +1125,10 @@ pub async fn vnc_url(
     )
     .await?;
     if output.exit_code != Some(0) {
-        anyhow::bail!(
-            "COMPUTER_CONTROL_UNAVAILABLE: noVNC não está publicado ({})",
-            output.stderr.trim()
-        );
+        anyhow::bail!(crate::i18n::t_args(
+            "computer.errors.noVncUnpublished",
+            &[("error", output.stderr.trim())],
+        ));
     }
     let port = output
         .stdout
@@ -1134,7 +1136,7 @@ pub async fn vnc_url(
         .next()
         .and_then(|line| line.rsplit(':').next())
         .and_then(|value| value.trim().parse::<u16>().ok())
-        .ok_or_else(|| anyhow::anyhow!("COMPUTER_CONTROL_UNAVAILABLE: porta noVNC inválida"))?;
+        .ok_or_else(|| anyhow::anyhow!(crate::i18n::t("computer.errors.noVncPort")))?;
     Ok(format!("http://127.0.0.1:{port}/vnc.html"))
 }
 
@@ -1200,11 +1202,13 @@ pub async fn ensure_container(
     args.push(settings.computer_docker_image.clone());
     let run = sh(data_dir, "docker", args, Duration::from_secs(120)).await?;
     if run.exit_code != Some(0) {
-        anyhow::bail!(
-            "COMPUTER_DOCKER_FAILED: não foi possível iniciar `{}` — {}",
-            settings.computer_docker_image,
-            run.stderr.trim()
-        );
+        anyhow::bail!(crate::i18n::t_args(
+            "computer.errors.dockerStart",
+            &[
+                ("image", &settings.computer_docker_image),
+                ("error", run.stderr.trim()),
+            ],
+        ));
     }
     // Give Xvfb/the desktop a brief moment to come up.
     tokio::time::sleep(Duration::from_millis(700)).await;

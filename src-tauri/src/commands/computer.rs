@@ -89,11 +89,11 @@ pub async fn computer_start_local_stream(
     ensure_computer_capability(&state, &conversation_id)?;
     let settings = settings_for_conversation(&state, &conversation_id, crate::config::load_settings(&app));
     if !crate::computer::desktop_enabled(&settings) || crate::computer::backend(&settings) != crate::computer::ComputerBackend::Local {
-        return Err("COMPUTER_STREAM_UNAVAILABLE: captura local indisponível neste ambiente".into());
+        return Err(crate::i18n::t("computer.errors.streamUnavailable").into());
     }
     if stream_id.is_empty() || stream_id.len() > 100 { return Err("COMPUTER_STREAM_INVALID".into()); }
     #[cfg(not(windows))]
-    { let _ = on_frame; return Err("COMPUTER_UNSUPPORTED: captura local disponível no Windows".into()); }
+    { let _ = on_frame; return Err(crate::i18n::t("computer.errors.unsupported").into()); }
     #[cfg(windows)]
     {
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -233,11 +233,10 @@ fn ensure_computer_capability(
         .db
         .get_agent(agent_id)
         .map_err(to_error)?
-        .ok_or_else(|| "COMPUTER_AGENT_NOT_FOUND: o agente da conversa não existe".to_string())?;
+        .ok_or_else(|| crate::i18n::t("computer.errors.agentNotFound"))?;
     if !agent.capabilities.computer_use && !agent.capabilities.screen_capture {
         return Err(
-            "COMPUTER_CAPABILITY_DENIED: ative o controle do computador para este agente"
-                .to_string(),
+            crate::i18n::t("computer.errors.capabilityDenied"),
         );
     }
     Ok(())
@@ -258,10 +257,7 @@ pub async fn computer_preview(
         crate::config::load_settings(&app),
     );
     if !crate::computer::desktop_enabled(&settings) {
-        return Err(
-            "COMPUTER_PREVIEW_DISABLED: o ambiente está desligado ou em modo navegador"
-                .to_string(),
-        );
+        return Err(crate::i18n::t("computer.errors.previewDisabled"));
     }
     let shot = crate::computer::screenshot(&settings, &state.data_dir, &conversation_id)
         .await
@@ -353,7 +349,7 @@ pub async fn computer_take_control(
         crate::config::load_settings(&app),
     );
     if !crate::computer::desktop_enabled(&settings) {
-        return Err("COMPUTER_CONTROL_UNAVAILABLE: não há desktop neste ambiente".to_string());
+        return Err(crate::i18n::t("computer.errors.noDesktop"));
     }
     let backend = crate::computer::backend(&settings);
     let host_gate = crate::computer::control::gate(crate::computer::control::HOST_CONTROL);
@@ -455,14 +451,14 @@ pub(crate) async fn release_computer_control_with_browser(
     let _action = gate.action.lock().await;
     let target = db.computer_control_target(conversation_id).map_err(to_error)?;
     if !target.is_empty() && target != expected_target {
-        return Err("COMPUTER_CONTROL_HELD: outro ambiente está no controle".into());
+        return Err(crate::i18n::t("computer.errors.controlHeld").into());
     }
     if expected_target == "browser" {
         gate.require_browser_generation(generation.unwrap_or(""))?;
     }
     if target == "browser" {
         browser
-            .ok_or("BROWSER_INPUT_CLEANUP_FAILED: navegador indisponível")?
+            .ok_or(crate::i18n::t("computer.errors.browserUnavailable"))?
             .release_human_input(conversation_id).await?;
         gate.invalidate_browser_generation();
     }
@@ -492,7 +488,7 @@ pub fn tool_image_preview(state: State<'_, AppState>, path: String) -> Result<St
     let canonical_root = root.canonicalize().map_err(to_error)?;
     let canonical = requested.canonicalize().map_err(to_error)?;
     if !canonical.starts_with(&canonical_root) {
-        return Err("TOOL_IMAGE_FORBIDDEN: caminho fora do diretório de imagens".to_string());
+        return Err(crate::i18n::t("computer.errors.imageOutsideDir"));
     }
     let bytes = std::fs::read(&canonical).map_err(to_error)?;
     if bytes.is_empty() || bytes.len() > 12 * 1024 * 1024 {
@@ -619,7 +615,7 @@ pub fn computer_screenshot_preview(
     let canonical_root = root.canonicalize().map_err(to_error)?;
     let canonical = requested.canonicalize().map_err(to_error)?;
     if !canonical.starts_with(&canonical_root) {
-        return Err("COMPUTER_PREVIEW_FORBIDDEN: caminho fora do diretório de screenshots".to_string());
+        return Err(crate::i18n::t("computer.errors.screenshotOutsideDir"));
     }
     let bytes = std::fs::read(&canonical).map_err(to_error)?;
     if bytes.len() > 8 * 1024 * 1024 {

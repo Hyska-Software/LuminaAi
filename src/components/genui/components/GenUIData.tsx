@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { asStringArray, chartFromProps, propArray, propString, type GenUIValue } from '@/lib/genui/schema';
 import { ChartSvg } from '../ChartSvg';
@@ -6,6 +7,7 @@ import type { GenUINodeProps } from './GenUILayout';
 /* ------------------------------- table ------------------------------- */
 
 export function GenUITable({ props }: GenUINodeProps) {
+  const { t } = useTranslation('genui');
   const columns = asStringArray(props?.columns);
   const rows = propArray(props, 'rows') ?? [];
   const caption = propString(props, 'caption');
@@ -13,7 +15,7 @@ export function GenUITable({ props }: GenUINodeProps) {
   if (!columns.length || !rows.length) {
     return (
       <p className="rounded-xl border border-border bg-surface px-3 py-2.5 text-xs text-foreground-subtle">
-        Tabela sem dados.
+        {t('table.empty')}
       </p>
     );
   }
@@ -68,13 +70,14 @@ export function GenUITable({ props }: GenUINodeProps) {
 /* ------------------------------- chart ------------------------------- */
 
 export function GenUIChart({ props }: GenUINodeProps) {
+  const { t } = useTranslation('genui');
   const { chart, error } = chartFromProps(props);
   const title = propString(props, 'title') || chart?.title;
 
   if (!chart) {
     return (
       <div className="rounded-xl border border-border bg-surface px-3 py-2.5 text-xs text-foreground-subtle">
-        {error ?? 'Gráfico inválido.'}
+        {error ?? t('chart.invalid')}
       </div>
     );
   }

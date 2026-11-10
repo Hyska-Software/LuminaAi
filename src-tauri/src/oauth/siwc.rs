@@ -104,7 +104,12 @@ pub struct AuthorizationParams<'a> {
 
 pub fn build_authorize_url(params: &AuthorizationParams<'_>) -> Result<String> {
     let mut url = Url::parse(&params.discovery.authorization_endpoint)
-        .map_err(|error| anyhow!("endpoint de autorização inválido: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.authorizeEndpointInvalid",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     {
         let mut query = url.query_pairs_mut();
         query
@@ -326,7 +331,12 @@ async fn post_form(
         .form(form)
         .send()
         .await
-        .map_err(|error| anyhow!("falha de rede no token endpoint: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.tokenNetwork",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     let status = response.status().as_u16();
     let body = response.text().await.unwrap_or_default();
     if !(200..300).contains(&status) {
@@ -336,7 +346,12 @@ async fn post_form(
         return Ok(TokenResponse::default());
     }
     serde_json::from_str::<TokenResponse>(&body)
-        .map_err(|error| anyhow!("resposta inválida do token endpoint: {error}"))
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.tokenResponseInvalid",
+                &[("error", &error.to_string())],
+            ))
+        })
 }
 
 pub async fn exchange_code(
@@ -402,11 +417,19 @@ pub async fn revoke(
         ])
         .send()
         .await
-        .map_err(|error| anyhow!("falha de rede na revogação: {error}"))?;
+        .map_err(|error| {
+            anyhow!(crate::i18n::t_args(
+                "oauth.errors.revokeNetwork",
+                &[("error", &error.to_string())],
+            ))
+        })?;
     if response.status().is_success() {
         Ok(())
     } else {
-        Err(anyhow!("revogação recusada com HTTP {}", response.status()))
+        Err(anyhow!(crate::i18n::t_args(
+            "oauth.errors.revokeRejected",
+            &[("status", &response.status().to_string())],
+        )))
     }
 }
 

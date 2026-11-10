@@ -224,14 +224,14 @@ fn api_key_for(app: &AppHandle, provider: &ProviderInfo) -> Option<String> {
 /// configured yet" failures without logging noise.
 fn missing_credential_message(provider: &ProviderInfo) -> String {
     if provider.supports_oauth() {
-        format!(
-            "nenhuma credencial configurada para {} (conecte o ChatGPT ou adicione uma API key)",
-            provider.name
+        crate::i18n::t_args(
+            "models.errors.noCredentialOauth",
+            &[("provider", &provider.name)],
         )
     } else {
-        format!(
-            "nenhuma credencial configurada para {} (adicione uma API key em Configurações → Provedores)",
-            provider.name
+        crate::i18n::t_args(
+            "models.errors.noCredential",
+            &[("provider", &provider.name)],
         )
     }
 }
@@ -297,7 +297,12 @@ async fn fetch_remote_models(
         let document: Value = response
             .json()
             .await
-            .map_err(|error| format!("resposta inválida de {}: {error}", provider.name))?;
+            .map_err(|error| {
+                crate::i18n::t_args(
+                    "models.errors.invalidResponse",
+                    &[("provider", &provider.name), ("error", &error.to_string())],
+                )
+            })?;
         let page = parse_remote_page(&document);
         remote.extend(page.models);
         match page.next_after {
@@ -306,9 +311,9 @@ async fn fetch_remote_models(
         }
     }
     if remote.is_empty() {
-        return Err(format!(
-            "{} não devolveu modelos disponíveis para esta conta",
-            provider.name
+        return Err(crate::i18n::t_args(
+            "models.errors.noModels",
+            &[("provider", &provider.name)],
         ));
     }
     Ok(remote)
@@ -581,7 +586,7 @@ pub async fn list_remote_models(
         .catalog
         .provider(&provider_id)
         .cloned()
-        .ok_or_else(|| format!("provedor desconhecido: {provider_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args("models.errors.providerUnknown", &[("provider_id", &provider_id)]))?;
     let remote = fetch_remote_models(&app, &state, &provider).await?;
     Ok(remote.into_iter().map(|model| model.id).collect())
 }

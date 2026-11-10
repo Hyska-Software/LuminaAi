@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, FolderOpen, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -9,6 +10,8 @@ import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 type ConfirmStep = 0 | 1 | 2;
 
 export function DataTab() {
+  const { t } = useTranslation('settings');
+  const { t: common } = useTranslation('common');
   const appInfo = useAppStore((state) => state.appInfo);
   const [confirmStep, setConfirmStep] = useState<ConfirmStep>(0);
   const [busy, setBusy] = useState(false);
@@ -17,7 +20,7 @@ export function DataTab() {
     try {
       await api.openDataDir();
     } catch (error) {
-      toast.error('Não foi possível abrir a pasta', {
+      toast.error(t('toasts.openFolderFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -32,9 +35,11 @@ export function DataTab() {
       useUiStore.getState().closeArtifactPanel();
       useChatStore.setState({ activeId: null, messagesByConversation: {}, conversations: [] });
       await Promise.all([useAppStore.getState().init(), useChatStore.getState().init()]);
-      toast.success('Dados apagados', { description: 'As configurações voltaram ao padrão.' });
+      toast.success(t('data.toasts.clearedTitle'), {
+        description: t('data.toasts.clearedDescription'),
+      });
     } catch (error) {
-      toast.error('Não foi possível limpar os dados', {
+      toast.error(t('data.toasts.clearFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -44,38 +49,35 @@ export function DataTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="Armazenamento" description="Tudo fica somente nesta máquina.">
+      <SettingsSection title={t('data.storage.title')} description={t('data.storage.description')}>
         <SettingRow
-          label="Pasta de dados"
-          description="Conversas (SQLite), anexos, artefatos e configurações."
+          label={t('data.storage.folder.label')}
+          description={t('data.storage.folder.description')}
         >
           <Button size="sm" variant="secondary" onClick={openDataDir} leftIcon={<FolderOpen className="size-3.5" />}>
-            Abrir pasta
+            {t('data.storage.open')}
           </Button>
         </SettingRow>
-        <SettingRow vertical label="Localização">
+        <SettingRow vertical label={t('data.storage.location')}>
           <code className="block w-full truncate rounded-lg border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-foreground-muted">
             {appInfo?.dataDir ?? '—'}
           </code>
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection
-        title="Zona de perigo"
-        description="Estas ações são permanentes e não podem ser desfeitas."
-      >
+      <SettingsSection title={t('data.danger.title')} description={t('data.danger.description')}>
         <SettingsBlock>
           {confirmStep === 0 ? (
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-[13px] font-medium text-foreground">Limpar todos os dados</p>
+                <p className="text-[13px] font-medium text-foreground">{t('data.danger.clearTitle')}</p>
                 <p className="mt-0.5 text-xs leading-relaxed text-foreground-muted">
-                  Apaga conversas, mensagens, anexos, artefatos e as API keys salvas.
+                  {t('data.danger.clearDescription')}
                 </p>
               </div>
               <Button variant="danger" size="sm" onClick={() => setConfirmStep(1)}>
                 <Trash2 className="size-3.5" />
-                Limpar dados…
+                {t('data.danger.clearAction')}
               </Button>
             </div>
           ) : (
@@ -84,14 +86,10 @@ export function DataTab() {
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-semibold text-foreground">
-                    {confirmStep === 1
-                      ? 'Tem certeza que deseja limpar os dados?'
-                      : 'Confirmação final'}
+                    {confirmStep === 1 ? t('data.danger.confirmTitle') : t('data.danger.finalTitle')}
                   </p>
                   <p className="mt-0.5 text-xs leading-relaxed text-foreground-muted">
-                    {confirmStep === 1
-                      ? 'Conversas, anexos, artefatos, configurações e chaves de API serão apagados desta máquina.'
-                      : 'Esta é a última confirmação. Depois de apagar, não há como recuperar as conversas.'}
+                    {confirmStep === 1 ? t('data.danger.confirmBody') : t('data.danger.finalBody')}
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <Button
@@ -100,15 +98,15 @@ export function DataTab() {
                       onClick={() => setConfirmStep(0)}
                       disabled={busy}
                     >
-                      Cancelar
+                      {common('actions.cancel')}
                     </Button>
                     {confirmStep === 1 ? (
                       <Button size="sm" variant="danger" onClick={() => setConfirmStep(2)}>
-                        Continuar
+                        {t('data.danger.continue')}
                       </Button>
                     ) : (
                       <Button size="sm" variant="danger" loading={busy} onClick={() => void resetData()}>
-                        Apagar tudo definitivamente
+                        {t('data.danger.deleteAll')}
                       </Button>
                     )}
                   </div>

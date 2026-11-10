@@ -6,12 +6,14 @@ import {
   type ComponentPropsWithoutRef,
   type ReactNode,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import rehypeRaw from 'rehype-raw';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { ChartBlock, GenUIBlock, HtmlPreview, MermaidBlock } from '@/components/genui';
+import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { CodeBlock, normalizeLanguage } from './CodeBlock';
 import { GitHubAlert, parseGitHubAlert } from './markdown/GitHubAlert';
@@ -109,7 +111,7 @@ function MarkdownBlockquote({ children }: BlockquoteProps) {
   return <blockquote>{children}</blockquote>;
 }
 
-/** Disabled GFM task-list checkbox with a pt-BR accessible label. */
+/** Disabled GFM task-list checkbox with a localized accessible label. */
 function TaskListCheckbox({ checked }: ComponentPropsWithoutRef<'input'>) {
   const done = checked === true;
   return (
@@ -117,7 +119,7 @@ function TaskListCheckbox({ checked }: ComponentPropsWithoutRef<'input'>) {
       type="checkbox"
       disabled
       checked={done}
-      aria-label={done ? 'Concluído' : 'Pendente'}
+      aria-label={done ? t('chat:markdown.taskDone') : t('chat:markdown.taskPending')}
       className="zylara-task-checkbox"
     />
   );
@@ -133,12 +135,12 @@ function MarkdownFootnotesSection({ node, className, children, ...props }: Compo
   );
 }
 
-/** The generated footnote title is hidden and localized to pt-BR ("Notas"). */
+/** The generated footnote title is hidden and localized ("Notes"). */
 function MarkdownHeading2({ node, children, ...props }: ComponentPropsWithoutRef<'h2'> & ExtraProps) {
   if (node?.properties?.id === 'footnote-label') {
     return (
       <h2 id="footnote-label" className="sr-only">
-        Notas
+        {t('chat:markdown.footnotes')}
       </h2>
     );
   }
@@ -184,6 +186,9 @@ export const Markdown = memo(function Markdown({
   streaming = false,
   variant = 'default',
 }: MarkdownProps) {
+  // Subscribes the tree to language changes: the child components resolve
+  // their labels through the global translator at render time.
+  useTranslation('chat');
   // `\$` must be protected before parsing (see `markdown/mathDollars.ts`);
   // `remarkRestoreMathDollars` puts the per-node semantics back afterwards.
   const source = useMemo(() => protectEscapedDollars(content), [content]);

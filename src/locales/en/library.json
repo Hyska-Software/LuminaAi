@@ -1,0 +1,194 @@
+{
+  "header": {
+    "back": "Back to chat",
+    "title": "Library",
+    "description": "Every file from your conversations plus the ones you upload. The agent can consult them during the conversation.",
+    "searchPlaceholder": "Search the library",
+    "searchAria": "Search the library",
+    "clearSearch": "Clear search",
+    "sortAria": "Sort: {{label}}",
+    "sortMenu": "Sort by",
+    "viewAria": "View mode",
+    "grid": "Grid",
+    "list": "List",
+    "upload": "Upload files",
+    "uploading": "Uploading files…"
+  },
+  "filters": {
+    "aria": "Filter library",
+    "all": "All",
+    "favorites": "Favorites",
+    "images": "Images",
+    "documents": "Documents",
+    "code": "Code",
+    "media": "Media",
+    "others": "Others",
+    "countLabel_one": "{{label}} ({{count}} file)",
+    "countLabel_other": "{{label}} ({{count}} files)"
+  },
+  "sorts": {
+    "recent": "Recent",
+    "oldest": "Oldest",
+    "name": "Name (A–Z)",
+    "size": "Size"
+  },
+  "card": {
+    "openAria": "Open {{name}} — {{kind}} · {{origin}}",
+    "favorite": "Add {{name}} to favorites",
+    "unfavorite": "Remove {{name}} from favorites",
+    "actionsAria": "Actions for {{name}}",
+    "rename": "Rename",
+    "favoriteAction": "Add to favorites",
+    "unfavoriteAction": "Remove from favorites",
+    "saveAs": "Save as…",
+    "open": "Open",
+    "delete": "Delete",
+    "thumbnailAlt": "Thumbnail of {{name}}",
+    "originFallback": "Library"
+  },
+  "view": {
+    "aria": "File library",
+    "loading": "Loading library…",
+    "loadErrorTitle": "Could not load the library",
+    "retry": "Try again",
+    "emptyTitle": "Your library is empty",
+    "emptyDescription": "Files created by the agent during conversations appear here. You can also upload your own files to consult them in the chat.",
+    "filteredEmptyTitle": "No artifacts found",
+    "filteredEmptyDescription": "No file matches the search or the selected filter.",
+    "clearFilters": "Clear filters",
+    "count_one": "{{count}} file",
+    "count_other": "{{count}} files",
+    "visibleCount_one": "{{visible}} of {{count}} file",
+    "visibleCount_other": "{{visible}} of {{count}} files",
+    "listAria": "Library files",
+    "dropTitle": "Drop to upload to the library",
+    "noFiles": "No files uploaded",
+    "importError": "Could not upload the files",
+    "pickerError": "Could not open the file picker",
+    "pickerTitle": "Upload files to the library",
+    "favoriteError": "Could not add the file to favorites",
+    "unfavoriteError": "Could not remove the file from favorites",
+    "renamed": "File renamed",
+    "deleted": "File deleted",
+    "saveSuccess": "File saved",
+    "saveError": "Could not save the file",
+    "openError": "Could not open the file",
+    "import_one": "{{count}} file uploaded",
+    "import_other": "{{count}} files uploaded"
+  },
+  "dialog": {
+    "previous": "Previous file",
+    "next": "Next file",
+    "position": "{{current}} of {{total}}",
+    "positionUnknown": "— of {{total}}",
+    "renameAria": "Rename file",
+    "nameRequired": "Enter a name for the file.",
+    "favorite": "Add to favorites",
+    "unfavorite": "Remove from favorites",
+    "rename": "Rename",
+    "saveAs": "Save as…",
+    "open": "Open",
+    "deleteFile": "Delete file",
+    "deleteConfirmAria": "Confirm deletion of {{name}}",
+    "deleteConfirm": "Delete “{{name}}”? This action cannot be undone.",
+    "delete": "Delete",
+    "deleteError": "Could not delete the file",
+    "previewAria": "Preview of {{name}}",
+    "loading": "Loading preview…",
+    "loadingLabel": "Loading preview",
+    "loadErrorTitle": "Could not load the preview",
+    "retry": "Try again",
+    "footer": "{{origin}} · Created on {{date}}",
+    "noContent": "Artifact content not found."
+  },
+  "skills": {
+    "sources": {
+      "user": {
+        "group": "Zylara",
+        "label": "From Zylara"
+      },
+      "agents": {
+        "group": "Agents",
+        "label": "Agents"
+      },
+      "codex": {
+        "group": "Codex",
+        "label": "Codex"
+      },
+      "claude": {
+        "group": "Claude",
+        "label": "Claude"
+      },
+      "opencode": {
+        "group": "OpenCode",
+        "label": "OpenCode"
+      },
+      "bundled": {
+        "group": "Bundled",
+        "label": "Bundled"
+      },
+      "other": "Other source"
+    },
+    "builtin": {
+      "imagens": {
+        "name": "Images",
+        "description": "Create SVG images and PNG/JPG files for charts, icons, and illustrations."
+      },
+      "pdf": {
+        "name": "PDF",
+        "description": "Create and manipulate PDF documents."
+      },
+      "office-docx": {
+        "name": "Word documents",
+        "description": "Create Word documents (.docx)."
+      },
+      "office-pptx": {
+        "name": "PowerPoint presentations",
+        "description": "Create PowerPoint presentations (.pptx)."
+      },
+      "office-xlsx": {
+        "name": "Excel workbooks",
+        "description": "Create Excel workbooks (.xlsx)."
+      }
+    },
+    "view": {
+      "aria": "Skills management",
+      "back": "Back to chat",
+      "openFolder": "Open skills folder",
+      "title": "Skills",
+      "description": "Instructions and scripts the agent can consult during the conversation. Enable, disable, or remove user skills. External skills from other agents are read-only.",
+      "loading": "Loading skills…",
+      "loadingLabel": "Loading skills",
+      "loadErrorTitle": "Could not load the skills",
+      "retry": "Try again",
+      "emptyTitle": "No skills found",
+      "emptyDescription": "Add a folder with a <code>{{file}}</code> file to the Zylara skills folder (“Open skills folder” button) and try again. Skills from other agents are detected automatically.",
+      "disabledNote": "Disabled skills are not used by the agent.",
+      "createNote": "To create a skill, add <code>{{path}}</code> to the skills folder. Built-in and external skills cannot be deleted — disable them if you do not want to use them.",
+      "readOnly": "Read-only",
+      "externalDescription": "Repository from another agent: disable it so the agent ignores it; Zylara does not change these files.",
+      "disabledBadge": "Disabled",
+      "deleteQuestion": "Delete?",
+      "deleteConfirmAria": "Confirm deletion of {{name}}",
+      "enableAria": "Enable skill {{name}}",
+      "previewAria": "Preview skill {{name}}",
+      "deleteAria": "Delete skill {{name}}",
+      "updateError": "Could not update the skill",
+      "deleted": "Skill deleted",
+      "deleteError": "Could not delete the skill",
+      "openFolderError": "Could not open the skills folder"
+    },
+    "preview": {
+      "viewAria": "Skill view mode",
+      "document": "Document",
+      "code": "Code",
+      "history": "Version history ({{count}})",
+      "contentAria": "Skill content: {{name}}",
+      "loading": "Loading skill content…",
+      "loadErrorTitle": "Could not load the skill content",
+      "retry": "Try again",
+      "empty": "This skill has no instructions.",
+      "disabledBadge": "Disabled"
+    }
+  }
+}

@@ -11,6 +11,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 type DropPosition = 'before' | 'after';
@@ -96,6 +97,7 @@ export function SortableList({
   onReorder,
   children,
 }: SortableListProps): ReactElement {
+  const { t } = useTranslation('common');
   const instructionsId = useId();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const elementsRef = useRef(new Map<string, HTMLElement>());
@@ -240,9 +242,12 @@ export function SortableList({
       if (next.every((item, itemIndex) => item === current[itemIndex])) return;
       onReorderRef.current(next);
       setAnnouncement(
-        `${labelRef.current}: ${itemLabelRef.current?.(id) ?? id} movido para a posição ${
-          next.indexOf(id) + 1
-        } de ${next.length}`,
+        t('common:sortable.moved', {
+          label: labelRef.current,
+          item: itemLabelRef.current?.(id) ?? id,
+          position: next.indexOf(id) + 1,
+          total: next.length,
+        }),
       );
     };
 
@@ -327,9 +332,12 @@ export function SortableList({
     [next[index], next[target]] = [next[target], next[index]];
     onReorderRef.current(next);
     setAnnouncement(
-      `${labelRef.current}: ${itemLabelRef.current?.(id) ?? id} movido para a posição ${
-        target + 1
-      } de ${current.length}`,
+      t('common:sortable.moved', {
+        label: labelRef.current,
+        item: itemLabelRef.current?.(id) ?? id,
+        position: target + 1,
+        total: current.length,
+      }),
     );
   };
 
@@ -356,7 +364,7 @@ export function SortableList({
     <>
       {children({ disabled, containerRef, itemProps, dropProps })}
       <span id={instructionsId} className="sr-only">
-        Use Alt+Seta para cima ou Alt+Seta para baixo para reordenar.
+        {t('common:sortable.instructions')}
       </span>
       <span role="status" aria-live="polite" className="sr-only">
         {announcement}

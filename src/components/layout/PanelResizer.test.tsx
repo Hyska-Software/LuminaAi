@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { PanelResizer, PANEL_RESIZER_HINT, type PanelResizerSide } from './PanelResizer';
+import { i18n } from '@/lib/i18n';
 
 const LABEL = 'Redimensionar painel de teste';
 const VALUE = 480;
@@ -75,7 +76,7 @@ describe('PanelResizer — acessibilidade e visual', () => {
     expect(handle.getAttribute('aria-valuemax')).toBe(String(MAX));
     expect(handle.getAttribute('aria-valuetext')).toBe('520 px');
     expect(handle.tabIndex).toBe(0);
-    expect(handle.title).toBe(PANEL_RESIZER_HINT);
+    expect(handle.title).toBe(i18n.t(PANEL_RESIZER_HINT));
   });
 
   it('accepts a custom tooltip hint', () => {

@@ -425,7 +425,8 @@ async fn guard_sensitive(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
     };
     if crate::computer::is_sensitive_title(&title) {
         return Err(ToolOutcome::error(format!(
-            "COMPUTER_SENSITIVE_WINDOW: a janela ativa (`{title}`) está na denylist e não pode receber automação"
+            "COMPUTER_SENSITIVE_WINDOW: {}",
+            crate::i18n::t_args("tools.computer.sensitiveWindow", &[("title", &title)])
         )));
     }
     let app = crate::computer::active_window_app(
@@ -442,14 +443,16 @@ async fn guard_sensitive(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
     };
     if ctx.settings.computer_blocked_apps.iter().any(matches) {
         return Err(ToolOutcome::error(format!(
-            "COMPUTER_APP_FORBIDDEN: `{app}` está na denylist de apps"
+            "COMPUTER_APP_FORBIDDEN: {}",
+            crate::i18n::t_args("tools.computer.appDenied", &[("app", &app)])
         )));
     }
     if !ctx.settings.computer_allowed_apps.is_empty()
         && !ctx.settings.computer_allowed_apps.iter().any(matches)
     {
         return Err(ToolOutcome::error(format!(
-            "COMPUTER_APP_FORBIDDEN: `{app}` não está na allowlist de apps"
+            "COMPUTER_APP_FORBIDDEN: {}",
+            crate::i18n::t_args("tools.computer.appNotAllowed", &[("app", &app)])
         )));
     }
     Ok(())
@@ -490,6 +493,7 @@ async fn approve(
     }
     let mut approval_ctx = ctx.clone();
     approval_ctx.cancel = ctx.cancel.child_token();
+    let approval_title = crate::i18n::t("tools.computer.approveTitle");
     let approval = super::exec::policy_check(
         &approval_ctx,
         tool,
@@ -499,7 +503,7 @@ async fn approve(
         false,
         None,
         detail,
-        "Controlar o computador?",
+        &approval_title,
     )
     ;
     tokio::pin!(approval);
@@ -512,12 +516,18 @@ async fn approve(
         _ = takeover.changed() => {
             approval_ctx.cancel.cancel();
             let _ = approval.await;
-            Err(ToolOutcome::error("COMPUTER_PAUSED: o usuário solicitou o controle do computador"))
+            Err(ToolOutcome::error(format!(
+                "COMPUTER_PAUSED: {}",
+                crate::i18n::t("tools.computer.pausedUserRequested")
+            )))
         },
         _ = host_takeover.changed(), if uses_host_desktop(ctx, tool) => {
             approval_ctx.cancel.cancel();
             let _ = approval.await;
-            Err(ToolOutcome::error("COMPUTER_PAUSED: o usuário solicitou o controle do computador local"))
+            Err(ToolOutcome::error(format!(
+                "COMPUTER_PAUSED: {}",
+                crate::i18n::t("tools.computer.pausedLocalRequested")
+            )))
         },
     }
 }
@@ -529,7 +539,10 @@ fn uses_host_desktop(ctx: &ToolCtx, tool: &str) -> bool {
 fn ensure_host_control(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
     match ctx.db.computer_control(crate::computer::control::HOST_CONTROL) {
         Ok((false, false)) => Ok(()),
-        Ok(_) => Err(ToolOutcome::error("COMPUTER_PAUSED: o usuário controla o computador local em outra conversa")),
+        Ok(_) => Err(ToolOutcome::error(format!(
+            "COMPUTER_PAUSED: {}",
+            crate::i18n::t("tools.computer.pausedOtherConversation")
+        ))),
         Err(error) => Err(ToolOutcome::error(format!("COMPUTER_CONTROL_UNAVAILABLE: {error:#}"))),
     }
 }
@@ -537,11 +550,16 @@ fn ensure_host_control(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
 fn ensure_agent_control(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
     match ctx.db.computer_control(&ctx.conversation_id) {
         Ok((false, false)) => Ok(()),
-        Ok(_) => Err(ToolOutcome::error(
-            "COMPUTER_PAUSED: o usuário assumiu ou solicitou o controle do computador",
-        )),
+        Ok(_) => Err(ToolOutcome::error(format!(
+            "COMPUTER_PAUSED: {}",
+            crate::i18n::t("tools.computer.pausedAssumed")
+        ))),
         Err(error) => Err(ToolOutcome::error(format!(
-            "COMPUTER_CONTROL_UNAVAILABLE: não foi possível verificar o controle: {error:#}"
+            "COMPUTER_CONTROL_UNAVAILABLE: {}",
+            crate::i18n::t_args(
+                "tools.computer.controlCheckFailed",
+                &[("error", &format!("{error:#}"))],
+            )
         ))),
     }
 }
@@ -564,7 +582,13 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
                 });
                 ToolOutcome {
                     content: serde_json::to_string_pretty(&shot).unwrap_or_else(|_| "{}".to_string()),
-                    summary: Some(format!("Screenshot {}×{}", shot.width, shot.height)),
+                    summary: Some(crate::i18n::t_args(
+                        "tools.computer.summary.screenshot",
+                        &[
+                            ("width", &shot.width.to_string()),
+                            ("height", &shot.height.to_string()),
+                        ],
+                    )),
                     images: image.into_iter().collect(),
                     ..Default::default()
                 }
@@ -576,7 +600,10 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
                 Ok(windows) => ToolOutcome {
                 content: serde_json::to_string_pretty(&windows)
                     .unwrap_or_else(|_| "[]".to_string()),
-                summary: Some(format!("{} janela(s)", windows.len())),
+                summary: Some(crate::i18n::t_args(
+                    "tools.computer.summary.windows",
+                    &[("count", &windows.len().to_string())],
+                )),
                 ..Default::default()
             },
             Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -587,7 +614,7 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
                 Ok(value) => ToolOutcome {
                     content: serde_json::to_string_pretty(&value)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    summary: Some("Árvore de acessibilidade".to_string()),
+                    summary: Some(crate::i18n::t("tools.computer.summary.uiTree")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -602,10 +629,16 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
         },
         "computer_click" => {
             let Some(x) = int_arg(args, "x") else {
-                return ToolOutcome::error("o argumento `x` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "x")],
+                ));
             };
             let Some(y) = int_arg(args, "y") else {
-                return ToolOutcome::error("o argumento `y` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "y")],
+                ));
             };
             let button = str_arg(args, "button").unwrap_or_else(|| "left".to_string());
             let clicks = int_arg(args, "clicks").unwrap_or(1).clamp(1, 3) as u8;
@@ -614,7 +647,15 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             }
             let detail = ApprovalDetail::ComputerAction {
                 action: "click".to_string(),
-                target: format!("({x}, {y}) botão {button} ×{clicks}"),
+                target: crate::i18n::t_args(
+                    "tools.computer.target.click",
+                    &[
+                        ("x", &x.to_string()),
+                        ("y", &y.to_string()),
+                        ("button", &button),
+                        ("clicks", &clicks.to_string()),
+                    ],
+                ),
                 screenshot_path: approval_preview(ctx).await,
                 text_length: None,
                 sensitive: false,
@@ -634,8 +675,16 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("clicked ({x}, {y}) button={button} clicks={clicks}"),
-                    summary: Some("Clique executado".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.clicked",
+                        &[
+                            ("x", &x.to_string()),
+                            ("y", &y.to_string()),
+                            ("button", &button),
+                            ("clicks", &clicks.to_string()),
+                        ],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.summary.click")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -648,9 +697,7 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
                 int_arg(args, "toX"),
                 int_arg(args, "toY"),
             ) else {
-                return ToolOutcome::error(
-                    "os argumentos `fromX`, `fromY`, `toX` e `toY` são obrigatórios",
-                );
+                return ToolOutcome::error(crate::i18n::t("tools.computer.args.requiredDrag"));
             };
             let button = str_arg(args, "button").unwrap_or_else(|| "left".to_string());
             if let Err(outcome) = guard_sensitive(ctx).await {
@@ -658,7 +705,16 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             }
             let detail = ApprovalDetail::ComputerAction {
                 action: "drag".to_string(),
-                target: format!("({from_x}, {from_y}) → ({to_x}, {to_y}) botão {button}"),
+                target: crate::i18n::t_args(
+                    "tools.computer.target.drag",
+                    &[
+                        ("from_x", &from_x.to_string()),
+                        ("from_y", &from_y.to_string()),
+                        ("to_x", &to_x.to_string()),
+                        ("to_y", &to_y.to_string()),
+                        ("button", &button),
+                    ],
+                ),
                 screenshot_path: approval_preview(ctx).await,
                 text_length: None,
                 sensitive: false,
@@ -679,8 +735,16 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("dragged ({from_x}, {from_y}) to ({to_x}, {to_y})"),
-                    summary: Some("Arrasto executado".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.dragged",
+                        &[
+                            ("from_x", &from_x.to_string()),
+                            ("from_y", &from_y.to_string()),
+                            ("to_x", &to_x.to_string()),
+                            ("to_y", &to_y.to_string()),
+                        ],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.summary.drag")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -692,9 +756,7 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
                 int_arg(args, "y"),
                 int_arg(args, "delta"),
             ) else {
-                return ToolOutcome::error(
-                    "os argumentos `x`, `y` e `delta` são obrigatórios",
-                );
+                return ToolOutcome::error(crate::i18n::t("tools.computer.args.requiredScroll"));
             };
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
@@ -720,8 +782,15 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("scrolled at ({x}, {y}) by {delta}"),
-                    summary: Some("Scroll executado".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.scrolled",
+                        &[
+                            ("x", &x.to_string()),
+                            ("y", &y.to_string()),
+                            ("delta", &delta.to_string()),
+                        ],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.summary.scrollAction")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -729,7 +798,7 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
         }
         "computer_move" => {
             let (Some(x), Some(y)) = (int_arg(args, "x"), int_arg(args, "y")) else {
-                return ToolOutcome::error("os argumentos `x` e `y` são obrigatórios");
+                return ToolOutcome::error(crate::i18n::t("tools.computer.args.requiredXY"));
             };
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
@@ -754,8 +823,11 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("moved pointer to ({x}, {y})"),
-                    summary: Some("Ponteiro movido".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.moved",
+                        &[("x", &x.to_string()), ("y", &y.to_string())],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.summary.move")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -765,14 +837,23 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             let ms = int_arg(args, "ms").unwrap_or(500).clamp(50, 5_000) as u64;
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
             ToolOutcome {
-                content: format!("waited {ms} ms"),
-                summary: Some(format!("Espera de {ms} ms")),
+                content: crate::i18n::t_args(
+                    "tools.computer.content.waited",
+                    &[("ms", &ms.to_string())],
+                ),
+                summary: Some(crate::i18n::t_args(
+                    "tools.computer.summary.wait",
+                    &[("ms", &ms.to_string())],
+                )),
                 ..Default::default()
             }
         }
         "computer_clipboard" => {
             let Some(action) = str_arg(args, "action") else {
-                return ToolOutcome::error("o argumento `action` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "action")],
+                ));
             };
             if action == "read" {
                 let detail = ApprovalDetail::ComputerAction {
@@ -794,14 +875,16 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
                 {
                     Ok(text) => ToolOutcome {
                         content: text.chars().take(20_000).collect(),
-                        summary: Some("Clipboard lido".to_string()),
+                        summary: Some(crate::i18n::t("tools.computer.summary.clipboardRead")),
                         ..Default::default()
                     },
                     Err(error) => ToolOutcome::error(format!("{error:#}")),
                 }
             } else if action == "write" {
                 let Some(text) = args.get("text").and_then(Value::as_str) else {
-                    return ToolOutcome::error("o argumento `text` é obrigatório para write");
+                    return ToolOutcome::error(crate::i18n::t(
+                        "tools.computer.args.textRequiredForWrite",
+                    ));
                 };
                 let detail = ApprovalDetail::ComputerAction {
                     action: "clipboard_write".to_string(),
@@ -822,26 +905,32 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
                 .await
                 {
                     Ok(()) => ToolOutcome {
-                        content: format!("wrote {} characters to the clipboard", text.chars().count()),
-                        summary: Some("Clipboard atualizado".to_string()),
+                        content: crate::i18n::t_args(
+                            "tools.computer.content.clipboardWritten",
+                            &[("count", &text.chars().count().to_string())],
+                        ),
+                        summary: Some(crate::i18n::t("tools.computer.summary.clipboardWritten")),
                         ..Default::default()
                     },
                     Err(error) => ToolOutcome::error(format!("{error:#}")),
                 }
             } else {
-                ToolOutcome::error("action inválida: use read ou write")
+                ToolOutcome::error(crate::i18n::t("tools.computer.args.invalidClipboardAction"))
             }
         }
         "computer_type" => {
             let Some(text) = str_arg(args, "text") else {
-                return ToolOutcome::error("o argumento `text` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "text")],
+                ));
             };
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
             }
             let detail = ApprovalDetail::ComputerAction {
                 action: "type".to_string(),
-                target: "janela focada".to_string(),
+                target: crate::i18n::t("tools.computer.target.focusedWindow"),
                 screenshot_path: approval_preview(ctx).await,
                 text_length: Some(text.chars().count() as u32),
                 sensitive: false,
@@ -858,11 +947,11 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!(
-                        "typed {} character(s) into the focused window",
-                        text.chars().count()
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.typed",
+                        &[("count", &text.chars().count().to_string())],
                     ),
-                    summary: Some("Texto digitado".to_string()),
+                    summary: Some(crate::i18n::t("tools.computer.summary.typed")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -870,7 +959,10 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
         }
         "computer_key" => {
             let Some(combo) = str_arg(args, "key") else {
-                return ToolOutcome::error("o argumento `key` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "key")],
+                ));
             };
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
@@ -894,8 +986,11 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("pressed {combo}"),
-                    summary: Some("Tecla pressionada".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.pressedKey",
+                        &[("key", &combo)],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.summary.pressedKey")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -903,7 +998,10 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
         }
         "computer_focus" => {
             let Some(window_id) = str_arg(args, "windowId") else {
-                return ToolOutcome::error("o argumento `windowId` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "windowId")],
+                ));
             };
             if let Err(outcome) = guard_sensitive(ctx).await {
                 return outcome;
@@ -927,20 +1025,29 @@ async fn run_inner(ctx: &ToolCtx, tool: &str, args: &Value, browser: Option<&cra
             .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("focused window {window_id}"),
-                    summary: Some("Janela focada".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.focusedWindow",
+                        &[("window_id", &window_id)],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.summary.focusedWindow")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
-        other => ToolOutcome::error(format!("ferramenta de computador desconhecida: {other}")),
+        other => ToolOutcome::error(crate::i18n::t_args(
+            "tools.computer.unknownTool",
+            &[("tool", other)],
+        )),
     }
 }
 
 async fn run_browser(ctx: &ToolCtx, tool: &str, args: &Value) -> ToolOutcome {
     let Some(manager) = crate::computer::browser::global() else {
-        return ToolOutcome::error("BROWSER_NOT_INITIALIZED: sessão de navegador indisponível");
+        return ToolOutcome::error(format!(
+            "BROWSER_NOT_INITIALIZED: {}",
+            crate::i18n::t("tools.computer.browser.notInitialized")
+        ));
     };
     run_browser_with_manager(ctx, tool, args, manager).await
 }
@@ -957,10 +1064,16 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
     match tool {
         "browser_open" => {
             let Some(url) = str_arg(args, "url") else {
-                return ToolOutcome::error("o argumento `url` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "url")],
+                ));
             };
             let Ok(url) = crate::computer::browser::validate_with_policy(&ctx.settings, &url) else {
-                return ToolOutcome::error("BROWSER_URL_FORBIDDEN: URL inválida ou não http(s)");
+                return ToolOutcome::error(format!(
+                    "BROWSER_URL_FORBIDDEN: {}",
+                    crate::i18n::t("tools.computer.browser.invalidUrl")
+                ));
             };
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_open".to_string(),
@@ -982,8 +1095,11 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                     .await
                 {
                     Ok(target) => ToolOutcome {
-                        content: format!("opened {target} in the controlled browser"),
-                        summary: Some("Navegador controlado".to_string()),
+                        content: crate::i18n::t_args(
+                            "tools.computer.content.opened",
+                            &[("target", &target)],
+                        ),
+                        summary: Some(crate::i18n::t("tools.computer.summary.browserControlled")),
                         ..Default::default()
                     },
                     Err(error) => ToolOutcome::error(error),
@@ -993,10 +1109,16 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         }
         "browser_navigate" => {
             let Some(url) = str_arg(args, "url") else {
-                return ToolOutcome::error("o argumento `url` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "url")],
+                ));
             };
             let Ok(url) = crate::computer::browser::validate_with_policy(&ctx.settings, &url) else {
-                return ToolOutcome::error("BROWSER_URL_FORBIDDEN: URL inválida ou não http(s)");
+                return ToolOutcome::error(format!(
+                    "BROWSER_URL_FORBIDDEN: {}",
+                    crate::i18n::t("tools.computer.browser.invalidUrl")
+                ));
             };
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_navigate".to_string(),
@@ -1013,8 +1135,11 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 .await
             {
                 Ok(target) => ToolOutcome {
-                    content: format!("navigated to {target}"),
-                    summary: Some("Página navegada".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.content.navigated",
+                        &[("target", &target)],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.summary.navigated")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1059,7 +1184,10 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         },
         "browser_click" => {
             let Some(reference) = str_arg(args, "ref") else {
-                return ToolOutcome::error("o argumento `ref` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "ref")],
+                ));
             };
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_click".to_string(),
@@ -1076,8 +1204,14 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 .await
             {
                 Ok(element) => ToolOutcome {
-                    content: format!("clicked {} \"{}\"", element.role, element.name),
-                    summary: Some(format!("Clique: {}", element.name)),
+                    content: crate::i18n::t_args(
+                        "tools.computer.web.clicked",
+                        &[("role", &element.role), ("name", &element.name)],
+                    ),
+                    summary: Some(crate::i18n::t_args(
+                        "tools.computer.web.clickSummary",
+                        &[("name", &element.name)],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1085,10 +1219,16 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         }
         "browser_type" => {
             let Some(reference) = str_arg(args, "ref") else {
-                return ToolOutcome::error("o argumento `ref` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "ref")],
+                ));
             };
             let Some(text) = args.get("text").and_then(Value::as_str) else {
-                return ToolOutcome::error("o argumento `text` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "text")],
+                ));
             };
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_type".to_string(),
@@ -1105,13 +1245,18 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 .await
             {
                 Ok(element) => ToolOutcome {
-                    content: format!(
-                        "typed {} characters into {} \"{}\"",
-                        text.chars().count(),
-                        element.role,
-                        element.name
+                    content: crate::i18n::t_args(
+                        "tools.computer.web.typed",
+                        &[
+                            ("count", &text.chars().count().to_string()),
+                            ("role", &element.role),
+                            ("name", &element.name),
+                        ],
                     ),
-                    summary: Some(format!("Texto em {}", element.name)),
+                    summary: Some(crate::i18n::t_args(
+                        "tools.computer.web.typeSummary",
+                        &[("name", &element.name)],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1119,7 +1264,10 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         }
         "browser_press" => {
             let Some(key) = str_arg(args, "key") else {
-                return ToolOutcome::error("o argumento `key` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "key")],
+                ));
             };
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_press".to_string(),
@@ -1136,8 +1284,14 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("pressed {key}"),
-                    summary: Some(format!("Tecla {key}")),
+                    content: crate::i18n::t_args(
+                        "tools.computer.web.pressed",
+                        &[("key", &key)],
+                    ),
+                    summary: Some(crate::i18n::t_args(
+                        "tools.computer.web.keySummary",
+                        &[("key", &key)],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1150,8 +1304,14 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 .await
             {
                 Ok(()) => ToolOutcome {
-                    content: format!("scrolled the page by {delta}"),
-                    summary: Some(format!("Scroll {delta}")),
+                    content: crate::i18n::t_args(
+                        "tools.computer.web.scrolled",
+                        &[("delta", &delta.to_string())],
+                    ),
+                    summary: Some(crate::i18n::t_args(
+                        "tools.computer.web.scrollSummary",
+                        &[("delta", &delta.to_string())],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1159,15 +1319,24 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         }
         "browser_hover" => {
             let Some(reference) = str_arg(args, "ref") else {
-                return ToolOutcome::error("o argumento `ref` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "ref")],
+                ));
             };
             match manager
                 .hover(&ctx.conversation_id, tab.as_deref(), &reference)
                 .await
             {
                 Ok(element) => ToolOutcome {
-                    content: format!("hovered {} \"{}\"", element.role, element.name),
-                    summary: Some(format!("Hover: {}", element.name)),
+                    content: crate::i18n::t_args(
+                        "tools.computer.web.hovered",
+                        &[("role", &element.role), ("name", &element.name)],
+                    ),
+                    summary: Some(crate::i18n::t_args(
+                        "tools.computer.web.hoverSummary",
+                        &[("name", &element.name)],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1175,10 +1344,16 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         }
         "browser_select" => {
             let Some(reference) = str_arg(args, "ref") else {
-                return ToolOutcome::error("o argumento `ref` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "ref")],
+                ));
             };
             let Some(value) = args.get("value").and_then(Value::as_str) else {
-                return ToolOutcome::error("o argumento `value` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "value")],
+                ));
             };
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_select".to_string(),
@@ -1195,8 +1370,18 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 .await
             {
                 Ok(element) => ToolOutcome {
-                    content: format!("selected {value} in {} \"{}\"", element.role, element.name),
-                    summary: Some(format!("Seleção em {}", element.name)),
+                    content: crate::i18n::t_args(
+                        "tools.computer.web.selected",
+                        &[
+                            ("value", value),
+                            ("role", &element.role),
+                            ("name", &element.name),
+                        ],
+                    ),
+                    summary: Some(crate::i18n::t_args(
+                        "tools.computer.web.selectSummary",
+                        &[("name", &element.name)],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1204,15 +1389,22 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         }
         "browser_upload" => {
             let Some(reference) = str_arg(args, "ref") else {
-                return ToolOutcome::error("o argumento `ref` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "ref")],
+                ));
             };
             let Some(path) = str_arg(args, "path") else {
-                return ToolOutcome::error("o argumento `path` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "path")],
+                ));
             };
             let Some(workspace) = ctx.workspace.as_ref() else {
-                return ToolOutcome::error(
-                    "BROWSER_UPLOAD_NO_WORKSPACE: vincule um workspace para enviar arquivos",
-                );
+                return ToolOutcome::error(format!(
+                    "BROWSER_UPLOAD_NO_WORKSPACE: {}",
+                    crate::i18n::t("tools.computer.web.uploadNoWorkspace")
+                ));
             };
             let root = match workspace.root.canonicalize() {
                 Ok(root) => root,
@@ -1227,9 +1419,10 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 }
             };
             if !file.starts_with(&root) || !file.is_file() {
-                return ToolOutcome::error(
-                    "BROWSER_UPLOAD_FORBIDDEN: o arquivo precisa estar dentro do workspace",
-                );
+                return ToolOutcome::error(format!(
+                    "BROWSER_UPLOAD_FORBIDDEN: {}",
+                    crate::i18n::t("tools.computer.web.uploadForbidden")
+                ));
             }
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_upload".to_string(),
@@ -1251,8 +1444,15 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
                 .await
             {
                 Ok(element) => ToolOutcome {
-                    content: format!("uploaded {path} into {} \"{}\"", element.role, element.name),
-                    summary: Some("Arquivo anexado".to_string()),
+                    content: crate::i18n::t_args(
+                        "tools.computer.web.uploaded",
+                        &[
+                            ("path", &path),
+                            ("role", &element.role),
+                            ("name", &element.name),
+                        ],
+                    ),
+                    summary: Some(crate::i18n::t("tools.computer.web.uploadSummary")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
@@ -1262,15 +1462,21 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
             let ms = int_arg(args, "ms").unwrap_or(500).clamp(50, 5_000) as u64;
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
             ToolOutcome {
-                content: format!("waited {ms} ms"),
-                summary: Some(format!("Espera de {ms} ms")),
+                content: crate::i18n::t_args(
+                    "tools.computer.content.waited",
+                    &[("ms", &ms.to_string())],
+                ),
+                summary: Some(crate::i18n::t_args(
+                    "tools.computer.summary.wait",
+                    &[("ms", &ms.to_string())],
+                )),
                 ..Default::default()
             }
         }
         "browser_extract" => match manager.extract(&ctx.conversation_id, tab.as_deref()).await {
             Ok(value) => ToolOutcome {
                 content: serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()),
-                summary: Some("Conteúdo extraído".to_string()),
+                summary: Some(crate::i18n::t("tools.computer.web.extractSummary")),
                 ..Default::default()
             },
             Err(error) => ToolOutcome::error(error),
@@ -1278,14 +1484,20 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
         "browser_tabs" => match manager.tabs(&ctx.conversation_id).await {
             Ok(tabs) => ToolOutcome {
                 content: serde_json::to_string_pretty(&tabs).unwrap_or_else(|_| "[]".to_string()),
-                summary: Some(format!("{} aba(s)", tabs.len())),
+                summary: Some(crate::i18n::t_args(
+                    "tools.computer.web.tabsSummary",
+                    &[("count", &tabs.len().to_string())],
+                )),
                 ..Default::default()
             },
             Err(error) => ToolOutcome::error(error),
         },
         "browser_download" => {
             let Some(reference) = str_arg(args, "ref") else {
-                return ToolOutcome::error("o argumento `ref` é obrigatório");
+                return ToolOutcome::error(crate::i18n::t_args(
+                    "tools.computer.args.required",
+                    &[("name", "ref")],
+                ));
             };
             let detail = ApprovalDetail::ComputerAction {
                 action: "browser_download".to_string(),
@@ -1303,13 +1515,16 @@ pub(crate) async fn run_browser_with_manager(ctx: &ToolCtx, tool: &str, args: &V
             {
                 Ok(value) => ToolOutcome {
                     content: serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".to_string()),
-                    summary: Some("Download concluído".to_string()),
+                    summary: Some(crate::i18n::t("tools.computer.web.downloadSummary")),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(error),
             }
         }
-        other => ToolOutcome::error(format!("ferramenta de navegador desconhecida: {other}")),
+        other => ToolOutcome::error(crate::i18n::t_args(
+            "tools.computer.web.unknownTool",
+            &[("tool", other)],
+        )),
     }
 }
 
@@ -1436,7 +1651,10 @@ pub(crate) async fn run_with_browser_manager(ctx: &ToolCtx, tool: &str, args: &V
     }
     match ctx.db.computer_needs_observation(&ctx.conversation_id) {
         Ok(true) if !matches!(tool, "computer_screenshot" | "browser_snapshot") => {
-            return ToolOutcome::error("COMPUTER_OBSERVATION_REQUIRED: o usuário modificou o ambiente; observe-o com computer_screenshot ou browser_snapshot antes de agir");
+            return ToolOutcome::error(format!(
+                "COMPUTER_OBSERVATION_REQUIRED: {}",
+                crate::i18n::t("tools.computer.guard.observationRequired")
+            ));
         }
         Err(error) => return ToolOutcome::error(format!("COMPUTER_CONTROL_UNAVAILABLE: {error:#}")),
         _ => {}
@@ -1450,8 +1668,14 @@ pub(crate) async fn run_with_browser_manager(ctx: &ToolCtx, tool: &str, args: &V
     {
         if count >= i64::from(ctx.settings.computer_max_actions_per_turn.max(1)) {
             return ToolOutcome::error(format!(
-                "COMPUTER_RATE_LIMIT: limite de {} ações por turno atingido",
-                ctx.settings.computer_max_actions_per_turn
+                "COMPUTER_RATE_LIMIT: {}",
+                crate::i18n::t_args(
+                    "tools.computer.guard.rateTurn",
+                    &[(
+                        "max",
+                        &ctx.settings.computer_max_actions_per_turn.to_string(),
+                    )],
+                )
             ));
         }
     }
@@ -1462,8 +1686,14 @@ pub(crate) async fn run_with_browser_manager(ctx: &ToolCtx, tool: &str, args: &V
         {
             if count >= i64::from(ctx.settings.computer_max_actions_per_hour.max(1)) {
                 return ToolOutcome::error(format!(
-                    "COMPUTER_RATE_LIMIT: limite de {} ações por hora atingido",
-                    ctx.settings.computer_max_actions_per_hour
+                    "COMPUTER_RATE_LIMIT: {}",
+                    crate::i18n::t_args(
+                        "tools.computer.guard.rateHour",
+                        &[(
+                            "max",
+                            &ctx.settings.computer_max_actions_per_hour.to_string(),
+                        )],
+                    )
                 ));
             }
         }
@@ -1506,7 +1736,11 @@ pub(crate) async fn run_with_browser_manager(ctx: &ToolCtx, tool: &str, args: &V
             // Audit failure is a hard stop: never execute an action without a
             // durable pending row.
             return ToolOutcome::error(format!(
-                "COMPUTER_AUDIT_FAILED: não foi possível registrar a ação antes de executar: {error:#}"
+                "COMPUTER_AUDIT_FAILED: {}",
+                crate::i18n::t_args(
+                    "tools.computer.guard.auditFailed",
+                    &[("error", &format!("{error:#}"))],
+                )
             ));
         }
     };

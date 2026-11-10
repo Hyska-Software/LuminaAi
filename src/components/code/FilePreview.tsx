@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CircleAlert,
   Copy,
@@ -36,11 +37,6 @@ export interface FilePreviewProps {
 /** Modo do ramo Markdown: documento renderizado (padrão) ou fonte. */
 type MarkdownViewMode = 'document' | 'code';
 
-const MARKDOWN_VIEW_OPTIONS = [
-  { value: 'document', label: 'Documento' },
-  { value: 'code', label: 'Código' },
-];
-
 /** Maps a path extension to a Prism language id. */
 export function languageForPath(path: string): string {
   const name = path.split('/').pop() ?? path;
@@ -71,6 +67,11 @@ export function FilePreview({
   onReload,
   className,
 }: FilePreviewProps) {
+  const { t } = useTranslation('code');
+  const markdownViewOptions = [
+    { value: 'document', label: t('code:preview.markdown.document') },
+    { value: 'code', label: t('code:preview.markdown.code') },
+  ];
   const [copied, setCopied] = useState(false);
   /** Ramo Markdown: documento renderizado por padrão, estado local à aba. */
   const [mdView, setMdView] = useState<MarkdownViewMode>('document');
@@ -105,7 +106,7 @@ export function FilePreview({
     if (!path) return;
     const ok = await copyText(path);
     if (!ok) {
-      toast.error('Não foi possível copiar o caminho');
+      toast.error(t('code:preview.copyError'));
       return;
     }
     setCopied(true);
@@ -118,7 +119,7 @@ export function FilePreview({
       <div className={cn('flex h-full min-h-0 flex-col', className)}>
         <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
           <div className="h-3 w-40 animate-pulse rounded bg-surface-hover motion-reduce:animate-none" />
-          <Spinner size="xs" label="Carregando arquivo" className="ml-auto" />
+          <Spinner size="xs" label={t('code:preview.loading')} className="ml-auto" />
         </div>
         <div aria-hidden className="flex-1 space-y-2 p-3">
           {[0, 1, 2, 3, 4, 5, 6].map((row) => (
@@ -144,11 +145,11 @@ export function FilePreview({
         <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
           <CircleAlert aria-hidden className="size-4" strokeWidth={1.75} />
         </span>
-        <p className="text-[12.5px] font-medium text-foreground">Não foi possível abrir o arquivo</p>
+        <p className="text-[12.5px] font-medium text-foreground">{t('code:preview.errorTitle')}</p>
         <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">{error}</p>
         {onReload ? (
           <Button size="sm" variant="secondary" className="mt-1" onClick={onReload}>
-            Tentar novamente
+            {t('common:actions.retry')}
           </Button>
         ) : null}
       </div>
@@ -164,9 +165,9 @@ export function FilePreview({
         )}
       >
         <FileQuestionMark aria-hidden className="size-5 text-foreground-subtle" strokeWidth={1.75} />
-        <p className="text-[12.5px] font-medium text-foreground">Nenhum arquivo selecionado</p>
+        <p className="text-[12.5px] font-medium text-foreground">{t('code:preview.noneTitle')}</p>
         <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
-          Escolha um arquivo na aba Arquivos para ver a prévia.
+          {t('code:preview.noneDescription')}
         </p>
       </div>
     );
@@ -235,8 +236,8 @@ export function FilePreview({
         <PreviewHeader path={content.path}>{headerActions}</PreviewHeader>
         <PreviewNotice
           icon={<FileWarning aria-hidden className="size-4" strokeWidth={1.75} />}
-          title="Prévia não disponível"
-          description={`O arquivo tem ${formatBytes(content.size)} — grande demais para a prévia inline. Abra no editor externo para visualizar.`}
+          title={t('code:preview.omitted.title')}
+          description={t('code:preview.omitted.description', { size: formatBytes(content.size) })}
         />
       </div>
     );
@@ -251,8 +252,8 @@ export function FilePreview({
         <PreviewHeader path={content.path}>{headerActions}</PreviewHeader>
         <PreviewNotice
           icon={<FileWarning aria-hidden className="size-4" strokeWidth={1.75} />}
-          title="Formato sem prévia no visualizador"
-          description={`Este formato (${formatBytes(content.size)}) não tem visualização embutida. Abra no editor externo para inspecionar o conteúdo.`}
+          title={t('code:preview.unsupported.title')}
+          description={t('code:preview.unsupported.description', { size: formatBytes(content.size) })}
         />
       </div>
     );
@@ -264,8 +265,8 @@ export function FilePreview({
         <PreviewHeader path={content.path}>{headerActions}</PreviewHeader>
         <PreviewNotice
           icon={<FileExclamationPoint aria-hidden className="size-4" strokeWidth={1.75} />}
-          title="Arquivo binário"
-          description={`Não há prévia de texto para este arquivo (${formatBytes(content.size)}). Abra no editor externo para inspecionar o conteúdo.`}
+          title={t('code:preview.binary.title')}
+          description={t('code:preview.binary.description', { size: formatBytes(content.size) })}
         />
       </div>
     );
@@ -277,8 +278,8 @@ export function FilePreview({
         {isMarkdown ? (
           <SegmentedControl
             size="sm"
-            ariaLabel="Modo de visualização do Markdown"
-            options={MARKDOWN_VIEW_OPTIONS}
+            ariaLabel={t('code:preview.markdown.modeAria')}
+            options={markdownViewOptions}
             value={mdView}
             onChange={(value) => setMdView(value === 'code' ? 'code' : 'document')}
             className="shrink-0"
@@ -289,8 +290,7 @@ export function FilePreview({
               {languageLabel(language)}
             </Badge>
             <span className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
-              {lines.length} {lines.length === 1 ? 'linha' : 'linhas'} ·{' '}
-              {formatBytes(content.size)}
+              {t('code:preview.lineInfo', { count: lines.length, size: formatBytes(content.size) })}
             </span>
           </>
         )}
@@ -302,7 +302,7 @@ export function FilePreview({
           role="note"
           className="shrink-0 border-b border-warning/30 bg-warning-soft px-3 py-1.5 text-[11.5px] text-warning"
         >
-          Encoding {content.encoding} detectado — o conteúdo pode aparecer com caracteres trocados.
+          {t('code:preview.encoding', { encoding: content.encoding })}
         </p>
       ) : null}
 
@@ -311,20 +311,19 @@ export function FilePreview({
           role="note"
           className="shrink-0 border-b border-border bg-surface px-3 py-1.5 text-[11.5px] text-foreground-muted"
         >
-          Prévia truncada: mostrando parte de {formatBytes(content.size)}. Abra no editor externo
-          para ver o arquivo completo.
+          {t('code:preview.truncated', { size: formatBytes(content.size) })}
         </p>
       ) : null}
 
       {showMarkdownDocument ? (
         content.text.trim().length === 0 ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-8 text-center text-[12px] text-foreground-muted">
-            Markdown vazio.
+            {t('code:preview.markdownEmpty')}
           </div>
         ) : (
           <div
             role="region"
-            aria-label="Prévia do Markdown"
+            aria-label={t('code:preview.markdownRegion')}
             className="min-h-0 flex-1 overflow-auto bg-background"
           >
             {/* Mesmo pipeline GFM/KaTeX + sanitização da conversa. */}
@@ -335,7 +334,7 @@ export function FilePreview({
         )
       ) : lines.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-6 py-8 text-center text-[12px] text-foreground-muted">
-          Arquivo vazio.
+          {t('code:preview.emptyFile')}
         </div>
       ) : (
         <div
@@ -349,7 +348,7 @@ export function FilePreview({
           <Highlight prism={prism} theme={SYNTAX_THEME} language={language} code={content.text}>
             {({ tokens, getLineProps, getTokenProps }) => (
               <pre
-                aria-label={`Conteúdo de ${content.path}`}
+                aria-label={t('code:preview.contentAria', { path: content.path })}
                 className="min-w-full py-2 font-mono text-[12px] leading-[1.7]"
               >
                 {tokens.map((line, lineIndex) => {
@@ -447,15 +446,16 @@ function HeaderActions({
   wrap?: boolean;
   onToggleWrap?: () => void;
 }) {
+  const { t } = useTranslation('code');
   return (
     <div className="flex shrink-0 items-center gap-0.5">
       {wrap !== undefined && onToggleWrap ? (
         <Tooltip
-          content={wrap ? 'Quebra de linha ativada' : 'Quebra de linha'}
+          content={wrap ? t('code:preview.wrapOn') : t('code:preview.wrap')}
           side="bottom"
         >
           <IconButton
-            label="Quebra de linha"
+            label={t('code:preview.wrap')}
             size="sm"
             active={wrap}
             aria-pressed={wrap}
@@ -465,9 +465,9 @@ function HeaderActions({
           </IconButton>
         </Tooltip>
       ) : null}
-      <Tooltip content={copied ? 'Caminho copiado' : 'Copiar caminho'} side="bottom">
+      <Tooltip content={copied ? t('code:preview.pathCopied') : t('code:preview.copyPath')} side="bottom">
         <IconButton
-          label={copied ? 'Caminho copiado' : 'Copiar caminho'}
+          label={copied ? t('code:preview.pathCopied') : t('code:preview.copyPath')}
           size="sm"
           onClick={onCopy}
         >
@@ -475,15 +475,15 @@ function HeaderActions({
         </IconButton>
       </Tooltip>
       {onReload ? (
-        <Tooltip content="Recarregar arquivo" side="bottom">
-          <IconButton label="Recarregar arquivo" size="sm" onClick={onReload}>
+        <Tooltip content={t('code:preview.reload')} side="bottom">
+          <IconButton label={t('code:preview.reload')} size="sm" onClick={onReload}>
             <RefreshCw aria-hidden className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         </Tooltip>
       ) : null}
       {onOpenExternal ? (
-        <Tooltip content="Abrir no editor externo" side="bottom">
-          <IconButton label="Abrir no editor externo" size="sm" onClick={() => onOpenExternal(path)}>
+        <Tooltip content={t('code:preview.openExternal')} side="bottom">
+          <IconButton label={t('code:preview.openExternal')} size="sm" onClick={() => onOpenExternal(path)}>
             <ExternalLink aria-hidden className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         </Tooltip>

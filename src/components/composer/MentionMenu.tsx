@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { FileCode, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -33,12 +34,13 @@ export function MentionMenu({
   onSelect,
   onHoverIndex,
 }: MentionMenuProps) {
+  const { t } = useTranslation('composer');
   return (
     <div className="w-full">
       <div className="flex items-center gap-1.5 px-2 pb-1 pt-1.5">
         <Search aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" strokeWidth={1.75} />
         <p className="min-w-0 flex-1 truncate text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
-          Arquivos do workspace
+          {t('mention.title')}
         </p>
         {query ? (
           <span className="max-w-40 truncate font-mono text-[11px] text-foreground-muted">@{query}</span>
@@ -54,19 +56,19 @@ export function MentionMenu({
         </p>
       ) : loading && results.length === 0 ? (
         <p role="status" className="px-2.5 py-2 text-[12px] text-foreground-muted">
-          Buscando arquivos…
+          {t('mention.searching')}
         </p>
       ) : results.length === 0 ? (
         <p className="px-2.5 py-2 text-[12px] leading-relaxed text-foreground-muted">
           {query
-            ? `Nenhum arquivo encontrado para “${query}”.`
-            : 'Nenhum arquivo encontrado neste workspace.'}
+            ? t('mention.emptyQuery', { query })
+            : t('mention.emptyWorkspace')}
         </p>
       ) : (
         <div
           role="listbox"
           id={MENTION_LISTBOX_ID}
-          aria-label="Arquivos do workspace"
+          aria-label={t('mention.listAria')}
           className="max-h-64 overflow-y-auto overscroll-contain p-1"
         >
           {results.map((path, index) => {
@@ -98,7 +100,7 @@ export function MentionMenu({
 
       {loading && results.length > 0 ? (
         <p role="status" className="px-2.5 pb-1.5 text-[11px] text-foreground-subtle">
-          Atualizando…
+          {t('mention.updating')}
         </p>
       ) : null}
     </div>

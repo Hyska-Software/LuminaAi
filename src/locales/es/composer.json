@@ -1,0 +1,210 @@
+{
+  "agentFallback": "el agente",
+  "plan": {
+    "title": "Plan"
+  },
+  "placeholder": {
+    "goal": "Describe el objetivo y el trabajo por hacer…",
+    "agent": "Conversa con {{name}}…",
+    "chat": "Pregunta algo…",
+    "code": "Describe la tarea… @ para archivos, / para comandos",
+    "codePlain": "Describe la tarea para el agente…"
+  },
+  "aria": {
+    "agent": "Mensaje para {{name}}",
+    "code": "Tarea para el agente",
+    "chat": "Mensaje para Zylara"
+  },
+  "actions": {
+    "attach": "Adjuntar archivos",
+    "send": "Enviar mensaje",
+    "sendNow": "Enviar ahora",
+    "sendNowTitle": "Interrumpir la respuesta actual y enviar",
+    "queue": "Poner en cola",
+    "stop": "Detener respuesta",
+    "openProviders": "Abrir Proveedores"
+  },
+  "goalChip": {
+    "tooltipActive": "Objetivo activo — haz clic para desactivar",
+    "disable": "Desactivar objetivo"
+  },
+  "tools": {
+    "webSearch": "Búsqueda web",
+    "fileCreation": "Crear archivos"
+  },
+  "disclaimer": "Zylara puede cometer errores. Verifica la información importante.",
+  "mention": {
+    "searchUnavailable": "La búsqueda de archivos no está disponible en esta versión.",
+    "title": "Archivos del espacio de trabajo",
+    "listAria": "Archivos del espacio de trabajo",
+    "searching": "Buscando archivos…",
+    "emptyQuery": "No se encontró ningún archivo para “{{query}}”.",
+    "emptyWorkspace": "No se encontró ningún archivo en este espacio de trabajo.",
+    "updating": "Actualizando…"
+  },
+  "mentionChips": {
+    "remove": "Quitar mención de {{path}}"
+  },
+  "attachments": {
+    "previewOf": "Ver vista previa de {{name}}",
+    "preview": "Ver vista previa",
+    "remove": "Quitar {{name}}",
+    "notFound": "Adjunto no encontrado.",
+    "previewAria": "Vista previa de {{name}}",
+    "loadingPreview": "Cargando vista previa…",
+    "pages": "{{count}} pág.",
+    "filters": {
+      "documents": "Documentos",
+      "images": "Imágenes",
+      "all": "Todos los archivos"
+    },
+    "pickerTitle": "Adjuntar archivos",
+    "kinds": {
+      "image": "Imagen",
+      "text": "Texto",
+      "code": "Código",
+      "unknown": "Archivo"
+    }
+  },
+  "slash": {
+    "header": "Comandos del espacio de trabajo",
+    "empty": "No se encontró ningún comando.",
+    "listAria": "Comandos del modo Code",
+    "groups": {
+      "session": "Sesión",
+      "plan": "Plan",
+      "goal": "Objetivo",
+      "git": "Git",
+      "context": "Contexto",
+      "project": "Proyecto"
+    },
+    "commands": {
+      "plan": {
+        "title": "Planificar antes de editar",
+        "description": "Activa el modo Plan e inserta una solicitud de plan para el agente.",
+        "fill": "Planifica la solución para esta tarea antes de cambiar archivos:\n"
+      },
+      "planOff": {
+        "title": "Salir del modo Plan",
+        "description": "Desactiva el modo Plan de la sesión activa."
+      },
+      "goal": {
+        "title": "Crear objetivo de la sesión",
+        "description": "Activa el chip de objetivo; el siguiente mensaje describe la tarea y el agente crea el objetivo."
+      },
+      "permissions": {
+        "title": "Modo de permiso",
+        "description": "Muestra dónde cambiar entre Lectura, Revisar, Editar y Autónomo."
+      },
+      "new": {
+        "title": "Nueva sesión",
+        "description": "Crea una nueva sesión de código en el espacio de trabajo actual."
+      },
+      "clear": {
+        "title": "Limpiar composer",
+        "description": "Limpia el texto y las menciones a archivos."
+      },
+      "compact": {
+        "title": "Compactar contexto",
+        "description": "Pide al backend que resuma el historial de esta sesión."
+      },
+      "commit": {
+        "title": "Abrir Cambios",
+        "description": "Abre el panel Cambios para revisar y hacer commit."
+      },
+      "test": {
+        "title": "Ejecutar verificación",
+        "description": "Inserta una solicitud para ejecutar tests/lint y corregir fallas.",
+        "fill": "Ejecuta las verificaciones del proyecto con `run_checks` (test primero) y corrige lo que falle. Muestra el exit code y qué cambió:\n"
+      },
+      "review": {
+        "title": "Revisar cambios",
+        "description": "Inserta una solicitud de revisión del diff actual.",
+        "fill": "Revisa los cambios actuales (git diff/status): señala bugs, riesgos y tests faltantes. Si tiene sentido, delega una revisión con `task` (subagent_type: \"review\") y consolida el resultado:\n"
+      },
+      "init": {
+        "title": "Generar AGENTS.md",
+        "description": "Inserta una solicitud para documentar el proyecto para agentes.",
+        "fill": "Analiza este proyecto y genera/actualiza AGENTS.md con instrucciones para agentes: comandos de build/test/lint, convenciones, trampas y mapa de directorios. Antes de escribir, muéstrame el contenido propuesto:\n"
+      }
+    }
+  },
+  "toasts": {
+    "attachFailed": "No se pudo adjuntar",
+    "compactNoSession": "Ninguna sesión activa para compactar",
+    "compactNoSessionHint": "Abre una sesión de código para compactar el contexto.",
+    "compacted": "Contexto compactado",
+    "compactUnavailable": "Compactación aún no disponible",
+    "permissionsInComposer": "El modo de permiso está en el campo de mensaje",
+    "permissionsInComposerHint": "Usa el chip Lectura / Revisar / Editar / Autónomo junto al adjunto.",
+    "noActiveSession": "Ninguna sesión activa",
+    "noActiveSessionPlanOnHint": "Abre una sesión de código para activar el modo Plan.",
+    "noActiveSessionPlanOffHint": "Abre una sesión de código para desactivar el modo Plan.",
+    "planAlreadyActive": "El modo Plan ya está activo",
+    "planEnabled": "Modo Plan activado",
+    "planDisabled": "Modo Plan desactivado"
+  },
+  "permissions": {
+    "readOnly": {
+      "label": "Lectura",
+      "description": "El agente solo puede leer archivos y consultar el espacio de trabajo."
+    },
+    "review": {
+      "label": "Revisar",
+      "description": "El agente puede proponer ediciones, pero cada escritura requiere aprobación."
+    },
+    "edit": {
+      "label": "Editar",
+      "description": "El agente puede editar archivos; los comandos requieren aprobación."
+    },
+    "autonomous": {
+      "label": "Autónomo",
+      "description": "El agente ejecuta comandos, ediciones, acceso a secretos y control de la computadora sin pedir confirmación."
+    }
+  },
+  "session": {
+    "permissionAria": "Modo de permiso: {{mode}}",
+    "permissionMenu": "Modo de permiso",
+    "planAria": "Modo Plan: {{state}}",
+    "planStateOn": "activado",
+    "planStateOff": "desactivado",
+    "planTitleOn": "Modo Plan activo: el agente planifica antes de editar",
+    "planTitleOff": "Activar modo Plan (planificar antes de editar)",
+    "planTitle": "Plan, tareas y trabajos en segundo plano",
+    "planState": {
+      "planning": "En preparación",
+      "reviewing": "Esperando aprobación",
+      "approved": "Aprobado"
+    },
+    "planWithState": "Plan · {{state}}",
+    "noPlan": "Ningún plan en esta sesión.",
+    "noTasks": "Ninguna tarea registrada.",
+    "noJobs": "Ningún trabajo en segundo plano.",
+    "jobsTitle": "{{running}} en ejecución · {{total}} en total"
+  },
+  "planMode": {
+    "tooltip": "Modo Plan activo — haz clic para desactivar",
+    "disable": "Desactivar modo Plan",
+    "label": "Plan"
+  },
+  "goal": {
+    "tooltipActive": "Objetivo activo — haz clic para desactivar",
+    "tooltipIdle": "Crear objetivo: usa /goal y describe la tarea en el siguiente mensaje.",
+    "disable": "Desactivar objetivo",
+    "create": "Crear objetivo con /goal",
+    "pillAria": "Objetivo: {{status}} — {{round}}",
+    "pillTitle": "{{status}} — {{round}}",
+    "paused": "Objetivo pausado",
+    "blocked": "Objetivo bloqueado",
+    "completed": "Objetivo completado",
+    "running": "Ronda en curso — el agente está trabajando en el objetivo.",
+    "confirmBody": "¿Completar el objetivo? El agente deja de continuar solo en esta sesión.",
+    "confirmAria": "Confirmar finalización del objetivo",
+    "confirmAction": "Completar objetivo",
+    "pauseAfterRound": "Pausar después de esta ronda",
+    "pauseAfterRoundHint": "La ronda actual termina antes de pausar.",
+    "newRound": "Nueva ronda ahora",
+    "newRoundUnavailable": "No disponible mientras haya plan, aprobación/pregunta pendiente o presupuesto agotado.",
+    "costNote": "Cada ronda es un turno completo y consume tokens del proveedor."
+  }
+}

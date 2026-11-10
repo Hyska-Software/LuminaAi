@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowLeft, FolderKanban, Loader2, PanelRight, Pencil } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
 import { AgentActivityDots } from './AgentActivityDots';
 import { AgentComputerControl } from './AgentComputerControl';
 import { AgentConversationWorkspace } from './AgentConversationWorkspace';
-import { TASK_STATUS_META, TASK_TERMINAL_STATUSES } from './agentTaskStatus';
+import { TASK_TERMINAL_STATUSES, taskStatusMeta } from './agentTaskStatus';
 import { modelLabel } from './agentUtils';
 import { CodeContextMeterChip } from '@/components/code/CodeAgentWidgets';
 import { Button, IconButton } from '@/components/ui';
@@ -28,6 +29,7 @@ export function AgentThreadHeader({
   conversation: Conversation;
   onBack: () => void;
 }) {
+  const { t } = useTranslation('agents');
   const providers = useAppStore((state) => state.providers);
   const turnActive = useChatStore((state) => Boolean(state.streamsByConversation[conversation.id]));
   const [taskStatus, setTaskStatus] = useState<AgentTaskStatus | null>(null);
@@ -61,7 +63,7 @@ export function AgentThreadHeader({
     };
   }, [taskId]);
 
-  const taskMeta = taskStatus ? TASK_STATUS_META[taskStatus] : null;
+  const taskMeta = taskStatus ? taskStatusMeta(taskStatus) : null;
   const taskActive = taskStatus ? !TASK_TERMINAL_STATUSES.includes(taskStatus) : false;
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const panelOpen = useUiStore((state) => state.agentPanelOpen);
@@ -74,7 +76,7 @@ export function AgentThreadHeader({
   const workspacePanelActive = codePanelOpen && rightPanel === 'workspace';
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/70 px-3">
-      <IconButton label="Voltar para o agente" size="sm" variant="ghost" onClick={onBack}>
+      <IconButton label={t('threadHeader.back')} size="sm" variant="ghost" onClick={onBack}>
         <ArrowLeft className="size-4" />
       </IconButton>
       <AgentAvatar
@@ -87,8 +89,8 @@ export function AgentThreadHeader({
           <span className="truncate text-[13px] font-medium text-foreground">{agent.name}</span>
           {!taskId && turnActive ? (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent">
-              <AgentActivityDots label="Executando" />
-              <span aria-hidden>Executando</span>
+              <AgentActivityDots label={t('threadHeader.running')} />
+              <span aria-hidden>{t('threadHeader.running')}</span>
             </span>
           ) : null}
           {taskMeta ? (
@@ -99,7 +101,7 @@ export function AgentThreadHeader({
               )}
             >
               {taskActive ? <Loader2 aria-hidden className="size-3 animate-spin" /> : null}
-              {taskMeta.label}
+              {t(taskMeta.labelKey as never)}
             </span>
           ) : null}
         </span>
@@ -117,7 +119,7 @@ export function AgentThreadHeader({
         <CodeContextMeterChip conversationId={conversation.id} showCache={false} />
       ) : null}
       <IconButton
-        label={agentPanelActive ? 'Recolher painel do agente' : 'Abrir painel do agente'}
+        label={agentPanelActive ? t('panelToggle.collapse') : t('panelToggle.open')}
         size="sm"
         variant="ghost"
         active={agentPanelActive}
@@ -133,8 +135,8 @@ export function AgentThreadHeader({
         <IconButton
           label={
             workspacePanelActive
-              ? 'Recolher ferramentas do workspace'
-              : 'Abrir ferramentas do workspace'
+              ? t('threadHeader.collapseWorkspace')
+              : t('threadHeader.openWorkspace')
           }
           size="sm"
           variant="ghost"
@@ -154,7 +156,7 @@ export function AgentThreadHeader({
         onClick={() => openEditor({ mode: 'edit', agentId: agent.id })}
       >
         <Pencil className="mr-1.5 size-3.5" />
-        Editar agente
+        {t('threadHeader.editAgent')}
       </Button>
     </header>
   );

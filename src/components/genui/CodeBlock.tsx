@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Copy } from 'lucide-react';
 import { Highlight } from 'prism-react-renderer';
 import { languageLabel, normalizeLanguage, prism, SYNTAX_THEME } from '@/lib/highlight';
@@ -38,6 +39,7 @@ export function CodeBlock({
   meta,
   actions,
 }: CodeBlockProps) {
+  const { t } = useTranslation('genui');
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -65,9 +67,9 @@ export function CodeBlock({
           <div className="flex shrink-0 items-center gap-1">
             {actions}
             {copyable ? (
-              <Tooltip content={copied ? 'Copiado!' : 'Copiar código'} side="top">
+              <Tooltip content={copied ? t('code.copiedTooltip') : t('code.copy')} side="top">
                 <IconButton
-                  label={copied ? 'Copiado' : 'Copiar código'}
+                  label={copied ? t('code.copied') : t('code.copy')}
                   size="sm"
                   onClick={handleCopy}
                   className="size-8 text-foreground-subtle hover:text-foreground"

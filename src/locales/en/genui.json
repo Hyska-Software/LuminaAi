@@ -1,0 +1,81 @@
+{
+  "actions": {
+    "group": "Suggested actions",
+    "copied": "Copied to clipboard",
+    "errors": {
+      "prepareSuggestion": "Could not prepare the suggestion.",
+      "copy": "Could not copy to the clipboard.",
+      "empty": "This action has no content to run.",
+      "run": "Could not run the action."
+    }
+  },
+  "block": {
+    "title": "Generative UI",
+    "parseError": "Could not parse the generative UI block.",
+    "diagnosticsAria": "Generative UI diagnostics"
+  },
+  "renderer": {
+    "depthExceeded": "Nesting depth exceeded in this UI.",
+    "unsupportedComponent": "Component \"{{type}}\" is not supported.",
+    "emptyTabs": "Tabs without panels.",
+    "defaultTab": "Tab {{index}}"
+  },
+  "choices": {
+    "group": "Choices",
+    "defaultPrefix": "Selection:"
+  },
+  "reveal": {
+    "defaultTitle": "Details"
+  },
+  "stat": {
+    "defaultLabel": "Metric"
+  },
+  "progress": {
+    "defaultLabel": "Progress"
+  },
+  "timeline": {
+    "defaultTitle": "Step {{index}}"
+  },
+  "image": {
+    "defaultAlt": "Image",
+    "loadError": "Could not load the image.",
+    "unavailable": "Image unavailable."
+  },
+  "table": {
+    "empty": "Table has no data."
+  },
+  "chart": {
+    "invalid": "Invalid chart.",
+    "titleFallback": "Chart",
+    "parseError": "Could not parse the chart data.",
+    "noData": "No data to display.",
+    "invalidValues": "Invalid values for the chart.",
+    "total": "total",
+    "title_one": "Chart with {{count}} item",
+    "title_other": "Chart with {{count}} items"
+  },
+  "source": {
+    "openAria": "Open {{label}} in a new tab"
+  },
+  "status": {
+    "done": "Done",
+    "active": "In progress",
+    "pending": "Pending",
+    "disabled": "Disabled",
+    "error": "Error"
+  },
+  "code": {
+    "copy": "Copy code",
+    "copied": "Copied",
+    "copiedTooltip": "Copied!"
+  },
+  "html": {
+    "title": "HTML preview",
+    "sandboxHint": "Content runs isolated, with no access to the app"
+  },
+  "mermaid": {
+    "title": "Mermaid diagram",
+    "renderError": "Could not render the diagram: {{error}}",
+    "rendering": "Rendering diagram…"
+  }
+}

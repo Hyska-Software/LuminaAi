@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
+import { formatDateTime } from '@/lib/i18n/format';
 import type { SkillContent, SkillSummary, SkillVersion } from '@/lib/types';
 import {
   Badge,
@@ -15,19 +17,17 @@ import {
 } from '@/components/ui';
 import { Markdown } from '@/components/chat/Markdown';
 import { CodeBlock } from '@/components/genui';
-import { skillSourceMeta } from './sources';
+import { localizedSkillMeta, skillSourceMeta } from './sources';
 
 type PreviewMode = 'document' | 'code';
+
+/** File name of the skill body shown as the raw-code title (technical token). */
+const SKILL_FILE_NAME = 'SKILL.md';
 
 type PreviewState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'ready'; content: SkillContent };
-
-const VIEW_OPTIONS = [
-  { value: 'document', label: 'Documento' },
-  { value: 'code', label: 'Código' },
-];
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -47,7 +47,13 @@ export interface SkillPreviewDialogProps {
  * `CodeBlock`. The frontmatter is stripped by the backend and never displayed.
  */
 export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) {
+  const { t } = useTranslation('library');
   const meta = skillSourceMeta(skill.source);
+  const display = localizedSkillMeta(skill);
+  const viewOptions = [
+    { value: 'document', label: t('library:skills.preview.document') },
+    { value: 'code', label: t('library:skills.preview.code') },
+  ];
   const [state, setState] = useState<PreviewState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [mode, setMode] = useState<PreviewMode>('document');
@@ -107,20 +113,22 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
       <DialogContent size="2xl" className="gap-0">
         <DialogHeader className="gap-2 pr-12">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <DialogTitle className="font-mono text-[16px] leading-6">{skill.name}</DialogTitle>
+            <DialogTitle className="font-mono text-[16px] leading-6">{display.name}</DialogTitle>
             <Badge tone={meta.tone}>{meta.label}</Badge>
-            {!skill.enabled ? <Badge tone="muted">Desativada</Badge> : null}
+            {!skill.enabled ? (
+              <Badge tone="muted">{t('library:skills.preview.disabledBadge')}</Badge>
+            ) : null}
           </div>
-          <DialogDescription>{skill.description}</DialogDescription>
+          <DialogDescription>{display.description}</DialogDescription>
           {versions.length > 0 ? (
             <details className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] text-foreground-muted">
               <summary className="cursor-pointer select-none">
-                Histórico de versões ({versions.length})
+                {t('library:skills.preview.history', { count: versions.length })}
               </summary>
               <ul className="mt-1 space-y-0.5 font-mono text-[10px]">
                 {versions.slice(0, 10).map((version) => (
                   <li key={version.file} className="truncate">
-                    {version.file} · {new Date(version.savedAt).toLocaleString('pt-BR')}
+                    {version.file} · {formatDateTime(version.savedAt)}
                   </li>
                 ))}
               </ul>
@@ -132,8 +140,8 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
           <div className="flex shrink-0 items-center justify-between gap-3 border-y border-border bg-surface px-6 py-1.5">
             <SegmentedControl
               size="sm"
-              ariaLabel="Modo de visualização da skill"
-              options={VIEW_OPTIONS}
+              ariaLabel={t('library:skills.preview.viewAria')}
+              options={viewOptions}
               value={mode}
               onChange={(value) => setMode(value === 'code' ? 'code' : 'document')}
             />
@@ -142,7 +150,7 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
 
         <div
           role="region"
-          aria-label={`Conteúdo da skill ${skill.name}`}
+          aria-label={t('library:skills.preview.contentAria', { name: skill.name })}
           className="min-h-0 flex-1 overflow-y-auto"
         >
           {state.status === 'loading' ? (
@@ -151,7 +159,9 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
               className="flex min-h-[280px] flex-col items-center justify-center gap-2 px-6 py-8"
             >
               <Spinner size="md" className="text-accent" />
-              <span className="text-xs text-foreground-muted">Carregando conteúdo da skill…</span>
+              <span className="text-xs text-foreground-muted">
+                {t('library:skills.preview.loading')}
+              </span>
             </div>
           ) : null}
 
@@ -162,13 +172,13 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
             >
               <AlertTriangle aria-hidden className="size-5 text-danger" />
               <p className="text-[13px] font-medium text-foreground">
-                Não foi possível carregar o conteúdo da skill
+                {t('library:skills.preview.loadErrorTitle')}
               </p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
                 {state.message}
               </p>
               <Button size="sm" variant="secondary" onClick={retry}>
-                Tentar novamente
+                {t('library:skills.preview.retry')}
               </Button>
             </div>
           ) : null}
@@ -176,7 +186,7 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
           {empty ? (
             <div className="flex min-h-[280px] items-center justify-center px-6 py-8 text-center">
               <p className="text-[13px] leading-relaxed text-foreground-muted">
-                Esta skill não tem instruções.
+                {t('library:skills.preview.empty')}
               </p>
             </div>
           ) : null}
@@ -192,7 +202,7 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
               <CodeBlock
                 code={content}
                 language="markdown"
-                title="SKILL.md"
+                title={SKILL_FILE_NAME}
                 showLineNumbers
                 wrap={false}
               />

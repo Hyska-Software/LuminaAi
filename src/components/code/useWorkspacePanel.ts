@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import type { WorkspaceFileEntry, WorkspaceGitCommit, WorkspaceGitStatus } from '@/lib/types';
 
 export interface WorkspacePanelDiff {
@@ -113,7 +114,7 @@ export function useWorkspacePanel(
     if (filesResult.status === 'fulfilled') setFiles(filesResult.value ?? []);
     else {
       setFiles([]);
-      setFilesError(describeError(filesResult.reason, 'Não foi possível ler a árvore de arquivos.'));
+      setFilesError(describeError(filesResult.reason, t('code:panelData.filesError')));
     }
     setFilesLoading(false);
 
@@ -124,7 +125,7 @@ export function useWorkspacePanel(
       isRepo = Boolean(statusResult.value?.isRepo);
     } else {
       setGitStatus(null);
-      setGitError(describeError(statusResult.reason, 'Não foi possível ler o estado do Git.'));
+      setGitError(describeError(statusResult.reason, t('code:panelData.gitError')));
     }
     setGitLoading(false);
 
@@ -144,7 +145,7 @@ export function useWorkspacePanel(
     } catch (error) {
       if (run !== loadRun.current) return;
       setCommits([]);
-      setCommitsError(describeError(error, 'Não foi possível ler os commits recentes.'));
+      setCommitsError(describeError(error, t('code:panelData.commitsError')));
     } finally {
       if (run === loadRun.current) setCommitsLoading(false);
     }
@@ -183,7 +184,7 @@ export function useWorkspacePanel(
           staged,
           text: '',
           loading: false,
-          error: 'Abra um workspace para ver o diff.',
+          error: t('code:panelData.noWorkspaceDiff'),
         });
         return;
       }
@@ -200,7 +201,7 @@ export function useWorkspacePanel(
           staged,
           text: '',
           loading: false,
-          error: describeError(error, 'Não foi possível carregar o diff.'),
+          error: describeError(error, t('code:panelData.diffError')),
         });
       }
     },

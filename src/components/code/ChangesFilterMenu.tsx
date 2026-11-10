@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'lucide-react';
 import {
   Button,
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui';
 import type { WorkspaceGitCommit } from '@/lib/types';
+import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { shortHash } from './CommitBar';
 
@@ -53,17 +55,17 @@ export function filterKey(filter: ChangesFilter): string {
 export function filterLabel(filter: ChangesFilter): string {
   switch (filter.kind) {
     case 'last-turn':
-      return 'Último turno';
+      return t('code:changesFilter.label.lastTurn');
     case 'uncommitted':
-      return 'Sem commit';
+      return t('code:changesFilter.label.uncommitted');
     case 'unstaged':
-      return 'Não marcadas para commit';
+      return t('code:changesFilter.label.unstaged');
     case 'staged':
-      return 'Marcadas para commit';
+      return t('code:changesFilter.label.staged');
     case 'commit':
-      return `Commit ${shortHash(filter.hash)}`;
+      return t('code:changesFilter.label.commit', { hash: shortHash(filter.hash) });
     case 'branch':
-      return `Branch ${filter.base}`;
+      return t('code:changesFilter.label.branch', { name: filter.base });
   }
 }
 
@@ -86,6 +88,7 @@ export function ChangesFilterMenu({
   onOpenBranches,
   className,
 }: ChangesFilterMenuProps) {
+  const { t } = useTranslation('code');
   const current = filterKey(value);
   const label = filterLabel(value);
   const commitItems = commits.slice(0, COMMIT_MENU_LIMIT);
@@ -96,7 +99,7 @@ export function ChangesFilterMenu({
         <Button
           variant="ghost"
           size="sm"
-          aria-label="Filtrar alterações"
+          aria-label={t('code:changesFilter.aria')}
           title={label}
           className={cn(
             'h-7 min-w-0 gap-1 px-2 text-[11.5px] font-medium',
@@ -113,25 +116,25 @@ export function ChangesFilterMenu({
           checked={current === 'last-turn'}
           onSelect={() => onChange({ kind: 'last-turn' })}
         >
-          Último turno
+          {t('code:changesFilter.label.lastTurn')}
         </DropdownMenuItem>
         <DropdownMenuItem
           checked={current === 'uncommitted'}
           onSelect={() => onChange({ kind: 'uncommitted' })}
         >
-          Sem commit
+          {t('code:changesFilter.label.uncommitted')}
         </DropdownMenuItem>
         <DropdownMenuItem
           checked={current === 'unstaged'}
           onSelect={() => onChange({ kind: 'unstaged' })}
         >
-          Não marcadas para commit
+          {t('code:changesFilter.label.unstaged')}
         </DropdownMenuItem>
         <DropdownMenuItem
           checked={current === 'staged'}
           onSelect={() => onChange({ kind: 'staged' })}
         >
-          Marcadas para commit
+          {t('code:changesFilter.label.staged')}
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
@@ -141,17 +144,17 @@ export function ChangesFilterMenu({
             disabled={commits.length === 0 && !commitsLoading}
             title={
               commits.length === 0 && !commitsLoading
-                ? 'Nenhum commit no workspace'
-                : 'Escolher um commit'
+                ? t('code:changesFilter.noCommitsInWorkspace')
+                : t('code:changesFilter.chooseCommit')
             }
           >
-            Commit
+            {t('code:changesFilter.commit')}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
             {commitsLoading ? (
-              <DropdownMenuItem disabled>Carregando commits…</DropdownMenuItem>
+              <DropdownMenuItem disabled>{t('code:changesFilter.loadingCommits')}</DropdownMenuItem>
             ) : commitItems.length === 0 ? (
-              <DropdownMenuItem disabled>Nenhum commit</DropdownMenuItem>
+              <DropdownMenuItem disabled>{t('code:changesFilter.noCommit')}</DropdownMenuItem>
             ) : (
               commitItems.map((commit) => (
                 <DropdownMenuItem
@@ -178,16 +181,16 @@ export function ChangesFilterMenu({
             if (open) onOpenBranches();
           }}
         >
-          <DropdownMenuSubTrigger title="Comparar com uma branch">
-            Branch
+          <DropdownMenuSubTrigger title={t('code:changesFilter.compareBranch')}>
+            {t('code:changesFilter.branch')}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
             {branchesLoading || (branches === null && !branchesError) ? (
-              <DropdownMenuItem disabled>Carregando branches…</DropdownMenuItem>
+              <DropdownMenuItem disabled>{t('code:changesFilter.loadingBranches')}</DropdownMenuItem>
             ) : branchesError ? (
               <DropdownMenuItem disabled>{branchesError}</DropdownMenuItem>
             ) : otherBranches.length === 0 ? (
-              <DropdownMenuItem disabled>Nenhuma outra branch</DropdownMenuItem>
+              <DropdownMenuItem disabled>{t('code:changesFilter.noOtherBranch')}</DropdownMenuItem>
             ) : (
               otherBranches.map((branch) => (
                 <DropdownMenuItem

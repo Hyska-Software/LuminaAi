@@ -1,17 +1,86 @@
+import { t } from './i18n';
+import { compareText, localeUpperCase } from './i18n/format';
 import type { AgentRoutine } from './types';
 
 /** Bitmask with every weekday selected (Monday=1 … Sunday=64). */
 export const ROUTINE_ALL_DAYS = 0x7f;
 
-/** Monday-first weekday metadata shared by the editor and the calendar. */
+/**
+ * Monday-first weekday metadata shared by the editor and the calendar. The
+ * labels are getters so the list follows a runtime language switch without
+ * rebuilding the module.
+ */
 export const ROUTINE_WEEKDAYS = [
-  { bit: 0x01, index: 0, short: 'Seg', long: 'Segunda-feira' },
-  { bit: 0x02, index: 1, short: 'Ter', long: 'Terça-feira' },
-  { bit: 0x04, index: 2, short: 'Qua', long: 'Quarta-feira' },
-  { bit: 0x08, index: 3, short: 'Qui', long: 'Quinta-feira' },
-  { bit: 0x10, index: 4, short: 'Sex', long: 'Sexta-feira' },
-  { bit: 0x20, index: 5, short: 'Sáb', long: 'Sábado' },
-  { bit: 0x40, index: 6, short: 'Dom', long: 'Domingo' },
+  {
+    bit: 0x01,
+    index: 0,
+    get short() {
+      return t('code:calendar.weekdayShort.monday');
+    },
+    get long() {
+      return t('code:calendar.weekdays.monday');
+    },
+  },
+  {
+    bit: 0x02,
+    index: 1,
+    get short() {
+      return t('code:calendar.weekdayShort.tuesday');
+    },
+    get long() {
+      return t('code:calendar.weekdays.tuesday');
+    },
+  },
+  {
+    bit: 0x04,
+    index: 2,
+    get short() {
+      return t('code:calendar.weekdayShort.wednesday');
+    },
+    get long() {
+      return t('code:calendar.weekdays.wednesday');
+    },
+  },
+  {
+    bit: 0x08,
+    index: 3,
+    get short() {
+      return t('code:calendar.weekdayShort.thursday');
+    },
+    get long() {
+      return t('code:calendar.weekdays.thursday');
+    },
+  },
+  {
+    bit: 0x10,
+    index: 4,
+    get short() {
+      return t('code:calendar.weekdayShort.friday');
+    },
+    get long() {
+      return t('code:calendar.weekdays.friday');
+    },
+  },
+  {
+    bit: 0x20,
+    index: 5,
+    get short() {
+      return t('code:calendar.weekdayShort.saturday');
+    },
+    get long() {
+      return t('code:calendar.weekdays.saturday');
+    },
+  },
+  {
+    bit: 0x40,
+    index: 6,
+    get short() {
+      return t('code:calendar.weekdayShort.sunday');
+    },
+    get long() {
+      return t('code:calendar.weekdays.sunday');
+    },
+  },
 ] as const;
 
 export type RoutineCalendarMode = 'day' | 'week' | 'month';
@@ -31,48 +100,73 @@ export interface RoutineCalendarEntry {
 
 export type RoutineStatusTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
 
+/**
+ * Status copy for routine runs. Getters resolve the current catalog on every
+ * read, so nothing is frozen at module import.
+ */
 export const ROUTINE_STATUS_META: Record<
   string,
   { label: string; tone: RoutineStatusTone }
 > = {
-  ok: { label: 'Concluída', tone: 'success' },
-  error: { label: 'Erro', tone: 'danger' },
-  blocked: { label: 'Bloqueada', tone: 'warning' },
-  running: { label: 'Executando', tone: 'accent' },
-  queued: { label: 'Na fila', tone: 'accent' },
+  get ok() {
+    return { label: t('code:calendar.status.ok'), tone: 'success' as const };
+  },
+  get error() {
+    return { label: t('code:calendar.status.error'), tone: 'danger' as const };
+  },
+  get blocked() {
+    return { label: t('code:calendar.status.blocked'), tone: 'warning' as const };
+  },
+  get running() {
+    return { label: t('code:calendar.status.running'), tone: 'accent' as const };
+  },
+  get queued() {
+    return { label: t('code:calendar.status.queued'), tone: 'accent' as const };
+  },
 };
 
-const MONTH_NAMES = [
-  'janeiro',
-  'fevereiro',
-  'março',
-  'abril',
-  'maio',
-  'junho',
-  'julho',
-  'agosto',
-  'setembro',
-  'outubro',
-  'novembro',
-  'dezembro',
+/** Monday-first short weekday header labels, resolved in the current language. */
+export function weekdayHeaders(): readonly string[] {
+  return [
+    t('code:calendar.weekdayHeaders.monday'),
+    t('code:calendar.weekdayHeaders.tuesday'),
+    t('code:calendar.weekdayHeaders.wednesday'),
+    t('code:calendar.weekdayHeaders.thursday'),
+    t('code:calendar.weekdayHeaders.friday'),
+    t('code:calendar.weekdayHeaders.saturday'),
+    t('code:calendar.weekdayHeaders.sunday'),
+  ];
+}
+
+/** Stable catalog key per month index (January = 0). */
+const MONTH_KEYS = [
+  'code:calendar.months.january',
+  'code:calendar.months.february',
+  'code:calendar.months.march',
+  'code:calendar.months.april',
+  'code:calendar.months.may',
+  'code:calendar.months.june',
+  'code:calendar.months.july',
+  'code:calendar.months.august',
+  'code:calendar.months.september',
+  'code:calendar.months.october',
+  'code:calendar.months.november',
+  'code:calendar.months.december',
 ] as const;
 
-const WEEKDAY_LONG = [
-  'domingo',
-  'segunda-feira',
-  'terça-feira',
-  'quarta-feira',
-  'quinta-feira',
-  'sexta-feira',
-  'sábado',
+/** Stable catalog key per `Date.getDay()` index (Sunday = 0). */
+const WEEKDAY_LONG_KEYS = [
+  'code:calendar.weekdays.sunday',
+  'code:calendar.weekdays.monday',
+  'code:calendar.weekdays.tuesday',
+  'code:calendar.weekdays.wednesday',
+  'code:calendar.weekdays.thursday',
+  'code:calendar.weekdays.friday',
+  'code:calendar.weekdays.saturday',
 ] as const;
-
-const WEEKDAY_HEADERS = ['SEG.', 'TER.', 'QUA.', 'QUI.', 'SEX.', 'SÁB.', 'DOM.'] as const;
-
-export { WEEKDAY_HEADERS };
 
 function capitalize(value: string): string {
-  return value.length > 0 ? value[0].toLocaleUpperCase('pt-BR') + value.slice(1) : value;
+  return value.length > 0 ? localeUpperCase(value[0]) + value.slice(1) : value;
 }
 
 export function dayKey(date: Date): string {
@@ -128,32 +222,56 @@ export function singleDay(anchor: Date, now: Date = new Date()): RoutineCalendar
 }
 
 export function monthLabel(anchor: Date): string {
-  return `${capitalize(MONTH_NAMES[anchor.getMonth()])} de ${anchor.getFullYear()}`;
+  return capitalize(
+    t('code:calendar.monthYear', {
+      month: t(MONTH_KEYS[anchor.getMonth()]),
+      year: anchor.getFullYear(),
+    }),
+  );
 }
 
 function monthName(date: Date): string {
-  return MONTH_NAMES[date.getMonth()];
+  return t(MONTH_KEYS[date.getMonth()]);
 }
 
 export function rangeLabel(mode: RoutineCalendarMode, anchor: Date): string {
   if (mode === 'month') return monthLabel(anchor);
   if (mode === 'day') {
-    return `${capitalize(WEEKDAY_LONG[anchor.getDay()])}, ${anchor.getDate()} de ${monthName(
-      anchor,
-    )} de ${anchor.getFullYear()}`;
+    return t('code:calendar.dayLabel', {
+      weekday: t(WEEKDAY_LONG_KEYS[anchor.getDay()]),
+      day: anchor.getDate(),
+      month: monthName(anchor),
+      year: anchor.getFullYear(),
+    });
   }
   const start = weekDays(anchor)[0]?.date;
   if (!start) return monthLabel(anchor);
   const end = addDays(start, 6);
   if (start.getFullYear() !== end.getFullYear()) {
-    return `${start.getDate()} de ${monthName(start)} de ${start.getFullYear()} – ${end.getDate()} de ${monthName(end)} de ${end.getFullYear()}`;
+    return t('code:calendar.weekRangeTwoYears', {
+      startDay: start.getDate(),
+      startMonth: monthName(start),
+      startYear: start.getFullYear(),
+      endDay: end.getDate(),
+      endMonth: monthName(end),
+      endYear: end.getFullYear(),
+    });
   }
   if (start.getMonth() !== end.getMonth()) {
-    return `${start.getDate()} de ${monthName(start)} – ${end.getDate()} de ${monthName(
-      end,
-    )} de ${end.getFullYear()}`;
+    return t('code:calendar.weekRangeTwoMonths', {
+      startDay: start.getDate(),
+      startMonth: monthName(start),
+      endDay: end.getDate(),
+      endMonth: monthName(end),
+      year: end.getFullYear(),
+    });
   }
-  return `${start.getDate()} – ${end.getDate()} de ${monthName(end)} de ${end.getFullYear()}`;
+  return t('code:calendar.weekRangeSameMonth', {
+    startDay: start.getDate(),
+    endDay: end.getDate(),
+    month: monthName(end),
+    year: end.getFullYear(),
+  });
 }
 
 function weekdayMask(mask: number): number {
@@ -163,35 +281,38 @@ function weekdayMask(mask: number): number {
 
 function weekdaySummary(daysOfWeek: number): string {
   const mask = weekdayMask(daysOfWeek);
-  if (mask === ROUTINE_ALL_DAYS) return 'Todos os dias';
-  if (mask === 0x1f) return 'Seg a sex';
-  if (mask === 0x60) return 'Sáb e dom';
+  if (mask === ROUTINE_ALL_DAYS) return t('code:calendar.days.all');
+  if (mask === 0x1f) return t('code:calendar.days.weekdays');
+  if (mask === 0x60) return t('code:calendar.days.weekend');
   const labels = ROUTINE_WEEKDAYS.filter((day) => (mask & day.bit) !== 0).map(
     (day) => day.short,
   );
-  return labels.length > 0 ? labels.join(', ') : 'Nenhum dia';
+  return labels.length > 0 ? labels.join(', ') : t('code:calendar.days.none');
 }
 
-/** Compact interval text (`4 h`, `30 min`, `2 d`); optionally prefixed with `A cada`. */
+/** Compact interval text (`4 h`, `30 min`, `2 d`); optionally prefixed with "every". */
 export function intervalLabel(minutes: number, short = false): string {
   const value = Math.max(1, Math.round(minutes));
   let amount: string;
   if (value >= 1440 && value % 1440 === 0) amount = `${value / 1440} d`;
   else if (value % 60 === 0) amount = `${value / 60} h`;
   else amount = `${value} min`;
-  return short ? amount : `A cada ${amount}`;
+  return short ? amount : t('code:calendar.schedule.every', { amount });
 }
 
 export function routineScheduleLabel(routine: AgentRoutine): string {
   if (routine.triggerKind === 'event') {
     return routine.eventKind === 'task.status'
-      ? 'Por evento: status de tarefa'
-      : 'Por evento: mensagem em canal';
+      ? t('code:calendar.schedule.eventTask')
+      : t('code:calendar.schedule.eventChannel');
   }
   if (routine.scheduleKind === 'interval') {
     return intervalLabel(routine.intervalMinutes);
   }
-  return `${weekdaySummary(routine.daysOfWeek)} às ${String(routine.hour).padStart(2, '0')}:${String(routine.minute).padStart(2, '0')}`;
+  return t('code:calendar.schedule.daily', {
+    days: weekdaySummary(routine.daysOfWeek),
+    time: `${String(routine.hour).padStart(2, '0')}:${String(routine.minute).padStart(2, '0')}`,
+  });
 }
 
 function durationLabel(absoluteMs: number): string {
@@ -203,17 +324,17 @@ function durationLabel(absoluteMs: number): string {
 }
 
 export function routineNextRunLabel(routine: AgentRoutine, now = Date.now()): string {
-  if (!routine.enabled) return 'Pausada';
-  if (routine.triggerKind === 'event') return 'Aguardando evento';
-  if (!routine.nextRunAt || routine.nextRunAt <= now) return 'Pendente';
-  return `em ${durationLabel(routine.nextRunAt - now)}`;
+  if (!routine.enabled) return t('code:calendar.next.paused');
+  if (routine.triggerKind === 'event') return t('code:calendar.next.event');
+  if (!routine.nextRunAt || routine.nextRunAt <= now) return t('code:calendar.next.pending');
+  return t('code:calendar.next.in', { duration: durationLabel(routine.nextRunAt - now) });
 }
 
 export function routineLastRunLabel(routine: AgentRoutine, now = Date.now()): string {
-  if (!routine.lastRunAt) return 'Nunca executada';
+  if (!routine.lastRunAt) return t('code:calendar.last.never');
   const delta = now - routine.lastRunAt;
-  if (delta < 60_000) return 'agora';
-  return `há ${durationLabel(delta)}`;
+  if (delta < 60_000) return t('code:calendar.last.now');
+  return t('code:calendar.last.ago', { duration: durationLabel(delta) });
 }
 
 /**
@@ -283,11 +404,7 @@ export function buildRoutineCalendar(
   }
 
   for (const list of entries.values()) {
-    list.sort(
-      (left, right) =>
-        left.at - right.at ||
-        left.routine.title.localeCompare(right.routine.title, 'pt-BR'),
-    );
+    list.sort((left, right) => left.at - right.at || compareText(left.routine.title, right.routine.title));
   }
   return entries;
 }

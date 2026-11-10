@@ -187,7 +187,7 @@ impl HeldInput {
     fn before_dispatch(&mut self, kind: &str, params: &Value) -> Result<(), String> {
         let event = params.get("type").and_then(Value::as_str).unwrap_or("");
         if matches!(event, "keyDown" | "rawKeyDown" | "keyUp" | "mousePressed" | "mouseReleased") {
-            let id = Self::identity(kind, params).ok_or("BROWSER_INPUT_INVALID: tecla ou botão ausente")?;
+            let id = Self::identity(kind, params).ok_or(crate::i18n::t("computer.browser.inputMissing"))?;
             if matches!(event, "keyDown" | "rawKeyDown" | "mousePressed") {
                 if kind == "key" && !self.keys.contains_key(&id) && self.keys.len() >= 32 {
                     return Err("BROWSER_INPUT_INVALID: teclas pressionadas demais".into());
@@ -519,7 +519,7 @@ impl BrowserManager {
             return Ok(self.status(conversation_id).await);
         }
         let executable = find_browser_executable()
-            .ok_or_else(|| "BROWSER_NOT_FOUND: Chrome/Edge não encontrado neste computador".to_string())?;
+            .ok_or_else(|| crate::i18n::t("computer.browser.notFound").to_string())?;
         let profile = self.profile_dir(conversation_id);
         std::fs::create_dir_all(&profile)
             .map_err(|error| format!("BROWSER_PROFILE: {error}"))?;
@@ -566,7 +566,7 @@ impl BrowserManager {
             }
             if started.elapsed() > START_TIMEOUT {
                 self.close(conversation_id);
-                return Err("BROWSER_START_TIMEOUT: o navegador não abriu o CDP".to_string());
+                return Err(crate::i18n::t("computer.browser.startTimeout").to_string());
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
@@ -618,7 +618,7 @@ impl BrowserManager {
                 .iter()
                 .find(|item| item.get("type").and_then(Value::as_str) == Some("page")),
         }
-        .ok_or_else(|| "BROWSER_TAB_NOT_FOUND: aba não encontrada".to_string())?;
+        .ok_or_else(|| crate::i18n::t("computer.browser.tabNotFound").to_string())?;
         target
             .get("webSocketDebuggerUrl")
             .and_then(Value::as_str)
@@ -638,7 +638,7 @@ impl BrowserManager {
         let tabs = self.tabs_of(port, None).await?;
         tabs.first()
             .map(|tab| tab.id.clone())
-            .ok_or_else(|| "BROWSER_TAB_NOT_FOUND: nenhuma aba aberta".to_string())
+            .ok_or_else(|| crate::i18n::t("computer.browser.tabNoneOpen").to_string())
     }
 
     pub async fn tabs(&self, conversation_id: &str) -> Result<Vec<BrowserTab>, String> {
@@ -811,7 +811,7 @@ impl BrowserManager {
                 )
                 .await?;
             }
-            other => return Err(format!("BROWSER_HISTORY_INVALID: ação `{other}`")),
+            other => return Err(crate::i18n::t_args("computer.browser.historyInvalid", &[("action", &other.to_string())])),
         }
         Ok(())
     }
@@ -1078,7 +1078,7 @@ impl BrowserManager {
                 .get("object")
                 .and_then(|value| value.get("objectId"))
                 .and_then(Value::as_str)
-                .ok_or_else(|| "BROWSER_REF_RESOLVE: nó sem objectId".to_string())?;
+                .ok_or_else(|| crate::i18n::t("computer.browser.refWithoutObject").to_string())?;
             client
                 .call(
                     "Runtime.callFunctionOn",
@@ -1121,7 +1121,7 @@ impl BrowserManager {
             .get("object")
             .and_then(|value| value.get("objectId"))
             .and_then(Value::as_str)
-            .ok_or_else(|| "BROWSER_REF_RESOLVE: nó sem objectId".to_string())?;
+            .ok_or_else(|| crate::i18n::t("computer.browser.refWithoutObject").to_string())?;
         client
             .call(
                 "Runtime.callFunctionOn",
@@ -1160,7 +1160,7 @@ impl BrowserManager {
         x: f64,
         y: f64,
     ) -> Result<(), String> {        if !(0.0..=10_000.0).contains(&x) || !(0.0..=10_000.0).contains(&y) {
-            return Err("BROWSER_POINT_INVALID: coordenada fora da página".to_string());
+            return Err(crate::i18n::t("computer.browser.pointOutOfPage").to_string());
         }
         let (port, _) = self.session_port(conversation_id).await?;
         let tab = match tab_id {
@@ -1209,10 +1209,10 @@ impl BrowserManager {
         let (method, allowed) = match kind {
             "mouse" => ("Input.dispatchMouseEvent", &["mouseMoved", "mousePressed", "mouseReleased", "mouseWheel"][..]),
             "key" => ("Input.dispatchKeyEvent", &["keyDown", "keyUp", "rawKeyDown"][..]),
-            _ => return Err("BROWSER_INPUT_INVALID: tipo de entrada inválido".into()),
+            _ => return Err(crate::i18n::t("computer.browser.inputTypeInvalid").into()),
         };
         let event_type = params.get("type").and_then(Value::as_str).unwrap_or("");
-        if !allowed.contains(&event_type) { return Err("BROWSER_INPUT_INVALID: evento inválido".into()); }
+        if !allowed.contains(&event_type) { return Err(crate::i18n::t("computer.browser.eventInvalid").into()); }
         if kind == "mouse" {
             for key in ["x", "y"] {
                 let value = params.get(key).and_then(Value::as_f64).unwrap_or(f64::NAN);
@@ -1343,7 +1343,7 @@ impl BrowserManager {
             .get("object")
             .and_then(|value| value.get("objectId"))
             .and_then(Value::as_str)
-            .ok_or_else(|| "BROWSER_REF_RESOLVE: nó sem objectId".to_string())?;
+            .ok_or_else(|| crate::i18n::t("computer.browser.refWithoutObject").to_string())?;
         client
             .call(
                 "Runtime.callFunctionOn",
@@ -1423,9 +1423,10 @@ impl BrowserManager {
             "ArrowRight" => ("ArrowRight", 39),
             "Space" => ("Space", 32),
             other => {
-                return Err(format!(
-                    "BROWSER_KEY_INVALID: tecla `{other}` não suportada (use Enter, Tab, Escape, Backspace, setas ou Space)"
-                ))
+                return Err(crate::i18n::t_args(
+                    "computer.browser.keyUnsupported",
+                    &[("key", other)],
+                ));
             }
         };
         cdp_call(
@@ -1527,7 +1528,7 @@ impl BrowserManager {
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        Err("BROWSER_DOWNLOAD_TIMEOUT: nenhum arquivo apareceu na pasta de downloads".to_string())
+        Err(crate::i18n::t("computer.browser.downloadTimeout").to_string())
     }
 
     pub async fn take_control(&self, conversation_id: &str, paused: bool) -> Result<(), String> {
@@ -1548,7 +1549,7 @@ impl BrowserManager {
 pub fn validate_url(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("BROWSER_URL_INVALID: URL vazia".to_string());
+        return Err(crate::i18n::t("computer.browser.urlEmpty"));
     }
     if trimmed == "about:blank" {
         return Ok(trimmed.to_string());
@@ -1556,13 +1557,13 @@ pub fn validate_url(raw: &str) -> Result<String, String> {
     let parsed = url::Url::parse(trimmed)
         .map_err(|error| format!("BROWSER_URL_INVALID: {error}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("BROWSER_URL_FORBIDDEN: apenas http/https são permitidos".to_string());
+        return Err(crate::i18n::t("computer.browser.urlScheme").to_string());
     }
     if parsed.host_str().is_none() {
-        return Err("BROWSER_URL_INVALID: URL sem host".to_string());
+        return Err(crate::i18n::t("computer.browser.urlNoHost"));
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("BROWSER_URL_FORBIDDEN: credenciais na URL não são permitidas".to_string());
+        return Err(crate::i18n::t("computer.browser.urlCredentials").to_string());
     }
     Ok(parsed.to_string())
 }
@@ -1572,7 +1573,7 @@ pub fn validate_url(raw: &str) -> Result<String, String> {
 pub fn normalize_navigation(raw: &str) -> Result<String, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return Err("BROWSER_URL_INVALID: URL vazia".to_string());
+        return Err(crate::i18n::t("computer.browser.urlEmpty"));
     }
     if trimmed.eq_ignore_ascii_case("about:blank") {
         return Ok("about:blank".to_string());
@@ -1645,15 +1646,16 @@ pub fn validate_with_policy(
         .map_err(|error| format!("BROWSER_URL_INVALID: {error}"))?;
     let host = parsed
         .host_str()
-        .ok_or_else(|| "BROWSER_URL_INVALID: URL sem host".to_string())?
+        .ok_or_else(|| crate::i18n::t("computer.browser.urlNoHost"))?
         .trim_end_matches('.')
         .to_ascii_lowercase();
     if host == "169.254.169.254" || host == "metadata.google.internal" {
-        return Err("BROWSER_URL_FORBIDDEN: metadata de nuvem não é acessível".to_string());
+        return Err(crate::i18n::t("computer.browser.urlMetadata"));
     }
     if is_private_host(&host) && !settings.browser_allow_private_hosts {
-        return Err(format!(
-            "BROWSER_URL_FORBIDDEN: `{host}` é privado/local; habilite hosts privados nas configurações"
+        return Err(crate::i18n::t_args(
+            "computer.browser.urlPrivateHost",
+            &[("host", &host)],
         ));
     }
     if settings
@@ -1661,7 +1663,7 @@ pub fn validate_with_policy(
         .iter()
         .any(|rule| domain_matches(&host, rule))
     {
-        return Err(format!("BROWSER_URL_FORBIDDEN: `{host}` está na denylist"));
+        return Err(crate::i18n::t_args("computer.browser.urlDenylist", &[("host", &host)]));
     }
     if !settings.browser_allowed_domains.is_empty()
         && !settings
@@ -1669,8 +1671,9 @@ pub fn validate_with_policy(
             .iter()
             .any(|rule| domain_matches(&host, rule))
     {
-        return Err(format!(
-            "BROWSER_URL_FORBIDDEN: `{host}` não está na allowlist do navegador"
+        return Err(crate::i18n::t_args(
+            "computer.browser.urlAllowlist",
+            &[("host", &host)],
         ));
     }
     Ok(target)
@@ -1755,7 +1758,7 @@ impl CdpClient {
     async fn connect(ws_url: &str) -> Result<Self, String> {
         let (socket, _) = tokio::time::timeout(CDP_TIMEOUT, connect_async(ws_url))
             .await
-            .map_err(|_| "BROWSER_CDP_TIMEOUT: conexão".to_string())?
+            .map_err(|_| crate::i18n::t("computer.browser.cdpTimeout").to_string())?
             .map_err(|error| format!("BROWSER_CDP_CONNECT: {error}"))?;
         Ok(Self {
             socket,

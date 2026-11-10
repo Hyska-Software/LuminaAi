@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Activity, AlertTriangle, ListChecks, MessageSquare, Square, Timer } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
@@ -17,7 +18,7 @@ import { api } from '@/lib/api';
 import { useAgentStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { ActiveTurnInfo, AgentTask, Conversation } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { TASK_ATTENTION_STATUSES, TASK_STATUS_META } from './agentTaskStatus';
+import { TASK_ATTENTION_STATUSES, taskStatusMeta } from './agentTaskStatus';
 
 function elapsedLabel(startedAt: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
@@ -25,7 +26,6 @@ function elapsedLabel(startedAt: number): string {
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${seconds % 60}s`;
 }
-
 
 /** Global view of active turns, pending approvals/questions and tasks needing a human. */
 export function AgentActivityDialog({
@@ -35,6 +35,7 @@ export function AgentActivityDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation('agents');
   const streams = useChatStore((state) => state.streamsByConversation);
   const conversations = useChatStore((state) => state.conversations);
   const openConversation = useChatStore((state) => state.openConversation);
@@ -113,11 +114,10 @@ export function AgentActivityDialog({
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <Activity className="size-4 text-accent" />
-            Atividade
+            {t('activityDialog.title')}
           </DialogTitle>
           <DialogDescription>
-            Turnos rodando agora, aprovações/perguntas pendentes e tarefas que precisam de você.
-            Parar um turno libera o slot de concorrência imediatamente.
+            {t('activityDialog.description')}
           </DialogDescription>
         </DialogHeader>
         <AgentDialogBody className="space-y-5">
@@ -127,7 +127,7 @@ export function AgentActivityDialog({
                 id="activity-running"
                 className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
               >
-                Em andamento
+                {t('activityDialog.running')}
               </h3>
               {entries.map((stream) => {
                 const conversation = conversations.find(
@@ -142,12 +142,16 @@ export function AgentActivityDialog({
                     {agent ? <AgentAvatar avatar={agent.avatar} size="sm" /> : null}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium text-foreground">
-                        {agent?.name ?? 'Sessão'} · {conversation?.title ?? stream.conversationId}
+                        {agent?.name ?? t('activityDialog.session')} · {conversation?.title ?? stream.conversationId}
                       </p>
                       <p className="flex items-center gap-1.5 text-[11px] text-foreground-muted">
                         <Timer className="size-3" />
-                        {elapsedLabel(stream.startedAt)} · {stream.phase} · passo {stream.step}
-                        {stream.turnKind === 'goal_round' ? ' · objetivo' : ''}
+                        {t('activityDialog.streamMeta', {
+                          elapsed: elapsedLabel(stream.startedAt),
+                          phase: stream.phase,
+                          step: stream.step,
+                        })}
+                        {stream.turnKind === 'goal_round' ? ` ${t('activityDialog.goalRound')}` : ''}
                       </p>
                     </div>
                     <Button
@@ -157,7 +161,7 @@ export function AgentActivityDialog({
                       onClick={() => void stopConversation(stream.conversationId)}
                     >
                       <Square className="mr-1.5 size-3.5" />
-                      Parar
+                      {t('common:actions.stop')}
                     </Button>
                   </article>
                 );
@@ -175,11 +179,13 @@ export function AgentActivityDialog({
                     {agent ? <AgentAvatar avatar={agent.avatar} size="sm" /> : null}
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium text-foreground">
-                        {agent?.name ?? 'Agente'} · {conversation?.title ?? turn.conversationId}
+                        {agent?.name ?? t('agentFallback')} · {conversation?.title ?? turn.conversationId}
                       </p>
                       <p className="flex items-center gap-1.5 text-[11px] text-foreground-muted">
                         <Timer className="size-3" />
-                        {elapsedLabel(turn.startedAt)} · tarefa/rotina em segundo plano
+                        {t('activityDialog.backgroundMeta', {
+                          elapsed: elapsedLabel(turn.startedAt),
+                        })}
                       </p>
                     </div>
                     <Button
@@ -189,7 +195,7 @@ export function AgentActivityDialog({
                       onClick={() => void stopConversation(turn.conversationId)}
                     >
                       <Square className="mr-1.5 size-3.5" />
-                      Parar
+                      {t('common:actions.stop')}
                     </Button>
                   </article>
                 );
@@ -203,7 +209,7 @@ export function AgentActivityDialog({
                 id="activity-attention"
                 className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
               >
-                Precisa de você
+                {t('activityDialog.needsYou')}
               </h3>
               {approvals.map(({ conversationId, approval }) => (
                 <button
@@ -215,13 +221,13 @@ export function AgentActivityDialog({
                   <AlertTriangle className="size-4 shrink-0 text-warning" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-medium text-foreground">
-                      Aprovação · {approval.title}
+                      {t('activityDialog.approvalTitle', { title: approval.title })}
                     </span>
                     <span className="block truncate text-[11px] text-foreground-muted">
                       {conversationLabel(conversations, conversationId)}
                     </span>
                   </span>
-                  <Badge tone="warning">Revisar</Badge>
+                  <Badge tone="warning">{t('activityDialog.review')}</Badge>
                 </button>
               ))}
               {questions.map(({ conversationId, question }) => (
@@ -234,13 +240,13 @@ export function AgentActivityDialog({
                   <MessageSquare className="size-4 shrink-0 text-accent" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-medium text-foreground">
-                      Pergunta do agente
+                      {t('askUser.aria')}
                     </span>
                     <span className="block truncate text-[11px] text-foreground-muted">
-                      {question.questions[0]?.question ?? 'Pergunta do agente'}
+                      {question.questions[0]?.question ?? t('askUser.aria')}
                     </span>
                   </span>
-                  <Badge tone="accent">Responder</Badge>
+                  <Badge tone="accent">{t('activityDialog.answer')}</Badge>
                 </button>
               ))}
             </section>
@@ -248,7 +254,7 @@ export function AgentActivityDialog({
 
           {tasksError ? (
             <p role="alert" className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger">
-              Não foi possível carregar as tarefas: {tasksError}
+              {t('activityDialog.tasksError', { error: tasksError })}
             </p>
           ) : null}
           {tasks.length > 0 ? (
@@ -257,9 +263,11 @@ export function AgentActivityDialog({
                 id="activity-tasks"
                 className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle"
               >
-                Tarefas aguardando
+                {t('activityDialog.tasksWaiting')}
               </h3>
-              {tasks.map((task) => (
+              {tasks.map((task) => {
+                const meta = taskStatusMeta(task.status);
+                return (
                 <button
                   key={task.id}
                   type="button"
@@ -275,19 +283,20 @@ export function AgentActivityDialog({
                       {task.title}
                     </span>
                     <span className="block truncate text-[11px] text-foreground-muted">
-                      {agents[task.ownerAgentId]?.name ?? 'Agente'} ·{' '}
-                      {TASK_STATUS_META[task.status].label}
+                      {agents[task.ownerAgentId]?.name ?? t('agentFallback')} ·{' '}
+                      {t(meta.labelKey as never)}
                     </span>
                   </span>
-                  <Badge tone={TASK_STATUS_META[task.status].badge}>Abrir</Badge>
+                  <Badge tone={meta.badge}>{t('activityDialog.open')}</Badge>
                 </button>
-              ))}
+                );
+              })}
             </section>
           ) : null}
 
           {entries.length + backgroundTurns.length + approvals.length + questions.length + tasks.length === 0 ? (
             <p className="py-8 text-center text-[13px] text-foreground-muted">
-              Nada pendente. Turnos, aprovações e tarefas aparecem aqui.
+              {t('activityDialog.empty')}
             </p>
           ) : null}
         </AgentDialogBody>
@@ -298,10 +307,10 @@ export function AgentActivityDialog({
             onClick={() => void stopAll()}
           >
             <Square className="mr-1.5 size-4" />
-            Parar tudo
+            {t('activityDialog.stopAll')}
           </Button>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Fechar
+            {t('common:actions.close')}
           </Button>
         </DialogFooter>
       </DialogContent>

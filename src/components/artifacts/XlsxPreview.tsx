@@ -1,4 +1,6 @@
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import { t } from '@/lib/i18n';
 import type { SheetPreview } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { BinaryPreview } from './BinaryPreview';
@@ -24,7 +26,7 @@ function SheetGrid({ sheet }: { sheet: SheetPreview }) {
   const header = sheet.rows[0] ?? [];
   const body = sheet.rows.slice(1);
 
-  if (!columnCount) return <PreviewEmpty message="Planilha vazia." />;
+  if (!columnCount) return <PreviewEmpty message={t('artifacts:xlsx.empty')} />;
 
   return (
     <>
@@ -66,7 +68,7 @@ function SheetGrid({ sheet }: { sheet: SheetPreview }) {
           ) : (
             <tr>
               <td colSpan={columnCount} className="px-3 py-6 text-center text-xs text-foreground-subtle">
-                Sem linhas de dados.
+                {t('artifacts:xlsx.noRows')}
               </td>
             </tr>
           )}
@@ -74,7 +76,7 @@ function SheetGrid({ sheet }: { sheet: SheetPreview }) {
       </table>
       {sheet.truncated ? (
         <p role="status" className="border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
-          Prévia truncada: exibindo apenas parte das linhas desta planilha.
+          {t('artifacts:xlsx.truncated')}
         </p>
       ) : null}
     </>
@@ -86,6 +88,7 @@ function SheetGrid({ sheet }: { sheet: SheetPreview }) {
  * numbers right-aligned. Data comes from `api.getArtifactPreview`.
  */
 export function XlsxPreview({ content, className }: ArtifactViewProps) {
+  const { t: translate } = useTranslation('artifacts');
   const { state, retry } = useArtifactPreview(content.artifact.id);
   const [activeIndex, setActiveIndex] = useState(0);
   const tabId = useId();
@@ -97,7 +100,7 @@ export function XlsxPreview({ content, className }: ArtifactViewProps) {
   }, [sheets.length]);
 
   if (state.status === 'loading') {
-    return <PreviewLoading label="Carregando planilha…" className={className} />;
+    return <PreviewLoading label={translate('artifacts:xlsx.loading')} className={className} />;
   }
   if (state.status === 'error') {
     return <PreviewError message={state.message} onRetry={retry} className={className} />;
@@ -114,7 +117,7 @@ export function XlsxPreview({ content, className }: ArtifactViewProps) {
     );
   }
   if (!preview.sheets.length) {
-    return <PreviewEmpty message="Planilha sem abas para exibir." className={className} />;
+    return <PreviewEmpty message={translate('artifacts:xlsx.noSheets')} className={className} />;
   }
 
   const currentIndex = Math.min(activeIndex, preview.sheets.length - 1);
@@ -137,13 +140,14 @@ export function XlsxPreview({ content, className }: ArtifactViewProps) {
     focusTab(next);
   };
 
-  if (!activeSheet) return <PreviewEmpty message="Planilha sem abas para exibir." className={className} />;
+  if (!activeSheet)
+    return <PreviewEmpty message={translate('artifacts:xlsx.noSheets')} className={className} />;
 
   return (
     <div className={cn('flex h-full flex-col', className)}>
       <div
         role="tablist"
-        aria-label="Planilhas do arquivo"
+        aria-label={translate('artifacts:xlsx.tabsAria')}
         className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-surface-raised px-2 py-1.5"
       >
         {preview.sheets.map((sheet, index) => {
@@ -167,7 +171,7 @@ export function XlsxPreview({ content, className }: ArtifactViewProps) {
                   : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
               )}
             >
-              {sheet.name || `Planilha ${index + 1}`}
+              {sheet.name || translate('artifacts:xlsx.sheetDefault', { index: index + 1 })}
             </button>
           );
         })}

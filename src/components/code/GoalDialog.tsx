@@ -20,6 +20,7 @@
  * e `aria-busy` durante o IPC.
  */
 import { useEffect, useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Play, Target, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -36,6 +37,8 @@ import {
   Textarea,
 } from '@/components/ui';
 import { useChatStore, useCodeStore } from '@/lib/store';
+import { t } from '@/lib/i18n';
+import { formatNumber } from '@/lib/i18n/format';
 import type { GoalStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -57,12 +60,18 @@ type FieldErrors = {
   maxRounds?: string;
 };
 
-const STATUS_TEXT: Record<GoalStatus, string> = {
-  active: 'ativo',
-  paused: 'pausado',
-  completed: 'concluído',
-  blocked: 'bloqueado',
-};
+function goalAdjective(status: GoalStatus): string {
+  switch (status) {
+    case 'active':
+      return t('code:goal.adjective.active');
+    case 'paused':
+      return t('code:goal.adjective.paused');
+    case 'completed':
+      return t('code:goal.adjective.completed');
+    case 'blocked':
+      return t('code:goal.adjective.blocked');
+  }
+}
 
 function errorId(base: string, field: keyof FieldErrors): string {
   return `${base}-${field}-error`;
@@ -73,6 +82,7 @@ function errorId(base: string, field: keyof FieldErrors): string {
  * vem do `codeStore` (snapshot autoritativo do backend).
  */
 export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
+  const { t } = useTranslation('code');
   const baseId = useId();
   const goal = useCodeStore((state) => state.byConversation[conversationId]?.goal ?? null);
   const createGoal = useCodeStore((state) => state.createGoal);
@@ -109,12 +119,14 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
     const next: FieldErrors = {};
     const objectiveText = objective.trim();
     if (!objectiveText) {
-      next.objective = 'Descreva o objetivo da sessão.';
+      next.objective = t('code:goal.dialog.error.objectiveRequired');
     } else if (objectiveText.length > MAX_OBJECTIVE_CHARS) {
-      next.objective = `O objetivo deve ter no máximo ${MAX_OBJECTIVE_CHARS.toLocaleString('pt-BR')} caracteres.`;
+      next.objective = t('code:goal.dialog.error.objectiveTooLong', {
+        max: formatNumber(MAX_OBJECTIVE_CHARS),
+      });
     }
     if (title.trim().length > MAX_TITLE_CHARS) {
-      next.title = `O título deve ter no máximo ${MAX_TITLE_CHARS} caracteres.`;
+      next.title = t('code:goal.dialog.error.titleTooLong', { max: MAX_TITLE_CHARS });
     }
     const parsedMax = Number(maxRoundsInput);
     if (
@@ -123,7 +135,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
       parsedMax < 1 ||
       parsedMax > MAX_ROUNDS_HARD_CAP
     ) {
-      next.maxRounds = `Use um limite entre 1 e ${MAX_ROUNDS_HARD_CAP} rodadas.`;
+      next.maxRounds = t('code:goal.dialog.error.maxRounds', { max: MAX_ROUNDS_HARD_CAP });
     }
     return next;
   };
@@ -167,9 +179,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
         autoContinue,
       });
       if (!ok) {
-        setSubmitError(
-          'Não foi possível criar o objetivo. Se já existe um objetivo ativo, edite-o em vez de criar outro.',
-        );
+        setSubmitError(t('code:goal.dialog.error.create'));
         return;
       }
       // O backend renomeia o título placeholder para o do objetivo; o sidebar
@@ -179,17 +189,16 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
         // Com um turno em andamento não é possível iniciar a rodada agora: a
         // continuidade fica para o fim do turno (regra do driver no chatStore).
         if (useChatStore.getState().streaming) {
-          toast.info('Objetivo criado', {
+          toast.info(t('code:goal.toast.created'), {
             description: autoContinue
-              ? 'A primeira rodada continua automaticamente ao fim do turno atual.'
-              : 'Quando o turno atual terminar, inicie a rodada pelo painel do objetivo.',
+              ? t('code:goal.toast.createdAuto')
+              : t('code:goal.toast.createdManual'),
           });
         } else {
           const started = await runGoalRound(conversationId);
           if (!started) {
-            toast.error('Objetivo criado, mas a rodada não iniciou', {
-              description:
-                'Verifique se a sessão está ativa no Code e se não há aprovação ou pergunta pendente.',
+            toast.error(t('code:goal.toast.roundNotStarted'), {
+              description: t('code:goal.toast.roundNotStartedDescription'),
             });
           }
         }
@@ -217,7 +226,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
         goal.revision,
       );
       if (!ok) {
-        setSubmitError('Não foi possível salvar o objetivo. Atualize a sessão e tente de novo.');
+        setSubmitError(t('code:goal.dialog.error.save'));
         return;
       }
       // `UpdateGoalInput` não carrega `autoContinue`: armar/desarmar é uma ação
@@ -240,7 +249,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
     try {
       const ok = await updateGoal(conversationId, 'delete');
       if (!ok) {
-        setSubmitError('Não foi possível encerrar o objetivo. Tente de novo.');
+        setSubmitError(t('code:goal.dialog.error.delete'));
         return;
       }
       onClose();
@@ -269,11 +278,13 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
         }}
       >
         <DialogHeader className="gap-1.5 pr-10">
-          <DialogTitle>{editing ? 'Editar objetivo' : 'Definir objetivo'}</DialogTitle>
+          <DialogTitle>
+            {editing ? t('code:goal.dialog.title.edit') : t('code:goal.dialog.title.create')}
+          </DialogTitle>
           <DialogDescription>
             {editing
-              ? 'Ajuste o resultado esperado, o limite de rodadas e a continuidade automática.'
-              : 'Descreva o resultado esperado. O agente trabalha nele em rodadas até concluir, bloquear ou atingir o limite.'}
+              ? t('code:goal.dialog.description.edit')
+              : t('code:goal.dialog.description.create')}
           </DialogDescription>
         </DialogHeader>
 
@@ -284,12 +295,13 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
               className="flex flex-col gap-2 rounded-lg border border-border bg-warning-soft px-3 py-2.5"
             >
               <p className="min-w-0 break-words text-[12px] leading-relaxed text-warning">
-                Já existe um objetivo {STATUS_TEXT[existingBlocking.status]} nesta sessão. Encerre o
-                atual para criar outro, ou edite o que já existe.
+                {t('code:goal.dialog.existingBlocking', {
+                  status: goalAdjective(existingBlocking.status),
+                })}
               </p>
               <div>
                 <Button size="sm" variant="secondary" onClick={openEdit}>
-                  Editar objetivo
+                  {t('code:goal.dialog.action.editObjective')}
                 </Button>
               </div>
             </div>
@@ -297,20 +309,20 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
 
           {!editing && goal?.status === 'completed' ? (
             <p className="min-w-0 break-words rounded-lg border border-border bg-success-soft px-3 py-2 text-[11.5px] leading-relaxed text-success">
-              O objetivo concluído será substituído pelo novo.
+              {t('code:goal.dialog.completedReplaced')}
             </p>
           ) : null}
 
           <div className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between gap-2">
-              <Label htmlFor={`${baseId}-title`}>Título</Label>
-              <span className="text-[11px] text-foreground-subtle">opcional</span>
+              <Label htmlFor={`${baseId}-title`}>{t('code:goal.dialog.field.title')}</Label>
+              <span className="text-[11px] text-foreground-subtle">{t('code:goal.dialog.field.optional')}</span>
             </div>
             <Input
               id={`${baseId}-title`}
               value={title}
               maxLength={MAX_TITLE_CHARS}
-              placeholder="Ex.: Corrigir o cálculo de juros"
+              placeholder={t('code:goal.dialog.titlePlaceholder')}
               invalid={Boolean(errors.title)}
               aria-describedby={errors.title ? errorId(baseId, 'title') : `${baseId}-title-hint`}
               onChange={(event) => {
@@ -324,7 +336,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
               </p>
             ) : (
               <p id={`${baseId}-title-hint`} className="text-[11px] text-foreground-subtle">
-                Sem título, usamos a primeira linha do objetivo.
+                {t('code:goal.dialog.titleHint')}
               </p>
             )}
           </div>
@@ -332,7 +344,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between gap-2">
               <Label htmlFor={`${baseId}-objective`} required>
-                Objetivo
+                {t('code:goal.dialog.field.objective')}
               </Label>
               <span
                 aria-hidden
@@ -349,7 +361,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
               rows={6}
               value={objective}
               maxLength={MAX_OBJECTIVE_CHARS}
-              placeholder="Descreva o resultado esperado, com critérios de aceite…"
+              placeholder={t('code:goal.dialog.objectivePlaceholder')}
               invalid={Boolean(errors.objective)}
               aria-describedby={
                 errors.objective ? errorId(baseId, 'objective') : `${baseId}-objective-hint`
@@ -365,7 +377,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
               </p>
             ) : (
               <p id={`${baseId}-objective-hint`} className="text-[11px] leading-relaxed text-foreground-subtle">
-                Só o objetivo decide quando o agente para: concluir, bloquear ou estourar o limite.
+                {t('code:goal.dialog.objectiveHint')}
               </p>
             )}
           </div>
@@ -376,16 +388,16 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                 checked={autoContinue}
                 onCheckedChange={setAutoContinue}
                 disabled={continuityLocked}
-                label="Continuar automaticamente"
+                label={t('code:goal.dialog.autoContinue.label')}
                 description={
                   continuityLocked
-                    ? 'A continuidade é reativada ao retomar o objetivo.'
-                    : 'O agente continua sozinho após cada turno bem-sucedido.'
+                    ? t('code:goal.dialog.autoContinue.locked')
+                    : t('code:goal.dialog.autoContinue.description')
                 }
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor={`${baseId}-max-rounds`}>Limite de rodadas</Label>
+              <Label htmlFor={`${baseId}-max-rounds`}>{t('code:goal.dialog.field.maxRounds')}</Label>
               <Input
                 id={`${baseId}-max-rounds`}
                 type="number"
@@ -409,7 +421,10 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                 </p>
               ) : (
                 <p id={`${baseId}-max-rounds-hint`} className="text-[11px] text-foreground-subtle">
-                  Entre 1 e {MAX_ROUNDS_HARD_CAP}. Default: {MAX_ROUNDS_DEFAULT}.
+                  {t('code:goal.dialog.maxRoundsHint', {
+                    max: MAX_ROUNDS_HARD_CAP,
+                    preset: MAX_ROUNDS_DEFAULT,
+                  })}
                 </p>
               )}
             </div>
@@ -417,10 +432,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
 
           <p className="flex items-start gap-1.5 rounded-lg bg-warning-soft px-3 py-2 text-[11.5px] leading-relaxed text-warning">
             <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
-            <span>
-              Cada rodada é um turno completo e consome tokens do provedor. O objetivo pausa sozinho
-              em erros, após 3 rodadas sem progresso ou ao atingir o limite.
-            </span>
+            <span>{t('code:goal.dialog.warning')}</span>
           </p>
 
           {submitError ? (
@@ -431,11 +443,11 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
 
           {editing && goal ? (
             <div className="flex flex-col gap-2 rounded-xl border border-border px-3 py-2.5">
-              <p className="text-[11.5px] font-medium text-danger">Zona de perigo</p>
+              <p className="text-[11.5px] font-medium text-danger">{t('code:goal.dialog.danger.heading')}</p>
               {!confirmDelete ? (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="min-w-0 text-[11.5px] leading-relaxed text-foreground-muted">
-                    Encerrar remove o objetivo e para as rodadas automáticas.
+                    {t('code:goal.dialog.danger.description')}
                   </p>
                   <Button
                     size="sm"
@@ -443,14 +455,13 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                     className="text-danger hover:bg-danger-soft hover:text-danger"
                     onClick={() => setConfirmDelete(true)}
                   >
-                    Encerrar objetivo
+                    {t('code:goal.dialog.danger.close')}
                   </Button>
                 </div>
               ) : (
-                <div role="group" aria-label="Confirmar encerramento do objetivo" className="flex flex-col gap-2">
+                <div role="group" aria-label={t('code:goal.dialog.danger.confirmGroup')} className="flex flex-col gap-2">
                   <p role="alert" className="text-[11.5px] leading-relaxed text-foreground-muted">
-                    O histórico de rodadas é preservado, mas a sessão fica sem objetivo. Esta ação não
-                    pode ser desfeita.
+                    {t('code:goal.dialog.danger.confirmDescription')}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
@@ -460,7 +471,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                       disabled={busy}
                       onClick={() => void submitDelete()}
                     >
-                      Confirmar encerramento
+                      {t('code:goal.dialog.danger.confirm')}
                     </Button>
                     <Button
                       size="sm"
@@ -468,7 +479,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                       disabled={busy}
                       onClick={() => setConfirmDelete(false)}
                     >
-                      Voltar
+                      {t('code:goal.dialog.danger.back')}
                     </Button>
                   </div>
                 </div>
@@ -479,7 +490,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
 
         <DialogFooter>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <div className="flex flex-wrap items-center gap-2">
             {editing ? (
@@ -490,7 +501,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                 disabled={!goal}
                 onClick={() => void submitEdit()}
               >
-                Salvar
+                {t('common:actions.save')}
               </Button>
             ) : (
               <>
@@ -500,7 +511,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                   disabled={busy || existingBlocking != null}
                   onClick={() => void submitCreate(false)}
                 >
-                  Criar sem começar
+                  {t('code:goal.dialog.action.createWithoutStart')}
                 </Button>
                 <Button
                   variant="primary"
@@ -510,7 +521,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
                   leftIcon={busy ? undefined : <Play aria-hidden className="size-3.5" />}
                   onClick={() => void submitCreate(true)}
                 >
-                  Criar e começar
+                  {t('code:goal.dialog.action.createAndStart')}
                 </Button>
               </>
             )}

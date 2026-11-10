@@ -1,0 +1,524 @@
+{
+  "queue": {
+    "aria": "Cola de mensajes",
+    "title": "En cola · {{count}}",
+    "titlePaused": "En cola · {{count}} · en pausa",
+    "resume": "Reanudar cola",
+    "pause": "Pausar cola",
+    "sendNow": "Enviar ahora",
+    "clear": "Vaciar cola",
+    "remove": "Quitar de la cola",
+    "attachments": "{{count}} adjunto(s)",
+    "more": "+{{count}} mensaje(s)"
+  },
+  "turnError": {
+    "planLimit": {
+      "title": "Límite de uso alcanzado",
+      "body": "El límite puede ser del plan o de esta app.",
+      "manageUsage": "Gestionar uso"
+    },
+    "planNotEligible": {
+      "title": "Uso del plan no disponible",
+      "body": "Tu cuenta/espacio de trabajo no tiene acceso al plan de ChatGPT. Usa una API key u otra cuenta."
+    },
+    "authRequired": {
+      "title": "Credencial necesaria",
+      "body": "Vuelve a conectar el proveedor para seguir enviando mensajes."
+    },
+    "openProviders": "Abrir Proveedores",
+    "dismiss": "Descartar aviso"
+  },
+  "credentialGate": {
+    "oauth": "Inicia sesión con tu cuenta de ChatGPT o agrega una API key para enviar.",
+    "apiKey": "Agrega la API key de este proveedor para enviar."
+  },
+  "message": {
+    "copyFailed": "No se pudo copiar",
+    "editAria": "Editar mensaje",
+    "saveAndResend": "Guardar y reenviar",
+    "copied": "Mensaje copiado",
+    "copy": "Copiar mensaje",
+    "edit": "Editar mensaje",
+    "generating": "Generando respuesta…",
+    "failedTitle": "No se pudo completar",
+    "failedHint": "Inténtalo de nuevo en un momento.",
+    "openSettings": "Abrir configuración",
+    "responseCopied": "Respuesta copiada",
+    "copyResponse": "Copiar respuesta",
+    "regenerate": "Regenerar respuesta",
+    "useful": "Respuesta útil",
+    "notUseful": "Respuesta poco útil",
+    "cancelled": "Cancelado",
+    "tokens": "{{tokens}} tokens",
+    "tokensAndDuration": "{{tokens}} tokens · {{duration}}"
+  },
+  "loading": {
+    "aria": "Cargando conversación",
+    "text": "Cargando conversación…"
+  },
+  "code": {
+    "copyFailed": "No se pudo copiar el código",
+    "copiedAria": "Código copiado",
+    "copyAria": "Copiar código",
+    "copied": "Copiado",
+    "copy": "Copiar"
+  },
+  "markdown": {
+    "taskDone": "Completado",
+    "taskPending": "Pendiente",
+    "footnotes": "Notas",
+    "backref": "Volver a la referencia",
+    "backrefWithId": "Volver a la referencia {{id}}"
+  },
+  "alerts": {
+    "note": "Nota",
+    "tip": "Consejo",
+    "important": "Importante",
+    "warning": "Advertencia",
+    "caution": "Precaución"
+  },
+  "image": {
+    "unavailable": "Imagen no disponible",
+    "unavailableWithDescription": "Imagen no disponible: {{description}}"
+  },
+  "sources": {
+    "panelAria": "Panel de fuentes",
+    "title": "Fuentes",
+    "unpin": "Soltar panel sobre el chat",
+    "pin": "Fijar panel junto al chat",
+    "pinHint": "Amplía la ventana para fijar el panel",
+    "closeTooltip": "Cerrar",
+    "close": "Cerrar panel de fuentes",
+    "listAria": "Fuentes de la conversación",
+    "emptyTitle": "Ninguna fuente en esta conversación",
+    "emptyBody": "Cuando el agente busque en la web, las fuentes aparecen aquí.",
+    "opensExternally": "Se abre en el navegador predeterminado",
+    "resize": "Redimensionar panel de fuentes",
+    "countOne": "{{count}} fuente",
+    "countMany": "{{count}} fuentes"
+  },
+  "citations": {
+    "openHidden_one": "Abrir {{count}} fuente en el panel lateral",
+    "openHidden_other": "Abrir {{count}} fuentes en el panel lateral",
+    "hidden_one": "{{count}} fuente",
+    "hidden_other": "{{count}} fuentes"
+  },
+  "welcome": {
+    "title": "¿Cómo puedo ayudarte?",
+    "description": "Pregunta, busca, analiza documentos o crea archivos con los modelos de OpenCode y OpenAI, incluido el uso de tu plan de ChatGPT.",
+    "suggestions": {
+      "document": {
+        "title": "Analizar documento",
+        "description": "Resume un PDF, DOCX o planilla y destaca los puntos principales.",
+        "prompt": "Analiza el documento adjunto y haz un resumen con los puntos principales."
+      },
+      "web": {
+        "title": "Buscar en la web",
+        "description": "Busca información actual y cita las fuentes.",
+        "prompt": "Busca en la web las noticias más recientes sobre "
+      },
+      "file": {
+        "title": "Crear archivo",
+        "description": "Genera un artefacto en Markdown, HTML, CSV o código.",
+        "prompt": "Crea un archivo Markdown con "
+      },
+      "code": {
+        "title": "Explicar código",
+        "description": "Entiende un fragmento de código o encuentra la causa de un bug.",
+        "prompt": "Explica qué hace el código de abajo y sugiere mejoras:\n\n```\n\n```"
+      }
+    },
+    "commands": "Comandos",
+    "sidebar": "Barra lateral",
+    "send": "Enviar"
+  },
+  "modelSwitch": {
+    "label": "Modelo cambiado a {{model}}",
+    "labelWithProvider": "Modelo cambiado a {{model}} · {{provider}}"
+  },
+  "goalRound": {
+    "text": "Continuación del objetivo",
+    "label": "Continuación del objetivo — ronda en curso",
+    "labelWithTime": "Continuación del objetivo — {{when}}"
+  },
+  "trace": {
+    "thought": "Pensó",
+    "reasoning": "Razonamiento",
+    "labelWithDuration": "{{label}} {{duration}}",
+    "toolsRunning": "Ejecutando herramientas…",
+    "thinking": "Pensando…",
+    "workedFor": "Trabajó durante {{duration}}",
+    "thoughtFor": "Pensó durante {{duration}}",
+    "steps_one": "{{count}} paso",
+    "steps_other": "{{count}} pasos",
+    "worked": "Trabajó",
+    "reasoned": "Razonó",
+    "working": "Trabajando…",
+    "sourcesAria": "Fuentes: {{domains}}",
+    "openPageAria": "Abrir {{title}} en el navegador",
+    "toolLabel": "{{verb}} {{detail}}",
+    "toolLabelPlain": "{{verb}}",
+    "families": {
+      "shell": "Shell",
+      "checks": "Verificaciones",
+      "read": "Lectura",
+      "list": "Listado",
+      "search": "Búsqueda",
+      "edit": "Editar",
+      "tasks": "Tareas",
+      "plan": "Plan",
+      "question": "Pregunta",
+      "subagent": "Subagente",
+      "jobs": "Jobs",
+      "git": "Git",
+      "goal": "Objetivo",
+      "ui": "Interfaz",
+      "web": "Búsqueda web",
+      "pages": "Páginas",
+      "files": "Archivos",
+      "code": "Código",
+      "skills": "Skills",
+      "artifacts": "Artefactos"
+    },
+    "activity": {
+      "run_command": "Ejecutando comandos",
+      "run_checks": "Ejecutando verificaciones",
+      "read_file": "Leyendo archivos",
+      "read_tool_output": "Leyendo la salida de la herramienta",
+      "list_dir": "Explorando archivos",
+      "search_files": "Buscando archivos",
+      "search_text": "Buscando en el código",
+      "write_file": "Creando archivos",
+      "edit_file": "Editando archivos",
+      "todo_write": "Actualizando las tareas",
+      "submit_plan": "Enviando el plan",
+      "ask_user": "Esperando la respuesta del usuario",
+      "task": "Delegando al subagente",
+      "job_list": "Consultando los jobs",
+      "job_output": "Leyendo la salida de un job",
+      "job_kill": "Deteniendo un job",
+      "git_status": "Consultando git",
+      "git_diff": "Leyendo el diff de git",
+      "git_log": "Consultando el historial de git",
+      "goal": "Actualizando el objetivo",
+      "validate_ui": "Validando la interfaz",
+      "web_search": "Buscando en la web",
+      "fetch_url": "Leyendo páginas",
+      "create_file": "Creando archivos",
+      "run_code": "Ejecutando código",
+      "list_skills": "Consultando las skills",
+      "read_skill": "Leyendo una skill",
+      "list_artifacts": "Consultando los artefactos",
+      "read_artifact": "Leyendo un artefacto",
+      "fallback": "Usando {{family}}"
+    },
+    "analyzing": "Analizando la solicitud",
+    "subagentKind": {
+      "review": "revisión",
+      "general": "general",
+      "explore": "exploración"
+    },
+    "group": {
+      "web_search": {
+        "running": "Buscando en la web…",
+        "found_one": "Encontró {{count}} página web",
+        "found_other": "Encontró {{count}} páginas web",
+        "failed": "La búsqueda web falló",
+        "empty": "No se encontraron resultados"
+      },
+      "fetch_url": {
+        "running_one": "Leyendo {{count}} página…",
+        "running_other": "Leyendo {{count}} páginas…",
+        "read_one": "Leyó {{count}} página",
+        "read_other": "Leyó {{count}} páginas",
+        "failed_one": "No se pudo leer la página",
+        "failed_other": "No se pudieron leer las páginas"
+      },
+      "create_file": {
+        "running_one": "Creando {{count}} archivo…",
+        "running_other": "Creando {{count}} archivos…",
+        "created_one": "Creó {{count}} archivo",
+        "created_other": "Creó {{count}} archivos",
+        "failed": "Falló la creación del archivo"
+      },
+      "validate_ui": {
+        "running": "Validando la interfaz…",
+        "failed": "La validación de la interfaz falló",
+        "done_one": "Validó la interfaz",
+        "done_other": "Validó la interfaz {{count}} veces"
+      },
+      "run_code": {
+        "running": "Ejecutando código…",
+        "failed": "La ejecución de código falló",
+        "done": "Ejecutó código",
+        "doneWithDetail": "Ejecutó código · {{detail}}"
+      },
+      "list_skills": {
+        "running": "Consultando skills…",
+        "failed": "La consulta de skills falló",
+        "done": "Consultó las skills disponibles"
+      },
+      "read_skill": {
+        "runningNamed": "Leyendo la skill {{name}}…",
+        "runningMany": "Leyendo {{count}} skills…",
+        "running": "Leyendo una skill…",
+        "doneNamed": "Leyó la skill {{name}}",
+        "doneMany": "Leyó {{count}} skills",
+        "done": "Leyó una skill",
+        "failed": "No se pudo leer la skill"
+      },
+      "list_artifacts": {
+        "running": "Buscando en los artefactos…",
+        "failed": "La búsqueda en los artefactos falló",
+        "done": "Consultó los artefactos",
+        "empty": "No se encontraron artefactos",
+        "found_one": "Encontró {{count}} artefacto",
+        "found_other": "Encontró {{count}} artefactos"
+      },
+      "read_artifact": {
+        "runningNamed": "Leyendo el artefacto {{name}}…",
+        "runningMany": "Leyendo {{count}} artefactos…",
+        "running": "Leyendo un artefacto…",
+        "doneNamed": "Leyó el artefacto {{name}}",
+        "doneMany": "Leyó {{count}} artefactos",
+        "done": "Leyó un artefacto",
+        "failed": "No se pudo leer el artefacto"
+      },
+      "default": {
+        "running": "Ejecutando {{name}}…",
+        "failed": "Falló {{name}}",
+        "done_one": "Ejecutó {{name}}",
+        "done_other": "Ejecutó {{name}} {{count}} veces"
+      },
+      "list_dir": {
+        "runningPath": "Listando {{path}}…",
+        "running": "Listando la carpeta…",
+        "failedPath": "No se pudo listar {{path}}",
+        "failed": "No se pudo listar la carpeta",
+        "donePath": "Listó {{path}}",
+        "done": "Listó la carpeta"
+      },
+      "search_text": {
+        "runningPattern": "Buscando “{{pattern}}”…",
+        "running": "Buscando en el espacio de trabajo…",
+        "failed": "La búsqueda en el espacio de trabajo falló",
+        "donePattern": "Buscó “{{pattern}}”",
+        "done": "Buscó en el espacio de trabajo"
+      },
+      "read_file": {
+        "runningPath": "Leyendo {{path}}…",
+        "running": "Leyendo archivos…",
+        "failedPath": "No se pudo leer {{path}}",
+        "failed": "No se pudieron leer los archivos",
+        "done_one": "Leyó {{path}}",
+        "done_other": "Leyó {{count}} archivos",
+        "done": "Leyó el archivo"
+      },
+      "write_file": {
+        "runningPath": "Escribiendo {{path}}…",
+        "running": "Escribiendo archivos…",
+        "failedPath": "Falló la escritura de {{path}}",
+        "failed": "Falló la escritura de los archivos",
+        "done_one": "Cambió {{path}}",
+        "done_other": "Cambió {{count}} archivos",
+        "done": "Cambió el archivo"
+      },
+      "run_command": {
+        "runningCommand": "Ejecutando {{command}}…",
+        "running": "Ejecutando un comando…",
+        "failedCommand": "El comando falló: {{command}}",
+        "failed": "El comando falló",
+        "doneCommand": "Ejecutó {{command}}",
+        "done": "Ejecutó el comando"
+      },
+      "run_checks": {
+        "running": "Ejecutando las verificaciones…",
+        "failed": "Las verificaciones fallaron",
+        "done": "Ejecutó las verificaciones"
+      },
+      "todo_write": {
+        "running": "Actualizando las tareas…",
+        "failed": "Falló la actualización de las tareas",
+        "done": "Actualizó las tareas"
+      },
+      "submit_plan": {
+        "running": "Enviando el plan para revisión…",
+        "failedFeedback": "Plan no aprobado",
+        "failed": "Falló el envío del plan",
+        "approved": "Plan aprobado",
+        "reviewingFeedback": "Plan revisado",
+        "reviewing": "Plan enviado para revisión",
+        "proposed": "Plan propuesto"
+      },
+      "goal": {
+        "running": "Actualizando el objetivo…",
+        "failed": "Falló la actualización del objetivo",
+        "completed": "Objetivo completado",
+        "blocked": "Objetivo bloqueado",
+        "paused": "Objetivo pausado",
+        "progressed": "Progresó en el objetivo"
+      },
+      "ask_user": {
+        "running": "Esperando la respuesta del usuario…",
+        "failed": "La pregunta no se completó",
+        "done": "Preguntó al usuario"
+      },
+      "task": {
+        "running": "Delegando a un subagente…",
+        "failed": "El subagente falló",
+        "done": "Delegó {{kind}} a un subagente"
+      },
+      "job_list": {
+        "running": "Consultando jobs…",
+        "failed": "Falló la consulta del job",
+        "kill": "Detuvo un job",
+        "output": "Leyó la salida de un job",
+        "list": "Listó los jobs"
+      },
+      "git_status": {
+        "running": "Consultando git…",
+        "failed": "El comando de git falló",
+        "diff": "Vio el diff de git",
+        "log": "Consultó el historial de git",
+        "status": "Consultó el estado de git"
+      },
+      "read_tool_output": {
+        "running": "Leyendo la salida completa…",
+        "failed": "No se pudo leer la salida",
+        "done": "Leyó la salida completa de una herramienta"
+      }
+    },
+    "verb": {
+      "read": "Leyó",
+      "list": "Listó",
+      "search": "Buscó",
+      "created": "Creó",
+      "deleted": "Eliminó",
+      "renamed": "Renombró",
+      "changed": "Cambió",
+      "command": "Ejecutó",
+      "checksFailed": "Las verificaciones fallaron",
+      "checksDone": "Ejecutó las verificaciones",
+      "todoFailed": "Falló la actualización de las tareas",
+      "todoDone": "Actualizó las tareas",
+      "goalFailed": "Falló la actualización del objetivo",
+      "goalCompleted": "Objetivo completado",
+      "goalBlocked": "Objetivo bloqueado",
+      "goalPaused": "Objetivo pausado",
+      "goalProgressed": "Progresó en el objetivo",
+      "planNotApproved": "Plan no aprobado",
+      "planFailed": "Falló el envío del plan",
+      "planApproved": "Plan aprobado",
+      "planRevised": "Plan revisado",
+      "planSentForReview": "Plan enviado para revisión",
+      "planProposed": "Plan propuesto",
+      "askFailed": "La pregunta no se completó",
+      "askRunning": "Esperando la respuesta del usuario",
+      "askDone": "Preguntó al usuario",
+      "taskFailed": "El subagente falló",
+      "taskDone": "Delegó {{kind}} a un subagente",
+      "jobsFailed": "Falló la consulta de los jobs",
+      "jobsDone": "Listó los jobs",
+      "jobOutputFailed": "Falló la lectura de la salida del job",
+      "jobOutputDone": "Leyó la salida de un job",
+      "jobKillFailed": "Falló la detención del job",
+      "jobKillDone": "Detuvo un job",
+      "gitStatusFailed": "El estado de git falló",
+      "gitStatusDone": "Consultó el estado de git",
+      "gitDiffFailed": "El diff de git falló",
+      "gitDiffDone": "Vio el diff de git",
+      "gitLogFailed": "El historial de git falló",
+      "gitLogDone": "Consultó el historial de git",
+      "readOutputFailed": "No se pudo leer la salida completa",
+      "readOutputDone": "Leyó la salida completa de una herramienta",
+      "uiFailed": "La validación de la interfaz falló",
+      "uiDone": "Validó la interfaz",
+      "defaultFailed": "Falló {{name}}",
+      "defaultDone": "Ejecutó {{name}}"
+    }
+  },
+  "tool": {
+    "copyOutputFailed": "No se pudo copiar la salida",
+    "outputFailed": "Salida (falló)",
+    "output": "Salida",
+    "copyOutput": "Copiar salida",
+    "imageUnavailable": "Imagen no disponible",
+    "openScreenshot": "Abrir captura {{index}}",
+    "screenshotAlt": "Captura devuelta por la herramienta ({{index}})",
+    "statusLive": "en vivo",
+    "statusDone": "completado",
+    "statusError": "falló",
+    "statusCancelled": "cancelado",
+    "steps_one": "{{count}} paso",
+    "steps_other": "{{count}} pasos",
+    "tokens": "{{tokens}} tokens",
+    "effort": "esfuerzo {{effort}}",
+    "openChat": "Abrir chat",
+    "subagentDefault": "Subagente",
+    "subagentAlreadyOpen": "Este subagente ya está abierto en una pestaña."
+  },
+  "toasts": {
+    "approvalNeeded": "Aprobación necesaria",
+    "agentQuestion": "El agente hizo una pregunta",
+    "agentThreadFallback": "Hilo del agente",
+    "agentFallback": "Agente",
+    "agentFinished": "{{agent}} terminó la respuesta",
+    "responseFailed": "Falló la respuesta",
+    "responseError": "La respuesta terminó con un error",
+    "threadBusy": "Hilo ocupado",
+    "threadBusyHint": "El mensaje volvió a la cola; reanuda cuando termine el turno actual.",
+    "goalRoundFailed": "No se pudo iniciar la ronda del objetivo",
+    "messageFailed": "No se pudo completar el mensaje",
+    "queuePaused": "La cola está en pausa: restaura el agente para continuar",
+    "interruptFailed": "No se pudo interrumpir la respuesta actual",
+    "selectAgentToStart": "Selecciona un agente para iniciar la conversación",
+    "createConversationFailed": "No se pudo crear la conversación",
+    "deleteFailed": "No se pudo eliminar",
+    "renameFailed": "No se pudo renombrar",
+    "mainConversationPinned": "La conversación principal permanece fijada.",
+    "pinFailed": "No se pudo fijar",
+    "reorderFailed": "No se pudieron reordenar las conversaciones",
+    "selectAgentForModel": "Selecciona un agente para cambiar el modelo",
+    "agentModelUpdated": "Modelo del agente actualizado",
+    "sessionModelChanged": "Modelo de la sesión cambiado",
+    "nextResponsesModel": "Las próximas respuestas usarán {{model}}.",
+    "changeModelFailed": "No se pudo cambiar el modelo",
+    "changeReasoningFailed": "No se pudo cambiar el modo de razonamiento",
+    "attachImportFailed": "Falló la importación del adjunto",
+    "pasteAttachmentFailed": "No se pudo pegar el adjunto",
+    "waitForResponse": "Espera a que termine la respuesta actual",
+    "queueFull": "Cola llena",
+    "queueFullHint": "Este hilo ya tiene {{count}} mensajes en la cola. Espera o vacía la cola.",
+    "messageQueued": "Mensaje en cola",
+    "messageQueuedHint": "Se enviará cuando termine la respuesta actual.",
+    "connectCredential": "Conecta una credencial para enviar",
+    "connectCredentialGoal": "Conecta una credencial para continuar el objetivo",
+    "connectCredentialOauth": "Inicia sesión con ChatGPT (Configuración → Proveedores) o agrega una API key.",
+    "connectCredentialApiKey": "Agrega la API key de este proveedor en Configuración → Proveedores.",
+    "goalRoundNotRegenerable": "La ronda del objetivo no se puede regenerar",
+    "goalRoundNotRegenerableHint": "Usa \"Nueva ronda\" en el objetivo para continuar el trabajo.",
+    "regenerateFailed": "No se pudo regenerar",
+    "editFailed": "No se pudo editar"
+  },
+  "modelLock": {
+    "locked": {
+      "title": "Modelo bloqueado en esta conversación",
+      "description": "El modelo no se puede cambiar después de iniciar la conversación. Ajusta el modo de razonamiento con el botón ✦."
+    },
+    "streaming": {
+      "title": "Espera a que termine la respuesta actual",
+      "description": "El cambio de modelo está disponible cuando termina la respuesta actual."
+    }
+  },
+  "errors": {
+    "agentMissing": "el agente ya no existe",
+    "agentRequiredBeforeSend": "Selecciona un agente antes de enviar el mensaje."
+  },
+  "chatView": {
+    "jumpToLatest": "Ir al final de la conversación"
+  },
+  "artifacts": {
+    "viewAll": "Ver todos ({{count}})",
+    "viewAllAria": "Ver los {{count}} artefactos generados"
+  }
+}

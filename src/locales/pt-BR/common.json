@@ -1,0 +1,243 @@
+{
+  "actions": {
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "delete": "Excluir",
+    "close": "Fechar",
+    "retry": "Tentar novamente",
+    "copy": "Copiar",
+    "open": "Abrir",
+    "stop": "Parar",
+    "confirm": "Confirmar",
+    "back": "Voltar",
+    "next": "Avançar",
+    "add": "Adicionar",
+    "remove": "Remover",
+    "edit": "Editar",
+    "done": "Concluído"
+  },
+  "layouts": {
+    "chat": {
+      "label": "Chat",
+      "title": "Layout de conversa",
+      "description": "Conversa com o assistente, artefatos e fontes."
+    },
+    "code": {
+      "label": "Code",
+      "title": "Layout de código",
+      "description": "Workbench com workspaces, arquivos, terminal e alterações."
+    },
+    "agent": {
+      "label": "Agentes",
+      "title": "Layout de agentes",
+      "description": "Equipes de personas, canais e rotinas."
+    },
+    "menuLabel": "Layouts",
+    "groupAria": "Modo do aplicativo"
+  },
+  "conversation": {
+    "defaultTitle": "Nova conversa"
+  },
+  "language": {
+    "text": "Texto"
+  },
+  "status": {
+    "loading": "Carregando"
+  },
+  "time": {
+    "justNow": "agora",
+    "minutesShort": "{{count}} min",
+    "hoursShort": "{{count}} h",
+    "daysShort": "{{count}} d",
+    "groups": {
+      "pinned": "Fixadas",
+      "today": "Hoje",
+      "yesterday": "Ontem",
+      "last7": "Últimos 7 dias",
+      "last30": "Últimos 30 dias",
+      "older": "Mais antigas"
+    },
+    "thinking": {
+      "lessThanSecond": "menos de 1s",
+      "seconds": "{{count}}s",
+      "minutesSeconds": "{{minutes}} min {{seconds}}s",
+      "minutes": "{{count}} min",
+      "hours": "{{count}} h",
+      "hoursMinutes": "{{hours}} h {{minutes}} min"
+    }
+  },
+  "sortable": {
+    "instructions": "Use Alt+Seta para cima ou Alt+Seta para baixo para reordenar.",
+    "moved": "{{label}}: {{item}} movido para a posição {{position}} de {{total}}"
+  },
+  "panelResizer": {
+    "hint": "Arraste para redimensionar · duplo clique para restaurar",
+    "sidebarLabel": "Redimensionar barra lateral"
+  },
+  "shell": {
+    "labels": {
+      "conversations": "Conversas",
+      "sessions": "Sessões",
+      "agents": "Agentes"
+    },
+    "sidebar": {
+      "aria": "Conversas",
+      "newChat": "Novo chat",
+      "close": "Fechar barra lateral",
+      "library": "Biblioteca",
+      "openLibrary": "Abrir biblioteca",
+      "skills": "Skills",
+      "manageSkills": "Gerenciar skills",
+      "settings": "Configurações",
+      "search": "Buscar conversas",
+      "loading": "Carregando conversas",
+      "emptyTitle": "Nenhuma conversa ainda.",
+      "emptyHint": "Comece um novo chat.",
+      "renameAria": "Renomear conversa",
+      "optionsAria": "Opções da conversa"
+    },
+    "menu": {
+      "pin": "Fixar",
+      "unpin": "Desafixar",
+      "rename": "Renomear",
+      "export": "Exportar",
+      "useInCode": "Usar no Code",
+      "removeFromCode": "Remover do Code"
+    },
+    "deleteDialog": {
+      "title": "Excluir conversa",
+      "description": "“{{title}}” será removida permanentemente. Esta ação não pode ser desfeita."
+    },
+    "toasts": {
+      "codeLinkAddError": "Não foi possível adicionar a sessão ao Code",
+      "codeLinkRemoveError": "Não foi possível remover a sessão do Code",
+      "codeLinkAdded": "Sessão adicionada ao Code",
+      "codeLinkRemoved": "Sessão removida do Code",
+      "codeLinkAddedDescription": "Agora ela aparece nos dois layouts.",
+      "codeLinkRemovedDescription": "Ela continua disponível no Chat.",
+      "exported": "Conversa exportada",
+      "exportError": "Não foi possível exportar"
+    },
+    "titlebar": {
+      "toggleSidebar": "Alternar barra lateral",
+      "minimize": "Minimizar",
+      "restore": "Restaurar",
+      "maximize": "Maximizar"
+    },
+    "plan": {
+      "title": "Plano ChatGPT",
+      "tooltip": "As requisições usam o limite do seu plano ChatGPT",
+      "manageAria": "Gerenciar uso do plano ChatGPT",
+      "manage": "Gerenciar uso"
+    },
+    "update": {
+      "popoverAria": "Atualização do Zylara",
+      "available": "v{{version}} disponível",
+      "availableTitle": "Atualização v{{version}} disponível",
+      "checking": "Verificando…",
+      "checkingTitle": "Verificando atualizações",
+      "downloading": "Baixando {{percent}}%",
+      "downloadingTitle": "Baixando atualização — {{percent}}%",
+      "verifying": "Verificando…",
+      "verifyingTitle": "Verificando a integridade do download",
+      "ready": "Instalar v{{version}}",
+      "readyTitle": "Atualização v{{version}} pronta para instalar",
+      "installing": "Abrindo instalador…",
+      "installingTitle": "Abrindo o instalador",
+      "error": "Falha na atualização",
+      "checkedNow": "Verificado agora",
+      "checkedAgo": "Verificado há {{relative}}",
+      "checkedAt": "Verificado em {{date}}",
+      "released": "publicada em {{date}}",
+      "downloadAction": "Baixar e instalar",
+      "downloadUpdate": "Baixar atualização",
+      "installNow": "Instalar agora",
+      "openDmg": "Abrir DMG",
+      "openFolder": "Abrir pasta",
+      "openInstaller": "Abrir instalador",
+      "hintSetup": "O Zylara será fechado durante a instalação. Suas conversas e configurações são mantidas.",
+      "hintDmg": "Arraste o Zylara para a pasta Aplicativos e abra a nova versão.",
+      "hintAppImage": "Substitua o AppImage atual pelo novo arquivo e abra-o novamente.",
+      "hintSystem": "O instalador do sistema será aberto para concluir a atualização.",
+      "hintDefault": "Siga as instruções do instalador para concluir a atualização.",
+      "downloadingAria": "Baixando a atualização",
+      "verifyingIntegrity": "Verificando integridade…",
+      "progress": "{{received}} de {{total}}",
+      "downloadLabel": "Download da atualização",
+      "speed": "{{speed}}/s",
+      "keepOpen": "Não feche o Zylara enquanto a verificação termina.",
+      "verified": "Download verificado",
+      "noAsset": "Esta versão não tem instalador para a sua plataforma. Abra a release no GitHub para baixar manualmente.",
+      "viewGithub": "Ver no GitHub",
+      "checkingPanelTitle": "Verificando atualizações…",
+      "upToDate": "Tudo atualizado",
+      "checkingPanelDescription": "Buscando a versão mais recente no GitHub.",
+      "upToDateDescription": "Você está usando a versão mais recente do Zylara.",
+      "newVersion": "Nova versão disponível",
+      "newBadge": "Nova",
+      "stale": "Não foi possível verificar agora. Mostrando o último resultado.",
+      "verifyAgain": "Verificar novamente",
+      "whatsNew": "Novidades",
+      "loadingNotes": "Carregando novidades",
+      "notesFallback": "Veja o que mudou nesta versão no GitHub.",
+      "notNow": "Agora não",
+      "skip": "Ignorar esta versão",
+      "toasts": {
+        "availableTitle": "Zylara v{{version}} disponível",
+        "availableDescription": "Abra o aviso na barra de título para baixar e instalar.",
+        "availableAction": "Ver",
+        "latestTitle": "Você está na versão mais recente",
+        "checkFailed": "Não foi possível verificar atualizações",
+        "cancelled": "Download cancelado",
+        "downloadedTitle": "Atualização baixada",
+        "downloadedDescription": "O download foi verificado e está pronto para instalar.",
+        "downloadFailed": "Falha ao baixar a atualização",
+        "installerOpenTitle": "Instalador aberto",
+        "installerOpenManual": "Siga as instruções do instalador do sistema.",
+        "installerOpenSetup": "Conclua a atualização na janela do Zylara Setup. Suas conversas e configurações são mantidas.",
+        "installerOpenFailed": "Não foi possível abrir o instalador",
+        "revealFailed": "Não foi possível abrir a pasta",
+        "skippedTitle": "Atualização ignorada",
+        "skippedDescription": "Você não será avisado sobre a v{{version}}. Uma versão mais nova volta a aparecer.",
+        "skipFailed": "Não foi possível ignorar esta versão",
+        "unskipFailed": "Não foi possível reativar o aviso",
+        "preferenceFailed": "Não foi possível salvar a preferência"
+      }
+    },
+    "app": {
+      "routineDone": "Rotina concluída: {{title}}",
+      "routineDoneDescription": "O resultado está na conversa principal do agente.",
+      "routineFailed": "Rotina falhou: {{title}}",
+      "errorTitle": "Algo deu errado",
+      "taskDone": "Tarefa concluída",
+      "taskFailed": "Tarefa falhou",
+      "taskHandoff": "Tarefa aguardando aceite",
+      "taskNeedsYou": "Tarefa precisa de você"
+    },
+    "workspace": {
+      "conversationRegion": "Conversa",
+      "subagentRegion": "Subagente {{description}}",
+      "commitsRegion": "Histórico de commits",
+      "diffRegion": "Diff de {{path}}",
+      "fileRegion": "Arquivo {{path}}",
+      "planRegion": "Plano aprovado da sessão",
+      "backToSession": "Voltar à sessão",
+      "backToChat": "Voltar ao chat"
+    },
+    "splash": {
+      "loading": "Preparando seu espaço…"
+    }
+  },
+  "errors": {
+    "boundaryTitle": "Algo quebrou por aqui",
+    "boundaryDescription": "A interface encontrou um erro inesperado. Você pode recarregar a janela — suas conversas estão salvas localmente.",
+    "reload": "Recarregar"
+  },
+  "computer": {
+    "bannerTitle": "Zylara está controlando o computador",
+    "unknownAgent": "Agente",
+    "openThread": "Abrir thread",
+    "stopped": "Computer use interrompido",
+    "stopFailed": "Não foi possível parar"
+  }
+}

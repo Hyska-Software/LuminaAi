@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Bug,
   CodeXml,
@@ -19,33 +20,26 @@ import { useWorkspaces } from './useWorkspaces';
 
 const EASE_OUT_SOFT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-interface CodeSuggestion {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  prompt: string;
-}
-
-const SUGGESTIONS: CodeSuggestion[] = [
+const SUGGESTIONS = [
   {
     icon: CodeXml,
-    title: 'Explique o código',
-    description: 'Entenda um trecho e os riscos antes de mexer nele.',
-    prompt: 'Explique o que faz o código abaixo e aponte os riscos:\n\n```\n\n```',
+    titleKey: 'code:welcome.suggestion.explain.title',
+    descriptionKey: 'code:welcome.suggestion.explain.description',
+    promptKey: 'code:welcome.suggestion.explain.prompt',
   },
   {
     icon: Bug,
-    title: 'Encontre um bug',
-    description: 'Investigue a causa provável e proponha a correção.',
-    prompt: 'Investigue a causa provável deste erro e proponha um plano de correção:\n\n```\n\n```',
+    titleKey: 'code:welcome.suggestion.bug.title',
+    descriptionKey: 'code:welcome.suggestion.bug.description',
+    promptKey: 'code:welcome.suggestion.bug.prompt',
   },
   {
     icon: FlaskConical,
-    title: 'Escreva testes',
-    description: 'Cubra o caminho feliz e os casos de borda.',
-    prompt: 'Escreva testes para o código abaixo, cobrindo casos de borda:\n\n```\n\n```',
+    titleKey: 'code:welcome.suggestion.tests.title',
+    descriptionKey: 'code:welcome.suggestion.tests.description',
+    promptKey: 'code:welcome.suggestion.tests.prompt',
   },
-];
+] as const;
 
 /** Fills the composer through the same event the Chat welcome screen uses. */
 function fillComposer(text: string): void {
@@ -64,13 +58,14 @@ interface WorkspaceRecentsProps {
 
 /** "Workspaces recentes" — reabre uma pasta já registrada sem criar sessão. */
 function WorkspaceRecents({ workspaces, disabled, onSelect }: WorkspaceRecentsProps) {
+  const { t } = useTranslation('code');
   return (
     <section aria-labelledby="code-recent-workspaces" className="mt-8 w-full">
       <h2
         id="code-recent-workspaces"
         className="text-left text-[11px] font-medium uppercase tracking-wide text-foreground-subtle"
       >
-        Workspaces recentes
+        {t('code:welcome.recents')}
       </h2>
       <div role="list" className="mt-2 flex flex-col gap-1.5">
         {workspaces.map((workspace) => {
@@ -126,6 +121,7 @@ function WorkspaceRecents({ workspaces, disabled, onSelect }: WorkspaceRecentsPr
  * (sem enviar nada).
  */
 export function CodeWelcomeScreen() {
+  const { t } = useTranslation('code');
   const reduceMotion = useReduceMotion();
   const activeWorkspaceId = useUiStore((state) => state.activeWorkspaceId);
   const setActiveWorkspace = useUiStore((state) => state.setActiveWorkspace);
@@ -175,10 +171,10 @@ export function CodeWelcomeScreen() {
       {activeWorkspace ? (
         <>
           <h1 className="mt-5 text-[28px] font-semibold tracking-tight text-foreground">
-            Comece uma sessão do agente
+            {t('code:welcome.active.title')}
           </h1>
           <p className="mt-2 max-w-md text-[14px] leading-relaxed text-foreground-muted">
-            Descreva uma tarefa de código — explicar, corrigir, testar ou refatorar — neste workspace.
+            {t('code:welcome.active.description')}
           </p>
 
           <div className="mt-4 flex max-w-full items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-foreground-muted">
@@ -195,10 +191,10 @@ export function CodeWelcomeScreen() {
                   <>
                     <span
                       aria-hidden
-                      title="Alterações não commitadas"
+                      title={t('code:welcome.dirty')}
                       className="size-1.5 shrink-0 rounded-full bg-warning"
                     />
-                    <span className="sr-only">Alterações não commitadas</span>
+                    <span className="sr-only">{t('code:welcome.dirty')}</span>
                   </>
                 ) : null}
               </>
@@ -216,9 +212,9 @@ export function CodeWelcomeScreen() {
               const Icon = suggestion.icon;
               return (
                 <motion.button
-                  key={suggestion.title}
+                  key={suggestion.titleKey}
                   type="button"
-                  onClick={() => fillComposer(suggestion.prompt)}
+                  onClick={() => fillComposer(t(suggestion.promptKey))}
                   initial={reduceMotion ? false : { opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{
@@ -237,10 +233,10 @@ export function CodeWelcomeScreen() {
                   </span>
                   <span className="min-w-0">
                     <span className="block text-[13px] font-medium text-foreground">
-                      {suggestion.title}
+                      {t(suggestion.titleKey)}
                     </span>
                     <span className="mt-0.5 block text-[12px] leading-relaxed text-foreground-muted">
-                      {suggestion.description}
+                      {t(suggestion.descriptionKey)}
                     </span>
                   </span>
                 </motion.button>
@@ -251,16 +247,16 @@ export function CodeWelcomeScreen() {
       ) : (
         <>
           <h1 className="mt-5 text-[28px] font-semibold tracking-tight text-foreground">
-            Comece com uma pasta
+            {t('code:welcome.noFolder.title')}
           </h1>
           <p className="mt-2 max-w-md text-[14px] leading-relaxed text-foreground-muted">
-            Abra uma pasta para o agente ler, editar e rodar comandos aqui.
+            {t('code:welcome.noFolder.description')}
           </p>
 
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
             {loadingList ? (
               <Button variant="secondary" size="md" loading>
-                Carregando workspaces
+                {t('code:welcome.loadingWorkspaces')}
               </Button>
             ) : (
               <Button
@@ -270,7 +266,7 @@ export function CodeWelcomeScreen() {
                 leftIcon={<FolderOpen className="size-4" />}
                 onClick={() => void handleOpenFolder()}
               >
-                Abrir pasta…
+                {t('code:welcome.openFolder')}
               </Button>
             )}
           </div>
@@ -281,7 +277,7 @@ export function CodeWelcomeScreen() {
               className="mt-4 flex max-w-md items-start gap-1.5 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-left text-[12px] leading-relaxed text-danger"
             >
               <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
-              <span>Não foi possível carregar os workspaces: {error}</span>
+              <span>{t('code:welcome.loadError', { error })}</span>
             </p>
           ) : null}
 
@@ -295,7 +291,7 @@ export function CodeWelcomeScreen() {
 
           {!loadingList && recents.length === 0 ? (
             <p className="mt-6 max-w-md text-[12px] leading-relaxed text-foreground-subtle">
-              Nenhuma pasta aberta ainda. Escolha um diretório do computador para começar.
+              {t('code:welcome.empty')}
             </p>
           ) : null}
         </>

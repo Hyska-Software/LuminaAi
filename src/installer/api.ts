@@ -13,6 +13,8 @@ import type {
 export const tauriInstallerApi: InstallerApi = {
   context: () => invoke<InstallerContext>('installer_context'),
 
+  setLanguage: (locale) => invoke('installer_set_language', { locale }),
+
   start: async (options, onEvent) => {
     const channel = new Channel<InstallerEvent>();
     channel.onmessage = onEvent;

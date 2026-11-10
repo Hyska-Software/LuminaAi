@@ -14,15 +14,22 @@
  * - `CacheDiagnostics`: corpo do painel de diagnóstico (compartilhado pelos dois).
  */
 import { useId, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Zap } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from '@/components/ui';
-import { cacheBreakLabel, cacheStateMeta, formatCacheHit } from '@/lib/cache';
+import { t as globalT } from '@/lib/i18n';
+import { formatCacheHit } from '@/lib/cache';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
 import type { CacheBreakReason, CacheSample, CacheState, CacheStats } from '@/lib/types';
 import { cn, copyText, formatCost, formatTokens, relativeTime } from '@/lib/utils';
-import { formatCacheTtl } from './cacheDiagnostics';
+import {
+  cacheBreakLabel,
+  cacheStateLabel,
+  cacheStateTone,
+  formatCacheTtl,
+} from './cacheDiagnostics';
 import { requestCacheDiagnostics } from './cacheDiagnosticsRequest';
 
 type CacheTone = 'success' | 'warning' | 'danger' | 'muted' | 'accent';
@@ -36,20 +43,36 @@ const TONE_CLASSES: Record<CacheTone, { icon: string; dot: string }> = {
 };
 
 /** Frases de motivo da queda (textos de `cache-audit-ui.md` §4.5). */
-const BREAK_SENTENCES: Record<CacheBreakReason, string> = {
-  first_request: 'o primeiro request do epoch',
-  system_prompt: 'o prompt de sistema mudou',
-  tool_definitions: 'as definições de ferramentas mudaram',
-  history_rewrite: 'o histórico foi reescrito',
-  head_trim: 'o histórico antigo foi cortado',
-  compaction: 'o contexto foi compactado',
-  model_switch: 'o modelo ou o provedor mudou',
-  protocol_fallback: 'o protocolo de wire mudou',
-  attachments: 'os anexos mudaram',
-  config_change: 'a configuração mudou',
-  ttl_expired: 'o cache expirou pelo TTL',
-  provider_policy: 'a regra do provedor impede o reaproveitamento',
-};
+function breakSentence(reason: CacheBreakReason | null): string {
+  switch (reason) {
+    case 'first_request':
+      return globalT('agents:cache.breakSentence.firstRequest');
+    case 'system_prompt':
+      return globalT('agents:cache.breakSentence.systemPrompt');
+    case 'tool_definitions':
+      return globalT('agents:cache.breakSentence.toolDefinitions');
+    case 'history_rewrite':
+      return globalT('agents:cache.breakSentence.historyRewrite');
+    case 'head_trim':
+      return globalT('agents:cache.breakSentence.headTrim');
+    case 'compaction':
+      return globalT('agents:cache.breakSentence.compaction');
+    case 'model_switch':
+      return globalT('agents:cache.breakSentence.modelSwitch');
+    case 'protocol_fallback':
+      return globalT('agents:cache.breakSentence.protocolFallback');
+    case 'attachments':
+      return globalT('agents:cache.breakSentence.attachments');
+    case 'config_change':
+      return globalT('agents:cache.breakSentence.configChange');
+    case 'ttl_expired':
+      return globalT('agents:cache.breakSentence.ttlExpired');
+    case 'provider_policy':
+      return globalT('agents:cache.breakSentence.providerPolicy');
+    default:
+      return globalT('agents:cache.breakSentence.unknown');
+  }
+}
 
 /** Projeção de UI do store (campos ausentes degradam para `—`). */
 interface CacheView {
@@ -106,7 +129,7 @@ function cacheView(cache: CacheConversationUi | null | undefined): CacheView {
 function toneFor(state: CacheState | null, hit: number | null): CacheTone {
   if (state === 'degraded') return 'danger';
   if (state == null) return hit == null ? 'muted' : 'accent';
-  return cacheStateMeta(state).tone;
+  return cacheStateTone(state);
 }
 
 /**
@@ -115,28 +138,32 @@ function toneFor(state: CacheState | null, hit: number | null): CacheTone {
  */
 export function cacheAriaLabel(cache: CacheConversationUi | null | undefined): string {
   const view = cacheView(cache);
-  if (view.hit != null) return `Cache de prompt: ${formatCacheHit(view.hit)} de acerto`;
-  if (cache == null) return 'Cache de prompt: aguardando a primeira amostra';
-  if (view.state === 'warming' || view.state === 'cold') return 'Cache de prompt: aquecendo';
-  return 'Cache de prompt: sem dados';
+  if (view.hit != null) {
+    return globalT('agents:cache.aria.hit', { hit: formatCacheHit(view.hit) });
+  }
+  if (cache == null) return globalT('agents:cache.aria.waiting');
+  if (view.state === 'warming' || view.state === 'cold') return globalT('agents:cache.aria.warming');
+  return globalT('agents:cache.aria.noData');
 }
 
 /** Descrição `aria-describedby` do chip (textos de `cache-audit-ui.md` §4.7). */
 export function cacheStateSentence(cache: CacheConversationUi | null | undefined): string {
   const view = cacheView(cache);
-  if (view.state === 'unsupported') return 'Cache de prompt: sem dados neste provedor.';
-  if (view.state === 'provider_policy') {
-    return 'Cache de prompt: política do provedor impede o reaproveitamento.';
+  if (view.state === 'unsupported') return globalT('agents:cache.sentence.unsupported');
+  if (view.state === 'provider_policy') return globalT('agents:cache.sentence.providerPolicy');
+  if (view.state === 'warming') return globalT('agents:cache.sentence.warming');
+  if (cache == null) return globalT('agents:cache.sentence.waiting');
+  if (view.hit == null) return globalT('agents:cache.sentence.noData');
+  if (view.state === 'degraded') {
+    return globalT('agents:cache.sentence.degraded', { hit: formatCacheHit(view.hit) });
   }
-  if (view.state === 'warming') return 'Cache de prompt: aquecendo.';
-  if (cache == null) return 'Cache de prompt: aguardando a primeira amostra.';
-  if (view.hit == null) return 'Cache de prompt: sem dados neste provedor.';
-  if (view.state === 'degraded') return `Cache de prompt: ${formatCacheHit(view.hit)} de acerto — caiu.`;
-  if (view.state === 'stable') return `Cache de prompt: ${formatCacheHit(view.hit)} de acerto — estável.`;
+  if (view.state === 'stable') {
+    return globalT('agents:cache.sentence.stable', { hit: formatCacheHit(view.hit) });
+  }
   if (view.state === 'cold') {
-    return `Cache de prompt: ${formatCacheHit(view.hit)} de acerto — primeiro request do epoch.`;
+    return globalT('agents:cache.sentence.cold', { hit: formatCacheHit(view.hit) });
   }
-  return `Cache de prompt: ${formatCacheHit(view.hit)} de acerto.`;
+  return globalT('agents:cache.sentence.default', { hit: formatCacheHit(view.hit) });
 }
 
 /** Nota honesta de estado (`role="status"`); `null` quando não há o que explicar. */
@@ -144,29 +171,31 @@ function cacheStatusNote(cache: CacheConversationUi | null | undefined): string 
   const view = cacheView(cache);
   switch (view.state) {
     case 'unsupported':
-      return 'Este provedor não informa detalhes de cache nesta execução.';
+      return globalT('agents:cache.note.unsupported');
     case 'provider_policy':
-      return 'O provedor não reutiliza este request por regra própria de cache.';
+      return globalT('agents:cache.note.providerPolicy');
     case 'cold':
-      return 'Primeiro request do epoch: ainda não há prefixo para reutilizar.';
+      return globalT('agents:cache.note.cold');
     case 'warming':
-      return 'Aquecendo o cache: o primeiro request grava o prefixo e o acerto aparece no próximo passo.';
+      return globalT('agents:cache.note.warming');
     case 'degraded': {
       const from = view.previousHit;
       const to = view.hit;
       const range =
         from != null && to != null && from > to
-          ? ` de ${Math.round(from)}% para ${Math.round(to)}%`
+          ? globalT('agents:cache.note.degradedRange', {
+              from: Math.round(from),
+              to: Math.round(to),
+            })
           : '';
-      const reason =
-        (view.breakReason ? BREAK_SENTENCES[view.breakReason] : null) ?? 'motivo não identificado';
-      return `Cache caiu${range} neste passo. Motivo: ${reason}.`;
+      return globalT('agents:cache.note.degraded', {
+        range,
+        reason: breakSentence(view.breakReason),
+      });
     }
     default:
       if (view.hit == null) {
-        return cache == null
-          ? 'Sem amostras ainda. O acerto de cache aparece depois do primeiro passo.'
-          : 'Este provedor não informa detalhes de cache nesta execução.';
+        return cache == null ? globalT('agents:cache.note.noSamples') : globalT('agents:cache.note.unsupported');
       }
       return null;
   }
@@ -230,11 +259,14 @@ export interface CacheDiagnosticsProps {
  * deve ganhar SVGs (teste de a11y existente) — o estado usa ponto + texto.
  */
 export function CacheDiagnostics({ cache, className }: CacheDiagnosticsProps) {
+  const { t } = useTranslation('agents');
   const view = cacheView(cache);
   const tone = TONE_CLASSES[toneFor(view.state, view.hit)];
-  const meta = cacheStateMeta(view.state);
   const note = cacheStatusNote(cache);
-  const hitLabel = view.hit != null ? `${Math.round(view.hit)}% de acerto` : 'sem dados';
+  const hitLabel =
+    view.hit != null
+      ? t('cache.hitPercent', { percent: Math.round(view.hit) })
+      : t('cache.noData');
   const measured =
     view.inputTotal > 0 || view.read > 0 || view.write > 0 || view.uncached > 0;
   const total = view.inputTotal > 0 ? view.inputTotal : view.read + view.write + view.uncached;
@@ -250,7 +282,10 @@ export function CacheDiagnostics({ cache, className }: CacheDiagnosticsProps) {
       : [];
   const sessionLabel =
     view.sessionHit != null
-      ? `${Math.round(view.sessionHit)}% em ${view.samples} ${view.samples === 1 ? 'passo' : 'passos'}`
+      ? t('cache.sessionHit', {
+          percent: Math.round(view.sessionHit),
+          count: view.samples,
+        })
       : '—';
   const rawUsage = view.sample?.rawUsage;
   const hasRawUsage = rawUsage !== undefined && rawUsage !== null;
@@ -258,29 +293,29 @@ export function CacheDiagnostics({ cache, className }: CacheDiagnosticsProps) {
   const copyRawUsage = async () => {
     if (!hasRawUsage) return;
     const ok = await copyText(JSON.stringify(rawUsage, null, 2));
-    if (ok) toast.success('Usage bruto copiado');
-    else toast.error('Não foi possível copiar o usage');
+    if (ok) toast.success(t('cache.rawCopied'));
+    else toast.error(t('cache.rawCopyError'));
   };
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
       <div className="flex items-baseline justify-between gap-3">
-        <p className="min-w-0 text-[13px] font-semibold text-foreground">Cache de prompt</p>
+        <p className="min-w-0 text-[13px] font-semibold text-foreground">{t('cache.title')}</p>
         <p className="shrink-0 tabular-nums text-[11px] text-foreground-muted">{hitLabel}</p>
       </div>
 
       <div
         role="progressbar"
-        aria-label="Acerto do cache de prompt"
+        aria-label={t('cache.progressAria')}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={view.hit != null ? Math.round(view.hit) : undefined}
         aria-valuetext={
           view.hit != null
-            ? `${Math.round(view.hit)}% de acerto no cache`
-            : 'acerto de cache não reportado'
+            ? t('cache.progressValue', { percent: Math.round(view.hit) })
+            : t('cache.progressNoData')
         }
-        title="Acerto = tokens lidos do cache ÷ tokens de entrada do request"
+        title={t('cache.progressTitle')}
         className="flex h-1.5 w-full overflow-hidden rounded-full bg-surface-active"
       >
         {segments.map((segment) => (
@@ -296,38 +331,44 @@ export function CacheDiagnostics({ cache, className }: CacheDiagnosticsProps) {
         ))}
       </div>
 
-      <CacheRow label="Lido do cache" value={measured ? formatTokens(view.read) : '—'} />
-      <CacheRow label="Gravado no cache" value={view.write > 0 ? formatTokens(view.write) : '—'} />
-      <CacheRow label="Sem cache" value={measured ? formatTokens(view.uncached) : '—'} />
-      <CacheRow label="Acumulado da sessão" value={sessionLabel} />
+      <CacheRow label={t('cache.rows.read')} value={measured ? formatTokens(view.read) : '—'} />
       <CacheRow
-        label="Acerto estável"
+        label={t('cache.rows.write')}
+        value={view.write > 0 ? formatTokens(view.write) : '—'}
+      />
+      <CacheRow label={t('cache.rows.uncached')} value={measured ? formatTokens(view.uncached) : '—'} />
+      <CacheRow label={t('cache.rows.session')} value={sessionLabel} />
+      <CacheRow
+        label={t('cache.rows.steady')}
         value={view.steadyHit != null ? formatCacheHit(view.steadyHit) : '—'}
       />
       <CacheRow
-        label="Teto deste request"
+        label={t('cache.rows.ceiling')}
         value={view.ceiling != null ? formatCacheHit(view.ceiling) : '—'}
-        title="Teto teórico P/(P+Δ) deste request"
+        title={t('cache.rows.ceilingTitle')}
       />
       <div className="flex min-w-0 items-baseline justify-between gap-3 text-[11px] leading-snug">
-        <span className="min-w-0 truncate text-foreground-muted">Estado</span>
+        <span className="min-w-0 truncate text-foreground-muted">{t('cache.rows.state')}</span>
         <span className="flex shrink-0 items-center gap-1.5 text-foreground">
           <span aria-hidden className={cn('size-2 rounded-full', tone.dot)} />
-          {meta.label}
+          {cacheStateLabel(view.state)}
         </span>
       </div>
       <CacheRow
-        label="Última amostra"
+        label={t('cache.rows.lastSample')}
         value={
           view.sample
-            ? `passo ${view.sample.step} · ${relativeTime(view.sample.at)}`
+            ? t('cache.sampleValue', {
+                step: view.sample.step,
+                time: relativeTime(view.sample.at),
+              })
             : '—'
         }
       />
-      {view.breakLabel ? <CacheRow label="Última quebra" value={view.breakLabel} /> : null}
-      <CacheRow label="TTL" value={formatCacheTtl(view.ttlSeconds)} />
+      {view.breakLabel ? <CacheRow label={t('cache.rows.lastBreak')} value={view.breakLabel} /> : null}
+      <CacheRow label={t('cache.rows.ttl')} value={formatCacheTtl(view.ttlSeconds)} />
       {view.savingsUsd != null ? (
-        <CacheRow label="Economia estimada" value={formatCost(view.savingsUsd)} />
+        <CacheRow label={t('cache.rows.savings')} value={formatCost(view.savingsUsd)} />
       ) : null}
 
       {note ? (
@@ -337,13 +378,13 @@ export function CacheDiagnostics({ cache, className }: CacheDiagnosticsProps) {
       ) : null}
 
       <p className="text-[10.5px] leading-snug text-foreground-subtle">
-        Acerto = tokens lidos do cache ÷ tokens de entrada do passo.
+        {t('cache.formula')}
       </p>
 
       <div className="flex flex-col gap-1 border-t border-border pt-1.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="tabular-nums text-[11px] text-foreground-subtle">
-            {view.samples} {view.samples === 1 ? 'amostra' : 'amostras'}
+            {t('cache.samples', { count: view.samples })}
           </span>
           {hasRawUsage ? (
             <button
@@ -355,7 +396,7 @@ export function CacheDiagnostics({ cache, className }: CacheDiagnosticsProps) {
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
               )}
             >
-              Copiar usage bruto
+              {t('cache.copyRaw')}
             </button>
           ) : null}
         </div>
@@ -369,7 +410,7 @@ export function CacheDiagnostics({ cache, className }: CacheDiagnosticsProps) {
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             )}
           >
-            Ver diagnóstico completo
+            {t('cache.fullDiagnostics')}
           </button>
         </PopoverClose>
       </div>
@@ -389,6 +430,7 @@ export interface CacheHitChipProps {
  * explica que o dado só existe depois do primeiro passo.
  */
 export function CacheHitChip({ cache, className }: CacheHitChipProps) {
+  const { t } = useTranslation('agents');
   const descriptionId = useId();
   const view = cacheView(cache);
   const tone = TONE_CLASSES[toneFor(view.state, view.hit)];
@@ -409,7 +451,7 @@ export function CacheHitChip({ cache, className }: CacheHitChipProps) {
         >
           <Zap aria-hidden className={cn('size-3 shrink-0', tone.icon)} strokeWidth={2} />
           <span aria-hidden className="text-foreground-subtle">
-            cache
+            {t('cache.chipLabel')}
           </span>
           <span className={cn('tabular-nums', view.hit == null && 'text-foreground-subtle')}>
             {formatCacheHit(view.hit)}
@@ -423,7 +465,7 @@ export function CacheHitChip({ cache, className }: CacheHitChipProps) {
         side="top"
         align="end"
         sideOffset={8}
-        aria-label="Detalhes do cache de prompt"
+        aria-label={t('cache.popoverAria')}
         className="w-72 p-3 shadow-lg"
       >
         <CacheDiagnostics cache={cache} />

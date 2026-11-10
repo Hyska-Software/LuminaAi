@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { ArrowUpRight, MessageSquarePlus, Pencil, Pin, Sparkles } from 'lucide-react';
 
 import { AgentAvatar } from './AgentAvatar';
 import {
   formatUsageCost,
   formatUsageTokens,
+  localizedDepartment,
   modelLabel,
   relativeTime,
 } from './agentUtils';
@@ -15,12 +18,22 @@ import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type { Agent, AgentUsage, Conversation } from '@/lib/types';
 import { compareConversationOrder } from '@/lib/utils';
 
-const PERMISSION_LABELS: Record<string, string> = {
-  read_only: 'Leitura',
-  review: 'Revisar',
-  edit: 'Editar',
-  autonomous: 'Autônomo',
-};
+type Translate = TFunction<'agents'>;
+
+function permissionLabel(mode: string, t: Translate): string {
+  switch (mode) {
+    case 'read_only':
+      return t('permissions.readOnly');
+    case 'review':
+      return t('permissions.review');
+    case 'edit':
+      return t('permissions.edit');
+    case 'autonomous':
+      return t('permissions.autonomous');
+    default:
+      return mode;
+  }
+}
 
 function fillComposer(text: string) {
   window.dispatchEvent(new CustomEvent<string>('zylara:suggest', { detail: text }));
@@ -61,6 +74,7 @@ export function AgentWelcome({
   onOpenThread: (id: string) => void;
   onOpenMain?: () => void;
 }) {
+  const { t } = useTranslation('agents');
   const providers = useAppStore((state) => state.providers);
   const usage = useAgentUsage(agent.id, agent.updatedAt);
   const openAvatarEditor = useUiStore((state) => state.openAgentAvatarEditor);
@@ -68,7 +82,7 @@ export function AgentWelcome({
     <div className="mx-auto flex w-full max-w-2xl flex-col items-center px-6 pb-6 pt-10 text-center sm:pt-14">
       <button
         type="button"
-        aria-label={`Personalizar avatar de ${agent.name}`}
+        aria-label={t('home.customizeAvatarAria', { name: agent.name })}
         onClick={() => openAvatarEditor(agent.id)}
         className="group relative rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
@@ -83,7 +97,9 @@ export function AgentWelcome({
       <h1 className="mt-4 text-2xl font-semibold tracking-tight text-foreground">{agent.name}</h1>
       <p className="mt-1 text-[13px] text-foreground-muted">
         {agent.role}
-        {agent.department ? ` · ${agent.department}` : ''}
+        {agent.department
+          ? ` · ${localizedDepartment(agent.department)}`
+          : ''}
       </p>
       {agent.description ? (
         <p className="mt-4 max-w-lg text-[14px] leading-relaxed text-foreground-muted">
@@ -96,32 +112,37 @@ export function AgentWelcome({
         </span>
         {agent.workspaceId ? (
           <span className="rounded-full border border-accent/30 bg-accent-soft px-3 py-1 text-[11px] text-accent">
-            Workspace · {PERMISSION_LABELS[agent.permissionMode] ?? agent.permissionMode}
+            {t('home.workspacePermission', {
+              permission: permissionLabel(agent.permissionMode, t),
+            })}
           </span>
         ) : null}
         {usage && usage.turns > 0 ? (
           <span className="rounded-full border border-border bg-surface-raised px-3 py-1 text-[11px] text-foreground-muted">
-            {formatUsageTokens(usage.totalTokens)} tokens · {formatUsageCost(usage.cost)}
+            {t('home.tokensCost', {
+              tokens: formatUsageTokens(usage.totalTokens),
+              cost: formatUsageCost(usage.cost),
+            })}
           </span>
         ) : null}
         <Button size="sm" onClick={onNewConversation}>
           <MessageSquarePlus className="mr-1.5 size-4" />
-          Nova conversa
+          {t('home.newConversation')}
         </Button>
         {onOpenMain ? (
           <Button
             size="sm"
             variant="secondary"
-            aria-label="Abrir conversa principal"
+            aria-label={t('home.openMainAria')}
             onClick={onOpenMain}
           >
             <Pin className="mr-1.5 size-3.5" />
-            Conversa principal
+            {t('threads.main')}
           </Button>
         ) : null}
         <Button size="sm" variant="ghost" onClick={onEdit}>
           <Pencil className="mr-1.5 size-3.5" />
-          Editar agente
+          {t('home.editAgent')}
         </Button>
       </div>
 
@@ -129,7 +150,7 @@ export function AgentWelcome({
         <div className="mt-8 w-full">
           <p className="mb-2 flex items-center justify-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
             <Sparkles className="size-3.5" />
-            Comece com
+            {t('home.starters')}
           </p>
           <div className="flex flex-wrap justify-center gap-2">
             {agent.starters.map((starter) => (
@@ -149,7 +170,7 @@ export function AgentWelcome({
       {threads.length > 0 ? (
         <div className="mt-8 w-full text-left">
           <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
-            Conversas recentes
+            {t('home.recentThreads')}
           </p>
           <div className="overflow-hidden rounded-xl border border-border bg-surface-raised/40">
             {threads.slice(0, 4).map((thread) => (

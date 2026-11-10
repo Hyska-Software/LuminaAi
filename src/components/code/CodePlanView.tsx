@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type { CodePlanTab } from '@/lib/store';
 import type { WorkspaceFileContent } from '@/lib/types';
@@ -11,7 +12,6 @@ export interface CodePlanViewProps {
 }
 
 /** Nome virtual exibido no cabeçalho/preview (extensão `.md` = Markdown). */
-const PLAN_PREVIEW_PATH = 'Plano.md';
 
 /**
  * Aba central do plano aprovado (WORKBENCH §5.4).
@@ -21,16 +21,17 @@ const PLAN_PREVIEW_PATH = 'Plano.md';
  * não é um arquivo do workspace e não passa pelo backend.
  */
 export function CodePlanView({ tab, className }: CodePlanViewProps) {
+  const { t } = useTranslation('code');
   const content = useMemo<WorkspaceFileContent>(
     () => ({
-      path: PLAN_PREVIEW_PATH,
+      path: t('code:plan.previewPath'),
       text: tab.markdown,
       truncated: false,
       size: new TextEncoder().encode(tab.markdown).length,
       encoding: 'utf-8',
       binary: false,
     }),
-    [tab.markdown],
+    [tab.markdown, t],
   );
 
   return (

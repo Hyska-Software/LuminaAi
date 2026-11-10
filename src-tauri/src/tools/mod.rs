@@ -8,6 +8,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::db::Db;
 use crate::domain::{Artifact, Citation, Settings, ToolCallRecord, TurnOptions};
+use crate::i18n;
 use crate::providers::ToolDefinition;
 
 pub mod artifact_library;
@@ -38,7 +39,10 @@ pub trait AgentHooks: Send + Sync {
         &self,
         _input: &crate::agents::AgentInput,
     ) -> Result<crate::agents::Agent, String> {
-        Err("AGENT_CREATE_UNAVAILABLE: criação de agentes indisponível neste runtime".to_string())
+        Err(format!(
+            "AGENT_CREATE_UNAVAILABLE: {}",
+            i18n::t("tools.mod.createUnavailable")
+        ))
     }
     /// Emitted after a tool-created persona so the renderer refreshes the team.
     fn agent_created(&self, _agent: &crate::agents::Agent) {}
@@ -157,9 +161,9 @@ pub fn definitions(options: &TurnOptions) -> Vec<ToolDefinition> {
 /// Execute a tool call. Must never panic: failures are returned as `ToolOutcome::error`.
 pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
     if !tool_allowed(&rt.options, &call.name) {
-        return ToolOutcome::error(format!(
-            "a ferramenta `{}` não está autorizada para este agente",
-            call.name
+        return ToolOutcome::error(i18n::t_args(
+            "tools.mod.notAuthorized",
+            &[("tool", &call.name)],
         ));
     }
     let arguments = match parse_arguments(&call.arguments) {
@@ -169,16 +173,16 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
 
     let outcome = match call.name.as_str() {
         "web_search" if !rt.options.web_search => {
-            ToolOutcome::error("a busca web está desativada nesta conversa")
+            ToolOutcome::error(i18n::t("tools.mod.webSearchDisabled"))
         }
         "web_search" => web_search::run(rt, &arguments).await,
         "fetch_url" => fetch_url::run(rt, &arguments).await,
         "create_file" if !rt.options.create_files => {
-            ToolOutcome::error("a criação de arquivos está desativada nesta conversa")
+            ToolOutcome::error(i18n::t("tools.mod.createFilesDisabled"))
         }
         "create_file" => create_file::run(rt, &arguments).await,
         "run_code" if !rt.options.run_code => {
-            ToolOutcome::error("a execução de código está desativada nesta conversa")
+            ToolOutcome::error(i18n::t("tools.mod.runCodeDisabled"))
         }
         "run_code" => code_exec::run(rt, &arguments).await,
         // Skills: sempre disponíveis, independentes das flags do turno.
@@ -194,15 +198,13 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
         "memory" => memory::run(rt, &arguments),
         name if agents::is_agent_tool(name) => {
             let Some(agent_id) = rt.options.agent_id.as_deref() else {
-                return ToolOutcome::error(
-                    "as ferramentas de agente só existem em conversas de um agente",
-                );
+                return ToolOutcome::error(i18n::t("tools.mod.agentToolsRequireAgent"));
             };
             agents::run_with_hooks(&rt.db, agent_id, name, &arguments, &rt.settings, rt.agent_hooks.as_deref())
         }
         "task_wait" => {
             let Some(agent_id) = rt.options.agent_id.as_deref() else {
-                return ToolOutcome::error("as ferramentas de tarefa só existem em conversas de um agente");
+                return ToolOutcome::error(i18n::t("tools.mod.taskToolsRequireAgent"));
             };
             tasks::wait_for_task(
                 &rt.db,
@@ -215,13 +217,14 @@ pub async fn execute(rt: &ToolRuntime, call: &ToolCallRecord) -> ToolOutcome {
         }
         name if tasks::is_delegation_tool(name) => {
             let Some(agent_id) = rt.options.agent_id.as_deref() else {
-                return ToolOutcome::error(
-                    "a delegação só existe em conversas de um agente",
-                );
+                return ToolOutcome::error(i18n::t("tools.mod.delegationRequiresAgent"));
             };
             tasks::run_with_hooks(&rt.db, agent_id, &rt.conversation_id, name, &arguments, rt.agent_hooks.as_deref())
         }
-        other => ToolOutcome::error(format!("ferramenta desconhecida: {other}")),
+        other => ToolOutcome::error(i18n::t_args(
+            "tools.mod.unknownTool",
+            &[("tool", other)],
+        )),
     };
     truncate_outcome(outcome)
 }
@@ -234,15 +237,20 @@ fn parse_arguments(raw: &str) -> Result<Value, String> {
     match serde_json::from_str::<Value>(trimmed) {
         Ok(Value::Null) => Ok(json!({})),
         Ok(Value::Object(map)) => Ok(Value::Object(map)),
-        Ok(_) => Err("os argumentos da ferramenta devem ser um objeto JSON".to_string()),
-        Err(error) => Err(format!("argumentos da ferramenta não são JSON válido: {error}")),
+        Ok(_) => Err(i18n::t("tools.mod.argumentsNotObject")),
+        Err(error) => Err(i18n::t_args(
+            "tools.mod.argumentsInvalid",
+            &[("error", &error.to_string())],
+        )),
     }
 }
 
 fn truncate_outcome(mut outcome: ToolOutcome) -> ToolOutcome {
     if outcome.content.chars().count() > MAX_TOOL_RESULT_CHARS {
         outcome.content = truncate_chars(&outcome.content, MAX_TOOL_RESULT_CHARS);
-        outcome.content.push_str("\n\n[resultado truncado para caber no contexto]");
+        outcome
+            .content
+            .push_str(&format!("\n\n{}", i18n::t("tools.mod.truncated")));
     }
     outcome
 }

@@ -1,0 +1,289 @@
+{
+  "groups": {
+    "conversas": "Conversas",
+    "navegacao": "Navegação",
+    "ferramentas": "Ferramentas",
+    "aparencia": "Aparência",
+    "configuracoes": "Configurações",
+    "sistema": "Sistema"
+  },
+  "sections": {
+    "suggestions": "Sugestões",
+    "conversations": "Conversas encontradas",
+    "recentConversations": "Conversas recentes",
+    "fallbackNote": "Busca no histórico indisponível; mostrando título e prévia."
+  },
+  "dialog": {
+    "title": "Paleta de comandos",
+    "description": "Busque conversas ou execute comandos do Zylara. Use as setas para navegar, Enter para executar e Esc para limpar a busca ou fechar."
+  },
+  "aria": {
+    "input": "Buscar conversas ou comandos",
+    "list": "Comandos e conversas"
+  },
+  "placeholders": {
+    "commands": "Buscar comandos…",
+    "conversations": "Buscar conversas…",
+    "all": "Buscar conversas ou comandos…"
+  },
+  "empty": {
+    "queryTitle": "Nenhum resultado para “{{query}}”",
+    "conversationsTitle": "Nenhuma conversa ainda",
+    "commandsTitle": "Nenhum comando encontrado",
+    "commandsHint": "Tente outro termo.",
+    "conversationMinChars": "Digite ao menos 2 caracteres para buscar no histórico.",
+    "conversationsHint": "Digite o título ou um trecho de uma mensagem.",
+    "allHint": "Tente outro termo ou use > para comandos e # para conversas."
+  },
+  "footer": {
+    "navigate": "navegar",
+    "execute": "executar",
+    "pin": "fixar",
+    "unpin": "desafixar",
+    "clearSearch": "limpar busca",
+    "close": "fechar",
+    "scopes": "> comandos · # conversas",
+    "searching": "Buscando conversas…",
+    "noResults": "Nenhum resultado",
+    "commandsOne": "{{count}} comando",
+    "commandsOther": "{{count}} comandos",
+    "conversationsOne": "{{count}} conversa",
+    "conversationsOther": "{{count}} conversas"
+  },
+  "announce": {
+    "searching": "Buscando conversas",
+    "resultsOne": "{{count}} resultado",
+    "resultsOther": "{{count}} resultados"
+  },
+  "toasts": {
+    "noAnswer": "Nenhuma resposta para copiar ainda",
+    "answerCopied": "Resposta copiada",
+    "copyFailed": "Não foi possível copiar",
+    "noConversation": "Nenhuma conversa aberta",
+    "exported": "Conversa exportada",
+    "exportFailed": "Não foi possível exportar",
+    "noArtifacts": "Nenhum artefato nesta conversa",
+    "noSources": "Nenhuma fonte nesta conversa",
+    "openDataDirFailed": "Não foi possível abrir a pasta de dados",
+    "openSkillsDirFailed": "Não foi possível abrir a pasta de skills",
+    "catalogFailed": "Não foi possível atualizar o catálogo",
+    "catalogUpdated": "Catálogo de modelos atualizado",
+    "conversationPinned": "Conversa fixada",
+    "conversationUnpinned": "Conversa desafixada",
+    "attachmentsRemoved": "Anexos removidos",
+    "toolEnabled": "{{tool}} ativada",
+    "toolDisabled": "{{tool}} desativada",
+    "runFailed": "Não foi possível executar a ação"
+  },
+  "tools": {
+    "webSearch": "Busca web",
+    "fileCreation": "Criação de arquivos",
+    "codeExecution": "Execução de código"
+  },
+  "themes": {
+    "dark": "escuro",
+    "light": "claro"
+  },
+  "settingsTabDescriptions": {
+    "general": "Tema, idioma e tamanho do texto",
+    "providers": "Chaves de API e status dos provedores",
+    "model": "Modelo e modo de pensamento padrão",
+    "instructions": "Instruções do sistema",
+    "tools": "Busca web, criação de arquivos, execução e passos",
+    "agents": "Concorrência, orçamento, notificações e computer use",
+    "data": "Pasta de dados, exportação e limpeza",
+    "about": "Versão e informações do aplicativo"
+  },
+  "actions": {
+    "newConversation": {
+      "codeLabel": "Nova sessão",
+      "agentLabel": "Nova conversa com agente",
+      "chatLabel": "Novo chat",
+      "codeDescription": "Comece uma nova sessão no layout Code",
+      "agentDescription": "Comece uma conversa com o agente selecionado",
+      "chatDescription": "Comece uma conversa em branco",
+      "codeKeywords": "nova sessao sessão code criar",
+      "agentKeywords": "nova conversa agente criar",
+      "chatKeywords": "nova conversa criar blank"
+    },
+    "pinConversation": {
+      "pinLabel": "Fixar conversa",
+      "unpinLabel": "Desafixar conversa",
+      "keywords": "pin fixar topo"
+    },
+    "exportMarkdown": {
+      "label": "Exportar conversa (Markdown)",
+      "description": "Salvar a conversa atual em Markdown",
+      "keywords": "salvar markdown arquivo"
+    },
+    "exportJson": {
+      "label": "Exportar conversa (JSON)",
+      "description": "Salvar a conversa em formato estruturado",
+      "keywords": "salvar json dados backup"
+    },
+    "copyLastAnswer": {
+      "label": "Copiar última resposta",
+      "description": "Copia o texto da resposta mais recente",
+      "keywords": "copiar clipboard área de transferência"
+    },
+    "clearAttachments": {
+      "label": "Limpar anexos",
+      "keywords": "arquivos remover composer",
+      "descriptionOne": "Remover 1 anexo pendente do composer",
+      "descriptionOther": "Remover {{count}} anexos pendentes do composer"
+    },
+    "stopResponse": {
+      "label": "Parar resposta",
+      "description": "Interrompe a resposta em andamento",
+      "keywords": "cancelar stop interromper"
+    },
+    "regenerateResponse": {
+      "label": "Regenerar resposta",
+      "description": "Gera novamente a última resposta",
+      "keywords": "tentar de novo refazer"
+    },
+    "modeCode": {
+      "label": "Ir para o modo Code",
+      "description": "Abrir o workspace de código (sessões e alterações)",
+      "keywords": "layout modo code chat conversa workspace agente"
+    },
+    "modeChat": {
+      "label": "Ir para o modo Chat",
+      "description": "Voltar ao layout de conversa com o assistente",
+      "keywords": "layout modo code chat conversa workspace agente"
+    },
+    "modeAgents": {
+      "label": "Ir para o modo Agentes",
+      "description": "Abrir a equipe de agentes e as personas",
+      "keywords": "layout modo agentes equipe personas"
+    },
+    "newAgent": {
+      "label": "Novo agente",
+      "description": "Criar uma persona com identidade, modelo e instruções",
+      "keywords": "agente novo criar persona"
+    },
+    "editAgent": {
+      "label": "Editar agente",
+      "description": "Abrir as configurações do agente selecionado",
+      "keywords": "agente editar instruções modelo"
+    },
+    "focusComposer": {
+      "label": "Focar campo de mensagem",
+      "description": "Leva o cursor para o composer",
+      "keywords": "input escrever mensagem"
+    },
+    "cacheDiagnostics": {
+      "label": "Diagnóstico de cache",
+      "description": "Amostras por request, quebras de prefixo e usage bruto da conversa ativa",
+      "keywords": "cache diagnóstico prompt tokens hit amostras usage provedor prefixo quebra"
+    },
+    "toggleSidebar": {
+      "label": "Alternar barra lateral",
+      "description": "Mostrar ou ocultar o histórico",
+      "keywords": "sidebar histórico lateral"
+    },
+    "openArtifacts": {
+      "label": "Abrir painel de artefatos",
+      "descriptionEmpty": "Nenhum artefato nesta conversa",
+      "keywords": "arquivos canvas prévia preview",
+      "descriptionOne": "{{count}} artefato nesta conversa",
+      "descriptionOther": "{{count}} artefatos nesta conversa"
+    },
+    "openSources": {
+      "label": "Abrir painel de fontes",
+      "descriptionEmpty": "Nenhuma fonte nesta conversa",
+      "keywords": "citações links referências web",
+      "descriptionOne": "{{count}} fonte nesta conversa",
+      "descriptionOther": "{{count}} fontes nesta conversa"
+    },
+    "openLibrary": {
+      "label": "Abrir biblioteca",
+      "description": "Todos os arquivos das conversas e os enviados por você",
+      "keywords": "biblioteca library arquivos favoritos upload enviados documentos"
+    },
+    "importLibrary": {
+      "label": "Enviar arquivos para a biblioteca",
+      "description": "Importar arquivos do computador para usar no chat",
+      "keywords": "upload importar enviar arquivos biblioteca library anexar"
+    },
+    "manageSkills": {
+      "label": "Gerenciar skills",
+      "description": "Ativar, desativar e excluir skills do agente",
+      "keywords": "skills habilidades agente"
+    },
+    "openSkillsFolder": {
+      "label": "Abrir pasta de skills",
+      "description": "Abrir a pasta de skills do usuário",
+      "keywords": "skills pasta arquivos"
+    },
+    "backToSession": {
+      "label": "Voltar à sessão",
+      "description": "Sair da gestão de skills e voltar ao agente",
+      "keywords": "sessão agente voltar code"
+    },
+    "backToChat": {
+      "label": "Voltar ao chat",
+      "descriptionLibrary": "Sair da biblioteca",
+      "descriptionSkills": "Sair da gestão de skills",
+      "keywords": "chat conversa voltar"
+    },
+    "switchModel": {
+      "label": "Trocar modelo",
+      "description": "Escolher modelo e modo de pensamento",
+      "keywords": "modelo raciocínio pensamento provider"
+    },
+    "webSearch": {
+      "enableLabel": "Ativar busca web",
+      "disableLabel": "Desativar busca web",
+      "enabledDescription": "Ferramenta ativa no próximo turno",
+      "disabledDescription": "Ferramenta desligada no composer",
+      "keywords": "web search internet pesquisa"
+    },
+    "fileCreation": {
+      "enableLabel": "Ativar criação de arquivos",
+      "disableLabel": "Desativar criação de arquivos",
+      "enabledDescription": "Ferramenta ativa no próximo turno",
+      "disabledDescription": "Ferramenta desligada no composer",
+      "keywords": "arquivos criar documentos artifacts"
+    },
+    "codeExecution": {
+      "enableLabel": "Ativar execução de código",
+      "disableLabel": "Desativar execução de código",
+      "enabledDescription": "run_code ativo no próximo turno",
+      "disabledDescription": "run_code desligado nas configurações",
+      "keywords": "código python node scripts run_code"
+    },
+    "toggleTheme": {
+      "label": "Alternar tema",
+      "description": "Tema atual: {{theme}} — alterna para {{next}}",
+      "keywords": "dark light escuro claro aparência"
+    },
+    "systemTheme": {
+      "label": "Seguir tema do sistema",
+      "description": "Usa a preferência de aparência do sistema operacional",
+      "keywords": "sistema automático auto aparência"
+    },
+    "openSettings": {
+      "label": "Abrir configurações",
+      "description": "Tema, provedores, modelo padrão e ferramentas",
+      "keywords": "preferências ajustes settings"
+    },
+    "openDataFolder": {
+      "label": "Abrir pasta de dados",
+      "description": "Banco, anexos e artefatos do Zylara",
+      "keywords": "dados database arquivos pasta"
+    },
+    "refreshCatalog": {
+      "label": "Recarregar catálogo de modelos",
+      "description": "Buscar a lista atualizada de modelos disponíveis",
+      "keywords": "modelos catálogo atualizar refresh"
+    }
+  },
+  "conversationRow": {
+    "noMessages": "Sem mensagens",
+    "oneMessage": "1 mensagem",
+    "messages": "{{count}} mensagens",
+    "contentBadge": "Conteúdo",
+    "contentMatch": "Correspondência no conteúdo da conversa"
+  }
+}

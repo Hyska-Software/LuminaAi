@@ -7,6 +7,7 @@
  * sessão (docs/goals/code-harness/WORKBENCH.md §5).
  */
 import { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   ApprovalCard,
@@ -19,6 +20,7 @@ import {
   type PlanAction,
 } from '@/components/agent';
 import { goalNeedsAttention } from '@/lib/goalRunner';
+import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui';
 import { useAppStore, useCodeStore, useUiStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
@@ -34,8 +36,12 @@ import type {
 function goalExecutionBlocker(goal: GoalView | null | undefined): string | null {
   if (!goal || goal.status === 'completed') return null;
   const status =
-    goal.status === 'active' ? 'ativo' : goal.status === 'paused' ? 'pausado' : 'bloqueado';
-  return `Esta sessão já tem um objetivo ${status}. Conclua ou encerre o objetivo atual antes de executar o plano como objetivo.`;
+    goal.status === 'active'
+      ? t('code:goal.adjective.active')
+      : goal.status === 'paused'
+        ? t('code:goal.adjective.paused')
+        : t('code:goal.adjective.blocked');
+  return t('code:cards.goalBlocker', { status });
 }
 
 /**
@@ -46,6 +52,7 @@ function goalExecutionBlocker(goal: GoalView | null | undefined): string | null 
  * popover "Plano e tarefas" do composer.
  */
 export function CodeSessionCards({ conversationId }: { conversationId: string }) {
+  const { t } = useTranslation('code');
   const session = useCodeStore((state) => state.byConversation[conversationId]);
   const respondApproval = useCodeStore((state) => state.respondApproval);
   const respondQuestion = useCodeStore((state) => state.respondQuestion);
@@ -117,7 +124,7 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
   ) => {
     if (action === 'keep_planning') {
       void decide(approval, 'denied', {
-        feedback: feedback?.trim() || 'Continue planejando.',
+        feedback: feedback?.trim() || t('code:cards.keepPlanning'),
       });
       return;
     }
@@ -132,11 +139,11 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
 
   const announcement =
     planApprovals.length > 0
-      ? 'Plano aguardando aprovação.'
+      ? t('code:cards.announcement.plan')
       : otherApprovals.length > 0
-        ? 'Aprovação necessária.'
+        ? t('code:cards.announcement.approval')
         : session.questions.length > 0
-          ? 'O agente fez uma pergunta.'
+          ? t('code:cards.announcement.question')
           : '';
 
   return (
@@ -213,8 +220,8 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
                   ui.setAgentRightPanel('agent');
                   ui.setAgentPanelTab(assistance.header === 'computer_browser' ? 'browser' : 'screen');
                   ui.setAgentPanelOpen(true);
-                }}>Abrir ambiente para ajudar</Button>
-                <span className="text-[11px] text-foreground-muted">Assuma e devolva o controle no painel antes de responder.</span>
+                }}>{t('code:cards.openEnvironment')}</Button>
+                <span className="text-[11px] text-foreground-muted">{t('code:cards.assistHint')}</span>
               </div>
             ) : null}
           </div>

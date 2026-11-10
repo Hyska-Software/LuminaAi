@@ -1,5 +1,7 @@
 import { MessageSquareText, Pin } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Badge } from '@/components/ui';
+import { t } from '@/lib/i18n';
 import type { Conversation } from '@/lib/types';
 import type { TextRanges } from '@/lib/palette/types';
 import { cn, relativeTime } from '@/lib/utils';
@@ -19,8 +21,9 @@ export interface ConversationRowProps {
 }
 
 function messageCountLabel(count: number): string {
-  if (count === 0) return 'Sem mensagens';
-  return count === 1 ? '1 mensagem' : `${count} mensagens`;
+  if (count === 0) return t('palette:conversationRow.noMessages');
+  if (count === 1) return t('palette:conversationRow.oneMessage');
+  return t('palette:conversationRow.messages', { count });
 }
 
 /** One conversation search result inside the palette listbox. */
@@ -35,11 +38,12 @@ export function ConversationRow({
   onExecute,
   refCallback,
 }: ConversationRowProps) {
+  const { t: tPalette } = useTranslation('palette');
   const Icon = conversation.pinned ? Pin : MessageSquareText;
   const preview = conversation.preview?.trim() ?? '';
   const ariaDescription = [
     preview || messageCountLabel(conversation.messageCount),
-    matchedInContent ? 'Correspondência no conteúdo da conversa' : null,
+    matchedInContent ? tPalette('conversationRow.contentMatch') : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -77,7 +81,7 @@ export function ConversationRow({
           </span>
           {matchedInContent ? (
             <Badge tone="outline" className="shrink-0">
-              Conteúdo
+              {tPalette('conversationRow.contentBadge')}
             </Badge>
           ) : null}
         </span>

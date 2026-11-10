@@ -1,6 +1,8 @@
 import { useId, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, FileDiff } from 'lucide-react';
 import { buildCodeTurnSummary } from '@/lib/codeTurnSummary';
+import { formatNumber } from '@/lib/i18n/format';
 import { useUiStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -20,15 +22,7 @@ export interface CodeTurnSummaryProps {
   className?: string;
 }
 
-/** Contagem no padrão pt-BR (`1.234`), como o resto das métricas do workbench. */
-function formatCount(value: number): string {
-  return value.toLocaleString('pt-BR');
-}
-
-/** "1 arquivo alterado" / "N arquivos alterados". */
-function filesTitle(count: number): string {
-  return count === 1 ? '1 arquivo alterado' : `${count} arquivos alterados`;
-}
+/** Contagem no padrão do locale (`1,234` / `1.234`), como o resto do workbench. */
 
 /**
  * Fecho de turno do layout Code (WORKBENCH §5.1): o card "Edited N files" dos
@@ -47,6 +41,7 @@ function filesTitle(count: number): string {
  * full-width "Todos os N arquivos" / "Mostrar menos".
  */
 export function CodeTurnSummary({ message, workspaceId, className }: CodeTurnSummaryProps) {
+  const { t } = useTranslation('code');
   const listId = useId();
   const [expanded, setExpanded] = useState(false);
   const summary = useMemo(() => buildCodeTurnSummary(message), [message]);
@@ -68,7 +63,7 @@ export function CodeTurnSummary({ message, workspaceId, className }: CodeTurnSum
   return (
     <section
       role="group"
-      aria-label="Resumo do turno"
+      aria-label={t('code:turnSummary.region')}
       className={cn(
         'mt-3 overflow-hidden rounded-xl border border-border bg-surface-raised',
         className,
@@ -83,16 +78,16 @@ export function CodeTurnSummary({ message, workspaceId, className }: CodeTurnSum
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold leading-snug text-foreground">
-            {filesTitle(total)}
+            {t('code:turnSummary.files', { count: total })}
           </p>
           <p className="mt-0.5 text-[11.5px] leading-snug tabular-nums text-foreground-muted">
-            <span className="text-success">+{formatCount(summary.added)}</span>{' '}
-            <span className="text-danger">−{formatCount(summary.removed)}</span>
+            <span className="text-success">+{formatNumber(summary.added)}</span>{' '}
+            <span className="text-danger">−{formatNumber(summary.removed)}</span>
           </p>
         </div>
       </div>
 
-      <ul id={listId} aria-label="Arquivos alterados" className="border-t border-border py-1">
+      <ul id={listId} aria-label={t('code:turnSummary.changedFilesAria')} className="border-t border-border py-1">
         {visibleFiles.map((file) => {
           const row = (
             <>
@@ -107,8 +102,8 @@ export function CodeTurnSummary({ message, workspaceId, className }: CodeTurnSum
                 {file.path}
               </span>
               <span className="shrink-0 text-[11px] tabular-nums">
-                <span className="text-success">+{formatCount(file.added)}</span>{' '}
-                <span className="text-danger">−{formatCount(file.removed)}</span>
+                <span className="text-success">+{formatNumber(file.added)}</span>{' '}
+                <span className="text-danger">−{formatNumber(file.removed)}</span>
               </span>
             </>
           );
@@ -126,7 +121,7 @@ export function CodeTurnSummary({ message, workspaceId, className }: CodeTurnSum
                       knownDiff: file.diff ?? null,
                     })
                   }
-                  aria-label={`Abrir diff de ${file.path}`}
+                  aria-label={t('code:turnSummary.openDiff', { path: file.path })}
                   className={cn(
                     'group/row flex h-7 w-full min-w-0 items-center gap-2 px-3 text-left',
                     'transition-colors duration-150 hover:bg-surface-hover',
@@ -158,7 +153,9 @@ export function CodeTurnSummary({ message, workspaceId, className }: CodeTurnSum
             'motion-reduce:transition-none',
           )}
         >
-          {expanded ? 'Mostrar menos' : `Todos os ${total} arquivos`}
+          {expanded
+            ? t('code:turnSummary.showLess')
+            : t('code:turnSummary.showAll', { count: total })}
           <ChevronDown
             aria-hidden
             strokeWidth={2}

@@ -62,16 +62,16 @@ pub fn save_settings(
 }
 
 /// Copy shown when the pasted key is too short to be a real API key.
-fn api_key_validation_hint(provider: &ProviderInfo) -> &'static str {
+fn api_key_validation_hint(provider: &ProviderInfo) -> String {
     // The catalog id is stable, so copy can be provider-specific without
     // guessing from URLs. Direct providers get their own console text; the
     // ChatGPT provider keeps the plan copy and the gateways the OpenCode copy.
     if provider.id == "anthropic" {
-        "Copie a API key completa do Console da Anthropic (a chave começa com `sk-ant-`)."
+        crate::i18n::t("settings.keys.hint.anthropic")
     } else if provider.supports_oauth() {
-        "Copie a API key completa da plataforma (a alternativa ao login ChatGPT)."
+        crate::i18n::t("settings.keys.hint.oauth")
     } else {
-        "Copie a API key completa do OpenCode Console."
+        crate::i18n::t("settings.keys.hint.generic")
     }
 }
 
@@ -87,21 +87,20 @@ fn normalize_provider_key(
         return Ok(None);
     };
     if key.starts_with("eyJ") && key.matches('.').count() == 2 {
-        return Err(
-            "isso parece um token de sessão, não uma API key. Use “Continuar com ChatGPT” \
-             para conectar a conta; a API key alternativa começa com `sk-`."
-                .to_string(),
-        );
+        return Err(crate::i18n::t("settings.keys.sessionToken"));
     }
     let length = key.chars().count();
     if length < 20 {
-        return Err(format!(
-            "a chave informada parece inválida ({length} caracteres; esperado pelo menos 20). {}",
-            api_key_validation_hint(provider)
+        return Err(crate::i18n::t_args(
+            "settings.keys.tooShort",
+            &[
+                ("length", &length.to_string()),
+                ("hint", &api_key_validation_hint(provider)),
+            ],
         ));
     }
     if key.chars().any(char::is_whitespace) {
-        return Err("a API key não pode conter espaços ou quebras de linha".to_string());
+        return Err(crate::i18n::t("settings.keys.whitespace"));
     }
     Ok(Some(key))
 }
@@ -117,7 +116,12 @@ pub fn set_provider_key(
         .catalog
         .provider(&provider_id)
         .cloned()
-        .ok_or_else(|| format!("provedor desconhecido: {provider_id}"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args(
+                "settings.errors.providerUnknown",
+                &[("provider_id", &provider_id)],
+            )
+        })?;
     let key = normalize_provider_key(&provider, key)?;
     // `config` rewrites the whole v2 file, so the OAuth block is preserved.
     config::set_api_key(&app, &provider_id, key.as_deref()).map_err(to_error)?;
@@ -146,7 +150,12 @@ pub fn open_data_dir(app: AppHandle) -> Result<(), String> {
     let dir = config::data_dir(&app).map_err(to_error)?;
     app.opener()
         .open_path(dir.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|error| format!("falha ao abrir a pasta de dados: {error}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "settings.errors.openDataDir",
+                &[("error", &error.to_string())],
+            )
+        })
 }
 
 /* ------------------------------------------------------------------ */
@@ -165,7 +174,12 @@ pub async fn get_code_environment(app: AppHandle) -> Result<CodeEnvironmentStatu
         crate::tools::code_exec::environment_status(&data_dir, &settings)
     })
     .await
-    .map_err(|error| format!("falha ao verificar o ambiente de código: {error}"))
+    .map_err(|error| {
+        crate::i18n::t_args(
+            "settings.errors.codeEnvironment",
+            &[("error", &error.to_string())],
+        )
+    })
 }
 
 /// Opens `<app-data>/skills` (the user skills folder) in the OS file manager,
@@ -174,14 +188,19 @@ pub async fn get_code_environment(app: AppHandle) -> Result<CodeEnvironmentStatu
 pub fn open_skills_dir(app: AppHandle) -> Result<(), String> {
     let dir = config::data_dir(&app).map_err(to_error)?.join("skills");
     std::fs::create_dir_all(&dir).map_err(|error| {
-        format!(
-            "falha ao criar a pasta de skills ({}): {error}",
-            dir.display()
+        crate::i18n::t_args(
+            "settings.errors.createSkillsDir",
+            &[("path", &dir.display().to_string()), ("error", &error.to_string())],
         )
     })?;
     app.opener()
         .open_path(dir.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|error| format!("falha ao abrir a pasta de skills: {error}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "settings.errors.openSkillsDir",
+                &[("error", &error.to_string())],
+            )
+        })
 }
 
 /* ------------------------------------------------------------------ */
@@ -220,9 +239,12 @@ pub fn reset_app_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     let data_dir = config::data_dir(&app).map_err(to_error)?;
     for sub in ["attachments", "artifacts"] {
         clear_dir(&data_dir.join(sub)).map_err(|error| {
-            format!(
-                "falha ao limpar a pasta {}: {error}",
-                data_dir.join(sub).display()
+            crate::i18n::t_args(
+                "settings.errors.clearDir",
+                &[
+                    ("path", &data_dir.join(sub).display().to_string()),
+                    ("error", &error.to_string()),
+                ],
             )
         })?;
     }
@@ -265,57 +287,42 @@ fn count_models(json: &serde_json::Value) -> u32 {
 
 fn credential_missing_message(provider: &ProviderInfo) -> String {
     if provider.supports_oauth() {
-        format!(
-            "Nenhuma credencial configurada para {}. Entre com o ChatGPT (Continuar com \
-             ChatGPT) ou adicione uma API key da plataforma em Configurações → Provedores.",
-            provider.name
+        crate::i18n::t_args(
+            "settings.validation.missingOauth",
+            &[("provider", &provider.name)],
         )
     } else {
-        "Nenhuma API key configurada para este provedor. Adicione uma chave em \
-         Configurações → Provedores."
-            .to_string()
+        crate::i18n::t("settings.validation.missingKey")
     }
 }
 
 fn validate_status_message(provider: &ProviderInfo, status: u16, oauth: bool) -> String {
     match status {
-        401 if oauth => "A sessão do ChatGPT expirou ou é inválida (401). Entre novamente com \
-                         ChatGPT em Configurações → Provedores."
-            .to_string(),
-        401 => format!(
-            "API key inválida ou expirada (401). {}",
-            api_key_validation_hint(provider)
+        401 if oauth => crate::i18n::t("settings.validation.status401Oauth"),
+        401 => crate::i18n::t_args(
+            "settings.validation.status401",
+            &[("hint", &api_key_validation_hint(provider))],
         ),
-        402 if oauth => "Pagamento necessário (402). Verifique a assinatura/créditos da sua conta \
-                         ChatGPT."
-            .to_string(),
+        402 if oauth => crate::i18n::t("settings.validation.status402Oauth"),
         402 if provider.id.starts_with("opencode-") => {
-            "Pagamento necessário (402). Verifique os créditos do OpenCode Zen ou a assinatura \
-             do OpenCode Go."
-                .to_string()
+            crate::i18n::t("settings.validation.status402Opencode")
         }
         // Direct providers (Anthropic, OpenAI API key) must never see the
         // OpenCode credits copy.
-        402 => "Pagamento necessário (402). Verifique o faturamento/créditos da sua conta no \
-                provedor."
-            .to_string(),
-        403 if oauth => {
-            "Acesso negado (403): sua conta não tem permissão para usar este provedor ou \
-             região."
-                .to_string()
-        }
-        403 => "Acesso negado (403): esta chave não tem permissão para o provedor.".to_string(),
-        404 => "Endpoint de modelos não encontrado (404). A URL base do provedor pode ter \
-                mudado; atualize o catálogo."
-            .to_string(),
-        429 if oauth => "Limite de uso atingido (429) — pode ser do seu plano ou deste app. Use \
-                         “Gerenciar uso” no ChatGPT para verificar."
-            .to_string(),
-        429 => "Muitas requisições (429). Aguarde um instante e tente novamente.".to_string(),
-        _ if (500..=599).contains(&status) => {
-            format!("O provedor respondeu {status}. Tente novamente mais tarde.")
-        }
-        _ => format!("O provedor respondeu {status}."),
+        402 => crate::i18n::t("settings.validation.status402"),
+        403 if oauth => crate::i18n::t("settings.validation.status403Oauth"),
+        403 => crate::i18n::t("settings.validation.status403"),
+        404 => crate::i18n::t("settings.validation.status404"),
+        429 if oauth => crate::i18n::t("settings.validation.status429Oauth"),
+        429 => crate::i18n::t("settings.validation.status429"),
+        _ if (500..=599).contains(&status) => crate::i18n::t_args(
+            "settings.validation.status5xx",
+            &[("status", &status.to_string())],
+        ),
+        _ => crate::i18n::t_args(
+            "settings.validation.statusOther",
+            &[("status", &status.to_string())],
+        ),
     }
 }
 
@@ -345,23 +352,11 @@ fn resolve_api_key(app: &AppHandle, provider: &ProviderInfo) -> Option<String> {
 /// only shown when there is no API key fallback either.
 fn oauth_blocker_message(registration: &StoredOAuthRegistration) -> Option<String> {
     if registration.disconnected {
-        Some(
-            "Você saiu da conta ChatGPT. Entre novamente para usar o plano ou adicione uma \
-             API key da plataforma (as duas opções ficam em Configurações → Provedores)."
-                .to_string(),
-        )
+        Some(crate::i18n::t("settings.validation.oauthSignedOut"))
     } else if !registration.has_refresh_token() {
-        Some(
-            "Sua sessão do ChatGPT expirou. Entre novamente para usar o plano ou adicione uma \
-             API key da plataforma em Configurações → Provedores."
-                .to_string(),
-        )
+        Some(crate::i18n::t("settings.validation.oauthExpired"))
     } else if !registration.plan_usage {
-        Some(
-            "Sua conta ChatGPT está conectada, mas o uso do plano não está autorizado. Ative o \
-             uso do plano em Configurações → Provedores (ou adicione uma API key da plataforma)."
-                .to_string(),
-        )
+        Some(crate::i18n::t("settings.validation.oauthPlanNotAuthorized"))
     } else {
         None
     }
@@ -417,7 +412,12 @@ pub async fn validate_provider(
         .catalog
         .provider(&provider_id)
         .cloned()
-        .ok_or_else(|| format!("provedor desconhecido: {provider_id}"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args(
+                "settings.errors.providerUnknown",
+                &[("provider_id", &provider_id)],
+            )
+        })?;
     let url = models_endpoint(&provider);
 
     // Credential order (PLAN §2.4): a usable OAuth registration (plan usage +
@@ -443,9 +443,9 @@ pub async fn validate_provider(
             Err(error) => {
                 return Ok(validation_failure(
                     provider_id,
-                    format!(
-                        "Não foi possível usar a conta ChatGPT: {error:#}. Entre novamente em \
-                             Configurações → Provedores (ou saia da conta para usar a API key)."
+                    crate::i18n::t_args(
+                        "settings.validation.oauthUnusable",
+                        &[("error", &format!("{error:#}"))],
                     ),
                     None,
                 ));
@@ -480,9 +480,9 @@ pub async fn validate_provider(
             Err(error) => {
                 return Ok(validation_failure(
                     provider_id,
-                    format!(
-                        "Sua sessão do ChatGPT expirou e não pôde ser renovada ({error:#}). Entre \
-                         novamente em Configurações → Provedores."
+                    crate::i18n::t_args(
+                        "settings.validation.refreshFailed",
+                        &[("error", &format!("{error:#}"))],
                     ),
                     None,
                 ));
@@ -500,9 +500,15 @@ pub async fn validate_provider(
                 .map(|json| count_models(&json))
                 .unwrap_or(0);
             let message = if auth_mode == "oauth" {
-                format!("Conta ChatGPT validada — {models} modelos disponíveis para o seu plano.")
+                crate::i18n::t_args(
+                    "settings.validation.oauthValid",
+                    &[("models", &models.to_string())],
+                )
             } else {
-                format!("Conexão validada — {models} modelos disponíveis no provedor.")
+                crate::i18n::t_args(
+                    "settings.validation.valid",
+                    &[("models", &models.to_string())],
+                )
             };
             Ok(ProviderValidation {
                 provider_id,
@@ -519,14 +525,17 @@ pub async fn validate_provider(
         }
         Err(error) => {
             let message = if error.is_timeout() {
-                "Tempo esgotado ao contatar o provedor (15s).".to_string()
+                crate::i18n::t("settings.validation.timeout")
             } else if error.is_connect() {
-                format!(
-                    "Não foi possível conectar a {}. Verifique a rede.",
-                    provider.base_url
+                crate::i18n::t_args(
+                    "settings.validation.connect",
+                    &[("url", &provider.base_url)],
                 )
             } else {
-                format!("Falha de rede ao contatar o provedor: {error}")
+                crate::i18n::t_args(
+                    "settings.validation.network",
+                    &[("error", &error.to_string())],
+                )
             };
             Ok(validation_failure(provider_id, message, Some(latency_ms)))
         }

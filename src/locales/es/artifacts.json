@@ -1,0 +1,271 @@
+{
+  "kinds": {
+    "markdown": {
+      "label": "Markdown",
+      "description": "Documento Markdown"
+    },
+    "code": {
+      "label": "Código",
+      "description": "Archivo de código"
+    },
+    "text": {
+      "label": "Texto",
+      "description": "Texto sin formato"
+    },
+    "html": {
+      "label": "HTML",
+      "description": "Página HTML"
+    },
+    "csv": {
+      "label": "CSV",
+      "description": "Hoja de cálculo CSV"
+    },
+    "json": {
+      "label": "JSON",
+      "description": "Datos JSON"
+    },
+    "svg": {
+      "label": "SVG",
+      "description": "Gráfico vectorial"
+    },
+    "image": {
+      "label": "Imagen",
+      "description": "Imagen"
+    },
+    "pdf": {
+      "label": "PDF",
+      "description": "Documento PDF"
+    },
+    "docx": {
+      "label": "Documento",
+      "description": "Documento de Word"
+    },
+    "xlsx": {
+      "label": "Hoja de cálculo",
+      "description": "Hoja de cálculo de Excel"
+    },
+    "pptx": {
+      "label": "Presentación",
+      "description": "Presentación de PowerPoint"
+    },
+    "audio": {
+      "label": "Audio",
+      "description": "Archivo de audio"
+    },
+    "video": {
+      "label": "Vídeo",
+      "description": "Archivo de vídeo"
+    },
+    "archive": {
+      "label": "Archivo comprimido",
+      "description": "Paquete ZIP"
+    },
+    "binary": {
+      "label": "Archivo",
+      "description": "Archivo binario"
+    }
+  },
+  "card": {
+    "open": "Abrir",
+    "saveAs": "Guardar como…",
+    "saveNamed": "Guardar {{name}} como…",
+    "saveSuccess": "Archivo guardado",
+    "saveError": "No se pudo guardar el archivo",
+    "openError": "No se pudo abrir el archivo",
+    "subtitle": "{{kind}} · {{size}}"
+  },
+  "list": {
+    "ariaLabel": "Artefactos de la conversación",
+    "emptyTitle": "No hay artefactos en esta conversación",
+    "emptyDescription": "Cuando el modelo cree un archivo, aparecerá aquí con vista previa y acciones."
+  },
+  "preview": {
+    "errorTitle": "No se pudo cargar la vista previa"
+  },
+  "panel": {
+    "title": "Artefactos",
+    "ariaLabel": "Panel de artefactos",
+    "close": "Cerrar",
+    "closeLabel": "Cerrar panel de artefactos",
+    "viewList": "Ver lista",
+    "viewListLabel": "Ver lista de artefactos",
+    "previous": "Artefacto anterior",
+    "next": "Siguiente artefacto",
+    "saveAs": "Guardar como…",
+    "openExternal": "Abrir en la aplicación predeterminada",
+    "delete": "Eliminar",
+    "deleteLabel": "Eliminar artefacto",
+    "deleteConfirm": "¿Eliminar «{{name}}»? Esta acción no se puede deshacer.",
+    "deleteSuccess": "Artefacto eliminado",
+    "deleteError": "No se pudo eliminar el artefacto",
+    "loading": "Cargando artefacto…",
+    "loadingLabel": "Cargando artefacto",
+    "loadErrorTitle": "No se pudo cargar el artefacto",
+    "noContent": "No se encontró el contenido del artefacto.",
+    "retry": "Reintentar",
+    "count_one": "{{current}} de {{total}} artefacto",
+    "count_other": "{{current}} de {{total}} artefactos",
+    "createdAt": "Creado el {{date}}",
+    "listHint": "Selecciona «Abrir» para ver la vista previa",
+    "listCount_one": "{{count}} artefacto",
+    "listCount_other": "{{count}} artefactos",
+    "countUnknown_one": "— artefacto",
+    "countUnknown_other": "— artefactos",
+    "dockedTooltip": "Flotar el panel sobre el chat",
+    "overlayTooltip": "Acoplar el panel junto al chat",
+    "dockDisabledTooltip": "Amplía la ventana para acoplar el panel",
+    "resize": "Cambiar el tamaño del panel de artefactos"
+  },
+  "code": {
+    "toolbar": "Controles del código",
+    "wrap": "Ajustar líneas",
+    "noWrap": "Desplazamiento horizontal",
+    "empty": "Nada que mostrar.",
+    "lineCount_one": "{{count}} línea",
+    "lineCount_other": "{{count}} líneas"
+  },
+  "csv": {
+    "empty": "CSV vacío.",
+    "truncated": "Mostrando las primeras {{shown}} de {{total}} filas."
+  },
+  "markdown": {
+    "viewAria": "Modo de visualización del Markdown",
+    "document": "Documento",
+    "code": "Código",
+    "previewAria": "Vista previa del Markdown",
+    "empty": "Markdown vacío."
+  },
+  "json": {
+    "viewAria": "Modo de visualización del JSON",
+    "tree": "Árbol",
+    "code": "Código",
+    "empty": "JSON vacío.",
+    "noJson": "No hay contenido JSON para mostrar.",
+    "invalid": "JSON no válido: se muestra el contenido original.",
+    "treeAria": "Árbol JSON de {{name}}",
+    "treeLabel": "Árbol JSON",
+    "truncated": "Vista previa truncada: el JSON es demasiado grande",
+    "lineCount_one": "{{count}} línea",
+    "lineCount_other": "{{count}} líneas",
+    "items_one": "{{count}} elemento",
+    "items_other": "{{count}} elementos",
+    "keys_one": "{{count}} clave",
+    "keys_other": "{{count}} claves",
+    "characters_one": "({{count}} carácter)",
+    "characters_other": "({{count}} caracteres)",
+    "expand": "Expandir {{label}}",
+    "collapse": "Contraer {{label}}"
+  },
+  "archive": {
+    "loading": "Leyendo archivo comprimido…",
+    "empty": "Archivo comprimido vacío.",
+    "listError": "No se pudieron listar las entradas del archivo comprimido.",
+    "summaryTitle": "Resumen del contenido",
+    "entriesAria": "Entradas del archivo comprimido",
+    "summary_one": "{{count}} archivo · {{size}}",
+    "summary_other": "{{count}} archivos · {{size}}",
+    "directorySummary_one": " · {{count}} carpeta",
+    "directorySummary_other": " · {{count}} carpetas",
+    "showing": "Mostrando {{shown}} de {{total}} entradas",
+    "files_one": "{{count}} archivo",
+    "files_other": "{{count}} archivos",
+    "folders_one": "{{count}} carpeta",
+    "folders_other": "{{count}} carpetas"
+  },
+  "binary": {
+    "saveAs": "Guardar como…",
+    "open": "Abrir",
+    "retry": "Reintentar",
+    "previewUnavailable": "vista previa no disponible",
+    "subtitle": "{{kind}} · {{size}}",
+    "subtitleUnavailable": "{{kind}} · {{size}} · vista previa no disponible",
+    "subtitleWithFormat": "{{kind}} · {{format}} · {{size}}",
+    "subtitleWithFormatUnavailable": "{{kind}} · {{format}} · {{size}} · vista previa no disponible",
+    "readError": "No se pudieron leer los primeros bytes: {{message}}",
+    "readingBytes": "Leyendo los primeros bytes",
+    "readingBytesEllipsis": "Leyendo los primeros bytes…",
+    "firstBytesAria": "Primeros bytes del archivo",
+    "firstBytes": "Primeros {{count}} bytes",
+    "totalSize": "{{size}} en total",
+    "hexdumpLabel": "Primeros {{count}} bytes del archivo {{name}}"
+  },
+  "hexdump": {
+    "defaultLabel": "Hexdump de los primeros bytes",
+    "empty": "No hay bytes que mostrar."
+  },
+  "audio": {
+    "largeDetail": "Archivo demasiado grande para reproducirlo en línea; usa Abrir/Guardar.",
+    "fileSizeTitle": "Tamaño del archivo",
+    "durationTitle": "Duración del audio",
+    "durationUnknown": "Duración —",
+    "playerAria": "Reproductor de audio de {{name}}",
+    "playError": "No se pudo reproducir el audio; usa Abrir/Guardar.",
+    "localPlayback": "Reproducción local en el reproductor nativo.",
+    "formatFallback": "AUDIO"
+  },
+  "video": {
+    "fileSizeTitle": "Tamaño del archivo",
+    "durationTitle": "Duración del vídeo",
+    "durationUnknown": "Duración —",
+    "playerAria": "Reproductor de vídeo de {{name}}",
+    "playError": "No se pudo reproducir el vídeo; usa Abrir/Guardar.",
+    "formatFallback": "VÍDEO"
+  },
+  "image": {
+    "toolbarAria": "Controles de la imagen",
+    "stageAria": "Visualización de la imagen",
+    "zoomOut": "Alejar",
+    "zoomIn": "Acercar",
+    "dimensionsTitle": "Dimensiones de la imagen en píxeles",
+    "fit": "Ajustar a la ventana",
+    "actual": "Tamaño real",
+    "loading": "Cargando imagen…",
+    "noData": "La imagen no tiene datos para mostrarla.",
+    "decodeError": "No se pudo decodificar la imagen.",
+    "svgNotRecognized": "Marcado no reconocido como SVG; se muestra como texto.",
+    "svgToolbarAria": "Controles del SVG",
+    "svgStageAria": "Visualización del SVG"
+  },
+  "pdf": {
+    "noData": "Este PDF llegó sin los datos necesarios para la vista previa.",
+    "renderErrorTitle": "No se pudo renderizar el PDF",
+    "retry": "Reintentar",
+    "toolbarAria": "Controles del PDF",
+    "previousPage": "Página anterior",
+    "nextPage": "Página siguiente",
+    "pageStatus": "Página {{page}} de {{total}}",
+    "loadingShort": "Cargando…",
+    "zoomOut": "Alejar",
+    "zoomIn": "Acercar",
+    "rendering": "Renderizando página",
+    "previewAria": "Vista previa del PDF",
+    "loading": "Cargando PDF",
+    "loadingEllipsis": "Cargando PDF…",
+    "canvasAria": "Página {{page}} de {{total}} del PDF {{name}}",
+    "pageRenderError": "No se pudo renderizar esta página.",
+    "cancelled": "Representación del PDF cancelada.",
+    "decodeEmpty": "PDF sin datos para mostrar."
+  },
+  "docx": {
+    "loading": "Cargando documento…"
+  },
+  "xlsx": {
+    "loading": "Cargando hoja de cálculo…",
+    "empty": "Hoja de cálculo vacía.",
+    "noRows": "Sin filas de datos.",
+    "truncated": "Vista previa truncada: se muestran solo parte de las filas de esta hoja de cálculo.",
+    "noSheets": "La hoja de cálculo no tiene pestañas que mostrar.",
+    "tabsAria": "Hojas del archivo",
+    "sheetDefault": "Hoja {{index}}"
+  },
+  "pptx": {
+    "loading": "Cargando presentación…",
+    "empty": "La presentación no tiene diapositivas que mostrar.",
+    "slide": "Diapositiva {{position}}",
+    "withNotes": "con notas",
+    "slideNoText": "Diapositiva sin texto",
+    "notes": "Notas del presentador:",
+    "simplified": "Vista previa simplificada: muestra el texto de las diapositivas, sin el diseño ni el tema originales.",
+    "slidesAria": "Diapositivas de la presentación"
+  }
+}

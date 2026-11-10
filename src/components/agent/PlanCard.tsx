@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CheckCircle2, ChevronDown, ChevronRight, ListChecks, Target } from 'lucide-react';
 import { Markdown } from '@/components/chat/Markdown';
 import { Badge, Button, Spinner, Textarea } from '@/components/ui';
@@ -63,6 +64,7 @@ export function PlanCard({
   scrollable = true,
   className,
 }: PlanCardProps) {
+  const { t } = useTranslation('agents');
   const titleId = useId();
   const contentId = useId();
   const feedbackId = useId();
@@ -93,7 +95,7 @@ export function PlanCard({
   if (!plan) {
     return (
       <p role="status" className={cn('text-[12px] leading-relaxed text-foreground-muted', className)}>
-        Plano indisponível nesta versão.
+        {t('plan.unavailable')}
       </p>
     );
   }
@@ -142,9 +144,9 @@ export function PlanCard({
   };
 
   const announcement = busy
-    ? 'Enviando decisão do plano…'
+    ? t('plan.announce.sending')
     : interactive
-      ? 'Plano aguardando aprovação.'
+      ? t('plan.announce.waiting')
       : '';
 
   if (approved) {
@@ -158,7 +160,7 @@ export function PlanCard({
         <div className="flex flex-wrap items-center gap-2">
           <CheckCircle2 aria-hidden className="size-4 shrink-0 text-success" />
           <span className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
-            Plano aprovado
+            {t('plan.approved')}
           </span>
           <span className="text-[11px] text-foreground-muted">{relativeTime(plan.updatedAt)}</span>
           {markdown ? (
@@ -169,7 +171,7 @@ export function PlanCard({
                 onClick={() => onViewPlan(plan)}
                 rightIcon={<ChevronRight className="size-3.5" />}
               >
-                Ver plano
+                {t('plan.view')}
               </Button>
             ) : (
               <Button
@@ -186,7 +188,7 @@ export function PlanCard({
                   )
                 }
               >
-                Ver plano
+                {t('plan.view')}
               </Button>
             )
           ) : null}
@@ -211,7 +213,7 @@ export function PlanCard({
   return (
     <section
       role={interactive ? 'alertdialog' : undefined}
-      aria-label={interactive ? undefined : 'Plano do agente'}
+      aria-label={interactive ? undefined : t('plan.aria')}
       aria-labelledby={interactive ? titleId : undefined}
       aria-busy={busy || undefined}
       onKeyDown={handleKeyDown}
@@ -230,24 +232,24 @@ export function PlanCard({
         <ListChecks aria-hidden className="size-4 shrink-0 text-accent" />
         <h3 id={titleId} className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
           {planning
-            ? 'Plano em preparação'
+            ? t('plan.title.planning')
             : persistedFeedback
-              ? 'Plano devolvido para revisão'
-              : 'Plano proposto'}
+              ? t('plan.title.returned')
+              : t('plan.title.proposed')}
         </h3>
-        {planning ? <Spinner size="xs" label="Planejando" /> : null}
+        {planning ? <Spinner size="xs" label={t('plan.planningAria')} /> : null}
         {reviewing ? (
           <Badge variant={persistedFeedback ? 'warning' : 'accent'}>
-            {persistedFeedback ? 'Não aprovado' : 'Aguardando aprovação'}
+            {persistedFeedback ? t('plan.badge.notApproved') : t('plan.badge.waiting')}
           </Badge>
         ) : null}
-        {readOnly && reviewing ? <Badge variant="outline">Somente leitura</Badge> : null}
+        {readOnly && reviewing ? <Badge variant="outline">{t('plan.readOnly')}</Badge> : null}
         <span className="text-[11px] text-foreground-muted">{relativeTime(plan.updatedAt)}</span>
       </header>
 
       {persistedFeedback ? (
         <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-background px-2 py-1.5">
-          <p className="text-[11px] font-medium text-foreground-muted">Feedback anterior</p>
+          <p className="text-[11px] font-medium text-foreground-muted">{t('plan.previousFeedback')}</p>
           <p className="min-w-0 break-words text-[12px] leading-relaxed text-foreground-muted">
             {persistedFeedback}
           </p>
@@ -268,7 +270,7 @@ export function PlanCard({
           </div>
         ) : (
           <p className="text-[12px] leading-relaxed text-foreground-muted">
-            {planning ? 'O plano ainda está sendo preparado.' : 'O plano ainda não tem conteúdo.'}
+            {planning ? t('plan.empty.preparing') : t('plan.empty.noContent')}
           </p>
         )}
         {!interactive && long && scrollable ? (
@@ -280,7 +282,7 @@ export function PlanCard({
             aria-controls={contentId}
             onClick={() => setExpanded((value) => !value)}
           >
-            {expanded ? 'Recolher plano' : 'Ver plano completo'}
+            {expanded ? t('plan.collapse') : t('plan.expand')}
           </Button>
         ) : null}
       </div>
@@ -295,7 +297,7 @@ export function PlanCard({
               disabled={busy}
               onClick={() => approve('approve_run')}
             >
-              Aprovar e executar
+              {t('plan.actions.approveRun')}
             </Button>
             <Button
               size="sm"
@@ -303,7 +305,7 @@ export function PlanCard({
               disabled={busy}
               onClick={() => approve('approve_review')}
             >
-              Aprovar e revisar cada edição
+              {t('plan.actions.approveReview')}
             </Button>
             <Button
               size="sm"
@@ -313,18 +315,18 @@ export function PlanCard({
               disabled={busy}
               onClick={() => setFeedbackOpen((value) => !value)}
             >
-              Continuar planejando
+              {t('plan.actions.keepPlanning')}
             </Button>
             <Button
               size="sm"
               variant="ghost"
               disabled={busy || goalBlocked}
               aria-describedby={goalBlocked ? goalBlockedId : undefined}
-              title="Aprova o plano e inicia uma execução autônoma em rodadas"
+              title={t('plan.actions.approveGoalTitle')}
               leftIcon={<Target aria-hidden className="size-3.5" />}
               onClick={() => approve('approve_goal')}
             >
-              Executar como Objetivo
+              {t('plan.actions.approveGoal')}
             </Button>
           </div>
 
@@ -337,23 +339,23 @@ export function PlanCard({
           {feedbackOpen ? (
             <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-2">
               <label htmlFor={feedbackId} className="text-[11px] font-medium text-foreground-muted">
-                O que ajustar no plano? (opcional)
+                {t('plan.feedbackLabel')}
               </label>
               <Textarea
                 id={feedbackId}
                 rows={3}
                 autoFocus
                 value={feedback}
-                placeholder="Ex.: inclua testes para o caso de erro e não toque em migrations"
+                placeholder={t('plan.feedbackPlaceholder')}
                 onChange={(event) => setFeedback(event.target.value)}
                 onKeyDown={handleFeedbackKeyDown}
               />
               <div className="flex items-center justify-end gap-2">
                 <Button size="sm" variant="ghost" onClick={() => setFeedbackOpen(false)}>
-                  Cancelar
+                  {t('common:actions.cancel')}
                 </Button>
                 <Button size="sm" variant="secondary" disabled={busy} onClick={submitFeedback}>
-                  Enviar feedback
+                  {t('plan.sendFeedback')}
                 </Button>
               </div>
             </div>
@@ -365,10 +367,11 @@ export function PlanCard({
 }
 
 function PlanMarkdown({ markdown }: { markdown: string }) {
+  const { t } = useTranslation('agents');
   if (!markdown) {
     return (
       <p className="text-[12px] leading-relaxed text-foreground-muted">
-        O plano ainda não tem conteúdo.
+        {t('plan.empty.noContent')}
       </p>
     );
   }

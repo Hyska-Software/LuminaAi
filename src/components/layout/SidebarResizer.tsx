@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import {
   clampSidebarWidth,
   SIDEBAR_WIDTH_MAX,
@@ -6,10 +7,10 @@ import {
 } from '@/lib/store';
 import { PanelResizer } from './PanelResizer';
 
-/** Accessible label of the sidebar resize handle (DESIGN §12). */
-export const SIDEBAR_RESIZER_LABEL = 'Redimensionar barra lateral';
-/** Discoverability hint shown as the native tooltip. */
-export const SIDEBAR_RESIZER_HINT = 'Arraste para redimensionar · duplo clique para restaurar';
+/** Translation key of the sidebar resize handle label (DESIGN §12). */
+export const SIDEBAR_RESIZER_LABEL = 'panelResizer.sidebarLabel' as const;
+/** Translation key of the discoverability hint shown as the native tooltip. */
+export const SIDEBAR_RESIZER_HINT = 'panelResizer.hint' as const;
 
 export interface SidebarResizerProps {
   /** Effective sidebar width in px (already clamped by the caller). */
@@ -34,6 +35,7 @@ export function SidebarResizer({
   onReset,
   className,
 }: SidebarResizerProps) {
+  const { t } = useTranslation('common');
   return (
     <PanelResizer
       value={clampSidebarWidth(width)}
@@ -41,8 +43,8 @@ export function SidebarResizer({
       max={SIDEBAR_WIDTH_MAX}
       step={SIDEBAR_WIDTH_STEP}
       side="start"
-      label={SIDEBAR_RESIZER_LABEL}
-      hint={SIDEBAR_RESIZER_HINT}
+      label={t(SIDEBAR_RESIZER_LABEL)}
+      hint={t(SIDEBAR_RESIZER_HINT)}
       onResize={onResize}
       onResizeEnd={onResizeEnd}
       onReset={onReset}

@@ -93,7 +93,10 @@ pub(crate) fn decode_text(bytes: &[u8], declared_charset: Option<&str>) -> Strin
 pub fn extract(bytes: &[u8], filename: &str, mime_type: &str) -> anyhow::Result<ExtractedDocument> {
     if bytes.is_empty() {
         let kind = guess_kind(filename, mime_type);
-        return Ok(ExtractedDocument::failed(kind, "arquivo vazio"));
+        return Ok(ExtractedDocument::failed(
+            kind,
+            crate::i18n::t("documents.errors.emptyFile"),
+        ));
     }
 
     let mut mime = mime_type.trim().to_lowercase();
@@ -115,7 +118,10 @@ pub fn extract(bytes: &[u8], filename: &str, mime_type: &str) -> anyhow::Result<
             if looks_like_text(bytes) {
                 guarded("text", || text::extract_plain(bytes, "text", &mime))
             } else {
-                ExtractedDocument::failed("unknown", "formato de arquivo não suportado")
+                ExtractedDocument::failed(
+                    "unknown",
+                    crate::i18n::t("documents.errors.unsupportedFormat"),
+                )
             }
         }
         _ => guarded(kind.as_str(), || text::extract_plain(bytes, &kind, &mime)),
@@ -134,7 +140,10 @@ fn guarded(
 ) -> ExtractedDocument {
     match std::panic::catch_unwind(run) {
         Ok(doc) => doc,
-        Err(_) => ExtractedDocument::failed(kind, "falha inesperada ao processar o arquivo"),
+        Err(_) => ExtractedDocument::failed(
+            kind,
+            crate::i18n::t("documents.errors.unexpected"),
+        ),
     }
 }
 

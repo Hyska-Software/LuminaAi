@@ -1,6 +1,7 @@
+import { useTranslation } from 'react-i18next';
 import { CornerDownLeft, Terminal } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { SlashCommand, SlashCommandGroup } from './commands';
+import type { SlashCommandGroup, SlashCommandView } from './commands';
 
 export const SLASH_LISTBOX_ID = 'composer-slash-listbox';
 
@@ -10,19 +11,19 @@ export function slashOptionId(index: number): string {
 
 export interface SlashMenuProps {
   /** Comandos já filtrados pela query digitada depois de `/`. */
-  commands: SlashCommand[];
+  commands: SlashCommandView[];
   activeIndex: number;
-  onSelect: (command: SlashCommand) => void;
+  onSelect: (command: SlashCommandView) => void;
   onHoverIndex: (index: number) => void;
 }
 
 const GROUP_ORDER: SlashCommandGroup[] = [
-  'Sessão',
-  'Plano',
-  'Objetivo',
-  'Git',
-  'Contexto',
-  'Projeto',
+  'session',
+  'plan',
+  'goal',
+  'git',
+  'context',
+  'project',
 ];
 
 /**
@@ -31,6 +32,7 @@ const GROUP_ORDER: SlashCommandGroup[] = [
  * opção ativa.
  */
 export function SlashMenu({ commands, activeIndex, onSelect, onHoverIndex }: SlashMenuProps) {
+  const { t } = useTranslation('composer');
   const grouped = GROUP_ORDER.map((group) => ({
     group,
     items: commands
@@ -43,7 +45,7 @@ export function SlashMenu({ commands, activeIndex, onSelect, onHoverIndex }: Sla
       <div className="flex items-center gap-1.5 px-2 pb-1 pt-1.5">
         <Terminal aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" strokeWidth={1.75} />
         <p className="min-w-0 flex-1 truncate text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
-          Comandos do workspace
+          {t('slash.header')}
         </p>
         <span className="flex items-center gap-1 text-[10.5px] text-foreground-subtle">
           <CornerDownLeft aria-hidden className="size-3" strokeWidth={1.75} />
@@ -53,19 +55,19 @@ export function SlashMenu({ commands, activeIndex, onSelect, onHoverIndex }: Sla
 
       {commands.length === 0 ? (
         <p className="px-2.5 py-2 text-[12px] leading-relaxed text-foreground-muted">
-          Nenhum comando encontrado.
+          {t('slash.empty')}
         </p>
       ) : (
         <div
           role="listbox"
           id={SLASH_LISTBOX_ID}
-          aria-label="Comandos do modo Code"
+          aria-label={t('slash.listAria')}
           className="max-h-72 overflow-y-auto overscroll-contain p-1"
         >
           {grouped.map(({ group, items }) => (
             <div key={group} role="presentation">
               <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-foreground-subtle">
-                {group}
+                {items[0]?.command.groupLabel ?? ''}
               </p>
               {items.map(({ command, index }) => {
                 const active = index === activeIndex;

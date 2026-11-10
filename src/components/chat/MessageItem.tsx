@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Copy, Pencil, RefreshCw, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from 'sonner';
@@ -19,8 +20,14 @@ import { Markdown } from './Markdown';
 import { AgentSteps } from './AgentSteps';
 import { MessageArtifacts } from './MessageArtifacts';
 
-/** Errors that indicate a missing/invalid provider key get a settings CTA. */
-const KEY_ERROR_PATTERN = /(chave de api|api[ _-]?key|401|unauthorized|não configurad)/i;
+/**
+ * Errors that indicate a missing/invalid provider key get a settings CTA.
+ * Historical messages carry no error code, so the pattern covers every
+ * supported language; live turns are classified by `errorCode` instead.
+ */
+const KEY_ERROR_PATTERN =
+  /(chave de api|api[ _-]?key|401|unauthorized|no configurad|credencial|credenciales)/i;
+const KEY_ERROR_CODES = new Set(['missing_credentials', 'auth_required']);
 
 /** Entrance animation shared by every message (DESIGN §11: fade-in-up 260ms). */
 const MESSAGE_MOTION = {
@@ -32,6 +39,7 @@ const MESSAGE_MOTION = {
 /** Blinking caret is rendered by `.zylara-prose--streaming` in globals.css. */
 
 function useCopyFeedback() {
+  const { t } = useTranslation('chat');
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -45,7 +53,7 @@ function useCopyFeedback() {
   const copy = async (text: string) => {
     const ok = await copyText(text);
     if (!ok) {
-      toast.error('Não foi possível copiar');
+      toast.error(t('message.copyFailed'));
       return;
     }
     setCopied(true);
@@ -81,6 +89,8 @@ const UserMessageItem = memo(function UserMessageItem({
   isGroupStart,
   readOnly = false,
 }: MessageItemProps) {
+  const { t } = useTranslation('chat');
+  const { t: tCommon } = useTranslation('common');
   const { copied, copy } = useCopyFeedback();
   const reduceMotion = useReduceMotion();
   const [editing, setEditing] = useState(false);
@@ -125,15 +135,15 @@ const UserMessageItem = memo(function UserMessageItem({
                 }
               }}
               rows={2}
-              aria-label="Editar mensagem"
+              aria-label={t('message.editAria')}
               className="max-h-60 w-full resize-none bg-transparent px-2 py-1.5 text-[15px] leading-relaxed text-foreground outline-none"
             />
             <div className="flex justify-end gap-1.5 pt-1">
               <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
-                Cancelar
+                {tCommon('actions.cancel')}
               </Button>
               <Button variant="primary" size="sm" onClick={saveEdit} disabled={!draft.trim()}>
-                Salvar e reenviar
+                {t('message.saveAndResend')}
               </Button>
             </div>
           </div>
@@ -147,7 +157,7 @@ const UserMessageItem = memo(function UserMessageItem({
       {!editing ? (
         <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/message:opacity-100">
           <IconButton
-            label={copied ? 'Mensagem copiada' : 'Copiar mensagem'}
+            label={copied ? t('message.copied') : t('message.copy')}
             size="sm"
             variant="ghost"
             className="size-8"
@@ -157,7 +167,7 @@ const UserMessageItem = memo(function UserMessageItem({
           </IconButton>
           {!readOnly ? (
             <IconButton
-              label="Editar mensagem"
+              label={t('message.edit')}
               size="sm"
               variant="ghost"
               className="size-8"
@@ -181,9 +191,11 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   streamPhase = null,
   streamStartedAt = null,
 }: MessageItemProps) {
+  const { t } = useTranslation('chat');
   const { copied, copy } = useCopyFeedback();
   const reduceMotion = useReduceMotion();
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  const errorCode = useChatStore((state) => state.errorCode);
 
   const phase = streamPhase;
   const startedAt = streamStartedAt;
@@ -239,7 +251,9 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
     usage?.totalTokens ??
     ((usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0) || null);
   const model = modelLabel(message);
-  const isKeyError = message.status === 'error' && KEY_ERROR_PATTERN.test(message.content ?? '');
+  const isKeyError =
+    message.status === 'error' &&
+    (KEY_ERROR_CODES.has(errorCode ?? '') || KEY_ERROR_PATTERN.test(message.content ?? ''));
 
   const regenerate = () => {
     window.dispatchEvent(new CustomEvent('zylara:scroll-bottom'));
@@ -272,7 +286,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
         {awaitingText ? (
           <div className="flex items-center gap-2 py-1 text-[13px] text-foreground-subtle">
             <Spinner size="xs" />
-            <span>Gerando resposta…</span>
+            <span>{t('message.generating')}</span>
           </div>
         ) : null}
 
@@ -281,18 +295,18 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             <div className="flex items-start gap-2">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] font-medium text-foreground">Não foi possível concluir</p>
+                <p className="text-[13px] font-medium text-foreground">{t('message.failedTitle')}</p>
                 {message.content ? (
                   <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] text-foreground-muted">
                     {message.content}
                   </p>
                 ) : (
-                  <p className="mt-1 text-[12.5px] text-foreground-muted">Tente novamente em instantes.</p>
+                  <p className="mt-1 text-[12.5px] text-foreground-muted">{t('message.failedHint')}</p>
                 )}
                 {!readOnly ? (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <Button variant="secondary" size="sm" onClick={regenerate} disabled={anyStreaming}>
-                      Tentar novamente
+                      {t('common:actions.retry')}
                     </Button>
                     {isKeyError ? (
                       <Button
@@ -300,7 +314,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
                         size="sm"
                         onClick={() => useUiStore.getState().setSettingsOpen(true)}
                       >
-                        Abrir configurações
+                        {t('message.openSettings')}
                       </Button>
                     ) : null}
                   </div>
@@ -320,7 +334,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
 
         {message.status === 'cancelled' ? (
           <div className="mt-2">
-            <Badge tone="neutral">Cancelado</Badge>
+            <Badge tone="neutral">{t('message.cancelled')}</Badge>
           </div>
         ) : null}
 
@@ -338,7 +352,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
         (message.content || messageArtifacts.length > 0) ? (
           <div className="mt-2 flex flex-wrap items-center gap-0.5 text-foreground-subtle opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/message:opacity-100">
             <IconButton
-              label={copied ? 'Resposta copiada' : 'Copiar resposta'}
+              label={copied ? t('message.responseCopied') : t('message.copyResponse')}
               size="sm"
               variant="ghost"
               className="size-8"
@@ -350,7 +364,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             {!readOnly ? (
               <>
                 <IconButton
-                  label="Regenerar resposta"
+                  label={t('message.regenerate')}
                   size="sm"
                   variant="ghost"
                   className="size-8"
@@ -360,7 +374,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
                   <RefreshCw className="size-3.5" />
                 </IconButton>
                 <IconButton
-                  label="Resposta útil"
+                  label={t('message.useful')}
                   size="sm"
                   variant="ghost"
                   className="size-8"
@@ -371,7 +385,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
                   <ThumbsUp className="size-3.5" />
                 </IconButton>
                 <IconButton
-                  label="Resposta não útil"
+                  label={t('message.notUseful')}
                   size="sm"
                   variant="ghost"
                   className="size-8"
@@ -390,8 +404,12 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             {model ? <span className="px-1 text-[11px] text-foreground-subtle">{model}</span> : null}
             {showTokenUsage && totalTokens ? (
               <span className="text-[11px] tabular-nums text-foreground-subtle">
-                {formatTokens(totalTokens)} tokens
-                {usage?.durationMs ? ` · ${formatDuration(usage.durationMs)}` : ''}
+                {usage?.durationMs
+                  ? t('message.tokensAndDuration', {
+                      tokens: formatTokens(totalTokens),
+                      duration: formatDuration(usage.durationMs),
+                    })
+                  : t('message.tokens', { tokens: formatTokens(totalTokens) })}
               </span>
             ) : null}
           </div>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import {
   Activity,
@@ -47,7 +48,8 @@ import { AgentDialogBody } from './AgentDialogBody';
 import { AgentRevisionDialog } from './AgentRevisionDialog';
 import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import { AgentTasksDialog } from './AgentTasksDialog';
-import { relativeTime } from './agentUtils';
+import { departmentKey, localizedDepartment, relativeTime } from './agentUtils';
+import { compareText, localeLowerCase } from '@/lib/i18n/format';
 import {
   Button,
   Dialog,
@@ -86,7 +88,7 @@ function sortChannels(channels: AgentChannel[]): AgentChannel[] {
     (left, right) =>
       (left.sortOrder ?? 0) - (right.sortOrder ?? 0) ||
       right.updatedAt - left.updatedAt ||
-      left.id.localeCompare(right.id),
+      compareText(left.id, right.id),
   );
 }
 
@@ -129,6 +131,18 @@ function ThreadRow({
   const awaitingApproval = (session?.approvals.length ?? 0) > 0;
   const awaitingAnswer = (session?.questions.length ?? 0) > 0;
   const failed = Boolean(session?.error);
+  const { t } = useTranslation('agents');
+  const defaultMainTitles = [
+    t('threads.main'),
+    'Conversa principal',
+    'Main conversation',
+    'Conversación principal',
+  ];
+  const mainLabel = conversation.isMain
+    ? defaultMainTitles.includes(conversation.title)
+      ? t('threads.main')
+      : `${conversation.title} · ${t('threads.main')}`
+    : conversation.title;
   return (
     <div
       {...sortable.dropProps(conversation.id)}
@@ -139,11 +153,7 @@ function ThreadRow({
         {...sortable.itemProps(conversation.id)}
         onClick={onSelect}
         aria-current={active ? 'page' : undefined}
-        title={
-          conversation.isMain && conversation.title !== 'Conversa principal'
-            ? `${conversation.title} · Conversa principal`
-            : conversation.title
-        }
+        title={mainLabel}
         className={cn(
           'flex h-8 w-full min-w-0 items-center gap-2 rounded-lg pl-7 pr-8 text-left text-[12px]',
           'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -158,29 +168,29 @@ function ThreadRow({
         ) : (
           <MessageSquare aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
         )}
-        <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+        <span className="min-w-0 flex-1 truncate">{mainLabel}</span>
         {queued > 0 ? (
           <span
-            title={`${queued} mensagem(ns) na fila`}
+            title={t('sidebar.queueTitle', { count: queued })}
             className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent"
           >
             {queued}
           </span>
         ) : null}
         {busy ? (
-          <AgentActivityDots label="Respondendo" />
+          <AgentActivityDots label={t('activity.responding')} />
         ) : awaitingApproval ? (
           <ShieldAlert
-            aria-label="Aguardando aprovação"
+            aria-label={t('sidebar.awaitingApproval')}
             className="size-3.5 shrink-0 text-warning"
           />
         ) : awaitingAnswer ? (
           <MessageCircleQuestion
-            aria-label="Aguardando resposta"
+            aria-label={t('sidebar.awaitingAnswer')}
             className="size-3.5 shrink-0 text-accent"
           />
         ) : failed ? (
-          <CircleAlert aria-label="Último turno falhou" className="size-3.5 shrink-0 text-danger" />
+          <CircleAlert aria-label={t('sidebar.lastTurnFailed')} className="size-3.5 shrink-0 text-danger" />
         ) : (
           <span className="shrink-0 text-[10px] text-foreground-subtle">
             {relativeTime(conversation.updatedAt)}
@@ -191,7 +201,7 @@ function ThreadRow({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            aria-label={`Opções de ${conversation.title}`}
+            aria-label={t('sidebar.threadOptions', { title: conversation.title })}
             onClick={(event) => event.stopPropagation()}
             className={cn(
               'absolute right-0.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md',
@@ -211,7 +221,7 @@ function ThreadRow({
                 icon={<Square className="size-3.5" />}
                 onSelect={onStop}
               >
-                Parar execução
+                {t('sidebar.stopRun')}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
             </>
@@ -227,14 +237,14 @@ function ThreadRow({
               }
               onSelect={onTogglePin}
             >
-              {conversation.pinned ? 'Desafixar' : 'Fixar'}
+              {conversation.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuItem icon={<Pencil className="size-3.5" />} onSelect={onStartRename}>
-            Renomear
+            {t('sidebar.rename')}
           </DropdownMenuItem>
           <DropdownMenuItem icon={<Download className="size-3.5" />} onSelect={onExport}>
-            Exportar
+            {t('sidebar.export')}
           </DropdownMenuItem>
           {!conversation.isMain ? (
             <>
@@ -244,7 +254,7 @@ function ThreadRow({
                 icon={<Trash2 className="size-3.5" />}
                 onSelect={onDelete}
               >
-                Excluir
+                {t('common:actions.delete')}
               </DropdownMenuItem>
             </>
           ) : null}
@@ -322,12 +332,13 @@ function AgentRow({
         (visibleStream?.conversationId === thread.id ? visibleStream : null),
     ),
   );
+  const { t } = useTranslation('agents');
   return (
     <div {...sortable.dropProps(agent.id)} className={sortableDropClass}>
       <div className="group relative flex items-center">
         <button
           type="button"
-          aria-label={expanded ? 'Recolher conversas' : 'Expandir conversas'}
+          aria-label={expanded ? t('sidebar.collapseThreads') : t('sidebar.expandThreads')}
           aria-expanded={expanded}
           onClick={onToggle}
           className="flex size-6 shrink-0 items-center justify-center rounded-md text-foreground-subtle hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -355,7 +366,7 @@ function AgentRow({
             <span className="flex items-center gap-1.5">
               <span className="truncate text-[13px] font-medium text-foreground">{agent.name}</span>
               {busy ? (
-                <AgentActivityDots label="Respondendo" />
+                <AgentActivityDots label={t('activity.responding')} />
               ) : null}
               {agent.pinned ? <Pin className="size-2.5 shrink-0 text-foreground-subtle" /> : null}
               {agent.computerEnvironment !== 'auto' ||
@@ -364,17 +375,17 @@ function AgentRow({
               agent.capabilities.browserUse ? (
                 agent.computerEnvironment === 'off' ? (
                   <Power
-                    aria-label="Computador desligado"
+                    aria-label={t('sidebar.computerOff')}
                     className="size-3 shrink-0 text-foreground-subtle"
                   />
                 ) : agent.computerEnvironment === 'browser' ? (
                   <Globe2
-                    aria-label="Somente navegador"
+                    aria-label={t('sidebar.browserOnly')}
                     className="size-3 shrink-0 text-foreground-subtle"
                   />
                 ) : (
                   <Monitor
-                    aria-label="Acesso ao computador"
+                    aria-label={t('sidebar.computerAccess')}
                     className="size-3 shrink-0 text-foreground-subtle"
                   />
                 )
@@ -392,7 +403,7 @@ function AgentRow({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label={`Opções de ${agent.name}`}
+              aria-label={t('sidebar.agentOptions', { name: agent.name })}
               onClick={(event) => event.stopPropagation()}
               className={cn(
                 'absolute right-0.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md',
@@ -406,48 +417,48 @@ function AgentRow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-48">
             <DropdownMenuItem icon={<MessageSquarePlus className="size-3.5" />} onSelect={onNewThread}>
-              Nova conversa
+              {t('sidebar.newConversation')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<ListTree className="size-3.5" />} onSelect={onShowAllThreads}>
-              Ver todas as conversas
+              {t('sidebar.allThreads')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<CalendarClock className="size-3.5" />} onSelect={onRoutines}>
-              Rotinas
+              {t('panel.tabs.routines')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<ListChecks className="size-3.5" />} onSelect={onTasks}>
-              Tarefas
+              {t('tasks.heading')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<Pencil className="size-3.5" />} onSelect={onEdit}>
-              Editar agente
+              {t('panel.editAgent')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<Palette className="size-3.5" />} onSelect={onAvatar}>
-              Personalizar avatar
+              {t('sidebar.agentAvatar')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<WandSparkles className="size-3.5" />} onSelect={onRevise}>
-              Editar com IA
+              {t('sidebar.editWithAi')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<Copy className="size-3.5" />} onSelect={onDuplicate}>
-              Duplicar
+              {t('sidebar.duplicate')}
             </DropdownMenuItem>
             <DropdownMenuItem icon={<Download className="size-3.5" />} onSelect={onExport}>
-              Exportar
+              {t('sidebar.export')}
             </DropdownMenuItem>
             <DropdownMenuItem
               icon={agent.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
               onSelect={onPin}
             >
-              {agent.pinned ? 'Desafixar' : 'Fixar'}
+              {agent.pinned ? t('sidebar.unpin') : t('sidebar.pin')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem icon={<Archive className="size-3.5" />} onSelect={onArchive}>
-              Arquivar
+              {t('sidebar.archive')}
             </DropdownMenuItem>
             <DropdownMenuItem
               variant="danger"
               icon={<Trash2 className="size-3.5" />}
               onSelect={onDelete}
             >
-              Excluir
+              {t('common:actions.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -457,7 +468,7 @@ function AgentRow({
           {shown.length > 0 ? (
             <SortableList
               ids={shown.map((thread) => thread.id)}
-              label={`Conversas de ${agent.name}`}
+              label={t('sidebar.agentThreadsLabel', { name: agent.name })}
               itemLabel={(id) => threads.find((thread) => thread.id === id)?.title ?? id}
               disabled={threadsDisabled}
               lockedCount={shown.filter((thread) => thread.pinned).length}
@@ -490,11 +501,11 @@ function AgentRow({
               className="flex h-7 w-full items-center gap-2 rounded-lg pl-7 pr-2 text-left text-[11px] text-foreground-muted hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <ListTree aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
-              Ver todas ({threads.length})
+              {t('sidebar.showAllThreads', { count: threads.length })}
             </button>
           ) : null}
           {threads.length === 0 ? (
-            <p className="py-1 pl-7 text-[11px] text-foreground-subtle">Nenhuma conversa ainda.</p>
+            <p className="py-1 pl-7 text-[11px] text-foreground-subtle">{t('sidebar.noThreads')}</p>
           ) : null}
         </div>
       ) : null}
@@ -536,6 +547,7 @@ function ChannelRow({
   onEdit: () => void;
 }) {
   const dm = channel.kind === 'dm';
+  const { t } = useTranslation('agents');
   return (
     <div
       {...sortable.dropProps(channel.id)}
@@ -573,7 +585,7 @@ function ChannelRow({
       {dm ? null : (
         <button
           type="button"
-          aria-label={`Editar canal ${channel.name}`}
+          aria-label={t('sidebar.editChannelAria', { name: channel.name })}
           onClick={(event) => {
             event.stopPropagation();
             onEdit();
@@ -593,6 +605,7 @@ function ChannelRow({
 }
 
 export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
+  const { t } = useTranslation('agents');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<Agent | null>(null);
@@ -703,25 +716,26 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const groups = useMemo(() => {
     const byDepartment = new Map<string, Agent[]>();
     for (const agent of agents) {
-      const list = byDepartment.get(agent.department) ?? [];
+      const key = departmentKey(agent.department);
+      const list = byDepartment.get(key) ?? [];
       list.push(agent);
-      byDepartment.set(agent.department, list);
+      byDepartment.set(key, list);
     }
     return [...byDepartment.entries()]
-      .sort(([left], [right]) => left.localeCompare(right, 'pt-BR', { sensitivity: 'base' }))
+      .sort(([left], [right]) => compareText(left, right))
       .map(([department, groupAgents]) => ({ department, agents: groupAgents }));
   }, [agents]);
 
-  const normalizedQuery = query.trim().toLocaleLowerCase('pt-BR');
+  const normalizedQuery = localeLowerCase(query.trim());
   const matches = (agent: Agent) => {
     if (!normalizedQuery) return true;
-    const haystack = `${agent.name} ${agent.role} ${agent.description} ${agent.department}`.toLocaleLowerCase(
-      'pt-BR',
+    const haystack = localeLowerCase(
+      `${agent.name} ${agent.role} ${agent.description} ${agent.department}`,
     );
     return (
       haystack.includes(normalizedQuery) ||
       threadsFor(agent.id).some((thread) =>
-        thread.title.toLocaleLowerCase('pt-BR').includes(normalizedQuery),
+        localeLowerCase(thread.title).includes(normalizedQuery),
       )
     );
   };
@@ -734,7 +748,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     () =>
       normalizedQuery
         ? channels.filter((channel) =>
-            channel.name.toLocaleLowerCase('pt-BR').includes(normalizedQuery),
+            localeLowerCase(channel.name).includes(normalizedQuery),
           )
         : channels,
     [channels, normalizedQuery],
@@ -789,7 +803,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
 
   const handleReorderAgents = (ids: string[]) => {
     void reorderAgents(ids).catch((error) => {
-      toast.error('Não foi possível reordenar os agentes', { description: String(error) });
+      toast.error(t('sidebar.reorderAgentsError'), { description: String(error) });
     });
   };
 
@@ -805,7 +819,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       ),
     );
     void runChannelReorder(() => api.reorderAgentChannels(ids)).catch((error) => {
-      toast.error('Não foi possível reordenar os canais', { description: String(error) });
+      toast.error(t('sidebar.reorderChannelsError'), { description: String(error) });
       loadChannels();
     });
   };
@@ -834,7 +848,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       await useChatStore.getState().renameConversation(target.id, title);
       setRenameThreadTarget(null);
     } catch (error) {
-      toast.error('Não foi possível renomear a conversa', { description: String(error) });
+      toast.error(t('sidebar.renameThreadError'), { description: String(error) });
     } finally {
       setRenameThreadBusy(false);
     }
@@ -843,9 +857,9 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
   const exportThread = async (thread: Conversation) => {
     try {
       const path = await api.exportConversation(thread.id, 'markdown');
-      if (path) toast.success('Conversa exportada', { description: path });
+      if (path) toast.success(t('sidebar.threadExported'), { description: path });
     } catch (error) {
-      toast.error('Não foi possível exportar', { description: String(error) });
+      toast.error(t('sidebar.exportThreadError'), { description: String(error) });
     }
   };
 
@@ -868,18 +882,18 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       await useChatStore.getState().refreshConversations();
       setActiveAgentId(copy.id);
       clearActiveConversation();
-      toast.success('Agente duplicado', { description: copy.name });
+      toast.success(t('sidebar.agentDuplicated'), { description: copy.name });
     } catch (error) {
-      toast.error('Não foi possível duplicar o agente', { description: String(error) });
+      toast.error(t('sidebar.duplicateError'), { description: String(error) });
     }
   };
 
   const exportAgent = async (agent: Agent) => {
     try {
       const path = await api.exportAgent(agent.id);
-      if (path) toast.success('Agente exportado', { description: path });
+      if (path) toast.success(t('sidebar.agentExported'), { description: path });
     } catch (error) {
-      toast.error('Não foi possível exportar o agente', { description: String(error) });
+      toast.error(t('sidebar.exportAgentError'), { description: String(error) });
     }
   };
 
@@ -887,7 +901,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     try {
       await pin(agent.id, !agent.pinned);
     } catch (error) {
-      toast.error('Não foi possível alterar o pin', { description: String(error) });
+      toast.error(t('sidebar.pinError'), { description: String(error) });
     }
   };
 
@@ -895,15 +909,15 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     try {
       await archive(agent.id);
       if (activeAgentId === agent.id) clearActiveConversation();
-      toast.success('Agente arquivado', {
+      toast.success(t('sidebar.agentArchived'), {
         description: agent.name,
         action: {
-          label: 'Desfazer',
+          label: t('sidebar.undo'),
           onClick: () => void restore(agent.id),
         },
       });
     } catch (error) {
-      toast.error('Não foi possível arquivar o agente', { description: String(error) });
+      toast.error(t('sidebar.archiveError'), { description: String(error) });
     }
   };
 
@@ -916,10 +930,10 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         setActiveAgentId(null);
         clearActiveConversation();
       }
-      toast.success('Agente excluído', { description: deleteTarget.name });
+      toast.success(t('sidebar.agentDeleted'), { description: deleteTarget.name });
       setDeleteTarget(null);
     } catch (error) {
-      toast.error('Não foi possível excluir o agente', { description: String(error) });
+      toast.error(t('sidebar.deleteError'), { description: String(error) });
     }
   };
 
@@ -936,14 +950,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
     <aside className={cn('flex h-full min-h-0 flex-col bg-surface', className)}>
       <div className="flex h-12 shrink-0 items-center justify-between px-3">
         <span className="text-[12px] font-semibold uppercase tracking-wide text-foreground-subtle">
-          Agentes
+          {t('sidebar.header')}
         </span>
         <div className="flex items-center gap-1">
           {activeTurnCount > 0 ? (
             <button
               type="button"
               onClick={() => setActivityOpen(true)}
-              aria-label={`Atividade: ${activeTurnCount} turno(s) em andamento`}
+              aria-label={t('sidebar.activityAria', { count: activeTurnCount })}
               className="flex h-6 items-center gap-1 rounded-full bg-accent-soft px-2 text-[10px] font-medium text-accent hover:bg-accent-soft/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <Activity className="size-3" />
@@ -953,8 +967,8 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           <IconButton
             label={
               agentPanelOpen && agentRightPanel === 'agent'
-                ? 'Recolher painel do agente'
-                : 'Abrir painel do agente'
+                ? t('panelToggle.collapse')
+                : t('panelToggle.open')
             }
             size="sm"
             variant="ghost"
@@ -967,7 +981,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
             <PanelRight className="size-4" />
           </IconButton>
           <IconButton
-            label="Quadro de tarefas"
+            label={t('sidebar.taskBoard')}
             size="sm"
             variant="ghost"
             onClick={() => setTaskBoardOpen(true)}
@@ -975,7 +989,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
             <ListChecks className="size-4" />
           </IconButton>
           <IconButton
-            label="Novo agente"
+            label={t('sidebar.newAgent')}
             size="sm"
             variant="ghost"
             onClick={() => openEditor({ mode: 'create' })}
@@ -991,7 +1005,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           size="sm"
           className="w-full justify-start"
           disabled={!activeAgentId}
-          title={activeAgentId ? 'Nova conversa com o agente selecionado' : 'Selecione um agente'}
+          title={activeAgentId ? t('sidebar.newConversationTitle') : t('sidebar.selectAgentTitle')}
           onClick={() => {
             if (activeAgentId) {
               void startNewConversation('agent', { agentId: activeAgentId });
@@ -1000,7 +1014,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           }}
         >
           <MessageSquarePlus className="mr-2 size-4" />
-          Nova conversa
+          {t('sidebar.newConversation')}
         </Button>
       </div>
 
@@ -1009,14 +1023,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar agentes ou conversas"
-          aria-label="Buscar agentes ou conversas"
+          placeholder={t('sidebar.searchPlaceholder')}
+          aria-label={t('sidebar.searchAria')}
           className="h-8 pl-8 pr-8 text-[12px]"
         />
         {query ? (
           <button
             type="button"
-            aria-label="Limpar busca"
+            aria-label={t('sidebar.clearSearch')}
             onClick={() => setQuery('')}
             className="absolute right-4 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-foreground-subtle hover:bg-surface-hover hover:text-foreground"
           >
@@ -1027,7 +1041,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
 
       <div className="mt-3 min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {status === 'loading' && agents.length === 0 ? (
-          <div className="space-y-2 px-2 py-3" aria-label="Carregando agentes">
+          <div className="space-y-2 px-2 py-3" aria-label={t('sidebar.loadingAgents')}>
             {[0, 1, 2].map((index) => (
               <div key={index} className="flex items-center gap-2">
                 <div className="size-7 animate-pulse rounded-lg bg-surface-active" />
@@ -1038,23 +1052,23 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         ) : null}
         {status === 'error' ? (
           <div className="px-2 py-3 text-[12px] text-foreground-muted">
-            <p>Não foi possível carregar seus agentes.</p>
+            <p>{t('sidebar.loadError')}</p>
             {storeError ? (
               <p className="mt-1 line-clamp-2 text-[11px] text-foreground-subtle">{storeError}</p>
             ) : null}
             <Button size="sm" variant="ghost" className="mt-2 px-0" onClick={() => void refresh()}>
-              Tentar novamente
+              {t('sidebar.retry')}
             </Button>
           </div>
         ) : null}
         <section className="mb-3">
           <div className="mb-1 flex items-center justify-between px-2">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
-              Canais
+              {t('sidebar.channels')}
             </p>
             <button
               type="button"
-              aria-label="Novo canal"
+              aria-label={t('sidebar.newChannel')}
               onClick={() => {
                 setEditingChannel(null);
                 setChannelDialogOpen(true);
@@ -1066,12 +1080,12 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           </div>
           {visibleChannels.length === 0 ? (
             <p className="px-2 py-1 text-[11px] text-foreground-subtle">
-              {normalizedQuery ? 'Nenhum canal encontrado.' : 'Nenhum canal ainda.'}
+              {normalizedQuery ? t('sidebar.noChannelsFound') : t('sidebar.noChannels')}
             </p>
           ) : (
             <SortableList
               ids={visibleChannels.map((channel) => channel.id)}
-              label="Canais"
+              label={t('sidebar.channels')}
               itemLabel={(id) => {
                 const channel = visibleChannels.find((item) => item.id === id);
                 return channel ? channelLabel(channel) : id;
@@ -1107,7 +1121,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
 
         {status === 'ready' && agents.length === 0 ? (
           <div className="px-2 py-5 text-center">
-            <p className="text-[12px] text-foreground-muted">Nenhum agente ainda.</p>
+            <p className="text-[12px] text-foreground-muted">{t('sidebar.noAgents')}</p>
             <Button
               size="sm"
               variant="ghost"
@@ -1115,7 +1129,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
               onClick={() => openEditor({ mode: 'create' })}
             >
               <Plus className="mr-1 size-3.5" />
-              Criar agente
+              {t('sidebar.createAgent')}
             </Button>
           </div>
         ) : null}
@@ -1123,11 +1137,11 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           <section className="mb-3">
             <p className="mb-1 flex items-center gap-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
               <Pin className="size-3" />
-              Fixados
+              {t('sidebar.pinned')}
             </p>
             <SortableList
               ids={visiblePinned.map((agent) => agent.id)}
-              label="Fixados"
+              label={t('sidebar.pinned')}
               itemLabel={(id) => visiblePinned.find((agent) => agent.id === id)?.name ?? id}
               disabled={normalizedQuery.length > 0}
               onReorder={handleReorderAgents}
@@ -1181,13 +1195,13 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         ) : null}
 
         {visibleGroups.map((group) => (
-          <section key={group.department} className="mb-3">
+          <section key={localizedDepartment(group.department)} className="mb-3">
             <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
-              {group.department}
+              {localizedDepartment(group.department)}
             </p>
             <SortableList
               ids={group.agents.map((agent) => agent.id)}
-              label={group.department}
+              label={localizedDepartment(group.department)}
               itemLabel={(id) => group.agents.find((agent) => agent.id === id)?.name ?? id}
               disabled={normalizedQuery.length > 0}
               onReorder={handleReorderAgents}
@@ -1245,7 +1259,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
         visibleGroups.length === 0 &&
         visibleChannels.length === 0 ? (
           <p className="px-2 py-6 text-center text-[12px] text-foreground-subtle">
-            Nenhum agente ou conversa encontrado para “{query.trim()}”.
+            {t('sidebar.noMatch', { query: query.trim() })}
           </p>
         ) : null}
       </div>
@@ -1274,7 +1288,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           )}
         >
           <Users className="size-3.5" />
-          Equipe
+          {t('sidebar.team')}
         </button>
         <button
           type="button"
@@ -1293,7 +1307,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           )}
         >
           <CalendarClock className="size-3.5" />
-          Rotinas
+          {t('panel.tabs.routines')}
         </button>
         <button
           type="button"
@@ -1301,31 +1315,30 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-[12px] text-foreground-muted hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
         >
           <Settings className="size-3.5" />
-          Configurações
+          {t('sidebar.settings')}
         </button>
       </div>
 
       <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader className="pb-4 pr-12">
-            <DialogTitle>Excluir agente?</DialogTitle>
+            <DialogTitle>{t('sidebar.deleteAgentTitle')}</DialogTitle>
             <DialogDescription>
               {deleteTarget
-                ? `“${deleteTarget.name}” será removido permanentemente. A conversa principal é removida junto.`
-                : 'Esta ação não pode ser desfeita.'}
+                ? t('sidebar.deleteAgentDescription', { name: deleteTarget.name })
+                : t('sidebar.deleteIrreversible')}
             </DialogDescription>
           </DialogHeader>
           {deleteThreads > 0 ? (
             <AgentDialogBody>
               <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
-                Este agente tem {deleteThreads} outra(s) conversa(s). Arquive-o para manter o
-                histórico; a exclusão definitiva só é permitida sem outras conversas.
+                {t('sidebar.deleteAgentBlocked', { count: deleteThreads })}
               </p>
             </AgentDialogBody>
           ) : null}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteTarget(null)}>
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button variant="danger" disabled={deleteThreads > 0} onClick={() => void confirmDelete()}>
               <Trash2 className="mr-1.5 size-3.5" />
@@ -1341,22 +1354,22 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       >
         <DialogContent className="max-w-xl">
           <DialogHeader className="pb-4 pr-12">
-            <DialogTitle>Conversas de {allThreadsAgent?.name ?? 'agente'}</DialogTitle>
+            <DialogTitle>{t('sidebar.allThreadsTitle', { name: allThreadsAgent?.name ?? t('agentFallback') })}</DialogTitle>
             <DialogDescription>
-              {allThreadsAgent ? `${threadsFor(allThreadsAgent.id).length} conversa(s)` : ''}
+              {allThreadsAgent ? t('sidebar.threadCount', { count: threadsFor(allThreadsAgent.id).length }) : ''}
             </DialogDescription>
           </DialogHeader>
           <AgentDialogBody className="space-y-0.5">
             {allThreadsAgent && threadsFor(allThreadsAgent.id).length === 0 ? (
               <p className="py-6 text-center text-[12px] text-foreground-muted">
-                Nenhuma conversa ainda.
+                {t('sidebar.noThreads')}
               </p>
             ) : null}
             {allThreadsAgent
               ? (
                   <SortableList
                     ids={threadsFor(allThreadsAgent.id).map((thread) => thread.id)}
-                    label={`Conversas de ${allThreadsAgent.name}`}
+                    label={t('sidebar.agentThreadsLabel', { name: allThreadsAgent.name })}
                     itemLabel={(id) =>
                       threadsFor(allThreadsAgent.id).find((thread) => thread.id === id)?.title ?? id
                     }
@@ -1396,10 +1409,10 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
               }}
             >
               <MessageSquarePlus className="mr-1.5 size-4" />
-              Nova conversa
+              {t('sidebar.newConversation')}
             </Button>
             <Button variant="ghost" onClick={() => setAllThreadsAgent(null)}>
-              Fechar
+              {t('common:actions.close')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1451,14 +1464,14 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       >
         <DialogContent className="max-w-md">
           <DialogHeader className="pb-4 pr-12">
-            <DialogTitle>Renomear conversa</DialogTitle>
-            <DialogDescription>O novo título aparece na barra lateral e na paleta.</DialogDescription>
+            <DialogTitle>{t('sidebar.renameTitle')}</DialogTitle>
+            <DialogDescription>{t('sidebar.renameDescription')}</DialogDescription>
           </DialogHeader>
           <AgentDialogBody>
             <Input
               value={renameThreadValue}
               maxLength={120}
-              aria-label="Título da conversa"
+              aria-label={t('sidebar.threadTitleAria')}
               onChange={(event) => setRenameThreadValue(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') void confirmThreadRename();
@@ -1467,7 +1480,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           </AgentDialogBody>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setRenameThreadTarget(null)}>
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button
               variant="primary"
@@ -1486,16 +1499,16 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
       >
         <DialogContent className="max-w-md">
           <DialogHeader className="pb-4 pr-12">
-            <DialogTitle>Excluir conversa?</DialogTitle>
+            <DialogTitle>{t('sidebar.deleteThreadTitle')}</DialogTitle>
             <DialogDescription>
               {deleteThreadTarget
-                ? `“${deleteThreadTarget.title}” será removida permanentemente.`
-                : 'Esta ação não pode ser desfeita.'}
+                ? t('sidebar.deleteThreadDescription', { title: deleteThreadTarget.title })
+                : t('sidebar.deleteIrreversible')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeleteThreadTarget(null)}>
-              Cancelar
+              {t('common:actions.cancel')}
             </Button>
             <Button
               variant="danger"

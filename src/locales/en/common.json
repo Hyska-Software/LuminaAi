@@ -1,0 +1,243 @@
+{
+  "actions": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "close": "Close",
+    "retry": "Retry",
+    "copy": "Copy",
+    "open": "Open",
+    "stop": "Stop",
+    "confirm": "Confirm",
+    "back": "Back",
+    "next": "Next",
+    "add": "Add",
+    "remove": "Remove",
+    "edit": "Edit",
+    "done": "Done"
+  },
+  "layouts": {
+    "chat": {
+      "label": "Chat",
+      "title": "Chat layout",
+      "description": "Conversation with the assistant, artifacts and sources."
+    },
+    "code": {
+      "label": "Code",
+      "title": "Code layout",
+      "description": "Workbench with workspaces, files, terminal and changes."
+    },
+    "agent": {
+      "label": "Agents",
+      "title": "Agents layout",
+      "description": "Persona teams, channels and routines."
+    },
+    "menuLabel": "Layouts",
+    "groupAria": "Application mode"
+  },
+  "conversation": {
+    "defaultTitle": "New chat"
+  },
+  "language": {
+    "text": "Text"
+  },
+  "status": {
+    "loading": "Loading"
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesShort": "{{count}} min",
+    "hoursShort": "{{count}} h",
+    "daysShort": "{{count}} d",
+    "groups": {
+      "pinned": "Pinned",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "last7": "Last 7 days",
+      "last30": "Last 30 days",
+      "older": "Older"
+    },
+    "thinking": {
+      "lessThanSecond": "less than 1s",
+      "seconds": "{{count}}s",
+      "minutesSeconds": "{{minutes}}m {{seconds}}s",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "hoursMinutes": "{{hours}}h {{minutes}}m"
+    }
+  },
+  "sortable": {
+    "instructions": "Use Alt+Arrow up or Alt+Arrow down to reorder.",
+    "moved": "{{label}}: {{item}} moved to position {{position}} of {{total}}"
+  },
+  "panelResizer": {
+    "hint": "Drag to resize · double-click to reset",
+    "sidebarLabel": "Resize sidebar"
+  },
+  "shell": {
+    "labels": {
+      "conversations": "Conversations",
+      "sessions": "Sessions",
+      "agents": "Agents"
+    },
+    "sidebar": {
+      "aria": "Conversations",
+      "newChat": "New chat",
+      "close": "Close sidebar",
+      "library": "Library",
+      "openLibrary": "Open library",
+      "skills": "Skills",
+      "manageSkills": "Manage skills",
+      "settings": "Settings",
+      "search": "Search conversations",
+      "loading": "Loading conversations",
+      "emptyTitle": "No conversations yet.",
+      "emptyHint": "Start a new chat.",
+      "renameAria": "Rename conversation",
+      "optionsAria": "Conversation options"
+    },
+    "menu": {
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "rename": "Rename",
+      "export": "Export",
+      "useInCode": "Use in Code",
+      "removeFromCode": "Remove from Code"
+    },
+    "deleteDialog": {
+      "title": "Delete conversation",
+      "description": "“{{title}}” will be permanently removed. This action cannot be undone."
+    },
+    "toasts": {
+      "codeLinkAddError": "Could not add the session to Code",
+      "codeLinkRemoveError": "Could not remove the session from Code",
+      "codeLinkAdded": "Session added to Code",
+      "codeLinkRemoved": "Session removed from Code",
+      "codeLinkAddedDescription": "It now appears in both layouts.",
+      "codeLinkRemovedDescription": "It stays available in Chat.",
+      "exported": "Conversation exported",
+      "exportError": "Could not export"
+    },
+    "titlebar": {
+      "toggleSidebar": "Toggle sidebar",
+      "minimize": "Minimize",
+      "restore": "Restore",
+      "maximize": "Maximize"
+    },
+    "plan": {
+      "title": "ChatGPT plan",
+      "tooltip": "Requests use your ChatGPT plan limit",
+      "manageAria": "Manage ChatGPT plan usage",
+      "manage": "Manage usage"
+    },
+    "update": {
+      "popoverAria": "Zylara update",
+      "available": "v{{version}} available",
+      "availableTitle": "Update v{{version}} available",
+      "checking": "Checking…",
+      "checkingTitle": "Checking for updates",
+      "downloading": "Downloading {{percent}}%",
+      "downloadingTitle": "Downloading update — {{percent}}%",
+      "verifying": "Verifying…",
+      "verifyingTitle": "Verifying download integrity",
+      "ready": "Install v{{version}}",
+      "readyTitle": "Update v{{version}} ready to install",
+      "installing": "Opening installer…",
+      "installingTitle": "Opening the installer",
+      "error": "Update failed",
+      "checkedNow": "Checked just now",
+      "checkedAgo": "Checked {{relative}} ago",
+      "checkedAt": "Checked on {{date}}",
+      "released": "published on {{date}}",
+      "downloadAction": "Download and install",
+      "downloadUpdate": "Download update",
+      "installNow": "Install now",
+      "openDmg": "Open DMG",
+      "openFolder": "Open folder",
+      "openInstaller": "Open installer",
+      "hintSetup": "Zylara will close during installation. Your conversations and settings are kept.",
+      "hintDmg": "Drag Zylara to the Applications folder and open the new version.",
+      "hintAppImage": "Replace the current AppImage with the new file and open it again.",
+      "hintSystem": "The system installer will open to finish the update.",
+      "hintDefault": "Follow the installer instructions to finish the update.",
+      "downloadingAria": "Downloading the update",
+      "verifyingIntegrity": "Verifying integrity…",
+      "progress": "{{received}} of {{total}}",
+      "downloadLabel": "Update download",
+      "speed": "{{speed}}/s",
+      "keepOpen": "Do not close Zylara while verification finishes.",
+      "verified": "Download verified",
+      "noAsset": "This version has no installer for your platform. Open the release on GitHub to download it manually.",
+      "viewGithub": "View on GitHub",
+      "checkingPanelTitle": "Checking for updates…",
+      "upToDate": "Everything is up to date",
+      "checkingPanelDescription": "Looking for the latest version on GitHub.",
+      "upToDateDescription": "You are using the latest version of Zylara.",
+      "newVersion": "New version available",
+      "newBadge": "New",
+      "stale": "Could not check right now. Showing the last result.",
+      "verifyAgain": "Check again",
+      "whatsNew": "What's new",
+      "loadingNotes": "Loading release notes",
+      "notesFallback": "See what changed in this version on GitHub.",
+      "notNow": "Not now",
+      "skip": "Skip this version",
+      "toasts": {
+        "availableTitle": "Zylara v{{version}} available",
+        "availableDescription": "Open the notice in the title bar to download and install.",
+        "availableAction": "View",
+        "latestTitle": "You are on the latest version",
+        "checkFailed": "Could not check for updates",
+        "cancelled": "Download cancelled",
+        "downloadedTitle": "Update downloaded",
+        "downloadedDescription": "The download was verified and is ready to install.",
+        "downloadFailed": "Failed to download the update",
+        "installerOpenTitle": "Installer opened",
+        "installerOpenManual": "Follow the system installer instructions.",
+        "installerOpenSetup": "Finish the update in the Zylara Setup window. Your conversations and settings are kept.",
+        "installerOpenFailed": "Could not open the installer",
+        "revealFailed": "Could not open the folder",
+        "skippedTitle": "Update skipped",
+        "skippedDescription": "You will not be notified about v{{version}}. A newer version will show up again.",
+        "skipFailed": "Could not skip this version",
+        "unskipFailed": "Could not re-enable the notice",
+        "preferenceFailed": "Could not save the preference"
+      }
+    },
+    "app": {
+      "routineDone": "Routine finished: {{title}}",
+      "routineDoneDescription": "The result is in the agent's main conversation.",
+      "routineFailed": "Routine failed: {{title}}",
+      "errorTitle": "Something went wrong",
+      "taskDone": "Task completed",
+      "taskFailed": "Task failed",
+      "taskHandoff": "Task waiting for acceptance",
+      "taskNeedsYou": "Task needs you"
+    },
+    "workspace": {
+      "conversationRegion": "Conversation",
+      "subagentRegion": "Subagent {{description}}",
+      "commitsRegion": "Commit history",
+      "diffRegion": "Diff of {{path}}",
+      "fileRegion": "File {{path}}",
+      "planRegion": "Approved plan for the session",
+      "backToSession": "Back to session",
+      "backToChat": "Back to chat"
+    },
+    "splash": {
+      "loading": "Preparing your space…"
+    }
+  },
+  "errors": {
+    "boundaryTitle": "Something broke here",
+    "boundaryDescription": "The interface hit an unexpected error. You can reload the window — your conversations are saved locally.",
+    "reload": "Reload"
+  },
+  "computer": {
+    "bannerTitle": "Zylara is controlling the computer",
+    "unknownAgent": "Agent",
+    "openThread": "Open thread",
+    "stopped": "Computer use stopped",
+    "stopFailed": "Could not stop"
+  }
+}

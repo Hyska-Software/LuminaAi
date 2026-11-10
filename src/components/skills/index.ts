@@ -8,6 +8,7 @@ export {
   countSkillsByOrigin,
   groupSkillsBySource,
   isExternalSkillSource,
+  localizedSkillMeta,
   skillSourceMeta,
 } from './sources';
 export type { SkillGroup, SkillOriginCounts, SkillSourceMeta } from './sources';

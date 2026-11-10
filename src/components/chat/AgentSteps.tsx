@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import * as Collapsible from '@radix-ui/react-collapsible';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowUpRight,
   Bot,
@@ -151,7 +152,7 @@ function useLiveElapsed(active: boolean, startedAt?: number | null): number | nu
 interface ReasoningRowProps {
   text: string;
   streaming: boolean;
-  /** Row label; the per-response transcript uses "Raciocínio". */
+  /** Row label; the per-response transcript uses "Reasoning". */
   label?: string;
   /** Model time of the step, shown next to the label when known. */
   durationMs?: number | null;
@@ -162,13 +163,10 @@ interface ReasoningRowProps {
  * reasoning is a detail: it starts collapsed and expands on demand, so long
  * chain-of-thought blocks never dominate the transcript.
  */
-function ReasoningRow({
-  text,
-  streaming,
-  label = 'Pensou',
-  durationMs = null,
-}: ReasoningRowProps) {
+function ReasoningRow({ text, streaming, label, durationMs = null }: ReasoningRowProps) {
+  const { t } = useTranslation('chat');
   const [open, setOpen] = useState(false);
+  const title = label ?? t('trace.thought');
   const duration =
     durationMs != null && durationMs >= 1000 ? formatThinkingDuration(durationMs) : null;
   return (
@@ -185,7 +183,9 @@ function ReasoningRow({
               className="flex min-w-0 flex-1 items-center gap-x-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <span className="text-[12px] font-semibold text-foreground">
-                {duration ? `${label} ${duration}` : label}
+                {duration
+                  ? t('trace.labelWithDuration', { label: title, duration })
+                  : title}
               </span>
               {streaming ? <Spinner size="xs" className="text-foreground-subtle" /> : null}
               <ChevronDown
@@ -231,6 +231,8 @@ function TraceEntryRows({
     return -1;
   }, [entries]);
 
+  const { t } = useTranslation('chat');
+
   return (
     <ol className="flex flex-col gap-1">
       {entries.map((entry, index) => {
@@ -243,7 +245,7 @@ function TraceEntryRows({
             <ReasoningRow
               key={`reasoning-${index}`}
               text={entry.text}
-              label={showReasoningDuration ? 'Raciocínio' : undefined}
+              label={showReasoningDuration ? t('trace.reasoning') : undefined}
               durationMs={showReasoningDuration ? (entry.durationMs ?? null) : null}
               streaming={streaming && phase === 'reasoning' && index === lastReasoningIndex}
             />
@@ -289,10 +291,12 @@ function TraceEntryRows({
  * stand-alone reasoning block and tool cards.
  */
 export function AgentSteps({ message, streaming, phase, startedAt, className }: AgentStepsProps) {
+  const { t, i18n } = useTranslation('chat');
   const reduceMotion = useReduceMotion();
+  // `buildAgentTrace` resolves localized labels, so the language is a dependency.
   const entries = useMemo(
     () => buildAgentTrace(message),
-    [message.reasoning, message.toolCalls, message.trace],
+    [message.reasoning, message.toolCalls, message.trace, i18n.language],
   );
   const hasReasoning = hasTraceReasoning(entries);
   const toolCount = countTraceTools(entries);
@@ -341,7 +345,7 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
   // answer; legacy messages without `trace[].text` fall back to it too.
   const blocks = useMemo(
     () => buildAgentResponseBlocks(message),
-    [message.toolCalls, message.trace],
+    [message.toolCalls, message.trace, i18n.language],
   );
   const segmented =
     layoutMode !== 'chat' && blocks.some((block) => block.kind === 'text');
@@ -367,15 +371,15 @@ export function AgentSteps({ message, streaming, phase, startedAt, className }: 
   );
   const title = working
     ? running && phase === 'tool'
-      ? 'Executando ferramentas…'
-      : 'Pensando…'
+      ? t('trace.toolsRunning')
+      : t('trace.thinking')
     : hasReasoning
       ? duration
-        ? `${layoutMode === 'code' ? 'Trabalhou' : 'Pensou'} por ${duration}`
-        : 'Raciocínio'
+        ? t(layoutMode === 'code' ? 'trace.workedFor' : 'trace.thoughtFor', { duration })
+        : t('trace.reasoning')
       : toolCount > 0
-        ? `${toolCount} ${toolCount === 1 ? 'passo' : 'passos'}`
-        : 'Raciocínio';
+        ? t('trace.steps', { count: toolCount })
+        : t('trace.reasoning');
   const shimmer = working && !reduceMotion;
 
   return (
@@ -516,6 +520,7 @@ function ExecutionGroup({
   live,
   collapsedByDefault,
 }: ExecutionGroupProps) {
+  const { t } = useTranslation('chat');
   const reduceMotion = useReduceMotion();
   const activity = live ? describeTraceActivity(entries) : null;
   const hasTools = entries.some(
@@ -543,11 +548,11 @@ function ExecutionGroup({
   const elapsed = isLast ? (turnDurationMs ?? durationMs) : durationMs;
   const finishedDuration = elapsed > 0 ? formatThinkingDuration(elapsed) : null;
   const finishedLabel = finishedDuration
-    ? `Trabalhou por ${finishedDuration}`
+    ? t('trace.workedFor', { duration: finishedDuration })
     : hasTools
-      ? 'Trabalhou'
-      : 'Raciocinou';
-  const label = live ? (activity?.label ?? 'Trabalhando…') : finishedLabel;
+      ? t('trace.worked')
+      : t('trace.reasoned');
+  const label = live ? (activity?.label ?? t('trace.working')) : finishedLabel;
   const preview = live ? (activity?.preview ?? null) : null;
   const ActiveIcon =
     activity?.kind === 'tool' ? (TOOL_ICONS[activity.toolName ?? ''] ?? Wrench) : null;
@@ -670,10 +675,15 @@ function ToolActivity({ group }: { group: ToolGroup }) {
 
 /** Source avatars (one letter per domain) — reads like a row of favicons. */
 function DomainSources({ domains }: { domains: string[] }) {
+  const { t } = useTranslation('chat');
   const visible = domains.slice(0, MAX_DOMAINS);
   const hidden = domains.length - visible.length;
   return (
-    <span role="img" aria-label={`Fontes: ${domains.join(', ')}`} className="flex items-center gap-1">
+    <span
+      role="img"
+      aria-label={t('trace.sourcesAria', { domains: domains.join(', ') })}
+      className="flex items-center gap-1"
+    >
       <span aria-hidden className="flex items-center -space-x-1">
         {visible.map((domain) => (
           <span
@@ -694,6 +704,7 @@ function DomainSources({ domains }: { domains: string[] }) {
 
 /** Pages read by `fetch_url`: dashed-underline links that open in the browser. */
 function PageLinks({ pages }: { pages: PageLink[] }) {
+  const { t } = useTranslation('chat');
   const visible = pages.slice(0, MAX_PAGE_CHIPS);
   const hidden = pages.length - visible.length;
   return (
@@ -704,7 +715,7 @@ function PageLinks({ pages }: { pages: PageLink[] }) {
           type="button"
           onClick={() => void openExternalUrl(page.url)}
           title={page.url}
-          aria-label={`Abrir ${page.title} no navegador`}
+          aria-label={t('trace.openPageAria', { title: page.title })}
           className={cn(
             'group/page flex max-w-full items-center gap-1 border-b border-dashed border-border-strong pb-px text-left',
             'text-[12px] font-medium text-foreground-muted transition-colors duration-150',

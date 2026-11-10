@@ -13,7 +13,10 @@ import {
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
+import { t as translate } from '@/lib/i18n';
+import { formatDateTime } from '@/lib/i18n/format';
 import type { ArtifactContent } from '@/lib/types';
 import { cn, formatBytes } from '@/lib/utils';
 import {
@@ -29,16 +32,6 @@ import { artifactKindMeta } from './kinds';
 import { ArtifactPreview } from './ArtifactPreview';
 import { ArtifactList } from './ArtifactList';
 
-function formatCreatedAt(timestamp: number): string {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-}
-
-function pluralize(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
-}
-
 interface SidePanelModeButtonProps {
   mode: SidePanelMode;
   canDock: boolean;
@@ -52,10 +45,11 @@ interface SidePanelModeButtonProps {
  * narrow to honor the docked layout.
  */
 function SidePanelModeButton({ mode, canDock, onToggle }: SidePanelModeButtonProps) {
+  const { t } = useTranslation('artifacts');
   const docked = mode === 'docked';
-  const label = docked ? 'Soltar painel sobre o chat' : 'Fixar painel ao lado do chat';
+  const label = t(docked ? 'artifacts:panel.dockedTooltip' : 'artifacts:panel.overlayTooltip');
   const disabled = !canDock && !docked;
-  const tooltip = disabled ? 'Aumente a janela para fixar o painel' : label;
+  const tooltip = disabled ? t('artifacts:panel.dockDisabledTooltip') : label;
   const button = (
     <IconButton label={label} size="sm" active={docked} disabled={disabled} onClick={onToggle}>
       <PanelRight className="size-4" />
@@ -78,6 +72,7 @@ function SidePanelModeButton({ mode, canDock, onToggle }: SidePanelModeButtonPro
  * Visibility is driven by `useUiStore`.
  */
 export function ArtifactPanel() {
+  const { t } = useTranslation('artifacts');
   const open = useUiStore((state) => state.artifactPanelOpen);
   const panelView = useUiStore((state) => state.artifactPanelView);
   const artifacts = useUiStore((state) => state.artifacts);
@@ -138,7 +133,7 @@ export function ArtifactPanel() {
       .then((result) => {
         if (cancelled) return;
         if (!result) {
-          setError('Conteúdo do artefato não encontrado.');
+          setError(translate('artifacts:panel.noContent'));
           return;
         }
         setContent(result);
@@ -165,9 +160,9 @@ export function ArtifactPanel() {
     if (!artifact) return;
     try {
       const path = await api.saveArtifact(artifact.id, artifact.name);
-      if (path) toast.success('Arquivo salvo', { description: path });
+      if (path) toast.success(translate('artifacts:card.saveSuccess'), { description: path });
     } catch (saveError) {
-      toast.error('Não foi possível salvar', {
+      toast.error(translate('artifacts:card.saveError'), {
         description: saveError instanceof Error ? saveError.message : String(saveError),
       });
     }
@@ -178,7 +173,7 @@ export function ArtifactPanel() {
     try {
       await api.openArtifact(artifact.id);
     } catch (openError) {
-      toast.error('Não foi possível abrir o arquivo', {
+      toast.error(translate('artifacts:card.openError'), {
         description: openError instanceof Error ? openError.message : String(openError),
       });
     }
@@ -196,10 +191,10 @@ export function ArtifactPanel() {
       } else {
         closeArtifactPanel();
       }
-      toast.success('Artefato excluído');
+      toast.success(translate('artifacts:panel.deleteSuccess'));
       setConfirmDelete(false);
     } catch (deleteError) {
-      toast.error('Não foi possível excluir', {
+      toast.error(translate('artifacts:panel.deleteError'), {
         description: deleteError instanceof Error ? deleteError.message : String(deleteError),
       });
     } finally {
@@ -211,7 +206,7 @@ export function ArtifactPanel() {
     <aside
       ref={panelRef}
       tabIndex={-1}
-      aria-label="Painel de artefatos"
+      aria-label={t('artifacts:panel.ariaLabel')}
       aria-hidden={!open || undefined}
       inert={!open}
       style={{
@@ -249,18 +244,18 @@ export function ArtifactPanel() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
-              <Tooltip content="Ver lista" side="bottom">
+              <Tooltip content={t('artifacts:panel.viewList')} side="bottom">
                 <IconButton
-                  label="Ver lista de artefatos"
+                  label={t('artifacts:panel.viewListLabel')}
                   size="sm"
                   onClick={() => setArtifactPanelView('list')}
                 >
                   <List className="size-4" />
                 </IconButton>
               </Tooltip>
-              <Tooltip content="Artefato anterior" side="bottom">
+              <Tooltip content={t('artifacts:panel.previous')} side="bottom">
                 <IconButton
-                  label="Artefato anterior"
+                  label={t('artifacts:panel.previous')}
                   size="sm"
                   onClick={() => navigate(-1)}
                   disabled={artifacts.length < 2}
@@ -268,9 +263,9 @@ export function ArtifactPanel() {
                   <ChevronLeft className="size-4" />
                 </IconButton>
               </Tooltip>
-              <Tooltip content="Próximo artefato" side="bottom">
+              <Tooltip content={t('artifacts:panel.next')} side="bottom">
                 <IconButton
-                  label="Próximo artefato"
+                  label={t('artifacts:panel.next')}
                   size="sm"
                   onClick={() => navigate(1)}
                   disabled={artifacts.length < 2}
@@ -278,19 +273,27 @@ export function ArtifactPanel() {
                   <ChevronRight className="size-4" />
                 </IconButton>
               </Tooltip>
-              <Tooltip content="Salvar como…" side="bottom">
-                <IconButton label="Salvar como…" size="sm" onClick={() => void handleSave()}>
+              <Tooltip content={t('artifacts:panel.saveAs')} side="bottom">
+                <IconButton
+                  label={t('artifacts:panel.saveAs')}
+                  size="sm"
+                  onClick={() => void handleSave()}
+                >
                   <Download className="size-4" />
                 </IconButton>
               </Tooltip>
-              <Tooltip content="Abrir no aplicativo padrão" side="bottom">
-                <IconButton label="Abrir no aplicativo padrão" size="sm" onClick={() => void handleOpen()}>
+              <Tooltip content={t('artifacts:panel.openExternal')} side="bottom">
+                <IconButton
+                  label={t('artifacts:panel.openExternal')}
+                  size="sm"
+                  onClick={() => void handleOpen()}
+                >
                   <ExternalLink className="size-4" />
                 </IconButton>
               </Tooltip>
-              <Tooltip content="Excluir" side="bottom">
+              <Tooltip content={t('artifacts:panel.delete')} side="bottom">
                 <IconButton
-                  label="Excluir artefato"
+                  label={t('artifacts:panel.deleteLabel')}
                   size="sm"
                   onClick={() => setConfirmDelete(true)}
                   className="hover:text-danger"
@@ -303,8 +306,12 @@ export function ArtifactPanel() {
                 canDock={layout.canDock}
                 onToggle={toggleSidePanelMode}
               />
-              <Tooltip content="Fechar" side="bottom">
-                <IconButton label="Fechar painel de artefatos" size="sm" onClick={closeArtifactPanel}>
+              <Tooltip content={t('artifacts:panel.close')} side="bottom">
+                <IconButton
+                  label={t('artifacts:panel.closeLabel')}
+                  size="sm"
+                  onClick={closeArtifactPanel}
+                >
                   <X className="size-4" />
                 </IconButton>
               </Tooltip>
@@ -315,13 +322,13 @@ export function ArtifactPanel() {
             <div className="flex shrink-0 items-center gap-2 border-b border-border bg-danger-soft px-3 py-2 text-[12px] text-danger">
               <AlertTriangle aria-hidden className="size-4 shrink-0" />
               <span className="min-w-0 flex-1 leading-snug">
-                Excluir “{artifact.name}”? Esta ação não pode ser desfeita.
+                {t('artifacts:panel.deleteConfirm', { name: artifact.name })}
               </span>
               <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)} disabled={busy}>
-                Cancelar
+                {t('common:actions.cancel')}
               </Button>
               <Button size="sm" variant="danger" loading={busy} onClick={() => void handleDelete()}>
-                Excluir
+                {t('artifacts:panel.delete')}
               </Button>
             </div>
           ) : null}
@@ -329,13 +336,19 @@ export function ArtifactPanel() {
           <div className="min-h-0 flex-1 overflow-hidden">
             {loading ? (
               <div className="flex h-full flex-col items-center justify-center gap-2">
-                <Spinner size="md" className="text-accent" label="Carregando artefato" />
-                <span className="text-xs text-foreground-muted">Carregando artefato…</span>
+                <Spinner
+                  size="md"
+                  className="text-accent"
+                  label={t('artifacts:panel.loadingLabel')}
+                />
+                <span className="text-xs text-foreground-muted">{t('artifacts:panel.loading')}</span>
               </div>
             ) : error ? (
               <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
                 <AlertTriangle aria-hidden className="size-5 text-danger" />
-                <p className="text-[13px] font-medium text-foreground">Não foi possível carregar</p>
+                <p className="text-[13px] font-medium text-foreground">
+                  {t('artifacts:panel.loadErrorTitle')}
+                </p>
                 <p className="text-xs leading-relaxed text-foreground-muted">{error}</p>
                 <Button
                   size="sm"
@@ -347,7 +360,7 @@ export function ArtifactPanel() {
                         .getArtifactContent(activeId)
                         .then((result) => {
                           setContent(result);
-                          setError(result ? null : 'Conteúdo do artefato não encontrado.');
+                          setError(result ? null : t('artifacts:panel.noContent'));
                         })
                         .catch((retryError: unknown) =>
                           setError(retryError instanceof Error ? retryError.message : String(retryError)),
@@ -356,7 +369,7 @@ export function ArtifactPanel() {
                     }
                   }}
                 >
-                  Tentar novamente
+                  {t('artifacts:panel.retry')}
                 </Button>
               </div>
             ) : content ? (
@@ -366,10 +379,19 @@ export function ArtifactPanel() {
 
           <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
             <span className="tabular-nums">
-              {index >= 0 ? `${index + 1} de ${artifacts.length}` : '—'} artefato
-              {artifacts.length === 1 ? '' : 's'}
+              {index >= 0
+                ? t('artifacts:panel.count', {
+                    current: index + 1,
+                    total: artifacts.length,
+                    count: artifacts.length,
+                  })
+                : t('artifacts:panel.countUnknown', { count: artifacts.length })}
             </span>
-            <span>Criado em {formatCreatedAt(artifact.createdAt)}</span>
+            <span>
+              {t('artifacts:panel.createdAt', {
+                date: formatDateTime(artifact.createdAt),
+              })}
+            </span>
           </footer>
         </>
       ) : (
@@ -379,12 +401,12 @@ export function ArtifactPanel() {
               <Files aria-hidden className="size-4" strokeWidth={1.9} />
             </span>
             <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight text-foreground">
-              Artefatos
+              {t('artifacts:panel.title')}
             </h2>
             <Badge
               tone="muted"
               size="md"
-              title={pluralize(artifacts.length, 'artefato', 'artefatos')}
+              title={t('artifacts:panel.listCount', { count: artifacts.length })}
               className="tabular-nums"
             >
               {artifacts.length}
@@ -394,8 +416,12 @@ export function ArtifactPanel() {
               canDock={layout.canDock}
               onToggle={toggleSidePanelMode}
             />
-            <Tooltip content="Fechar" side="bottom">
-              <IconButton label="Fechar painel de artefatos" size="sm" onClick={closeArtifactPanel}>
+            <Tooltip content={t('artifacts:panel.close')} side="bottom">
+              <IconButton
+                label={t('artifacts:panel.closeLabel')}
+                size="sm"
+                onClick={closeArtifactPanel}
+              >
                 <X className="size-4" />
               </IconButton>
             </Tooltip>
@@ -407,24 +433,24 @@ export function ArtifactPanel() {
 
           <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-2 text-[11px] text-foreground-subtle">
             <span className="tabular-nums">
-              {pluralize(artifacts.length, 'artefato', 'artefatos')}
+              {t('artifacts:panel.listCount', { count: artifacts.length })}
             </span>
-            {artifacts.length ? <span>Selecione “Abrir” para ver a prévia</span> : null}
+            {artifacts.length ? <span>{t('artifacts:panel.listHint')}</span> : null}
           </footer>
         </>
       )}
 
-      {/* Fora do fluxo, sobre a borda esquerda: não cobre a lista nem a scrollbar.
-          O containing block vem do próprio painel (`absolute` no overlay, cuja
-          linha do AppShell é `relative`; `relative` no docked), então não é
-          preciso um `relative` conflitante. */}
+      {/* Out of flow, over the left edge: never covers the list or the scrollbar.
+          The containing block comes from the panel itself (`absolute` in overlay
+          mode, whose AppShell row is `relative`; `relative` when docked), so no
+          conflicting `relative` is needed. */}
       <PanelResizer
         side="end"
         value={layout.width}
         min={SIDE_PANEL_WIDTH_MIN}
         max={layout.maxWidth}
         step={SIDE_PANEL_WIDTH_STEP}
-        label="Redimensionar painel de artefatos"
+        label={t('artifacts:panel.resize')}
         className="absolute inset-y-0 -left-2 z-10"
         onResize={onResize}
         onResizeEnd={onResizeEnd}

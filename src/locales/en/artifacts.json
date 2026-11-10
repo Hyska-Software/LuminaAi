@@ -1,0 +1,271 @@
+{
+  "kinds": {
+    "markdown": {
+      "label": "Markdown",
+      "description": "Markdown document"
+    },
+    "code": {
+      "label": "Code",
+      "description": "Source code file"
+    },
+    "text": {
+      "label": "Text",
+      "description": "Plain text"
+    },
+    "html": {
+      "label": "HTML",
+      "description": "HTML page"
+    },
+    "csv": {
+      "label": "CSV",
+      "description": "CSV spreadsheet"
+    },
+    "json": {
+      "label": "JSON",
+      "description": "JSON data"
+    },
+    "svg": {
+      "label": "SVG",
+      "description": "Vector graphic"
+    },
+    "image": {
+      "label": "Image",
+      "description": "Image"
+    },
+    "pdf": {
+      "label": "PDF",
+      "description": "PDF document"
+    },
+    "docx": {
+      "label": "Document",
+      "description": "Word document"
+    },
+    "xlsx": {
+      "label": "Spreadsheet",
+      "description": "Excel spreadsheet"
+    },
+    "pptx": {
+      "label": "Presentation",
+      "description": "PowerPoint presentation"
+    },
+    "audio": {
+      "label": "Audio",
+      "description": "Audio file"
+    },
+    "video": {
+      "label": "Video",
+      "description": "Video file"
+    },
+    "archive": {
+      "label": "Archive",
+      "description": "ZIP package"
+    },
+    "binary": {
+      "label": "File",
+      "description": "Binary file"
+    }
+  },
+  "card": {
+    "open": "Open",
+    "saveAs": "Save as…",
+    "saveNamed": "Save {{name}} as…",
+    "saveSuccess": "File saved",
+    "saveError": "Could not save the file",
+    "openError": "Could not open the file",
+    "subtitle": "{{kind}} · {{size}}"
+  },
+  "list": {
+    "ariaLabel": "Conversation artifacts",
+    "emptyTitle": "No artifacts in this conversation",
+    "emptyDescription": "When the model creates a file, it appears here with a preview and actions."
+  },
+  "preview": {
+    "errorTitle": "Could not load the preview"
+  },
+  "panel": {
+    "title": "Artifacts",
+    "ariaLabel": "Artifacts panel",
+    "close": "Close",
+    "closeLabel": "Close artifacts panel",
+    "viewList": "View list",
+    "viewListLabel": "View artifact list",
+    "previous": "Previous artifact",
+    "next": "Next artifact",
+    "saveAs": "Save as…",
+    "openExternal": "Open in default app",
+    "delete": "Delete",
+    "deleteLabel": "Delete artifact",
+    "deleteConfirm": "Delete “{{name}}”? This action cannot be undone.",
+    "deleteSuccess": "Artifact deleted",
+    "deleteError": "Could not delete the artifact",
+    "loading": "Loading artifact…",
+    "loadingLabel": "Loading artifact",
+    "loadErrorTitle": "Could not load the artifact",
+    "noContent": "Artifact content not found.",
+    "retry": "Try again",
+    "count_one": "{{current}} of {{total}} artifact",
+    "count_other": "{{current}} of {{total}} artifacts",
+    "createdAt": "Created on {{date}}",
+    "listHint": "Select “Open” to see the preview",
+    "listCount_one": "{{count}} artifact",
+    "listCount_other": "{{count}} artifacts",
+    "countUnknown_one": "— artifact",
+    "countUnknown_other": "— artifacts",
+    "dockedTooltip": "Float panel over chat",
+    "overlayTooltip": "Dock panel beside chat",
+    "dockDisabledTooltip": "Widen the window to dock the panel",
+    "resize": "Resize artifacts panel"
+  },
+  "code": {
+    "toolbar": "Code controls",
+    "wrap": "Wrap lines",
+    "noWrap": "Horizontal scroll",
+    "empty": "Nothing to show.",
+    "lineCount_one": "{{count}} line",
+    "lineCount_other": "{{count}} lines"
+  },
+  "csv": {
+    "empty": "Empty CSV.",
+    "truncated": "Showing the first {{shown}} of {{total}} rows."
+  },
+  "markdown": {
+    "viewAria": "Markdown view mode",
+    "document": "Document",
+    "code": "Code",
+    "previewAria": "Markdown preview",
+    "empty": "Empty Markdown."
+  },
+  "json": {
+    "viewAria": "JSON view mode",
+    "tree": "Tree",
+    "code": "Code",
+    "empty": "Empty JSON.",
+    "noJson": "No JSON content to display.",
+    "invalid": "Invalid JSON — showing the original content.",
+    "treeAria": "JSON tree of {{name}}",
+    "treeLabel": "JSON tree",
+    "truncated": "Preview truncated — JSON is too large",
+    "lineCount_one": "{{count}} line",
+    "lineCount_other": "{{count}} lines",
+    "items_one": "{{count}} item",
+    "items_other": "{{count}} items",
+    "keys_one": "{{count}} key",
+    "keys_other": "{{count}} keys",
+    "characters_one": "({{count}} character)",
+    "characters_other": "({{count}} characters)",
+    "expand": "Expand {{label}}",
+    "collapse": "Collapse {{label}}"
+  },
+  "archive": {
+    "loading": "Reading archive…",
+    "empty": "Empty archive.",
+    "listError": "Could not list the archive entries.",
+    "summaryTitle": "Content summary",
+    "entriesAria": "Archive entries",
+    "summary_one": "{{count}} file · {{size}}",
+    "summary_other": "{{count}} files · {{size}}",
+    "directorySummary_one": " · {{count}} folder",
+    "directorySummary_other": " · {{count}} folders",
+    "showing": "Showing {{shown}} of {{total}} entries",
+    "files_one": "{{count}} file",
+    "files_other": "{{count}} files",
+    "folders_one": "{{count}} folder",
+    "folders_other": "{{count}} folders"
+  },
+  "binary": {
+    "saveAs": "Save as…",
+    "open": "Open",
+    "retry": "Try again",
+    "previewUnavailable": "preview unavailable",
+    "subtitle": "{{kind}} · {{size}}",
+    "subtitleUnavailable": "{{kind}} · {{size}} · preview unavailable",
+    "subtitleWithFormat": "{{kind}} · {{format}} · {{size}}",
+    "subtitleWithFormatUnavailable": "{{kind}} · {{format}} · {{size}} · preview unavailable",
+    "readError": "Could not read the first bytes: {{message}}",
+    "readingBytes": "Reading the first bytes",
+    "readingBytesEllipsis": "Reading the first bytes…",
+    "firstBytesAria": "First bytes of the file",
+    "firstBytes": "First {{count}} bytes",
+    "totalSize": "{{size}} total",
+    "hexdumpLabel": "First {{count}} bytes of file {{name}}"
+  },
+  "hexdump": {
+    "defaultLabel": "Hexdump of the first bytes",
+    "empty": "No bytes to display."
+  },
+  "audio": {
+    "largeDetail": "File too large for inline playback; use Open/Save.",
+    "fileSizeTitle": "File size",
+    "durationTitle": "Audio duration",
+    "durationUnknown": "Duration —",
+    "playerAria": "Audio player for {{name}}",
+    "playError": "Could not play the audio; use Open/Save.",
+    "localPlayback": "Local playback in the native player.",
+    "formatFallback": "AUDIO"
+  },
+  "video": {
+    "fileSizeTitle": "File size",
+    "durationTitle": "Video duration",
+    "durationUnknown": "Duration —",
+    "playerAria": "Video player for {{name}}",
+    "playError": "Could not play the video; use Open/Save.",
+    "formatFallback": "VIDEO"
+  },
+  "image": {
+    "toolbarAria": "Image controls",
+    "stageAria": "Image view",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "dimensionsTitle": "Image dimensions in pixels",
+    "fit": "Fit to window",
+    "actual": "Actual size",
+    "loading": "Loading image…",
+    "noData": "The image has no data to display.",
+    "decodeError": "Could not decode the image.",
+    "svgNotRecognized": "Markup not recognized as SVG; showing as text.",
+    "svgToolbarAria": "SVG controls",
+    "svgStageAria": "SVG view"
+  },
+  "pdf": {
+    "noData": "This PDF came without the data needed for the preview.",
+    "renderErrorTitle": "Could not render the PDF",
+    "retry": "Try again",
+    "toolbarAria": "PDF controls",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "pageStatus": "Page {{page}} of {{total}}",
+    "loadingShort": "Loading…",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "rendering": "Rendering page",
+    "previewAria": "PDF preview",
+    "loading": "Loading PDF",
+    "loadingEllipsis": "Loading PDF…",
+    "canvasAria": "Page {{page}} of {{total}} of PDF {{name}}",
+    "pageRenderError": "Could not render this page.",
+    "cancelled": "PDF rendering cancelled.",
+    "decodeEmpty": "PDF without data to display."
+  },
+  "docx": {
+    "loading": "Loading document…"
+  },
+  "xlsx": {
+    "loading": "Loading spreadsheet…",
+    "empty": "Empty spreadsheet.",
+    "noRows": "No data rows.",
+    "truncated": "Preview truncated: showing only part of this spreadsheet's rows.",
+    "noSheets": "Spreadsheet has no sheets to display.",
+    "tabsAria": "Sheets in the file",
+    "sheetDefault": "Sheet {{index}}"
+  },
+  "pptx": {
+    "loading": "Loading presentation…",
+    "empty": "Presentation has no slides to display.",
+    "slide": "Slide {{position}}",
+    "withNotes": "with notes",
+    "slideNoText": "Slide without text",
+    "notes": "Speaker notes:",
+    "simplified": "Simplified preview: shows the slide text without the original layout and theme.",
+    "slidesAria": "Presentation slides"
+  }
+}

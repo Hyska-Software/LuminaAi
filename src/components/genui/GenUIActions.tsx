@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { propObjectArray, propString, type GenUIValue } from '@/lib/genui';
@@ -57,6 +58,7 @@ function readItems(props: Record<string, GenUIValue> | undefined): GenUIActionIt
  * nunca envia a mensagem. `copy` copia o texto e confirma com um toast.
  */
 export function GenUIActions({ props }: GenUIActionsProps) {
+  const { t } = useTranslation('genui');
   const items = readItems(props);
   const [busyIndex, setBusyIndex] = useState<number | null>(null);
   const align = propString(props, 'align', 'start') === 'end' ? 'end' : 'start';
@@ -72,10 +74,10 @@ export function GenUIActions({ props }: GenUIActionsProps) {
           : { label: item.label, copy: item.text },
       );
       if (!result.ok) {
-        toast.error(result.message ?? 'Não foi possível executar a ação.');
+        toast.error(result.message ?? t('actions.errors.run'));
         return;
       }
-      if (item.kind === 'copy') toast.success('Copiado para a área de transferência');
+      if (item.kind === 'copy') toast.success(t('actions.copied'));
     } finally {
       setBusyIndex(null);
     }
@@ -84,7 +86,7 @@ export function GenUIActions({ props }: GenUIActionsProps) {
   return (
     <div
       role="group"
-      aria-label="Ações sugeridas"
+      aria-label={t('actions.group')}
       className={cn('flex flex-wrap items-center gap-2', align === 'end' ? 'justify-end' : 'justify-start')}
     >
       {items.map((item, index) => {

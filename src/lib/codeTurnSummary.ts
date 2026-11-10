@@ -16,6 +16,7 @@
  *   e o último `kind` vence;
  * - lista ordenada por path (como o painel Alterações), determinística.
  */
+import { compareText } from './i18n/format';
 import type { ChatMessage, FileChangeKind } from './types';
 
 /** Um arquivo alterado no turno (linha do resumo). */
@@ -106,9 +107,7 @@ export function buildCodeTurnSummary(
 
   if (byPath.size === 0) return null;
 
-  const files = [...byPath.values()].sort((left, right) =>
-    left.path.localeCompare(right.path, 'pt-BR'),
-  );
+  const files = [...byPath.values()].sort((left, right) => compareText(left.path, right.path));
 
   return {
     files,

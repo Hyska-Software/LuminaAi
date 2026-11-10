@@ -1,4 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   Check,
   ChevronDown,
@@ -67,63 +69,102 @@ export interface ApprovalCardProps {
 }
 
 interface RiskMeta {
-  label: string;
+  labelKey: string;
   tone: BadgeVariant;
   Icon: LucideIcon;
   /** Título humano do card quando o backend manda um título vazio. */
-  ask: string;
+  askKey: string;
 }
 
 /** Rótulos e cores (sempre acompanhados de texto — nunca só cor) por classe de risco. */
 const RISK: Record<RiskClass, RiskMeta> = {
-  read: { label: 'Leitura', tone: 'neutral', Icon: Eye, ask: 'Ler arquivo?' },
-  write: { label: 'Escrita', tone: 'outline', Icon: FilePenLine, ask: 'Gravar alteração?' },
-  shell: { label: 'Comando', tone: 'warning', Icon: SquareTerminal, ask: 'Executar comando?' },
-  outside: { label: 'Fora do projeto', tone: 'warning', Icon: FolderLock, ask: 'Ler arquivo fora do projeto?' },
-  secret: { label: 'Segredo', tone: 'warning', Icon: KeyRound, ask: 'Ler arquivo de segredo?' },
-  destroy: { label: 'Destrutivo', tone: 'danger', Icon: Flame, ask: 'Executar ação destrutiva?' },
-  network: { label: 'Rede', tone: 'warning', Icon: Globe, ask: 'Acessar a rede?' },
+  read: { labelKey: 'approval.risk.read', tone: 'neutral', Icon: Eye, askKey: 'approval.ask.read' },
+  write: {
+    labelKey: 'approval.risk.write',
+    tone: 'outline',
+    Icon: FilePenLine,
+    askKey: 'approval.ask.write',
+  },
+  shell: {
+    labelKey: 'approval.risk.shell',
+    tone: 'warning',
+    Icon: SquareTerminal,
+    askKey: 'approval.ask.shell',
+  },
+  outside: {
+    labelKey: 'approval.risk.outside',
+    tone: 'warning',
+    Icon: FolderLock,
+    askKey: 'approval.ask.outside',
+  },
+  secret: {
+    labelKey: 'approval.risk.secret',
+    tone: 'warning',
+    Icon: KeyRound,
+    askKey: 'approval.ask.secret',
+  },
+  destroy: {
+    labelKey: 'approval.risk.destroy',
+    tone: 'danger',
+    Icon: Flame,
+    askKey: 'approval.ask.destroy',
+  },
+  network: {
+    labelKey: 'approval.risk.network',
+    tone: 'warning',
+    Icon: Globe,
+    askKey: 'approval.ask.network',
+  },
   computer: {
-    label: 'Computador',
+    labelKey: 'approval.risk.computer',
     tone: 'warning',
     Icon: MousePointerClick,
-    ask: 'Controlar o computador?',
+    askKey: 'approval.ask.computer',
   },
-  ask: { label: 'Confirmar', tone: 'accent', Icon: ShieldQuestion, ask: 'Confirmar ação?' },
+  ask: {
+    labelKey: 'approval.risk.ask',
+    tone: 'accent',
+    Icon: ShieldQuestion,
+    askKey: 'approval.ask.ask',
+  },
 };
 
 const SCOPE_LABEL: Record<ApprovalScope, string> = {
-  session: 'Nesta sessão',
-  workspace: 'Neste workspace',
-  global: 'Sempre',
+  session: 'approval.scope.session',
+  workspace: 'approval.scope.workspace',
+  global: 'approval.scope.global',
 };
 
 const SCOPE_SHORT: Record<ApprovalScope, string> = {
-  session: 'nesta sessão',
-  workspace: 'neste workspace',
-  global: 'sempre',
+  session: 'approval.scopeShort.session',
+  workspace: 'approval.scopeShort.workspace',
+  global: 'approval.scopeShort.global',
 };
 
 const SCOPE_ORDER: ApprovalScope[] = ['session', 'workspace', 'global'];
 
 const MAX_LISTED_PATHS = 5;
 
-function resolutionText(resolution: ApprovalResolution): string {
+type Translate = TFunction<'agents'>;
+
+function resolutionText(resolution: ApprovalResolution, t: Translate): string {
   switch (resolution.decision) {
     case 'approved':
       return resolution.scope
-        ? `Permitido · ${SCOPE_SHORT[resolution.scope]}`
-        : 'Permitido';
+        ? t('approval.resolved.allowedWithScope', { scope: t(SCOPE_SHORT[resolution.scope]) })
+        : t('approval.resolved.allowed');
     case 'denied': {
       const reason = resolution.feedback?.trim();
-      return reason ? `Negado: “${reason}”` : 'Negado';
+      return reason
+        ? t('approval.resolved.deniedWithReason', { reason })
+        : t('approval.resolved.denied');
     }
     case 'cancelled':
-      return 'Cancelado';
+      return t('approval.resolved.cancelled');
     case 'expired':
-      return 'Expirado';
+      return t('approval.resolved.expired');
     default:
-      return 'Resolvido';
+      return t('approval.resolved.resolved');
   }
 }
 
@@ -141,6 +182,7 @@ export function ApprovalCard({
   savedScope = null,
   className,
 }: ApprovalCardProps) {
+  const { t } = useTranslation('agents');
   const titleId = useId();
   const descriptionId = useId();
   const reasonId = useId();
@@ -164,6 +206,8 @@ export function ApprovalCard({
   }, [approval.id]);
 
   const risk = RISK[approval.risk] ?? RISK.ask;
+  const riskLabel = t(risk.labelKey as never);
+  const riskAsk = t(risk.askKey as never);
   const RiskIcon = risk.Icon;
 
   const allowOption: ApprovalOption | null =
@@ -171,7 +215,7 @@ export function ApprovalCard({
 
   const scopeItems = SCOPE_ORDER.map((scope) => {
     const option = approval.options.find((candidate) => candidate.scope === scope);
-    return { scope, option, label: option?.label ?? SCOPE_LABEL[scope] };
+    return { scope, option, label: option?.label ?? t(SCOPE_LABEL[scope]) };
   });
 
   const decide = (decision: ApprovalDecision, options?: ApprovalDecisionOptions) => {
@@ -204,8 +248,11 @@ export function ApprovalCard({
   };
 
   const announcement = resolved
-    ? `Aprovação ${resolutionText(resolved)}`
-    : `Aprovação necessária: ${approval.title}. Risco: ${risk.label}.`;
+    ? t('approval.announce.resolved', { status: resolutionText(resolved, t) })
+    : t('approval.announce.needed', {
+        title: approval.title || riskAsk,
+        risk: riskLabel,
+      });
 
   return (
     <div
@@ -237,14 +284,14 @@ export function ApprovalCard({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 id={titleId} className="min-w-0 flex-1 text-[13px] font-medium leading-snug text-foreground">
-                  {approval.title || risk.ask}
+                  {approval.title || riskAsk}
                 </h3>
-                <Badge variant={risk.tone}>{risk.label}</Badge>
+                <Badge variant={risk.tone}>{riskLabel}</Badge>
                 <span className="font-mono text-[11px] text-foreground-muted">{approval.tool}</span>
               </div>
               <div id={descriptionId} className="mt-2 flex flex-col gap-2">
                 <ApprovalDetailView
-                  title={approval.title || risk.ask}
+                  title={approval.title || riskAsk}
                   detail={approval.detail}
                   preview={approval.preview}
                 />
@@ -255,19 +302,19 @@ export function ApprovalCard({
           {denying ? (
             <div className="mt-3 flex flex-col gap-2">
               <label htmlFor={reasonId} className="text-[11px] font-medium text-foreground-muted">
-                Motivo da negação (opcional)
+                {t('approval.reasonLabel')}
               </label>
               <Textarea
                 id={reasonId}
                 value={reason}
                 rows={2}
                 autoFocus
-                placeholder="Ex.: use pnpm em vez de npm"
+                placeholder={t('approval.reasonPlaceholder')}
                 onChange={(event) => setReason(event.target.value)}
               />
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button variant="ghost" size="sm" onClick={() => { setDenying(false); setReason(''); }}>
-                  Cancelar
+                  {t('common:actions.cancel')}
                 </Button>
                 <Button
                   variant="danger"
@@ -276,7 +323,7 @@ export function ApprovalCard({
                   onClick={deny}
                   leftIcon={<X className="size-4" />}
                 >
-                  Negar
+                  {t('approval.deny')}
                 </Button>
               </div>
             </div>
@@ -291,10 +338,10 @@ export function ApprovalCard({
                 onClick={() => decide('approved', { optionId: allowOption?.id })}
                 leftIcon={<Check className="size-4" />}
               >
-                {allowOption?.label ?? 'Permitir'}
+                {allowOption?.label ?? t('approval.allow')}
               </Button>
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => setDenying(true)}>
-                Negar
+                {t('approval.deny')}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -304,14 +351,14 @@ export function ApprovalCard({
                     disabled={busy}
                     rightIcon={<ChevronDown className="size-3.5" />}
                   >
-                    Sempre permitir
+                    {t('approval.allowAlways')}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>Lembrar para</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('approval.rememberFor')}</DropdownMenuLabel>
                   {savedScope ? (
                     <p className="px-2 pb-1 text-[11px] leading-snug text-foreground-muted">
-                      Regra salva: {SCOPE_SHORT[savedScope]}
+                      {t('approval.savedRule', { scope: t(SCOPE_SHORT[savedScope]) })}
                     </p>
                   ) : null}
                   {scopeItems.map(({ scope, option, label }) => (
@@ -325,7 +372,7 @@ export function ApprovalCard({
                   ))}
                   <DropdownMenuSeparator />
                   <p className="px-2 py-1 text-[11px] leading-snug text-foreground-muted">
-                    A regra só vale para <span className="font-mono">{approval.tool}</span>.
+                    {t('approval.ruleOnlyFor', { tool: approval.tool })}
                   </p>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -338,6 +385,7 @@ export function ApprovalCard({
 }
 
 function ResolvedLine({ resolution }: { resolution: ApprovalResolution }) {
+  const { t } = useTranslation('agents');
   const approved = resolution.decision === 'approved';
   return (
     <div className="flex items-center gap-2 text-[12px] text-foreground-muted" role="status">
@@ -346,7 +394,7 @@ function ResolvedLine({ resolution }: { resolution: ApprovalResolution }) {
       ) : (
         <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
       )}
-      <span className="min-w-0 break-words">{resolutionText(resolution)}</span>
+      <span className="min-w-0 break-words">{resolutionText(resolution, t)}</span>
     </div>
   );
 }
@@ -377,6 +425,7 @@ function ComputerActionDetail({
 }: {
   detail: Extract<ApprovalRequest['detail'], { kind: 'computer_action' }>;
 }) {
+  const { t } = useTranslation('agents');
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
@@ -398,32 +447,32 @@ function ComputerActionDetail({
   return (
     <div className="flex flex-col gap-2">
       <p className="text-[12px] text-foreground">
-        Ação: <span className="font-medium">{detail.action}</span>
+        {t('approval.computer.action', { action: detail.action })}
       </p>
       <p className="break-words font-mono text-[11px] text-foreground-muted">
         {detail.target}
       </p>
       {detail.textLength != null ? (
         <p className="text-[11px] text-foreground-muted">
-          Texto: {detail.textLength} caractere(s) — o conteúdo não é exibido.
+          {t('approval.computer.textLength', { count: detail.textLength })}
         </p>
       ) : null}
       {detail.sensitive ? (
         <p className="rounded-lg border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning">
-          Esta janela parece conter dados sensíveis. A automação será bloqueada.
+          {t('approval.computer.sensitive')}
         </p>
       ) : null}
       {src ? (
         <img
           src={src}
-          alt="Screenshot do alvo da ação"
+          alt={t('approval.computer.screenshotAlt')}
           className="max-h-72 w-full rounded-lg border border-border object-contain"
         />
       ) : detail.screenshotPath && !error ? (
-        <p className="text-[11px] text-foreground-subtle">Carregando screenshot…</p>
+        <p className="text-[11px] text-foreground-subtle">{t('approval.computer.loadingScreenshot')}</p>
       ) : (
         <p className="text-[11px] text-foreground-subtle">
-          Sem screenshot disponível; confira a janela antes de permitir.
+          {t('approval.computer.noScreenshot')}
         </p>
       )}
     </div>
@@ -439,6 +488,7 @@ function ApprovalDetailView({
   preview?: string | null;
   title: string;
 }): ReactNode {
+  const { t } = useTranslation('agents');
   switch (detail.kind) {
     case 'command':
       return (
@@ -447,7 +497,7 @@ function ApprovalDetailView({
             cwd: <span className="font-mono text-foreground-muted">{detail.workdir}</span>
           </p>
           <pre
-            aria-label={`Comando a executar: ${title}`}
+            aria-label={t('approval.commandAria', { title })}
             tabIndex={0}
             className="max-h-40 overflow-auto rounded-lg border border-border bg-background px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
           >
@@ -461,21 +511,23 @@ function ApprovalDetailView({
       return (
         <div className="flex flex-col gap-1">
           <p className="text-[11px] text-foreground-muted">
-            {detail.change || 'Alterar arquivos'}
+            {detail.change || t('approval.paths.change')}
           </p>
-          <ul aria-label="Arquivos que serão alterados" className="flex flex-col gap-0.5">
+          <ul aria-label={t('approval.paths.listAria')} className="flex flex-col gap-0.5">
             {visible.map((path) => (
               <li key={path} className="truncate font-mono text-[12px] text-foreground-muted" title={path}>
                 {path}
               </li>
             ))}
             {hidden > 0 ? (
-              <li className="text-[11px] text-foreground-muted">+{hidden} outro(s) arquivo(s)</li>
+              <li className="text-[11px] text-foreground-muted">
+                {t('approval.paths.more', { count: hidden })}
+              </li>
             ) : null}
           </ul>
           {preview ? (
             <pre
-              aria-label="Prévia das alterações"
+              aria-label={t('approval.paths.previewAria')}
               tabIndex={0}
               className="max-h-40 overflow-auto rounded-lg border border-border bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground-muted [overflow-wrap:anywhere]"
             >
@@ -488,10 +540,10 @@ function ApprovalDetailView({
     case 'secret':
       return (
         <div className="flex flex-col gap-1">
-          <p className="text-[11px] text-foreground-muted">Arquivo de segredo</p>
+          <p className="text-[11px] text-foreground-muted">{t('approval.secret.title')}</p>
           <p className="break-all font-mono text-[12px] text-foreground-muted">{detail.path}</p>
           <p className="text-[11px] leading-snug text-warning">
-            O conteúdo deste arquivo não é mostrado ao agente.
+            {t('approval.secret.note')}
           </p>
         </div>
       );
@@ -500,7 +552,7 @@ function ApprovalDetailView({
         <div className="flex flex-col gap-1">
           <p className="break-all font-mono text-[12px] text-foreground-muted">{detail.path}</p>
           <p className="text-[11px] leading-snug text-warning">
-            O caminho fica fora do workspace. Permitir acesso?
+            {t('approval.outside.note')}
           </p>
         </div>
       );
@@ -516,4 +568,3 @@ function ApprovalDetailView({
       return null;
   }
 }
-

@@ -123,17 +123,16 @@ pub fn create_conversation(
     let title = title
         .map(|title| title.trim().to_string())
         .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "Nova conversa".to_string());
+        .unwrap_or_else(|| crate::i18n::t("common.defaultConversationTitle"));
     if let Some(agent_id) = agent_id
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
         if let Some(mode) = mode.as_deref().map(str::trim).filter(|mode| !mode.is_empty()) {
             if mode != crate::domain::CONVERSATION_MODE_AGENT {
-                return Err(
-                    "AGENT_VALIDATION: uma conversa de agente não pode usar outro layout"
-                        .to_string(),
-                );
+                return Err(crate::i18n::t(
+                    "conversations.errors.agentModeInvalid",
+                ));
             }
         }
         return state
@@ -142,7 +141,7 @@ pub fn create_conversation(
             .map_err(to_error);
     }
     if mode.as_deref().map(str::trim) == Some(crate::domain::CONVERSATION_MODE_AGENT) {
-        return Err("AGENT_VALIDATION: informe o agente da conversa".to_string());
+        return Err(crate::i18n::t("conversations.errors.agentRequired"));
     }
     let (provider_id, model_id) = resolve_defaults(&state, provider_id, model_id);
     // `mode` ausente/inválido cai no layout padrão (Chat).
@@ -177,7 +176,7 @@ pub fn rename_conversation(
 ) -> Result<(), String> {
     let title = title.trim();
     if title.is_empty() {
-        return Err("o título da conversa não pode ficar vazio".to_string());
+        return Err(crate::i18n::t("conversations.errors.emptyTitle"));
     }
     state.db.rename_conversation(&id, title).map_err(to_error)
 }
@@ -186,9 +185,7 @@ pub fn rename_conversation(
 pub fn delete_conversation(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let conversation = state.db.get_conversation(&id).map_err(to_error)?;
     if conversation.as_ref().is_some_and(|conversation| conversation.is_main) {
-        return Err(
-            "CONVERSATION_MAIN: a conversa principal não pode ser excluída.".to_string(),
-        );
+        return Err(crate::i18n::t("conversations.errors.mainCannotDelete"));
     }
     state.cancel_conversation(&id);
     let result = state.db.delete_conversation(&id).map_err(to_error);
@@ -259,7 +256,7 @@ pub fn set_conversation_code_linked(
         .db
         .get_conversation(&id)
         .map_err(to_error)?
-        .ok_or_else(|| "conversa não encontrada após vincular ao Code".to_string())
+        .ok_or_else(|| crate::i18n::t("conversations.errors.notFoundAfterCodeLink"))
 }
 
 #[tauri::command]
@@ -308,10 +305,10 @@ pub(crate) fn validate_model_change(
     let provider_id = provider_id.trim();
     let model_id = model_id.trim();
     if provider_id.is_empty() {
-        return Err("selecione um provedor para a sessão".to_string());
+        return Err(crate::i18n::t("conversations.errors.selectProvider"));
     }
     if model_id.is_empty() {
-        return Err("selecione um modelo para a sessão".to_string());
+        return Err(crate::i18n::t("conversations.errors.selectModel"));
     }
     let is_code_session =
         conversation.mode == crate::domain::CONVERSATION_MODE_CODE || conversation.code_linked;
@@ -320,23 +317,23 @@ pub(crate) fn validate_model_change(
     if !is_code_session && !is_empty_agent_thread {
         if conversation.mode == crate::domain::CONVERSATION_MODE_AGENT {
             return Err(
-                "MODEL_LOCKED: o modelo do agente fica travado após a primeira mensagem \
-                 desta conversa"
-                    .to_string(),
+                crate::i18n::t("conversations.errors.agentModelLocked"),
             );
         }
         return Err(
-            "MODEL_LOCKED: o modelo do Chat fica travado após a primeira mensagem; \
-             use uma sessão do Code"
-                .to_string(),
+            crate::i18n::t("conversations.errors.chatModelLocked"),
         );
     }
     if !provider_known(provider_id) {
-        return Err(format!("provedor desconhecido: {provider_id}"));
+        return Err(crate::i18n::t_args(
+            "conversations.errors.providerUnknown",
+            &[("provider_id", &provider_id)],
+        ));
     }
     if !model_known(provider_id, model_id) {
-        return Err(format!(
-            "modelo `{model_id}` não está disponível no provedor `{provider_id}`"
+        return Err(crate::i18n::t_args(
+            "conversations.errors.modelUnavailable",
+            &[("model_id", &model_id), ("provider_id", &provider_id)],
         ));
     }
     Ok((provider_id.to_string(), model_id.to_string()))
@@ -357,13 +354,16 @@ pub fn set_conversation_model(
 ) -> Result<Conversation, String> {
     let conversation_id = conversation_id.trim();
     if conversation_id.is_empty() {
-        return Err("conversa não informada".to_string());
+        return Err(crate::i18n::t("conversations.errors.missingId"));
     }
     let conversation = state
         .db
         .get_conversation(conversation_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "conversations.errors.notFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
     let (provider_id, model_id) = validate_model_change(
         &conversation,
         &provider_id,
@@ -372,7 +372,7 @@ pub fn set_conversation_model(
         |provider_id, model_id| state.model(provider_id, model_id).is_some(),
     )?;
     if state.has_active_turn_for(conversation_id) {
-        return Err("MODEL_LOCKED: aguarde a resposta atual terminar".to_string());
+        return Err(crate::i18n::t("conversations.errors.waitCurrentReply"));
     }
     state
         .db
@@ -382,7 +382,7 @@ pub fn set_conversation_model(
         .db
         .get_conversation(conversation_id)
         .map_err(to_error)?
-        .ok_or_else(|| "conversa não encontrada após atualizar o modelo".to_string())
+        .ok_or_else(|| crate::i18n::t("conversations.errors.notFoundAfterModelUpdate"))
 }
 
 /* ------------------------------------------------------------------ */
@@ -390,36 +390,31 @@ pub fn set_conversation_model(
 /* ------------------------------------------------------------------ */
 
 fn format_timestamp(ms: i64) -> String {
-    use chrono::TimeZone;
-    chrono::Local
-        .timestamp_millis_opt(ms)
-        .single()
-        .map(|datetime| datetime.format("%d/%m/%Y %H:%M").to_string())
-        .unwrap_or_default()
+    crate::i18n::format_datetime(ms)
 }
 
-fn role_label(role: MessageRole) -> &'static str {
+fn role_label(role: MessageRole) -> String {
     match role {
-        MessageRole::User => "Usuário",
-        MessageRole::Assistant => "Assistente",
-        MessageRole::System => "Sistema",
+        MessageRole::User => crate::i18n::t("conversations.role.user"),
+        MessageRole::Assistant => crate::i18n::t("conversations.role.assistant"),
+        MessageRole::System => crate::i18n::t("conversations.role.system"),
     }
 }
 
-fn status_label(status: MessageStatus) -> &'static str {
+fn status_label(status: MessageStatus) -> String {
     match status {
-        MessageStatus::Streaming => "em andamento",
-        MessageStatus::Complete => "completa",
-        MessageStatus::Error => "erro",
-        MessageStatus::Cancelled => "cancelada",
+        MessageStatus::Streaming => crate::i18n::t("conversations.status.streaming"),
+        MessageStatus::Complete => crate::i18n::t("conversations.status.complete"),
+        MessageStatus::Error => crate::i18n::t("conversations.status.error"),
+        MessageStatus::Cancelled => crate::i18n::t("conversations.status.cancelled"),
     }
 }
 
-fn tool_status_label(status: ToolCallStatus) -> &'static str {
+fn tool_status_label(status: ToolCallStatus) -> String {
     match status {
-        ToolCallStatus::Running => "executando",
-        ToolCallStatus::Done => "concluída",
-        ToolCallStatus::Error => "erro",
+        ToolCallStatus::Running => crate::i18n::t("conversations.toolStatus.running"),
+        ToolCallStatus::Done => crate::i18n::t("conversations.toolStatus.done"),
+        ToolCallStatus::Error => crate::i18n::t("conversations.toolStatus.error"),
     }
 }
 
@@ -439,30 +434,41 @@ fn export_markdown(detail: &ConversationDetail) -> String {
     let conversation = &detail.conversation;
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", conversation.title));
-    out.push_str(&format!(
-        "- **Criada em:** {}\n",
-        format_timestamp(conversation.created_at)
+    out.push_str(&crate::i18n::t_args(
+        "conversations.export.createdAtLine",
+        &[("date", &format_timestamp(conversation.created_at))],
     ));
-    out.push_str(&format!(
-        "- **Atualizada em:** {}\n",
-        format_timestamp(conversation.updated_at)
+    out.push_str(&crate::i18n::t_args(
+        "conversations.export.updatedAtLine",
+        &[("date", &format_timestamp(conversation.updated_at))],
     ));
-    out.push_str(&format!("- **Provedor:** {}\n", conversation.provider_id));
-    out.push_str(&format!("- **Modelo:** {}\n", conversation.model_id));
-    out.push_str(&format!(
-        "- **Mensagens:** {}\n",
-        conversation.message_count
+    out.push_str(&crate::i18n::t_args(
+        "conversations.export.providerLine",
+        &[("provider", &conversation.provider_id)],
+    ));
+    out.push_str(&crate::i18n::t_args(
+        "conversations.export.modelLine",
+        &[("model", &conversation.model_id)],
+    ));
+    out.push_str(&crate::i18n::t_args(
+        "conversations.export.messageCountLine",
+        &[("count", &conversation.message_count.to_string())],
     ));
     out.push_str("\n---\n");
 
     for message in &detail.messages {
-        out.push_str(&format!(
-            "\n## {} — {}\n\n",
-            role_label(message.role),
-            format_timestamp(message.created_at)
+        out.push_str(&crate::i18n::t_args(
+            "conversations.export.messageHeading",
+            &[
+                ("role", &role_label(message.role)),
+                ("date", &format_timestamp(message.created_at)),
+            ],
         ));
         if message.status != MessageStatus::Complete {
-            out.push_str(&format!("_Status: {}_\n\n", status_label(message.status)));
+            out.push_str(&crate::i18n::t_args(
+                "conversations.export.statusLine",
+                &[("status", &status_label(message.status))],
+            ));
         }
         if !message.content.trim().is_empty() {
             out.push_str(message.content.trim_end());
@@ -473,22 +479,28 @@ fn export_markdown(detail: &ConversationDetail) -> String {
             .as_deref()
             .filter(|reasoning| !reasoning.trim().is_empty())
         {
-            out.push_str("<details>\n<summary>Raciocínio</summary>\n\n");
+            out.push_str(&crate::i18n::t(
+                "conversations.export.reasoningSummary",
+            ));
             out.push_str(reasoning.trim());
             out.push_str("\n\n</details>\n\n");
         }
         if !message.attachments.is_empty() {
-            out.push_str("**Anexos:**\n");
+            out.push_str(&crate::i18n::t("conversations.export.attachmentsHeader"));
             for attachment in &message.attachments {
-                out.push_str(&format!(
-                    "- {} ({}, {} bytes)\n",
-                    attachment.name, attachment.kind, attachment.size
+                out.push_str(&crate::i18n::t_args(
+                    "conversations.export.attachmentItem",
+                    &[
+                        ("name", &attachment.name),
+                        ("kind", &attachment.kind),
+                        ("size", &attachment.size.to_string()),
+                    ],
                 ));
             }
             out.push('\n');
         }
         if !message.tool_calls.is_empty() {
-            out.push_str("**Ferramentas:**\n");
+            out.push_str(&crate::i18n::t("conversations.export.toolsHeader"));
             for call in &message.tool_calls {
                 let mut line = format!("- `{}` ({})", call.name, tool_status_label(call.status));
                 if let Some(summary) = call
@@ -512,7 +524,7 @@ fn export_markdown(detail: &ConversationDetail) -> String {
             out.push('\n');
         }
         if !message.citations.is_empty() {
-            out.push_str("**Citações:**\n");
+            out.push_str(&crate::i18n::t("conversations.export.citationsHeader"));
             for citation in &message.citations {
                 out.push_str(&format!("- [{}]({})\n", citation.title, citation.url));
             }
@@ -521,25 +533,39 @@ fn export_markdown(detail: &ConversationDetail) -> String {
         if let Some(usage) = &message.usage {
             let mut parts: Vec<String> = Vec::new();
             if let Some(value) = usage.input_tokens {
-                parts.push(format!("entrada {value}"));
+                parts.push(crate::i18n::t_args(
+                    "conversations.export.usage.input",
+                    &[("value", &value.to_string())],
+                ));
             }
             if let Some(value) = usage.output_tokens {
-                parts.push(format!("saída {value}"));
+                parts.push(crate::i18n::t_args(
+                    "conversations.export.usage.output",
+                    &[("value", &value.to_string())],
+                ));
             }
             if let Some(value) = usage.reasoning_tokens {
-                parts.push(format!("raciocínio {value}"));
+                parts.push(crate::i18n::t_args(
+                    "conversations.export.usage.reasoning",
+                    &[("value", &value.to_string())],
+                ));
             }
             if !parts.is_empty() {
-                out.push_str(&format!("_Uso de tokens: {}_\n\n", parts.join(", ")));
+                out.push_str(&crate::i18n::t_args(
+                    "conversations.export.tokenUsage",
+                    &[("parts", &parts.join(", "))],
+                ));
             }
         }
         out.push_str("---\n");
     }
 
-    out.push_str(&format!(
-        "\n_Exportado por Zylara {} em {}._\n",
-        env!("CARGO_PKG_VERSION"),
-        format_timestamp(crate::domain::now_ms())
+    out.push_str(&crate::i18n::t_args(
+        "conversations.export.footer",
+        &[
+            ("version", env!("CARGO_PKG_VERSION")),
+            ("date", &format_timestamp(crate::domain::now_ms())),
+        ],
     ));
     out
 }
@@ -577,7 +603,7 @@ pub fn export_conversation(
         .db
         .get_conversation_detail(&id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("conversa não encontrada: {id}"))?;
+        .ok_or_else(|| crate::i18n::t_args("conversations.errors.notFound", &[("conversation_id", &id)]))?;
 
     let format = format.trim().to_lowercase();
     let (contents, extension, filter_name) = match format.as_str() {
@@ -588,8 +614,9 @@ pub fn export_conversation(
             "JSON",
         ),
         other => {
-            return Err(format!(
-                "formato de exportação não suportado: {other} (use \"markdown\" ou \"json\")"
+            return Err(crate::i18n::t_args(
+                "conversations.errors.unsupportedExportFormat",
+                &[("format", other)],
             ))
         }
     };
@@ -606,9 +633,15 @@ pub fn export_conversation(
     };
     let path = selected
         .into_path()
-        .map_err(|error| format!("caminho de destino inválido: {error}"))?;
+        .map_err(|error| crate::i18n::t_args(
+            "conversations.errors.invalidDestination",
+            &[("error", &error.to_string())],
+        ))?;
     std::fs::write(&path, contents)
-        .map_err(|error| format!("falha ao gravar {}: {error}", path.display()))?;
+        .map_err(|error| crate::i18n::t_args(
+            "conversations.errors.writeFailed",
+            &[("path", &path.display().to_string()), ("error", &error.to_string())],
+        ))?;
     Ok(Some(path.to_string_lossy().to_string()))
 }
 

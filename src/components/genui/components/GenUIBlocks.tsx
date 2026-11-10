@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
   AlertTriangle,
@@ -10,6 +11,7 @@ import {
   Minus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatNumber } from '@/lib/i18n/format';
 import { openExternal } from '@/lib/genui/open-external';
 import {
   asStringArray,
@@ -29,7 +31,8 @@ import type { GenUINodeProps } from './GenUILayout';
 /* -------------------------------- stat -------------------------------- */
 
 export function GenUIStat({ props }: GenUINodeProps) {
-  const label = propString(props, 'label', 'Métrica');
+  const { t } = useTranslation('genui');
+  const label = propString(props, 'label', t('stat.defaultLabel'));
   const value = propString(props, 'value', '—');
   const hint = propString(props, 'hint');
   const trend = propString(props, 'trend');
@@ -59,7 +62,9 @@ export function GenUIStat({ props }: GenUINodeProps) {
 /* ------------------------------ progress ------------------------------ */
 
 export function GenUIProgress({ props }: GenUINodeProps) {
+  const { t } = useTranslation('genui');
   const label = propString(props, 'label');
+  const fallbackLabel = t('progress.defaultLabel');
   const suffix = propString(props, 'suffix');
   const max = Math.abs(propNumber(props, 'max', 100) ?? 100) || 100;
   const rawValue = Math.min(max, Math.max(0, propNumber(props, 'value', 0) ?? 0));
@@ -67,18 +72,18 @@ export function GenUIProgress({ props }: GenUINodeProps) {
   // porcentagem, nunca "50/1". Com `max: 100` a barra também é percentual.
   const pct = Math.round((max === 1 ? rawValue : rawValue / max) * 100);
   const display = suffix
-    ? `${rawValue.toLocaleString('pt-BR')}${suffix}`
+    ? `${formatNumber(rawValue)}${suffix}`
     : max === 100 || max === 1
-      ? `${pct}%`
-      : `${rawValue.toLocaleString('pt-BR')}/${max.toLocaleString('pt-BR')}`;
+      ? `${formatNumber(pct)}%`
+      : `${formatNumber(rawValue)}/${formatNumber(max)}`;
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[12.5px] text-foreground-muted">{label || 'Progresso'}</span>
+        <span className="text-[12.5px] text-foreground-muted">{label || fallbackLabel}</span>
         <span className="text-xs tabular-nums text-foreground">{display}</span>
       </div>
-      <ProgressBar value={pct} size="md" tone="accent" label={label || 'Progresso'} />
+      <ProgressBar value={pct} size="md" tone="accent" label={label || fallbackLabel} />
     </div>
   );
 }
@@ -86,13 +91,14 @@ export function GenUIProgress({ props }: GenUINodeProps) {
 /* ------------------------------- timeline ----------------------------- */
 
 const TIMELINE_STATUS = {
-  done: { dot: 'bg-success', text: 'text-success', label: 'Concluído' },
-  active: { dot: 'bg-accent', text: 'text-accent', label: 'Em andamento' },
-  pending: { dot: 'bg-border-strong', text: 'text-foreground-subtle', label: 'Pendente' },
-  error: { dot: 'bg-danger', text: 'text-danger', label: 'Erro' },
+  done: { dot: 'bg-success', text: 'text-success', labelKey: 'status.done' },
+  active: { dot: 'bg-accent', text: 'text-accent', labelKey: 'status.active' },
+  pending: { dot: 'bg-border-strong', text: 'text-foreground-subtle', labelKey: 'status.pending' },
+  error: { dot: 'bg-danger', text: 'text-danger', labelKey: 'status.error' },
 } as const;
 
 export function GenUITimeline({ props }: GenUINodeProps) {
+  const { t } = useTranslation('genui');
   const items = propObjectArray(props, 'items');
   if (!items.length) return null;
 
@@ -102,8 +108,9 @@ export function GenUITimeline({ props }: GenUINodeProps) {
       {items.map((item, index) => {
         const statusRaw = propString(item, 'status', 'pending');
         const status = statusRaw in TIMELINE_STATUS ? (statusRaw as keyof typeof TIMELINE_STATUS) : 'pending';
-        const { dot, text: statusText, label: statusLabel } = TIMELINE_STATUS[status];
-        const title = propString(item, 'title', `Etapa ${index + 1}`);
+        const { dot, text: statusText, labelKey } = TIMELINE_STATUS[status];
+        const statusLabel = t(labelKey);
+        const title = propString(item, 'title', t('timeline.defaultTitle', { index: index + 1 }));
         const description = propString(item, 'description');
         const time = propString(item, 'time');
         return (
@@ -281,6 +288,7 @@ function readListItems(props: GenUINodeProps['props']): GenUIListItem[] {
 }
 
 export function GenUIList({ props }: GenUINodeProps) {
+  useTranslation('genui');
   const items = readListItems(props);
   const ordered = propBool(props, 'ordered');
   if (!items.length) return null;
@@ -371,9 +379,10 @@ const IMAGE_SIZE_CLASSES: Record<GenUIImageSize, string> = {
 };
 
 export function GenUIImage({ props }: GenUINodeProps) {
+  const { t } = useTranslation('genui');
   const [broken, setBroken] = useState(false);
   const src = propString(props, 'src');
-  const alt = propString(props, 'alt', 'Imagem');
+  const alt = propString(props, 'alt', t('image.defaultAlt'));
   const caption = propString(props, 'caption');
   const sizeRaw = propString(props, 'size', 'full');
   const size: GenUIImageSize = (IMAGE_SIZES as readonly string[]).includes(sizeRaw)
@@ -387,7 +396,7 @@ export function GenUIImage({ props }: GenUINodeProps) {
   if (!src || !isSafeImageSrc(src) || broken) {
     return (
       <div className="flex h-24 items-center justify-center rounded-xl border border-dashed border-border bg-surface text-xs text-foreground-subtle">
-        {broken ? 'Não foi possível carregar a imagem.' : 'Imagem indisponível.'}
+        {broken ? t('image.loadError') : t('image.unavailable')}
       </div>
     );
   }

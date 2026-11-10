@@ -8,6 +8,7 @@ use scraper::{ElementRef, Html, Node};
 use serde_json::{json, Value};
 
 use crate::domain::Citation;
+use crate::i18n;
 use crate::providers::ToolDefinition;
 
 use super::{
@@ -96,7 +97,7 @@ pub fn definition() -> ToolDefinition {
 pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let raw = match json_str(args, "url") {
         Some(url) if !url.trim().is_empty() => url.trim().to_string(),
-        _ => return ToolOutcome::error("o argumento `url` é obrigatório"),
+        _ => return ToolOutcome::error(i18n::t("tools.fetch_url.urlRequired")),
     };
     let url = match parse_public_url(&raw) {
         Ok(url) => url,
@@ -115,18 +116,26 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         .await
     {
         Ok(response) => response,
-        Err(error) => return ToolOutcome::error(format!("não foi possível acessar a URL: {error}")),
+        Err(error) => {
+            return ToolOutcome::error(i18n::t_args(
+                "tools.fetch_url.requestFailed",
+                &[("error", &error.to_string())],
+            ))
+        }
     };
 
     let status = response.status();
     if !status.is_success() {
-        return ToolOutcome::error(format!("a URL respondeu HTTP {status}"));
+        return ToolOutcome::error(i18n::t_args(
+            "tools.fetch_url.httpStatus",
+            &[("status", &status.to_string())],
+        ));
     }
 
     let final_url = response.url().to_string();
     if let Some(host) = response.url().host_str() {
         if is_blocked_host(host) {
-            return ToolOutcome::error("a URL redirecionou para um endereço local/privado");
+            return ToolOutcome::error(i18n::t("tools.fetch_url.redirectBlocked"));
         }
     }
 
@@ -137,8 +146,9 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         .unwrap_or("")
         .to_ascii_lowercase();
     if !is_textual_content_type(&content_type) {
-        return ToolOutcome::error(format!(
-            "conteúdo binário não suportado (Content-Type: `{content_type}`)"
+        return ToolOutcome::error(i18n::t_args(
+            "tools.fetch_url.binaryUnsupported",
+            &[("contentType", &content_type)],
         ));
     }
 
@@ -147,7 +157,7 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         Err(error) => return ToolOutcome::error(error),
     };
     if bytes.is_empty() {
-        return ToolOutcome::error("a página retornou conteúdo vazio");
+        return ToolOutcome::error(i18n::t("tools.fetch_url.emptyBody"));
     }
 
     let charset = charset_from_content_type(&content_type);
@@ -161,14 +171,14 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let mut notes = Vec::new();
     let mut content = content.trim().to_string();
     if content.is_empty() {
-        return ToolOutcome::error("não foi possível extrair texto legível da página");
+        return ToolOutcome::error(i18n::t("tools.fetch_url.noReadableText"));
     }
     if download_truncated {
-        notes.push("download truncado em 2 MB".to_string());
+        notes.push(i18n::t("tools.fetch_url.downloadTruncated"));
     }
     if content.chars().count() > MAX_CONTENT_CHARS {
         content = truncate_chars(&content, MAX_CONTENT_CHARS);
-        notes.push("conteúdo truncado em 120k caracteres".to_string());
+        notes.push(i18n::t("tools.fetch_url.contentTruncated"));
     }
     if !notes.is_empty() {
         content.push_str(&format!("\n\n[{}]", notes.join("; ")));
@@ -195,21 +205,37 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
             "content": content,
         })
         .to_string(),
-        summary: Some(format!("{title} · {characters} caracteres")),
+        summary: Some(format!(
+            "{title} · {}",
+            i18n::t_count(
+                "tools.fetch_url.characters",
+                characters,
+                &[("count", &characters.to_string())],
+            )
+        )),
         citations: vec![citation],
         ..Default::default()
     }
 }
 
 fn parse_public_url(raw: &str) -> Result<url::Url, String> {
-    let url = url::Url::parse(raw).map_err(|error| format!("URL inválida: {error}"))?;
+    let url = url::Url::parse(raw).map_err(|error| {
+        i18n::t_args("tools.fetch_url.invalidUrl", &[("error", &error.to_string())])
+    })?;
     match url.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("esquema não suportado: {other}")),
+        other => {
+            return Err(i18n::t_args(
+                "tools.fetch_url.unsupportedScheme",
+                &[("scheme", other)],
+            ))
+        }
     }
-    let host = url.host_str().ok_or_else(|| "URL sem host".to_string())?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| i18n::t("tools.fetch_url.missingHost"))?;
     if is_blocked_host(host) {
-        return Err("URLs locais/privadas não são permitidas".to_string());
+        return Err(i18n::t("tools.fetch_url.blockedUrl"));
     }
     Ok(url)
 }
@@ -260,7 +286,12 @@ async fn read_limited(response: reqwest::Response) -> Result<(Vec<u8>, bool), St
     let mut buffer = Vec::new();
     let mut truncated = false;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| format!("falha ao baixar o conteúdo: {error}"))?;
+        let chunk = chunk.map_err(|error| {
+            i18n::t_args(
+                "tools.fetch_url.downloadFailed",
+                &[("error", &error.to_string())],
+            )
+        })?;
         let remaining = MAX_DOWNLOAD_BYTES.saturating_sub(buffer.len());
         if chunk.len() > remaining {
             buffer.extend_from_slice(&chunk[..remaining]);

@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { AgentAvatar, AgentCapabilities } from './types';
 import { DEFAULT_AGENT_CAPABILITIES } from './agentDefaults';
 
@@ -5,6 +6,19 @@ import { DEFAULT_AGENT_CAPABILITIES } from './agentDefaults';
  * versioned with the app and never grant capabilities beyond the factory
  * defaults: a template can only restrict them. */
 export interface AgentTemplate {
+  id: string;
+  nameKey: string;
+  roleKey: string;
+  descriptionKey: string;
+  avatar: AgentAvatar;
+  departmentKey: string;
+  instructionsKey: string;
+  starterKeys: string[];
+  capabilities?: Partial<AgentCapabilities>;
+  memoryEnabled?: boolean;
+}
+
+export interface LocalizedAgentTemplate {
   id: string;
   name: string;
   role: string;
@@ -20,94 +34,203 @@ export interface AgentTemplate {
 export const AGENT_TEMPLATES: AgentTemplate[] = [
   {
     id: 'assistant',
-    name: 'Assistente',
-    role: 'Assistente',
-    description: 'Um assistente direto para o dia a dia.',
+    nameKey: 'templates.assistant.name',
+    roleKey: 'templates.assistant.role',
+    descriptionKey: 'templates.assistant.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'mascot', expression: 'neutral', color: 'blue', face: 'white' },
-    department: 'Geral',
-    instructions:
-      'Seja direto e útil. Responda em português brasileiro, destaque o próximo passo e peça contexto quando a decisão depender de informação que você não tem. Nunca invente fatos ou resultados.',
-    starters: ['Organize minhas prioridades de hoje.', 'Explique este assunto em poucas palavras.'],
+    departmentKey: 'departments.general',
+    instructionsKey: 'templates.assistant.instructions',
+    starterKeys: ['templates.assistant.starter.0', 'templates.assistant.starter.1'],
   },
   {
     id: 'researcher',
-    name: 'Pesquisador',
-    role: 'Pesquisador',
-    description: 'Busca, compara e cita fontes com cuidado.',
+    nameKey: 'templates.researcher.name',
+    roleKey: 'templates.researcher.role',
+    descriptionKey: 'templates.researcher.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'circle', expression: 'happy', color: 'teal', face: 'white' },
-    department: 'Pesquisa',
-    instructions:
-      'Pesquise antes de concluir. Compare pelo menos duas fontes quando o tema for controverso, cite os links usados e separe fatos de opinião. Se não houver evidência suficiente, diga o que falta.',
-    starters: ['Pesquise o estado atual deste tema.', 'Compare estas duas abordagens com fontes.'],
+    departmentKey: 'departments.research',
+    instructionsKey: 'templates.researcher.instructions',
+    starterKeys: ['templates.researcher.starter.0', 'templates.researcher.starter.1'],
   },
   {
     id: 'engineer',
-    name: 'Engenheiro',
-    role: 'Engenheiro',
-    description: 'Analisa código e propõe mudanças verificáveis.',
+    nameKey: 'templates.engineer.name',
+    roleKey: 'templates.engineer.role',
+    descriptionKey: 'templates.engineer.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'rounded', expression: 'smug', color: 'purple', face: 'white' },
-    department: 'Engenharia',
-    instructions:
-      'Trabalhe com evidências: leia o código, reproduza o problema e proponha a menor mudança que resolve. Explique riscos, impactos e como verificar. Nunca afirme que algo funciona sem um teste ou saída real.',
-    starters: ['Investigue este bug e proponha um fix.', 'Revise esta mudança antes do merge.'],
+    departmentKey: 'departments.engineering',
+    instructionsKey: 'templates.engineer.instructions',
+    starterKeys: ['templates.engineer.starter.0', 'templates.engineer.starter.1'],
   },
   {
     id: 'reviewer',
-    name: 'Revisor',
-    role: 'Revisor técnico',
-    description: 'Aponta riscos, regressões e testes faltando.',
+    nameKey: 'templates.reviewer.name',
+    roleKey: 'templates.reviewer.role',
+    descriptionKey: 'templates.reviewer.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'diamond', expression: 'neutral', color: 'orange', face: 'white' },
-    department: 'Qualidade',
-    instructions:
-      'Revise como um par exigente, mas construtivo. Procure regressões, casos de borda, problemas de segurança e testes ausentes. Classifique os achados por severidade e cite o trecho exato.',
-    starters: ['Revise as alterações deste turno.', 'Encontre casos de borda neste código.'],
+    departmentKey: 'departments.quality',
+    instructionsKey: 'templates.reviewer.instructions',
+    starterKeys: ['templates.reviewer.starter.0', 'templates.reviewer.starter.1'],
   },
   {
     id: 'writer',
-    name: 'Redator',
-    role: 'Redator',
-    description: 'Escreve e edita textos com voz consistente.',
+    nameKey: 'templates.writer.name',
+    roleKey: 'templates.writer.role',
+    descriptionKey: 'templates.writer.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'drop', expression: 'happy', color: 'pink', face: 'white' },
-    department: 'Conteúdo',
-    instructions:
-      'Escreva em português brasileiro claro, com ritmo natural e sem clichês. Preserve a voz do autor quando houver um texto de referência. Entregue a versão final e, se pedirem, uma nota curta das decisões de edição.',
-    starters: ['Transforme estas notas em um texto.', 'Edite este rascunho sem mudar a voz.'],
+    departmentKey: 'departments.content',
+    instructionsKey: 'templates.writer.instructions',
+    starterKeys: ['templates.writer.starter.0', 'templates.writer.starter.1'],
   },
   {
     id: 'ops',
-    name: 'Operações',
-    role: 'Analista de operações',
-    description: 'Transforma pedidos vagos em checklists executáveis.',
+    nameKey: 'templates.ops.name',
+    roleKey: 'templates.ops.role',
+    descriptionKey: 'templates.ops.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'hex', expression: 'neutral', color: 'green', face: 'white' },
-    department: 'Operações',
-    instructions:
-      'Decomponha o pedido em passos verificáveis, donos e critérios de conclusão. Sinalize bloqueios cedo. Prefira uma lista curta e executável a um plano longo.',
-    starters: ['Transforme este pedido em um checklist.', 'O que está bloqueando esta entrega?'],
+    departmentKey: 'departments.operations',
+    instructionsKey: 'templates.ops.instructions',
+    starterKeys: ['templates.ops.starter.0', 'templates.ops.starter.1'],
   },
   {
     id: 'analyst',
-    name: 'Analista',
-    role: 'Analista de dados',
-    description: 'Explora números e explica o que eles mostram.',
+    nameKey: 'templates.analyst.name',
+    roleKey: 'templates.analyst.role',
+    descriptionKey: 'templates.analyst.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'blob', expression: 'sleepy', color: 'yellow', face: 'black' },
-    department: 'Dados',
-    instructions:
-      'Comece pelos dados e pelas definições. Mostre a conta, indique incertezas e evite correlação sem mecanismo. Quando faltar dado, diga exatamente qual série ou recorte ajudaria.',
-    starters: ['Analise esta tabela e destaque anomalias.', 'Explique este resultado para um leigo.'],
+    departmentKey: 'departments.data',
+    instructionsKey: 'templates.analyst.instructions',
+    starterKeys: ['templates.analyst.starter.0', 'templates.analyst.starter.1'],
   },
   {
     id: 'support',
-    name: 'Suporte',
-    role: 'Agente de suporte',
-    description: 'Responde com calma, cita a documentação e escala o que não sabe.',
+    nameKey: 'templates.support.name',
+    roleKey: 'templates.support.role',
+    descriptionKey: 'templates.support.description',
     avatar: { kind: 'mascot', shape: 'mascot', body: 'bubble', expression: 'grin', color: 'coral', face: 'white' },
-    department: 'Suporte',
-    instructions:
-      'Responda com empatia e objetividade. Confirme o problema antes de propor a solução, cite a documentação quando existir e escale casos de cobrança, segurança ou dados sensíveis. Nunca prometa prazos que você não controla.',
-    starters: ['Ajude-me a diagnosticar este problema.', 'Escreva uma resposta para este cliente.'],
+    departmentKey: 'departments.support',
+    instructionsKey: 'templates.support.instructions',
+    starterKeys: ['templates.support.starter.0', 'templates.support.starter.1'],
   },
 ];
 
 export function templateCapabilities(template: AgentTemplate): AgentCapabilities {
   return { ...DEFAULT_AGENT_CAPABILITIES, ...template.capabilities };
+}
+
+/**
+ * Resolves a template in the active language. The switch keeps keys literal so
+ * the catalog parity gate can see every string the templates use.
+ */
+export function localizedAgentTemplate(template: AgentTemplate): LocalizedAgentTemplate {
+  const base = {
+    id: template.id,
+    avatar: template.avatar,
+    capabilities: template.capabilities,
+    memoryEnabled: template.memoryEnabled,
+  };
+  switch (template.id) {
+    case 'assistant':
+      return {
+        ...base,
+        name: t('agents:templates.assistant.name'),
+        role: t('agents:templates.assistant.role'),
+        description: t('agents:templates.assistant.description'),
+        department: t('agents:departments.general'),
+        instructions: t('agents:templates.assistant.instructions'),
+        starters: [
+          t('agents:templates.assistant.starter.0'),
+          t('agents:templates.assistant.starter.1'),
+        ],
+      };
+    case 'researcher':
+      return {
+        ...base,
+        name: t('agents:templates.researcher.name'),
+        role: t('agents:templates.researcher.role'),
+        description: t('agents:templates.researcher.description'),
+        department: t('agents:departments.research'),
+        instructions: t('agents:templates.researcher.instructions'),
+        starters: [
+          t('agents:templates.researcher.starter.0'),
+          t('agents:templates.researcher.starter.1'),
+        ],
+      };
+    case 'engineer':
+      return {
+        ...base,
+        name: t('agents:templates.engineer.name'),
+        role: t('agents:templates.engineer.role'),
+        description: t('agents:templates.engineer.description'),
+        department: t('agents:departments.engineering'),
+        instructions: t('agents:templates.engineer.instructions'),
+        starters: [
+          t('agents:templates.engineer.starter.0'),
+          t('agents:templates.engineer.starter.1'),
+        ],
+      };
+    case 'reviewer':
+      return {
+        ...base,
+        name: t('agents:templates.reviewer.name'),
+        role: t('agents:templates.reviewer.role'),
+        description: t('agents:templates.reviewer.description'),
+        department: t('agents:departments.quality'),
+        instructions: t('agents:templates.reviewer.instructions'),
+        starters: [
+          t('agents:templates.reviewer.starter.0'),
+          t('agents:templates.reviewer.starter.1'),
+        ],
+      };
+    case 'writer':
+      return {
+        ...base,
+        name: t('agents:templates.writer.name'),
+        role: t('agents:templates.writer.role'),
+        description: t('agents:templates.writer.description'),
+        department: t('agents:departments.content'),
+        instructions: t('agents:templates.writer.instructions'),
+        starters: [
+          t('agents:templates.writer.starter.0'),
+          t('agents:templates.writer.starter.1'),
+        ],
+      };
+    case 'ops':
+      return {
+        ...base,
+        name: t('agents:templates.ops.name'),
+        role: t('agents:templates.ops.role'),
+        description: t('agents:templates.ops.description'),
+        department: t('agents:departments.operations'),
+        instructions: t('agents:templates.ops.instructions'),
+        starters: [t('agents:templates.ops.starter.0'), t('agents:templates.ops.starter.1')],
+      };
+    case 'analyst':
+      return {
+        ...base,
+        name: t('agents:templates.analyst.name'),
+        role: t('agents:templates.analyst.role'),
+        description: t('agents:templates.analyst.description'),
+        department: t('agents:departments.data'),
+        instructions: t('agents:templates.analyst.instructions'),
+        starters: [
+          t('agents:templates.analyst.starter.0'),
+          t('agents:templates.analyst.starter.1'),
+        ],
+      };
+    case 'support':
+    default:
+      return {
+        ...base,
+        name: t('agents:templates.support.name'),
+        role: t('agents:templates.support.role'),
+        description: t('agents:templates.support.description'),
+        department: t('agents:departments.support'),
+        instructions: t('agents:templates.support.instructions'),
+        starters: [
+          t('agents:templates.support.starter.0'),
+          t('agents:templates.support.starter.1'),
+        ],
+      };
+  }
 }

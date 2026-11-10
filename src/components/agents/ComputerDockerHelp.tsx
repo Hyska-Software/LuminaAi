@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Container, Copy, Download, RefreshCw, Settings2, Terminal } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -31,6 +32,7 @@ export function ComputerDockerHelp({
   onRetry: () => void;
   onOpenSettings: () => void;
 }) {
+  const { t } = useTranslation('agents');
   const image = dockerImageFromError(error);
   const pullCommand = `docker pull ${image}`;
   const buildCommand = `docker build -t ${image} docker/computer`;
@@ -38,17 +40,17 @@ export function ComputerDockerHelp({
 
   const copy = async (value: string, label: string) => {
     if (await copyText(value)) toast.success(label);
-    else toast.error('Não foi possível copiar o comando');
+    else toast.error(t('dockerHelp.copyError'));
   };
 
   const download = async () => {
     setDownloading(true);
     try {
       await api.dockerPullImage(image);
-      toast.success('Imagem baixada', { description: image });
+      toast.success(t('dockerHelp.downloaded'), { description: image });
       onRetry();
     } catch (caught) {
-      toast.error('Não foi possível baixar a imagem', { description: String(caught) });
+      toast.error(t('dockerHelp.downloadError'), { description: String(caught) });
     } finally {
       setDownloading(false);
     }
@@ -62,12 +64,10 @@ export function ComputerDockerHelp({
         </span>
         <div className="min-w-0">
           <p className="text-[12px] font-medium text-foreground">
-            Imagem do Desktop privado não está disponível
+            {t('dockerHelp.title')}
           </p>
           <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-muted">
-            A imagem gráfica <code className="font-mono text-[10px] text-foreground">{image}</code>{' '}
-            não foi encontrada no Docker local. Baixe a imagem publicada ou configure outra em
-            Configurações → Agentes.
+            {t('dockerHelp.missingImage', { image })}
           </p>
         </div>
       </div>
@@ -75,21 +75,15 @@ export function ComputerDockerHelp({
       <ol className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-foreground-muted">
         <li className="flex gap-2">
           <span className="font-medium text-foreground">1.</span>
-          <span>Instale/abra o Docker Desktop (ou inicie o daemon) e confirme que ele está respondendo.</span>
+          <span>{t('dockerHelp.steps.docker')}</span>
         </li>
         <li className="flex gap-2">
           <span className="font-medium text-foreground">2.</span>
-          <span>
-            Baixe a imagem publicada com o botão abaixo. Para imagens privadas, rode{' '}
-            <code className="font-mono text-[10px]">docker login</code> no registry antes.
-          </span>
+          <span>{t('dockerHelp.steps.download')}</span>
         </li>
         <li className="flex gap-2">
           <span className="font-medium text-foreground">3.</span>
-          <span>
-            Se preferir outra imagem, informe o nome em Configurações → Agentes →
-            Desktop privado → Imagem do computer use e faça o download.
-          </span>
+          <span>{t('dockerHelp.steps.customImage')}</span>
         </li>
       </ol>
 
@@ -99,10 +93,10 @@ export function ComputerDockerHelp({
           {pullCommand}
         </code>
         <IconButton
-          label="Copiar comando docker pull"
+          label={t('dockerHelp.copyPullAria')}
           size="sm"
           variant="ghost"
-          onClick={() => void copy(pullCommand, 'Comando copiado')}
+          onClick={() => void copy(pullCommand, t('dockerHelp.copied'))}
         >
           <Copy aria-hidden className="size-3.5" />
         </IconButton>
@@ -115,34 +109,34 @@ export function ComputerDockerHelp({
           ) : (
             <Download className="mr-1.5 size-3.5" />
           )}
-          Baixar imagem
+          {t('dockerHelp.download')}
         </Button>
         <Button size="sm" variant="secondary" onClick={onOpenSettings}>
           <Settings2 className="mr-1.5 size-3.5" />
-          Configurar Docker
+          {t('dockerHelp.configure')}
         </Button>
         <Button size="sm" variant="ghost" onClick={onRetry} disabled={downloading}>
           <RefreshCw className="mr-1.5 size-3.5" />
-          Tentar de novo
+          {t('dockerHelp.retry')}
         </Button>
       </div>
 
       <details className="rounded-lg border border-border bg-surface/50 px-2.5 py-2">
         <summary className="cursor-pointer select-none text-[10px] font-medium text-foreground-subtle">
-          Build local (desenvolvimento)
+          {t('dockerHelp.localBuild')}
         </summary>
         <p className="mt-1.5 text-[10px] leading-relaxed text-foreground-muted">
-          Na raiz do repositório do Zylara, construa a imagem gráfica:
+          {t('dockerHelp.localBuildHint')}
         </p>
         <div className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1.5">
           <code className="min-w-0 flex-1 break-all font-mono text-[10px] leading-relaxed text-foreground">
             {buildCommand}
           </code>
           <IconButton
-            label="Copiar comando docker build"
+            label={t('dockerHelp.copyBuildAria')}
             size="sm"
             variant="ghost"
-            onClick={() => void copy(buildCommand, 'Comando copiado')}
+            onClick={() => void copy(buildCommand, t('dockerHelp.copied'))}
           >
             <Copy aria-hidden className="size-3.5" />
           </IconButton>
@@ -151,7 +145,7 @@ export function ComputerDockerHelp({
 
       <details className="rounded-lg border border-border bg-surface/50 px-2.5 py-2">
         <summary className="cursor-pointer select-none text-[10px] font-medium text-foreground-subtle">
-          Detalhes técnicos
+          {t('dockerHelp.technicalDetails')}
         </summary>
         <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-danger">
           {error}

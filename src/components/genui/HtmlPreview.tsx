@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Code2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui';
@@ -85,6 +86,7 @@ export interface HtmlPreviewProps {
  * reported by an injected bridge script and validated on the parent side.
  */
 export function HtmlPreview({ html, title, className, minHeight = 240, maxHeight = 1200 }: HtmlPreviewProps) {
+  const { t } = useTranslation('genui');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const dark = useIsDark();
   const [frameHeight, setFrameHeight] = useState(minHeight);
@@ -114,15 +116,15 @@ export function HtmlPreview({ html, title, className, minHeight = 240, maxHeight
       <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-1.5">
         <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-foreground-muted">
           <Code2 aria-hidden className="size-3.5 text-foreground-subtle" />
-          <span className="truncate">{title ?? 'Prévia HTML'}</span>
+          <span className="truncate">{title ?? t('html.title')}</span>
         </span>
-        <Badge tone="muted" title="O conteúdo roda isolado, sem acesso ao aplicativo">
+        <Badge tone="muted" title={t('html.sandboxHint')}>
           sandbox
         </Badge>
       </div>
       <iframe
         ref={iframeRef}
-        title={title ?? 'Prévia HTML'}
+        title={title ?? t('html.title')}
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
         srcDoc={srcDoc}

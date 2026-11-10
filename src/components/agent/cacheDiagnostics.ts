@@ -5,9 +5,15 @@
  * estado ao vivo do `cacheStore`. Nada aqui recalcula hit%: números vêm do
  * backend; ausências degradam para `null` e a UI mostra `—`.
  */
-import { cacheBreakLabel } from '@/lib/cache';
+import { t } from '@/lib/i18n';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
-import type { CacheSample, CacheState, CacheStats, CacheStatsView } from '@/lib/types';
+import type {
+  CacheBreakReason,
+  CacheSample,
+  CacheState,
+  CacheStats,
+  CacheStatsView,
+} from '@/lib/types';
 
 /** Quantas quebras recentes o painel lista. */
 export const RECENT_BREAKS_LIMIT = 5;
@@ -49,6 +55,80 @@ export interface CacheDiagnosticsInput {
   /** Fallback quando ainda não há amostra (provider/modelo da conversa). */
   fallbackProviderId?: string | null;
   fallbackModelId?: string | null;
+}
+
+/** Rótulo do motivo de quebra do prefixo, no idioma ativo. */
+export function cacheBreakLabel(reason: CacheBreakReason | null | undefined): string | null {
+  switch (reason) {
+    case null:
+    case undefined:
+      return null;
+    case 'first_request':
+      return t('agents:cache.break.firstRequest');
+    case 'system_prompt':
+      return t('agents:cache.break.systemPrompt');
+    case 'tool_definitions':
+      return t('agents:cache.break.toolDefinitions');
+    case 'history_rewrite':
+      return t('agents:cache.break.historyRewrite');
+    case 'head_trim':
+      return t('agents:cache.break.headTrim');
+    case 'compaction':
+      return t('agents:cache.break.compaction');
+    case 'model_switch':
+      return t('agents:cache.break.modelSwitch');
+    case 'protocol_fallback':
+      return t('agents:cache.break.protocolFallback');
+    case 'attachments':
+      return t('agents:cache.break.attachments');
+    case 'config_change':
+      return t('agents:cache.break.configChange');
+    case 'ttl_expired':
+      return t('agents:cache.break.ttlExpired');
+    case 'provider_policy':
+      return t('agents:cache.break.providerPolicy');
+    default:
+      return String(reason);
+  }
+}
+
+/** Rótulo curto do estado do cache (`Frio`, `Estável`, ...). */
+export function cacheStateLabel(state: CacheState | null | undefined): string {
+  switch (state) {
+    case 'warming':
+      return t('agents:cache.state.warming');
+    case 'stable':
+      return t('agents:cache.state.stable');
+    case 'degraded':
+      return t('agents:cache.state.degraded');
+    case 'unsupported':
+      return t('agents:cache.state.unsupported');
+    case 'provider_policy':
+      return t('agents:cache.state.providerPolicy');
+    case 'cold':
+    default:
+      return t('agents:cache.state.cold');
+  }
+}
+
+/** Tom visual do estado do cache. */
+export function cacheStateTone(
+  state: CacheState | null | undefined,
+): 'success' | 'warning' | 'danger' | 'muted' | 'accent' {
+  switch (state) {
+    case 'stable':
+      return 'success';
+    case 'degraded':
+      return 'danger';
+    case 'warming':
+      return 'accent';
+    case 'cold':
+    case 'unsupported':
+    case 'provider_policy':
+      return 'muted';
+    default:
+      return 'muted';
+  }
 }
 
 /** TTL do cache em formato curto (`1 h`, `5 min`); `—` quando ausente. */

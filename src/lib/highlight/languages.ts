@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n';
+
 /**
  * Language normalization shared by the chat and the artifact previews.
  *
@@ -221,12 +223,13 @@ const LANGUAGE_LABELS: Record<string, string> = {
 };
 
 /**
- * pt-BR label for the language badge (`Python`, `TypeScript`, `Texto`, …).
- * Accepts the same raw values as `normalizeLanguage`.
+ * Locale label for the language badge (`Python`, `TypeScript`, `Text`, …).
+ * Accepts the same raw values as `normalizeLanguage`. Only the plain-text
+ * badge is translated; language names stay as their canonical spelling.
  */
 export function languageLabel(raw?: string | null): string {
   const id = normalizeLanguage(raw);
-  if (!id || id === 'text') return 'Texto';
+  if (!id || id === 'text') return t('common:language.text');
   const label = LANGUAGE_LABELS[id];
   if (label) return label;
   // Unknown ids stay recognizable: capitalize the first letter only.

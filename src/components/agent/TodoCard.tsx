@@ -1,4 +1,5 @@
 import { CheckCircle2, Circle, ListTodo, LoaderCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { ProgressBar } from '@/components/ui';
 import type { TodoItem, TodoStatus } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -14,10 +15,17 @@ export interface TodoCardProps {
   scrollable?: boolean;
 }
 
-const STATUS_META: Record<TodoStatus, { label: string; Icon: typeof Circle; color: string }> = {
-  pending: { label: 'Pendente', Icon: Circle, color: 'text-foreground-muted' },
-  in_progress: { label: 'Em andamento', Icon: LoaderCircle, color: 'text-accent' },
-  completed: { label: 'Concluída', Icon: CheckCircle2, color: 'text-success' },
+const STATUS_META: Record<
+  TodoStatus,
+  { labelKey: string; Icon: typeof Circle; color: string }
+> = {
+  pending: { labelKey: 'todo.status.pending', Icon: Circle, color: 'text-foreground-muted' },
+  in_progress: {
+    labelKey: 'todo.status.inProgress',
+    Icon: LoaderCircle,
+    color: 'text-accent',
+  },
+  completed: { labelKey: 'todo.status.completed', Icon: CheckCircle2, color: 'text-success' },
 };
 
 /**
@@ -28,6 +36,7 @@ const STATUS_META: Record<TodoStatus, { label: string; Icon: typeof Circle; colo
  * when the host already provides the single scroll surface.
  */
 export function TodoCard({ todos, className, scrollable = true }: TodoCardProps) {
+  const { t } = useTranslation('agents');
   if (todos.length === 0) return null;
 
   const total = todos.length;
@@ -37,15 +46,17 @@ export function TodoCard({ todos, className, scrollable = true }: TodoCardProps)
 
   return (
     <section
-      aria-label="Tarefas do agente"
+      aria-label={t('todo.aria')}
       className={cn('flex flex-col gap-2 rounded-xl border border-border bg-surface p-3', className)}
     >
       <header className="flex flex-wrap items-center gap-2">
         <ListTodo aria-hidden className="size-4 shrink-0 text-foreground-muted" />
-        <h3 className="min-w-0 flex-1 text-[13px] font-medium text-foreground">Tarefas</h3>
+        <h3 className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
+          {t('todo.title')}
+        </h3>
         <span className="text-[11px] text-foreground-muted">
-          {done} de {total} concluída{total === 1 ? '' : 's'}
-          {inProgress > 0 ? ` · ${inProgress} em andamento` : ''}
+          {t('todo.summary', { count: total, done, total })}
+          {inProgress > 0 ? ` · ${t('todo.inProgress', { count: inProgress })}` : ''}
         </span>
       </header>
 
@@ -53,11 +64,11 @@ export function TodoCard({ todos, className, scrollable = true }: TodoCardProps)
         value={percent}
         size="xs"
         tone="accent"
-        label={`Progresso das tarefas: ${percent}%`}
+        label={t('todo.progressAria', { percent })}
       />
 
       <ul
-        aria-label="Lista de tarefas"
+        aria-label={t('todo.listAria')}
         tabIndex={scrollable ? 0 : undefined}
         className={cn(
           'flex flex-col gap-1.5',
@@ -91,7 +102,7 @@ export function TodoCard({ todos, className, scrollable = true }: TodoCardProps)
               >
                 {todo.content}
               </span>
-              <span className="sr-only"> — {meta.label}</span>
+              <span className="sr-only"> — {t(meta.labelKey as never)}</span>
             </li>
           );
         })}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { AlertTriangle, Library, SearchX, Upload } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
 import type { Artifact, LibraryArtifact } from '@/lib/types';
 import { useUiStore } from '@/lib/store';
@@ -11,7 +12,6 @@ import {
   applyLibraryQuery,
   importResultMessage,
   libraryArtifactCounts,
-  pluralizeFiles,
   type LibraryFilterId,
   type LibrarySortId,
 } from './filters';
@@ -43,6 +43,7 @@ function eventDetail<T>(event: Event): T | null {
  * live here; persistence stays in the backend (no parallel index).
  */
 export function LibraryView() {
+  const { t, i18n } = useTranslation('library');
   const setActiveView = useUiStore((state) => state.setActiveView);
 
   const [state, setState] = useState<LibraryState>({ status: 'loading' });
@@ -102,7 +103,7 @@ export function LibraryView() {
       try {
         const imported = await api.importLibraryFiles(unique);
         if (!imported.length) {
-          toast.info('Nenhum arquivo enviado');
+          toast.info(t('library:view.noFiles'));
           return;
         }
         // Re-read from the backend so the origin (conversation title) is exactly
@@ -115,13 +116,13 @@ export function LibraryView() {
         }
         toast.success(importResultMessage(imported.length));
       } catch (error) {
-        toast.error('Não foi possível enviar os arquivos', { description: describeError(error) });
+        toast.error(t('library:view.importError'), { description: describeError(error) });
       } finally {
         importingRef.current = false;
         setImporting(false);
       }
     },
-    [],
+    [t],
   );
 
   const pickFiles = useCallback(async () => {
@@ -129,16 +130,16 @@ export function LibraryView() {
     try {
       const selection = await open({
         multiple: true,
-        title: 'Enviar arquivos para a biblioteca',
+        title: t('library:view.pickerTitle'),
       });
       const paths = Array.isArray(selection) ? selection : selection ? [selection] : [];
       if (paths.length) await importFiles(paths);
     } catch (error) {
-      toast.error('Não foi possível abrir o seletor de arquivos', {
+      toast.error(t('library:view.pickerError'), {
         description: describeError(error),
       });
     }
-  }, [importFiles]);
+  }, [importFiles, t]);
 
   /* Global drag & drop (App.tsx) and the palette/hotkey import trigger. */
   useEffect(() => {
@@ -178,16 +179,17 @@ export function LibraryView() {
       .then((updated) => applyArtifactUpdate(updated))
       .catch((error: unknown) => {
         applyArtifactUpdate({ ...artifact, favorite: !next });
-        toast.error(next ? 'Não foi possível favoritar o arquivo' : 'Não foi possível desfavoritar o arquivo', {
-          description: describeError(error),
-        });
+        toast.error(
+          next ? t('library:view.favoriteError') : t('library:view.unfavoriteError'),
+          { description: describeError(error) },
+        );
       });
   };
 
   const renameArtifact = async (artifact: LibraryArtifact, name: string) => {
     const updated = await api.renameArtifact(artifact.id, name);
     applyArtifactUpdate(updated);
-    toast.success('Arquivo renomeado', { description: updated.name });
+    toast.success(t('library:view.renamed'), { description: updated.name });
   };
 
   const deleteArtifact = async (artifact: LibraryArtifact) => {
@@ -200,23 +202,23 @@ export function LibraryView() {
       };
     });
     setActiveId(null);
-    toast.success('Arquivo excluído', { description: artifact.name });
+    toast.success(t('library:view.deleted'), { description: artifact.name });
   };
 
   const saveArtifact = (artifact: LibraryArtifact) => {
     void api
       .saveArtifact(artifact.id, artifact.name)
       .then((path) => {
-        if (path) toast.success('Arquivo salvo', { description: path });
+        if (path) toast.success(t('library:view.saveSuccess'), { description: path });
       })
       .catch((error: unknown) => {
-        toast.error('Não foi possível salvar', { description: describeError(error) });
+        toast.error(t('library:view.saveError'), { description: describeError(error) });
       });
   };
 
   const openExternal = (artifact: LibraryArtifact) => {
     void api.openArtifact(artifact.id).catch((error: unknown) => {
-      toast.error('Não foi possível abrir o arquivo', { description: describeError(error) });
+      toast.error(t('library:view.openError'), { description: describeError(error) });
     });
   };
 
@@ -224,7 +226,7 @@ export function LibraryView() {
   const counts = useMemo(() => libraryArtifactCounts(artifacts), [artifacts]);
   const visible = useMemo(
     () => applyLibraryQuery(artifacts, { query, filter, sort }),
-    [artifacts, query, filter, sort],
+    [artifacts, query, filter, sort, i18n.language],
   );
   const activeArtifact = activeId
     ? (artifacts.find((artifact) => artifact.id === activeId) ?? null)
@@ -257,7 +259,7 @@ export function LibraryView() {
     <section
       ref={viewRef}
       tabIndex={-1}
-      aria-label="Biblioteca de arquivos"
+      aria-label={t('library:view.aria')}
       aria-busy={importing || undefined}
       className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
     >
@@ -284,7 +286,7 @@ export function LibraryView() {
                 className="flex items-center gap-2 text-xs text-foreground-muted"
               >
                 <Spinner size="sm" />
-                Carregando biblioteca…
+                {t('library:view.loading')}
               </p>
               <ul
                 aria-hidden
@@ -301,7 +303,7 @@ export function LibraryView() {
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 text-center">
               <AlertTriangle aria-hidden className="size-5 text-danger" />
               <p className="text-[13px] font-medium text-foreground">
-                Não foi possível carregar a biblioteca
+                {t('library:view.loadErrorTitle')}
               </p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
                 {state.message}
@@ -311,7 +313,7 @@ export function LibraryView() {
                 variant="secondary"
                 onClick={() => setAttempt((value) => value + 1)}
               >
-                Tentar novamente
+                {t('library:view.retry')}
               </Button>
             </div>
           ) : null}
@@ -320,11 +322,10 @@ export function LibraryView() {
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 text-center">
               <Library aria-hidden className="size-6 text-foreground-subtle" />
               <p className="text-[14px] font-medium text-foreground">
-                Sua biblioteca está vazia
+                {t('library:view.emptyTitle')}
               </p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
-                Os arquivos criados pelo agente durante as conversas aparecem aqui. Você também
-                pode enviar arquivos próprios para consultá-los no chat.
+                {t('library:view.emptyDescription')}
               </p>
               <Button
                 size="sm"
@@ -333,7 +334,7 @@ export function LibraryView() {
                 leftIcon={<Upload aria-hidden className="size-3.5" />}
                 onClick={() => void pickFiles()}
               >
-                {importing ? 'Enviando arquivos…' : 'Enviar arquivos'}
+                {importing ? t('library:header.uploading') : t('library:header.upload')}
               </Button>
             </div>
           ) : null}
@@ -342,13 +343,13 @@ export function LibraryView() {
             <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 px-6 text-center">
               <SearchX aria-hidden className="size-6 text-foreground-subtle" />
               <p className="text-[13px] font-medium text-foreground">
-                Nenhum artefato encontrado
+                {t('library:view.filteredEmptyTitle')}
               </p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
-                Nenhum arquivo corresponde à busca ou ao filtro selecionado.
+                {t('library:view.filteredEmptyDescription')}
               </p>
               <Button size="sm" variant="secondary" onClick={clearFilters}>
-                Limpar filtros
+                {t('library:view.clearFilters')}
               </Button>
             </div>
           ) : null}
@@ -357,11 +358,14 @@ export function LibraryView() {
             <>
               <p className="sr-only" role="status" aria-live="polite">
                 {visible.length === artifacts.length
-                  ? pluralizeFiles(artifacts.length)
-                  : `${visible.length} de ${pluralizeFiles(artifacts.length)}`}
+                  ? t('library:view.count', { count: artifacts.length })
+                  : t('library:view.visibleCount', {
+                      visible: visible.length,
+                      count: artifacts.length,
+                    })}
               </p>
               <ul
-                aria-label="Arquivos da biblioteca"
+                aria-label={t('library:view.listAria')}
                 className={cn(
                   view === 'grid'
                     ? 'grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3'
@@ -386,7 +390,7 @@ export function LibraryView() {
           <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-accent/60 bg-surface-raised px-10 py-8 text-center shadow-lg">
             <Upload aria-hidden className="size-6 text-accent" />
             <p className="text-[13px] font-medium text-foreground">
-              Solte para enviar à biblioteca
+              {t('library:view.dropTitle')}
             </p>
           </div>
         </div>

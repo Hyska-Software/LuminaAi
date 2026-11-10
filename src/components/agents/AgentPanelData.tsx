@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   Activity,
   Bot,
@@ -20,6 +22,7 @@ import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import {
   formatUsageCost,
   formatUsageTokens,
+  localizedDepartment,
   modelLabel,
   relativeTime,
 } from './agentUtils';
@@ -33,30 +36,56 @@ import {
 } from '@/lib/store';
 import type { AgentTask, AgentUsage, ComputerActionRecord } from '@/lib/types';
 
-const PERMISSION_LABELS: Record<string, string> = {
-  read_only: 'Leitura',
-  review: 'Revisar',
-  edit: 'Editar',
-  autonomous: 'Autônomo',
-};
+type Translate = TFunction<'agents'>;
 
-const CAPABILITIES: Array<{ key: keyof AgentPanelContext['agent']['capabilities']; label: string }> = [
-  { key: 'webSearch', label: 'Web' },
-  { key: 'fileAccess', label: 'Arquivos' },
-  { key: 'codeExecution', label: 'Código' },
-  { key: 'delegation', label: 'Delegação' },
-  { key: 'automation', label: 'Automações' },
-  { key: 'sharedMemory', label: 'Memória equipe' },
-  { key: 'skillsWrite', label: 'Skills (escrita)' },
-  { key: 'createAgents', label: 'Criar agentes' },
-  { key: 'computerUse', label: 'Computador' },
-  { key: 'screenCapture', label: 'Tela (leitura)' },
-  { key: 'browserUse', label: 'Navegador' },
-  { key: 'dockerExecution', label: 'Docker' },
+function permissionLabel(mode: string, t: Translate): string {
+  switch (mode) {
+    case 'read_only':
+      return t('permissions.readOnly');
+    case 'review':
+      return t('permissions.review');
+    case 'edit':
+      return t('permissions.edit');
+    case 'autonomous':
+      return t('permissions.autonomous');
+    default:
+      return mode;
+  }
+}
+
+function environmentLabel(environment: string | undefined, t: Translate): string {
+  switch (environment) {
+    case 'this_computer':
+      return t('panelData.environment.thisComputer');
+    case 'private_desktop':
+      return t('panelData.environment.privateDesktop');
+    case 'browser':
+      return t('panelData.environment.browser');
+    case 'off':
+      return t('panelData.environment.off');
+    default:
+      return t('panelData.environment.auto');
+  }
+}
+
+const CAPABILITIES: Array<{ key: keyof AgentPanelContext['agent']['capabilities']; labelKey: string }> = [
+  { key: 'webSearch', labelKey: 'panelData.capabilities.web' },
+  { key: 'fileAccess', labelKey: 'panelData.capabilities.files' },
+  { key: 'codeExecution', labelKey: 'panelData.capabilities.code' },
+  { key: 'delegation', labelKey: 'panelData.capabilities.delegation' },
+  { key: 'automation', labelKey: 'panelData.capabilities.automation' },
+  { key: 'sharedMemory', labelKey: 'panelData.capabilities.sharedMemory' },
+  { key: 'skillsWrite', labelKey: 'panelData.capabilities.skillsWrite' },
+  { key: 'createAgents', labelKey: 'panelData.capabilities.createAgents' },
+  { key: 'computerUse', labelKey: 'panelData.capabilities.computer' },
+  { key: 'screenCapture', labelKey: 'panelData.capabilities.screenCapture' },
+  { key: 'browserUse', labelKey: 'panelData.capabilities.browser' },
+  { key: 'dockerExecution', labelKey: 'panelData.capabilities.docker' },
 ];
 
 /** Agent + conversation dashboard: identity, usage, memory, tasks and audit. */
 export function AgentPanelData({ context }: { context: AgentPanelContext }) {
+  const { t } = useTranslation('agents');
   const { agent, conversation, openThread, onEdit } = context;
   const providers = useAppStore((state) => state.providers);
   const openAgentEditor = useUiStore((state) => state.openAgentEditor);
@@ -121,35 +150,27 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-medium text-foreground">
-                {agent.name} · {agent.role || 'Agente'}
+                {agent.name} · {agent.role || t('agentFallback')}
               </p>
               <p className="truncate text-[11px] text-foreground-muted">
                 {modelLabel(providers, agent.providerId, agent.modelId)}
-                {agent.department ? ` · ${agent.department}` : ''}
+                {agent.department ? ` · ${localizedDepartment(agent.department)}` : ''}
               </p>
             </div>
-            <Button size="sm" variant="ghost" onClick={onEdit} aria-label="Editar agente">
+            <Button size="sm" variant="ghost" onClick={onEdit} aria-label={t('panelData.editAgentAria')}>
               <Pencil className="size-3.5" />
             </Button>
           </div>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <Badge tone="neutral">{PERMISSION_LABELS[agent.permissionMode] ?? agent.permissionMode}</Badge>
+            <Badge tone="neutral">{permissionLabel(agent.permissionMode, t)}</Badge>
             <Badge tone={agent.workspaceId ? 'accent' : 'neutral'}>
-              {agent.workspaceId ? 'Pasta selecionada' : 'Pasta interna'}
+              {agent.workspaceId ? t('panelData.folder.selected') : t('panelData.folder.internal')}
             </Badge>
             <Badge tone="neutral">
-              {agent.computerEnvironment === 'this_computer'
-                ? 'Este computador'
-                : agent.computerEnvironment === 'private_desktop'
-                  ? 'Desktop privado'
-                  : agent.computerEnvironment === 'browser'
-                    ? 'Navegador'
-                    : agent.computerEnvironment === 'off'
-                      ? 'Computador desligado'
-                      : 'Ambiente automático'}
+              {environmentLabel(agent.computerEnvironment, t)}
             </Badge>
             <Badge tone={agent.archivedAt ? 'danger' : 'success'}>
-              {agent.archivedAt ? 'Arquivado' : 'Ativo'}
+              {agent.archivedAt ? t('panelData.archived') : t('panelData.active')}
             </Badge>
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
@@ -159,45 +180,47 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
                 <span
                   key={capability.key}
                   className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-foreground-muted"
-                  title={`${capability.label}: ${enabled ? 'ligado' : 'desligado'}`}
+                  title={`${t(capability.labelKey as never)}: ${
+                    enabled ? t('panelData.capabilityOn') : t('panelData.capabilityOff')
+                  }`}
                 >
                   {enabled ? (
                     <CheckCircle2 className="size-2.5 text-success" />
                   ) : (
                     <Circle className="size-2.5 text-foreground-subtle" />
                   )}
-                  {capability.label}
+                  {t(capability.labelKey as never)}
                 </span>
               );
             })}
           </div>
         </section>
 
-        <section aria-label="Uso do agente" className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.usageAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
           <div className="flex items-center gap-2">
             <Gauge className="size-4 text-accent" />
-            <p className="text-[12px] font-medium text-foreground">Uso</p>
+            <p className="text-[12px] font-medium text-foreground">{t('panelData.usage')}</p>
             {loading ? <Loader2 className="size-3.5 animate-spin text-foreground-muted" /> : null}
           </div>
           <dl className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
             <div>
-              <dt className="text-foreground-subtle">Turnos</dt>
+              <dt className="text-foreground-subtle">{t('panelData.fields.turns')}</dt>
               <dd className="font-medium text-foreground">{usage?.turns ?? 0}</dd>
             </div>
             <div>
-              <dt className="text-foreground-subtle">Tokens</dt>
+              <dt className="text-foreground-subtle">{t('panelData.fields.tokens')}</dt>
               <dd className="font-medium text-foreground">
                 {formatUsageTokens(usage?.totalTokens ?? 0)}
               </dd>
             </div>
             <div>
-              <dt className="text-foreground-subtle">Custo</dt>
+              <dt className="text-foreground-subtle">{t('panelData.fields.cost')}</dt>
               <dd className="font-medium text-foreground">
                 {formatUsageCost(usage?.cost ?? 0)}
               </dd>
             </div>
             <div>
-              <dt className="text-foreground-subtle">Última atividade</dt>
+              <dt className="text-foreground-subtle">{t('panelData.fields.lastActivity')}</dt>
               <dd className="font-medium text-foreground">
                 {usage?.lastUsedAt ? relativeTime(usage.lastUsedAt) : '—'}
               </dd>
@@ -205,24 +228,31 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           </dl>
         </section>
 
-        <section aria-label="Conversa atual" className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.conversationAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
           <div className="flex items-center gap-2">
             <Database className="size-4 text-accent" />
-            <p className="text-[12px] font-medium text-foreground">Conversa</p>
+            <p className="text-[12px] font-medium text-foreground">{t('panelData.conversation')}</p>
           </div>
           {conversation ? (
             <div className="mt-2 space-y-1.5 text-[11px] text-foreground-muted">
               <p className="truncate font-medium text-foreground">{conversation.title}</p>
               <p>
-                {conversation.messageCount} mensagem(ns) · {modelLabel(providers, conversation.providerId, conversation.modelId)}
+                {t('panelData.conversationMeta', {
+                  count: conversation.messageCount,
+                  model: modelLabel(providers, conversation.providerId, conversation.modelId),
+                })}
               </p>
               <p>
                 {activeStream
-                  ? `Turno ativo · ${activeStream.phase} · passo ${activeStream.step}`
-                  : 'Nenhum turno ativo'}
+                  ? t('panelData.activeTurn', {
+                      phase: activeStream.phase,
+                      step: activeStream.step,
+                    })
+                  : t('panelData.noActiveTurn')}
               </p>
               <p>
-                Fila: {queueItems.length} mensagem(ns){queueIsPaused ? ' · pausada' : ''}
+                {t('panelData.queue', { count: queueItems.length })}
+                {queueIsPaused ? ` ${t('panelData.queuePaused')}` : ''}
               </p>
               {activeStream ? (
                 <Button
@@ -231,39 +261,39 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
                   onClick={() => void stopConversation(conversation.id)}
                 >
                   <Square className="mr-1.5 size-3.5" />
-                  Parar turno
+                  {t('panelData.stopTurn')}
                 </Button>
               ) : null}
             </div>
           ) : (
             <p className="mt-2 text-[11px] text-foreground-muted">
-              Nenhuma thread aberta. Abra uma conversa para ver fila, turno ativo e auditoria.
+              {t('panelData.noThread')}
             </p>
           )}
         </section>
 
-        <section aria-label="Tarefas do agente" className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.tasksAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
           <div className="flex items-center gap-2">
             <ListChecks className="size-4 text-accent" />
-            <p className="text-[12px] font-medium text-foreground">Tarefas</p>
+            <p className="text-[12px] font-medium text-foreground">{t('panelData.tasks')}</p>
             <span className="ml-auto text-[11px] text-foreground-muted">
-              {openTasks} aberta(s) de {tasks.length}
+              {t('panelData.openTasks', { open: openTasks, total: tasks.length })}
             </span>
           </div>
           <Button size="sm" variant="secondary" className="mt-2" onClick={() => setBoardOpen(true)}>
             <ListChecks className="mr-1.5 size-3.5" />
-            Abrir quadro
+            {t('panelData.openBoard')}
           </Button>
         </section>
 
-        <section aria-label="Auditoria de computer use" className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.auditAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
           <div className="flex items-center gap-2">
             <Activity className="size-4 text-accent" />
-            <p className="text-[12px] font-medium text-foreground">Auditoria</p>
+            <p className="text-[12px] font-medium text-foreground">{t('panelData.audit')}</p>
           </div>
           {actions.length === 0 ? (
             <p className="mt-2 text-[11px] text-foreground-muted">
-              Nenhuma ação de computador nesta conversa.
+              {t('panelData.noComputerActions')}
             </p>
           ) : (
             <ul className="mt-2 space-y-1.5">
@@ -287,10 +317,10 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           )}
         </section>
 
-        <section aria-label="Memória do agente" className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.memoryAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
           <div className="flex items-center gap-2">
             <Wrench className="size-4 text-accent" />
-            <p className="text-[12px] font-medium text-foreground">Memória</p>
+            <p className="text-[12px] font-medium text-foreground">{t('panelData.memory')}</p>
           </div>
           <div className="mt-2">
             <AgentMemoryPanel
@@ -310,12 +340,12 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => openAgentEditor({ mode: 'edit', agentId: agent.id })}>
             <Pencil className="mr-1.5 size-3.5" />
-            Editar agente
+            {t('panelData.editAgent')}
           </Button>
           {conversation ? (
             <Button size="sm" variant="ghost" onClick={() => openThread(conversation.id)}>
               <Activity className="mr-1.5 size-3.5" />
-              Abrir conversa
+              {t('panelData.openConversation')}
             </Button>
           ) : null}
         </div>
@@ -324,7 +354,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
         open={boardOpen}
         onOpenChange={setBoardOpen}
         ownerAgentId={context.agent.id}
-        title={`Tarefas de ${context.agent.name}`}
+        title={t('tasks.boardTitle', { name: context.agent.name })}
       />
     </div>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { CacheDiagnosticsDialog } from '@/components/agent/CacheDiagnosticsDialog';
 import { CACHE_DIAGNOSTICS_EVENT } from '@/components/agent/cacheDiagnosticsRequest';
@@ -13,7 +14,7 @@ import {
 } from '@/components/ui';
 import {
   PALETTE_GROUPS,
-  PALETTE_SECTION_LABELS,
+  paletteGroupLabel,
   type PaletteCommandResult,
   type PaletteItem,
   type PaletteSection,
@@ -26,6 +27,7 @@ import {
   recordRecentCommandId,
 } from '@/lib/palette/recents';
 import { filterConversationsForLayout } from '@/lib/conversations';
+import { t } from '@/lib/i18n';
 import { useChatStore, useUiStore } from '@/lib/store';
 import { modKey } from '@/lib/utils';
 import { ConversationRow } from './ConversationRow';
@@ -56,7 +58,7 @@ function groupSections(commandResults: readonly PaletteCommandResult[]): Palette
   for (const group of PALETTE_GROUPS) {
     const items = commandResults.filter((result) => result.action.group === group.id);
     if (items.length) {
-      sections.push({ id: `group-${group.id}`, label: group.label, items });
+      sections.push({ id: `group-${group.id}`, label: paletteGroupLabel(group.id), items });
     }
   }
   return sections;
@@ -92,19 +94,20 @@ function LoadingRows() {
 }
 
 function EmptyState({ query, scope }: { query: string; scope: PaletteScope }) {
+  const { t: tPalette } = useTranslation('palette');
   const title = query
-    ? `Nenhum resultado para “${query}”`
+    ? tPalette('empty.queryTitle', { query })
     : scope === 'conversations'
-      ? 'Nenhuma conversa ainda'
-      : 'Nenhum comando encontrado';
+      ? tPalette('empty.conversationsTitle')
+      : tPalette('empty.commandsTitle');
   const hint =
     scope === 'commands'
-      ? 'Tente outro termo.'
+      ? tPalette('empty.commandsHint')
       : scope === 'conversations'
         ? query.length === 1
-          ? 'Digite ao menos 2 caracteres para buscar no histórico.'
-          : 'Digite o título ou um trecho de uma mensagem.'
-        : 'Tente outro termo ou use > para comandos e # para conversas.';
+          ? tPalette('empty.conversationMinChars')
+          : tPalette('empty.conversationsHint')
+        : tPalette('empty.allHint');
 
   return (
     <div className="flex flex-col items-center gap-1.5 px-6 py-10 text-center">
@@ -124,7 +127,7 @@ function EmptyState({ query, scope }: { query: string; scope: PaletteScope }) {
 function scheduleAfterClose(run: () => void | Promise<void>): void {
   window.setTimeout(() => {
     void Promise.resolve(run()).catch((error: unknown) => {
-      toast.error('Não foi possível executar a ação', {
+      toast.error(t('palette:toasts.runFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
     });
@@ -138,6 +141,7 @@ function scheduleAfterClose(run: () => void | Promise<void>): void {
  * lives in App.tsx / lib/hotkeys.ts).
  */
 export function CommandPalette() {
+  const { t: tPalette } = useTranslation('palette');
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const layoutMode = useUiStore((state) => state.layoutMode);
@@ -202,7 +206,7 @@ export function CommandPalette() {
       if (recentConversations.length) {
         list.push({
           id: 'recent-conversations',
-          label: PALETTE_SECTION_LABELS.recentConversations,
+          label: tPalette('sections.recentConversations'),
           items: recentConversations,
         });
       }
@@ -211,7 +215,7 @@ export function CommandPalette() {
         if (suggestions.length) {
           list.push({
             id: 'suggestions',
-            label: PALETTE_SECTION_LABELS.suggestions,
+            label: tPalette('sections.suggestions'),
             items: suggestions,
           });
         }
@@ -229,7 +233,7 @@ export function CommandPalette() {
     ) {
       list.push({
         id: 'conversation-results',
-        label: PALETTE_SECTION_LABELS.conversations,
+        label: tPalette('sections.conversations'),
         items: conversationSearch.results,
         loading: conversationSearch.loading,
         fallback: conversationSearch.fallback,
@@ -238,7 +242,7 @@ export function CommandPalette() {
     if (parsed.scope === 'conversations') return list;
     list.push(...groupSections(commandResults));
     return list;
-  }, [commandResults, conversationSearch, hasQuery, parsed.scope, recentConversations, recentIds]);
+  }, [commandResults, conversationSearch, hasQuery, parsed.scope, recentConversations, recentIds, tPalette]);
 
   const flat = useMemo(() => sections.flatMap((section) => section.items), [sections]);
   const flatSignature = useMemo(() => flat.map((item) => item.key).join('|'), [flat]);
@@ -327,9 +331,14 @@ export function CommandPalette() {
     if (activeItem?.kind !== 'conversation') return;
     const { conversation } = activeItem;
     void useChatStore.getState().togglePinned(conversation.id);
-    toast.success(conversation.pinned ? 'Conversa desafixada' : 'Conversa fixada', {
-      description: conversation.title,
-    });
+    toast.success(
+      conversation.pinned
+        ? tPalette('toasts.conversationUnpinned')
+        : tPalette('toasts.conversationPinned'),
+      {
+        description: conversation.title,
+      },
+    );
   };
 
   /**
@@ -401,16 +410,18 @@ export function CommandPalette() {
 
   const placeholder =
     parsed.scope === 'commands'
-      ? 'Buscar comandos…'
+      ? tPalette('placeholders.commands')
       : parsed.scope === 'conversations'
-        ? 'Buscar conversas…'
-        : 'Buscar conversas ou comandos…';
+        ? tPalette('placeholders.conversations')
+        : tPalette('placeholders.all');
 
   const commandCount = flat.filter((item) => item.kind === 'command').length;
   const conversationCount = flat.length - commandCount;
   const announcement = conversationSearch.loading
-    ? 'Buscando conversas'
-    : `${flat.length} ${flat.length === 1 ? 'resultado' : 'resultados'}`;
+    ? tPalette('announce.searching')
+    : flat.length === 1
+      ? tPalette('announce.resultsOne', { count: flat.length })
+      : tPalette('announce.resultsOther', { count: flat.length });
 
   return (
     <>
@@ -421,11 +432,8 @@ export function CommandPalette() {
           onEscapeKeyDown={handleEscapeKeyDown}
           className="mt-[9vh] w-[640px] max-w-[calc(100vw-2rem)] flex-none gap-0 self-start overflow-hidden p-0"
         >
-          <DialogTitle className="sr-only">Paleta de comandos</DialogTitle>
-          <DialogDescription className="sr-only">
-            Busque conversas ou execute comandos do Zylara. Use as setas para navegar, Enter para
-            executar e Esc para limpar a busca ou fechar.
-          </DialogDescription>
+          <DialogTitle className="sr-only">{tPalette('dialog.title')}</DialogTitle>
+          <DialogDescription className="sr-only">{tPalette('dialog.description')}</DialogDescription>
   
           <div className="flex shrink-0 items-center gap-2.5 border-b border-border px-4">
             <Search aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
@@ -437,7 +445,7 @@ export function CommandPalette() {
               }}
               onKeyDown={handleInputKeyDown}
               placeholder={placeholder}
-              aria-label="Buscar conversas ou comandos"
+              aria-label={tPalette('aria.input')}
               role="combobox"
               aria-expanded
               aria-controls="zylara-palette-list"
@@ -449,7 +457,7 @@ export function CommandPalette() {
               className="h-12 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground-subtle"
             />
             {conversationSearch.loading ? (
-              <Spinner size="xs" label="Buscando conversas" className="text-foreground-subtle" />
+              <Spinner size="xs" label={tPalette('announce.searching')} className="text-foreground-subtle" />
             ) : null}
             <Kbd>Esc</Kbd>
           </div>
@@ -458,7 +466,7 @@ export function CommandPalette() {
             <div
               id="zylara-palette-list"
               role="listbox"
-              aria-label="Comandos e conversas"
+              aria-label={tPalette('aria.list')}
               className={sections.length ? 'p-1.5' : 'hidden'}
             >
               {sections.map((section) => (
@@ -477,7 +485,7 @@ export function CommandPalette() {
                   {section.loading ? <LoadingRows /> : null}
                   {section.fallback ? (
                     <p className="px-2.5 pb-1 text-[11px] leading-relaxed text-foreground-subtle">
-                      Busca no histórico indisponível; mostrando título e prévia.
+                      {tPalette('sections.fallbackNote')}
                     </p>
                   ) : null}
                   {section.items.map((item) =>
@@ -533,40 +541,48 @@ export function CommandPalette() {
               <span className="flex items-center gap-1">
                 <Kbd>↑</Kbd>
                 <Kbd>↓</Kbd>
-                navegar
+                {tPalette('footer.navigate')}
               </span>
               <span className="flex items-center gap-1">
                 <Kbd>↵</Kbd>
-                executar
+                {tPalette('footer.execute')}
               </span>
               {activeItem?.kind === 'conversation' ? (
                 <span className="flex items-center gap-1">
                   <Kbd>{modKey}</Kbd>
                   <Kbd>↵</Kbd>
-                  {activeItem.conversation.pinned ? 'desafixar' : 'fixar'}
+                  {activeItem.conversation.pinned
+                    ? tPalette('footer.unpin')
+                    : tPalette('footer.pin')}
                 </span>
               ) : null}
               <span className="flex items-center gap-1">
                 <Kbd>esc</Kbd>
-                {rawQuery ? 'limpar busca' : 'fechar'}
+                {rawQuery ? tPalette('footer.clearSearch') : tPalette('footer.close')}
               </span>
               {!rawQuery ? (
-                <span className="hidden sm:inline">&gt; comandos · # conversas</span>
+                <span className="hidden sm:inline">{tPalette('footer.scopes')}</span>
               ) : null}
             </span>
             <span className="tabular-nums">
               {conversationSearch.loading && flat.length === 0 ? (
-                'Buscando conversas…'
+                tPalette('footer.searching')
               ) : (
                 <>
                   {commandCount > 0
-                    ? `${commandCount} ${commandCount === 1 ? 'comando' : 'comandos'}`
+                    ? commandCount === 1
+                      ? tPalette('footer.commandsOne', { count: commandCount })
+                      : tPalette('footer.commandsOther', { count: commandCount })
                     : null}
                   {commandCount > 0 && conversationCount > 0 ? ' · ' : null}
                   {conversationCount > 0
-                    ? `${conversationCount} ${conversationCount === 1 ? 'conversa' : 'conversas'}`
+                    ? conversationCount === 1
+                      ? tPalette('footer.conversationsOne', { count: conversationCount })
+                      : tPalette('footer.conversationsOther', { count: conversationCount })
                     : null}
-                  {commandCount === 0 && conversationCount === 0 ? 'Nenhum resultado' : null}
+                  {commandCount === 0 && conversationCount === 0
+                    ? tPalette('footer.noResults')
+                    : null}
                 </>
               )}
             </span>

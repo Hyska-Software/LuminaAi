@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { api } from '@/lib/api';
 import type { Agent, AgentAvatar, AgentInput } from '@/lib/types';
 import { createSerialRunner } from '@/lib/utils';
+import { compareText } from '@/lib/i18n/format';
 
 let initializePromise: Promise<void> | null = null;
 const avatarSequence = new Map<string, number>();
@@ -11,13 +12,11 @@ const runReorder = createSerialRunner();
 function sortAgents(agents: Agent[]): Agent[] {
   return [...agents].sort((left, right) => {
     if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
-    const nameOrder = left.name.localeCompare(right.name, 'pt-BR', { sensitivity: 'base' });
+    const nameOrder = compareText(left.name, right.name);
     if (left.pinned) {
       return left.sortOrder - right.sortOrder || nameOrder;
     }
-    const department = left.department.localeCompare(right.department, 'pt-BR', {
-      sensitivity: 'base',
-    });
+    const department = compareText(left.department, right.department);
     if (department !== 0) return department;
     return left.sortOrder - right.sortOrder || nameOrder;
   });
@@ -287,6 +286,6 @@ export function selectAgentsByDepartment(state: AgentState): Array<{
     groups.set(agent.department, list);
   }
   return [...groups.entries()]
-    .sort(([left], [right]) => left.localeCompare(right, 'pt-BR', { sensitivity: 'base' }))
+    .sort(([left], [right]) => compareText(left, right))
     .map(([department, agents]) => ({ department, agents }));
 }

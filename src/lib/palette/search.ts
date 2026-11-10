@@ -4,6 +4,7 @@
  * §4.3). Pure functions only — the palette UI never reimplements matching.
  */
 import type { Conversation } from '../types';
+import { compareText } from '../i18n/format';
 import {
   PALETTE_GROUP_ORDER,
   paletteGroupLabel,
@@ -350,7 +351,7 @@ export function rankCommands(
     }
     return (
       groupOrderIndex(left.action.group) - groupOrderIndex(right.action.group) ||
-      left.action.label.localeCompare(right.action.label, 'pt-BR')
+      compareText(left.action.label, right.action.label)
     );
   });
 }

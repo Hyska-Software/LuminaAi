@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, FolderOpen, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -8,38 +9,31 @@ import type {
   InterpreterInfo,
   PermissionMode,
 } from '@/lib/types';
-import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
+import { AUTONOMOUS_MODE_WARNING_KEY } from '@/lib/permissionModes';
 import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
 import { Badge, Button, IconButton, Input, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
-import { countSkillsByOrigin, skillSourceMeta } from '@/components/skills/sources';
+import { countSkillsByOrigin, localizedSkillMeta, skillSourceMeta } from '@/components/skills/sources';
 import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 
 const TIMEOUT_MIN = 10;
 const TIMEOUT_MAX = 600;
 const TIMEOUT_STEP = 10;
 
-/** Modos de permissão do harness (mesma ordem do chip do composer). */
-const CODE_PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
-  { value: 'read_only', label: 'Leitura' },
-  { value: 'review', label: 'Revisar' },
-  { value: 'edit', label: 'Editar' },
-  { value: 'autonomous', label: 'Autônomo' },
-];
-
-/** Padrão de fábrica quando o backend ainda não devolveu o campo. */
+/** Factory default when the backend has not returned the field yet. */
 const CODE_DEFAULT_PERMISSION_FALLBACK: PermissionMode = 'autonomous';
 
-function interpreterSourceLabel(source: string): string {
-  if (source === 'settings') return 'caminho configurado';
-  if (source === 'path') return 'detectado no PATH';
-  return source;
-}
-
 function InterpreterStatus({ info }: { info: InterpreterInfo | null | undefined }) {
+  const { t } = useTranslation('settings');
   if (!info) {
-    return <Badge tone="warning">Não encontrado</Badge>;
+    return <Badge tone="warning">{t('tools.environment.notFound')}</Badge>;
   }
+  const sourceLabel =
+    info.source === 'settings'
+      ? t('tools.environment.sourceConfigured')
+      : info.source === 'path'
+        ? t('tools.environment.sourcePath')
+        : info.source;
   return (
     <div className="flex min-w-0 flex-col items-end gap-0.5 text-right">
       <code
@@ -49,13 +43,15 @@ function InterpreterStatus({ info }: { info: InterpreterInfo | null | undefined 
         {info.path}
       </code>
       <span className="text-[11px] text-foreground-subtle">
-        {info.version || 'versão desconhecida'} · {interpreterSourceLabel(info.source)}
+        {info.version || t('tools.environment.versionUnknown')} · {sourceLabel}
       </span>
     </div>
   );
 }
 
 export function ToolsTab() {
+  const { t } = useTranslation('settings');
+  const { t: codeT } = useTranslation('code');
   const settings = useAppStore((state) => state.settings);
   const saveSettings = useAppStore((state) => state.saveSettings);
   const setActiveView = useUiStore((state) => state.setActiveView);
@@ -118,13 +114,19 @@ export function ToolsTab() {
   };
   const skills = environment?.skills ?? [];
   const originCounts = countSkillsByOrigin(skills);
+  const permissionOptions: { value: PermissionMode; label: string }[] = [
+    { value: 'read_only', label: t('tools.codeSessions.permission.read_only') },
+    { value: 'review', label: t('tools.codeSessions.permission.review') },
+    { value: 'edit', label: t('tools.codeSessions.permission.edit') },
+    { value: 'autonomous', label: t('tools.codeSessions.permission.autonomous') },
+  ];
 
   const openSkillsDir = async () => {
     setOpeningSkills(true);
     try {
       await api.openSkillsDir();
     } catch (error) {
-      toast.error('Não foi possível abrir a pasta de skills', {
+      toast.error(t('tools.skills.openFolderFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -135,94 +137,91 @@ export function ToolsTab() {
   const copyInstallHint = async () => {
     if (!environment?.installHint) return;
     const copied = await copyText(environment.installHint);
-    if (copied) toast.success('Comando copiado');
-    else toast.error('Não foi possível copiar o comando');
+    if (copied) toast.success(t('tools.skills.copied'));
+    else toast.error(t('tools.skills.copyFailed'));
   };
 
   const retryEnvironment = () => setEnvironmentAttempt((value) => value + 1);
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="Ferramentas do agente" description="O que o modelo pode fazer durante uma resposta.">
+      <SettingsSection title={t('tools.agent.title')} description={t('tools.agent.description')}>
         <SettingRow
-          label="Busca web"
-          description="Permite pesquisar na internet e citar as fontes no chat."
+          label={t('tools.agent.webSearch.label')}
+          description={t('tools.agent.webSearch.description')}
         >
           <Switch
             checked={settings.webSearchEnabled}
             onCheckedChange={(checked) => void saveSettings({ webSearchEnabled: checked })}
-            aria-label="Ativar busca web"
+            aria-label={t('tools.agent.webSearch.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="Criar arquivos"
-          description="Permite gerar artefatos (documentos, planilhas, código, HTML)."
+          label={t('tools.agent.fileCreation.label')}
+          description={t('tools.agent.fileCreation.description')}
         >
           <Switch
             checked={settings.fileCreationEnabled}
             onCheckedChange={(checked) => void saveSettings({ fileCreationEnabled: checked })}
-            aria-label="Ativar criação de arquivos"
+            aria-label={t('tools.agent.fileCreation.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="Enviar anexos ao modelo"
-          description="Inclui o texto extraído e imagens dos anexos no contexto."
+          label={t('tools.agent.attachments.label')}
+          description={t('tools.agent.attachments.description')}
         >
           <Switch
             checked={settings.includeAttachments}
             onCheckedChange={(checked) => void saveSettings({ includeAttachments: checked })}
-            aria-label="Enviar anexos ao modelo"
+            aria-label={t('tools.agent.attachments.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="Gerar título automático"
-          description="Cria um título curto para a conversa no primeiro turno."
+          label={t('tools.agent.autoTitle.label')}
+          description={t('tools.agent.autoTitle.description')}
         >
           <Switch
             checked={settings.autoTitle}
             onCheckedChange={(checked) => void saveSettings({ autoTitle: checked })}
-            aria-label="Gerar título automático"
+            aria-label={t('tools.agent.autoTitle.aria')}
           />
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection
-        title="Cache de prompt"
-        description="Como o Zylara reaproveita o prefixo do prompt nos provedores que medem cache."
-      >
+      <SettingsSection title={t('tools.cache.title')} description={t('tools.cache.description')}>
         <SettingRow
-          label="Mostrar indicador"
-          description="Exibe o acerto de cache em tempo real no medidor de contexto do Code e no composer do Chat. Desligar só esconde o indicador: a medição continua."
+          label={t('tools.cache.indicator.label')}
+          description={t('tools.cache.indicator.description')}
         >
           <Switch
             checked={cacheSettings.showIndicator}
             onCheckedChange={(checked) => saveCacheSettings({ showIndicator: checked })}
-            aria-label="Mostrar indicador de cache"
+            aria-label={t('tools.cache.indicator.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="TTL do cache (Anthropic)"
-          description="Quanto tempo o prefixo fica cacheado na API da Anthropic. 1 h custa 2× na gravação e reduz renovações no meio do turno; 5 min custa 1,25×."
+          label={t('tools.cache.anthropicTtl.label')}
+          description={t('tools.cache.anthropicTtl.description')}
         >
           <NativeSelect
             value={cacheSettings.anthropicTtl}
             onChange={(event) =>
               saveCacheSettings({ anthropicTtl: event.target.value === '5m' ? '5m' : '1h' })
             }
-            aria-label="TTL do cache da Anthropic"
+            aria-label={t('tools.cache.anthropicTtl.aria')}
           >
-            <option value="1h">1 hora (padrão)</option>
-            <option value="5m">5 minutos</option>
+            <option value="1h">{t('tools.cache.anthropicTtl.oneHour')}</option>
+            <option value="5m">{t('tools.cache.anthropicTtl.fiveMinutes')}</option>
           </NativeSelect>
         </SettingRow>
 
         <SettingRow
-          label="Retenção do cache (OpenAI)"
-          description="Por quanto tempo a OpenAI mantém o prefixo no cache. Automático deixa o provedor decidir."
+          label={t('tools.cache.openaiRetention.label')}
+          description={t('tools.cache.openaiRetention.description')}
         >
           <NativeSelect
             value={cacheSettings.openaiRetention ?? 'auto'}
@@ -231,20 +230,20 @@ export function ToolsTab() {
                 openaiRetention: event.target.value === 'auto' ? null : event.target.value,
               })
             }
-            aria-label="Retenção do cache da OpenAI"
+            aria-label={t('tools.cache.openaiRetention.aria')}
           >
-            <option value="auto">Automático</option>
-            <option value="in_memory">Na memória</option>
-            <option value="24h">24 horas</option>
+            <option value="auto">{t('tools.cache.openaiRetention.auto')}</option>
+            <option value="in_memory">{t('tools.cache.openaiRetention.memory')}</option>
+            <option value="24h">{t('tools.cache.openaiRetention.day')}</option>
           </NativeSelect>
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="Execução" description="Limites do loop de agente e criatividade do modelo.">
+      <SettingsSection title={t('tools.execution.title')} description={t('tools.execution.description')}>
         <SettingRow
           vertical
-          label="Máximo de passos"
-          description={`O agente executa até ${maxSteps} ${maxSteps === 1 ? 'passo' : 'passos'} (ferramenta → resposta) por turno.`}
+          label={t('tools.execution.maxSteps.label')}
+          description={t('tools.execution.maxSteps.description', { count: maxSteps })}
         >
           <Slider
             min={1}
@@ -254,7 +253,7 @@ export function ToolsTab() {
             valueLabel={String(maxSteps)}
             onValueChange={setMaxSteps}
             onValueCommit={(value) => void saveSettings({ maxSteps: value })}
-            aria-label="Máximo de passos do agente"
+            aria-label={t('tools.execution.maxSteps.aria')}
           />
         </SettingRow>
 
@@ -265,8 +264,8 @@ export function ToolsTab() {
               onCheckedChange={(checked) =>
                 void saveSettings({ temperature: checked ? temperature : null })
               }
-              label="Personalizar temperatura"
-              description="Quando desligado, cada provedor usa o próprio padrão."
+              label={t('tools.execution.temperature.label')}
+              description={t('tools.execution.temperature.description')}
             />
             {temperatureEnabled ? (
               <Slider
@@ -277,8 +276,8 @@ export function ToolsTab() {
                 valueLabel={temperature.toFixed(2)}
                 onValueChange={setTemperature}
                 onValueCommit={(value) => void saveSettings({ temperature: value })}
-                description="Valores baixos são mais determinísticos; altos, mais criativos."
-                aria-label="Temperatura"
+                description={t('tools.execution.temperature.sliderDescription')}
+                aria-label={t('tools.execution.temperature.aria')}
               />
             ) : null}
           </div>
@@ -286,17 +285,17 @@ export function ToolsTab() {
       </SettingsSection>
 
       <SettingsSection
-        title="Execução de código"
-        description="Permite ao agente executar scripts para criar documentos, planilhas, apresentações e imagens."
+        title={t('tools.codeExecution.title')}
+        description={t('tools.codeExecution.description')}
       >
         <SettingRow
-          label="Permitir execução de código"
-          description="Opt-in: o modelo só recebe a ferramenta de execução quando isto está ligado."
+          label={t('tools.codeExecution.enable.label')}
+          description={t('tools.codeExecution.enable.description')}
         >
           <Switch
             checked={settings.codeExecutionEnabled}
             onCheckedChange={(checked) => void saveSettings({ codeExecutionEnabled: checked })}
-            aria-label="Ativar execução de código"
+            aria-label={t('tools.codeExecution.enable.aria')}
           />
         </SettingRow>
 
@@ -304,18 +303,19 @@ export function ToolsTab() {
           <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
             <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
             <p className="text-[11px] leading-relaxed text-warning">
-              O código roda nesta máquina com as suas permissões e acesso à rede —{' '}
-              <span className="font-semibold">não é um sandbox de sistema</span>. As chaves de API do
-              aplicativo não são repassadas e cada execução tem limite de tempo, mas habilite apenas
-              se confiar no que o modelo for executar.
+              <Trans
+                ns="settings"
+                i18nKey="tools.codeExecution.warning"
+                components={{ b: <span className="font-semibold" /> }}
+              />
             </p>
           </div>
         </SettingsBlock>
 
         <SettingRow
           vertical
-          label="Tempo limite de execução"
-          description={`Cada script é interrompido após ${timeoutSecs} ${timeoutSecs === 1 ? 'segundo' : 'segundos'}.`}
+          label={t('tools.codeExecution.timeout.label')}
+          description={t('tools.codeExecution.timeout.description', { count: timeoutSecs })}
         >
           <Slider
             min={TIMEOUT_MIN}
@@ -325,30 +325,27 @@ export function ToolsTab() {
             valueLabel={`${timeoutSecs} s`}
             onValueChange={setTimeoutSecs}
             onValueCommit={(value) => void saveSettings({ codeTimeoutSecs: value })}
-            aria-label="Tempo limite de execução"
+            aria-label={t('tools.codeExecution.timeout.aria')}
           />
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection
-        title="Sandbox de comandos"
-        description="Onde os comandos do agente de código rodam. O padrão executa nesta máquina; Docker isola o processo com o workspace montado em /workspace."
-      >
+      <SettingsSection title={t('tools.sandbox.title')} description={t('tools.sandbox.description')}>
         <SettingRow
-          label="Ambiente"
-          description="O terminal interativo do painel continua local; esta opção vale para as ferramentas run_command/run_checks e jobs do agente."
+          label={t('tools.sandbox.environment.label')}
+          description={t('tools.sandbox.environment.description')}
         >
           <NativeSelect
             value={executionEnvironment}
-            aria-label="Ambiente de execução dos comandos do agente"
+            aria-label={t('tools.sandbox.environment.aria')}
             onChange={(event) =>
               void saveSettings({
                 executionEnvironment: event.target.value === 'docker' ? 'docker' : 'local',
               })
             }
           >
-            <option value="local">Este computador</option>
-            <option value="docker">Docker</option>
+            <option value="local">{t('tools.sandbox.environment.local')}</option>
+            <option value="docker">{t('tools.sandbox.environment.docker')}</option>
           </NativeSelect>
         </SettingRow>
 
@@ -356,13 +353,13 @@ export function ToolsTab() {
           <>
             <SettingRow
               vertical
-              label="Imagem Docker"
-              description="Precisa existir no Docker local (o app não baixa imagens automaticamente). Ex.: node:22-bookworm, python:3.12, ubuntu:24.04."
+              label={t('tools.sandbox.image.label')}
+              description={t('tools.sandbox.image.description')}
             >
               <Input
                 value={dockerImage}
                 maxLength={200}
-                aria-label="Imagem Docker dos comandos do agente"
+                aria-label={t('tools.sandbox.image.aria')}
                 placeholder="node:22-bookworm"
                 onChange={(event) => setDockerImage(event.target.value)}
                 onBlur={() => {
@@ -382,54 +379,62 @@ export function ToolsTab() {
               />
             </SettingRow>
             <SettingRow
-              label="Rede no contêiner"
-              description="Desligado, o comando roda com --network none. Ligue apenas quando a tarefa precisar baixar dependências ou acessar a internet."
+              label={t('tools.sandbox.network.label')}
+              description={t('tools.sandbox.network.description')}
             >
               <Switch
                 checked={settings.dockerNetwork ?? false}
                 onCheckedChange={(checked) => void saveSettings({ dockerNetwork: checked })}
-                aria-label="Permitir rede no contêiner Docker"
+                aria-label={t('tools.sandbox.network.aria')}
               />
             </SettingRow>
             <div className="grid gap-3 sm:grid-cols-3">
               <SettingRow
                 vertical
-                label="Memória (MB)"
-                description="Limite do sandbox Docker."
+                label={t('tools.sandbox.memory.label')}
+                description={t('tools.sandbox.memory.description')}
               >
                 <Input
                   type="number"
                   min={256}
                   max={16384}
                   defaultValue={settings.dockerMemoryMb ?? 2048}
-                  aria-label="Memória do sandbox Docker em MB"
+                  aria-label={t('tools.sandbox.memory.aria')}
                   onBlur={(event) => {
                     const value = Math.max(256, Math.min(16_384, Number(event.target.value) || 2048));
                     void saveSettings({ dockerMemoryMb: value });
                   }}
                 />
               </SettingRow>
-              <SettingRow vertical label="CPUs" description="Limite de CPU do sandbox.">
+              <SettingRow
+                vertical
+                label={t('tools.sandbox.cpus.label')}
+                description={t('tools.sandbox.cpus.description')}
+              >
                 <Input
                   type="number"
                   min={0.25}
                   max={16}
                   step={0.25}
                   defaultValue={settings.dockerCpus ?? 2}
-                  aria-label="CPUs do sandbox Docker"
+                  aria-label={t('tools.sandbox.cpus.aria')}
                   onBlur={(event) => {
                     const value = Math.max(0.25, Math.min(16, Number(event.target.value) || 2));
                     void saveSettings({ dockerCpus: value });
                   }}
                 />
               </SettingRow>
-              <SettingRow vertical label="PIDs" description="Limite de processos do sandbox.">
+              <SettingRow
+                vertical
+                label={t('tools.sandbox.pids.label')}
+                description={t('tools.sandbox.pids.description')}
+              >
                 <Input
                   type="number"
                   min={32}
                   max={4096}
                   defaultValue={settings.dockerPidsLimit ?? 256}
-                  aria-label="Limite de PIDs do sandbox Docker"
+                  aria-label={t('tools.sandbox.pids.aria')}
                   onBlur={(event) => {
                     const value = Math.max(32, Math.min(4096, Number(event.target.value) || 256));
                     void saveSettings({ dockerPidsLimit: value });
@@ -438,22 +443,24 @@ export function ToolsTab() {
               </SettingRow>
             </div>
             <SettingRow
-              label="Rootfs somente leitura"
-              description="O workspace em /workspace continua gravável; o restante do contêiner fica read-only."
+              label={t('tools.sandbox.readOnlyRoot.label')}
+              description={t('tools.sandbox.readOnlyRoot.description')}
             >
               <Switch
                 checked={settings.dockerReadOnlyRoot ?? true}
                 onCheckedChange={(checked) => void saveSettings({ dockerReadOnlyRoot: checked })}
-                aria-label="Montar rootfs do contêiner como somente leitura"
+                aria-label={t('tools.sandbox.readOnlyRoot.aria')}
               />
             </SettingRow>
             <SettingsBlock>
               <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
                 <p className="text-[11px] leading-relaxed text-warning">
-                  Docker Desktop/Engine precisa estar instalado e rodando. O workspace é montado
-                  em <code>/workspace</code>; o contêiner pode ler e alterar esses arquivos, mas
-                  não tem acesso ao resto do computador. Ainda assim, revise o que o agente executa.
+                  <Trans
+                    ns="settings"
+                    i18nKey="tools.sandbox.warning"
+                    components={{ code: <code /> }}
+                  />
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -472,7 +479,7 @@ export function ToolsTab() {
                       )
                       .catch((error) => {
                         setDockerInfo(null);
-                        toast.error('Imagem Docker inválida', {
+                        toast.error(t('tools.sandbox.invalidImage'), {
                           description: String(error),
                         });
                       })
@@ -480,27 +487,27 @@ export function ToolsTab() {
                   }}
                 >
                   {dockerBusy ? <Spinner className="mr-1.5 size-3.5" /> : null}
-                  Validar imagem
+                  {t('tools.sandbox.validate')}
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   disabled={dockerBusy}
-                  aria-label="Baixar imagem dos comandos"
+                  aria-label={t('tools.sandbox.pullAria')}
                   onClick={() => {
                     setDockerBusy(true);
                     void api
                       .dockerPullImage(settings.dockerImage ?? 'node:22-bookworm')
-                      .then((image) => toast.success(`Imagem disponível: ${image}`))
+                      .then((image) => toast.success(t('tools.sandbox.available', { image })))
                       .catch((error) =>
-                        toast.error('Não foi possível baixar a imagem', {
+                        toast.error(t('tools.sandbox.pullFailed'), {
                           description: String(error),
                         }),
                       )
                       .finally(() => setDockerBusy(false));
                   }}
                 >
-                  Baixar imagem
+                  {t('tools.sandbox.download')}
                 </Button>
                 {dockerInfo ? (
                   <span className="text-[11px] text-foreground-muted">{dockerInfo}</span>
@@ -512,24 +519,24 @@ export function ToolsTab() {
       </SettingsSection>
 
       <SettingsSection
-        title="Sessões de código"
-        description="Padrões das novas sessões do layout Code e como o workbench mostra as alterações."
+        title={t('tools.codeSessions.title')}
+        description={t('tools.codeSessions.description')}
       >
         <SettingRow
-          label="Modo de permissão padrão"
-          description="Toda nova sessão do Code começa neste modo. Você pode trocar pelo chip de permissão no composer a qualquer momento — a mudança aqui vale para as próximas sessões."
+          label={t('tools.codeSessions.permission.label')}
+          description={t('tools.codeSessions.permission.description')}
         >
           <NativeSelect
             value={codeDefaultPermissionMode}
             onChange={(event) => {
-              const mode = CODE_PERMISSION_OPTIONS.find(
+              const mode = permissionOptions.find(
                 (option) => option.value === event.target.value,
               )?.value;
               if (mode) void saveSettings({ codeDefaultPermissionMode: mode });
             }}
-            aria-label="Modo de permissão padrão das novas sessões do Code"
+            aria-label={t('tools.codeSessions.permission.aria')}
           >
-            {CODE_PERMISSION_OPTIONS.map(({ value, label }) => (
+            {permissionOptions.map(({ value, label }) => (
               <option key={value} value={value}>
                 {label}
               </option>
@@ -542,13 +549,13 @@ export function ToolsTab() {
             role="status"
             className="mb-3 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[11.5px] leading-relaxed text-warning"
           >
-            {AUTONOMOUS_MODE_WARNING}
+            {codeT(AUTONOMOUS_MODE_WARNING_KEY)}
           </p>
         ) : null}
 
         <SettingRow
-          label="Abrir diff dos arquivos"
-          description="Escolha onde o diff de um arquivo da aba Alterações abre ao clicar."
+          label={t('tools.codeSessions.diff.label')}
+          description={t('tools.codeSessions.diff.description')}
         >
           <NativeSelect
             value={settings.diffOpenMode ?? 'tab'}
@@ -557,23 +564,23 @@ export function ToolsTab() {
                 diffOpenMode: event.target.value === 'panel' ? 'panel' : 'tab',
               })
             }
-            aria-label="Onde abrir o diff dos arquivos"
+            aria-label={t('tools.codeSessions.diff.aria')}
           >
-            <option value="tab">Em uma aba do chat (padrão)</option>
-            <option value="panel">No painel lateral</option>
+            <option value="tab">{t('tools.codeSessions.diff.tab')}</option>
+            <option value="panel">{t('tools.codeSessions.diff.panel')}</option>
           </NativeSelect>
         </SettingRow>
       </SettingsSection>
 
       <SettingsSection
-        title="Ambiente de código"
-        description="Detectado nesta máquina; nada é instalado automaticamente."
+        title={t('tools.environment.title')}
+        description={t('tools.environment.description')}
       >
         {environmentLoading && !environment ? (
           <SettingsBlock>
             <div className="flex items-center gap-2 text-xs text-foreground-muted">
-              <Spinner size="sm" className="text-accent" label="Verificando ambiente de código" />
-              Verificando ambiente…
+              <Spinner size="sm" className="text-accent" label={t('tools.environment.checking')} />
+              {t('tools.environment.checkingShort')}
             </div>
           </SettingsBlock>
         ) : null}
@@ -585,7 +592,7 @@ export function ToolsTab() {
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[12px] font-medium text-foreground">
-                    Não foi possível verificar o ambiente
+                    {t('tools.environment.errorTitle')}
                   </p>
                   <p className="mt-0.5 break-words text-[11px] leading-relaxed text-foreground-muted">
                     {environmentError}
@@ -593,7 +600,7 @@ export function ToolsTab() {
                 </div>
               </div>
               <Button size="sm" variant="secondary" loading={environmentLoading} onClick={retryEnvironment}>
-                Verificar novamente
+                {t('tools.environment.retry')}
               </Button>
             </div>
           </SettingsBlock>
@@ -602,15 +609,15 @@ export function ToolsTab() {
         {environment ? (
           <>
             <SettingRow
-              label="Python"
-              description="Interpretador usado pelos scripts que geram documentos e planilhas."
+              label={t('tools.environment.python.label')}
+              description={t('tools.environment.python.description')}
             >
               <InterpreterStatus info={environment.python} />
             </SettingRow>
 
             <SettingRow
-              label="Node.js"
-              description="Interpretador usado para executar scripts JavaScript."
+              label={t('tools.environment.node.label')}
+              description={t('tools.environment.node.description')}
             >
               <InterpreterStatus info={environment.node} />
             </SettingRow>
@@ -618,10 +625,11 @@ export function ToolsTab() {
             <SettingsBlock>
               <div className="flex flex-col gap-2">
                 <div>
-                  <p className="text-[13px] font-medium text-foreground">Pacotes opcionais</p>
+                  <p className="text-[13px] font-medium text-foreground">
+                    {t('tools.environment.packages.title')}
+                  </p>
                   <p className="mt-0.5 text-xs leading-relaxed text-foreground-muted">
-                    Ampliam os formatos suportados nos scripts de Python. Os helpers embutidos usam
-                    somente a biblioteca padrão.
+                    {t('tools.environment.packages.description')}
                   </p>
                 </div>
 
@@ -645,26 +653,30 @@ export function ToolsTab() {
                         </span>
                         <span className="truncate font-mono text-foreground-muted">{entry.name}</span>
                         <span className="sr-only">
-                          {entry.available ? 'disponível' : 'não instalado'}
+                          {entry.available
+                            ? t('tools.environment.packages.available')
+                            : t('tools.environment.packages.unavailable')}
                         </span>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-xs text-foreground-muted">Nenhum pacote opcional verificado.</p>
+                  <p className="text-xs text-foreground-muted">
+                    {t('tools.environment.packages.none')}
+                  </p>
                 )}
 
                 {environment.installHint ? (
                   <div className="flex flex-col gap-1.5">
                     <p className="text-[11px] text-foreground-subtle">
-                      Para instalar os pacotes opcionais, execute:
+                      {t('tools.environment.packages.installHint')}
                     </p>
                     <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-2 py-1.5">
                       <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-[11px] text-foreground-muted">
                         {environment.installHint}
                       </code>
                       <IconButton
-                        label="Copiar comando de instalação"
+                        label={t('tools.environment.packages.copyInstall')}
                         size="sm"
                         onClick={() => void copyInstallHint()}
                       >
@@ -681,10 +693,10 @@ export function ToolsTab() {
                     loading={environmentLoading}
                     onClick={retryEnvironment}
                   >
-                    Verificar novamente
+                    {t('tools.environment.retry')}
                   </Button>
                   <span className="text-[11px] text-foreground-subtle">
-                    Nada é instalado automaticamente.
+                    {t('tools.environment.packages.nothingInstalled')}
                   </span>
                 </div>
               </div>
@@ -693,35 +705,30 @@ export function ToolsTab() {
         ) : null}
       </SettingsSection>
 
-      <SettingsSection
-        title="Skills"
-        description="Instruções e scripts que o agente pode consultar para tarefas especializadas."
-      >
+      <SettingsSection title={t('tools.skills.title')} description={t('tools.skills.description')}>
         <SettingRow
-          label="Painel de skills na barra lateral"
-          description="Mostra o item Skills na barra lateral. Quando desligado, o gerenciamento continua disponível por aqui."
+          label={t('tools.skills.panel.label')}
+          description={t('tools.skills.panel.description')}
         >
           <Switch
             checked={settings.skillsPanelEnabled}
             onCheckedChange={(checked) => void saveSettings({ skillsPanelEnabled: checked })}
-            aria-label="Mostrar painel de skills na barra lateral"
+            aria-label={t('tools.skills.panel.aria')}
           />
         </SettingRow>
 
         {environmentLoading && !environment ? (
           <SettingsBlock>
             <div className="flex items-center gap-2 text-xs text-foreground-muted">
-              <Spinner size="sm" className="text-accent" label="Carregando skills" />
-              Carregando skills…
+              <Spinner size="sm" className="text-accent" label={t('tools.skills.loading')} />
+              {t('tools.skills.loadingShort')}
             </div>
           </SettingsBlock>
         ) : null}
 
         {environmentError ? (
           <SettingsBlock>
-            <p className="text-xs leading-relaxed text-foreground-muted">
-              Não foi possível carregar as skills. Tente verificar o ambiente novamente.
-            </p>
+            <p className="text-xs leading-relaxed text-foreground-muted">{t('tools.skills.error')}</p>
           </SettingsBlock>
         ) : null}
 
@@ -729,24 +736,24 @@ export function ToolsTab() {
           <SettingsBlock>
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-1.5">
-                <Badge tone="muted">
-                  {originCounts.total} {originCounts.total === 1 ? 'skill' : 'skills'}
-                </Badge>
+                <Badge tone="muted">{t('tools.skills.count', { count: originCounts.total })}</Badge>
                 {originCounts.zylara > 0 ? (
-                  <Badge tone="accent">{originCounts.zylara} do Zylara</Badge>
+                  <Badge tone="accent">
+                    {t('tools.skills.ofZylara', { count: originCounts.zylara })}
+                  </Badge>
                 ) : null}
                 {originCounts.external > 0 ? (
                   <Badge tone="muted">
-                    {originCounts.external} {originCounts.external === 1 ? 'externa' : 'externas'}
+                    {t('tools.skills.external', { count: originCounts.external })}
                   </Badge>
                 ) : null}
                 {originCounts.bundled > 0 ? (
                   <Badge tone="success">
-                    {originCounts.bundled} {originCounts.bundled === 1 ? 'embutida' : 'embutidas'}
+                    {t('tools.skills.bundled', { count: originCounts.bundled })}
                   </Badge>
                 ) : null}
                 {originCounts.other > 0 ? (
-                  <Badge tone="muted">{originCounts.other} outras</Badge>
+                  <Badge tone="muted">{t('tools.skills.other', { count: originCounts.other })}</Badge>
                 ) : null}
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
                   <Button
@@ -760,7 +767,7 @@ export function ToolsTab() {
                       setActiveView('skills');
                     }}
                   >
-                    Gerenciar skills
+                    {t('tools.skills.manage')}
                   </Button>
                   <Button
                     size="sm"
@@ -769,7 +776,7 @@ export function ToolsTab() {
                     leftIcon={<FolderOpen className="size-3.5" />}
                     onClick={() => void openSkillsDir()}
                   >
-                    Abrir pasta de skills
+                    {t('tools.skills.openFolder')}
                   </Button>
                 </div>
               </div>
@@ -779,6 +786,7 @@ export function ToolsTab() {
                   {skills.map((skill) => {
                     const meta = skillSourceMeta(skill.source);
                     const SkillIcon = meta.icon;
+                    const localized = localizedSkillMeta(skill);
                     return (
                       <li
                         key={`${skill.source}-${skill.name}`}
@@ -792,13 +800,15 @@ export function ToolsTab() {
                                 skill.enabled ? 'text-foreground' : 'text-foreground-muted',
                               )}
                             >
-                              {skill.name}
+                              {localized.name}
                             </span>
                             <Badge tone={meta.tone}>
                               <SkillIcon aria-hidden className="size-2.5" />
                               {meta.label}
                             </Badge>
-                            {!skill.enabled ? <Badge tone="muted">Desativada</Badge> : null}
+                            {!skill.enabled ? (
+                              <Badge tone="muted">{t('tools.skills.disabled')}</Badge>
+                            ) : null}
                           </p>
                           <p
                             className={cn(
@@ -806,7 +816,7 @@ export function ToolsTab() {
                               skill.enabled ? 'text-foreground-muted' : 'text-foreground-subtle',
                             )}
                           >
-                            {skill.description}
+                            {localized.description}
                           </p>
                         </div>
                       </li>
@@ -814,7 +824,7 @@ export function ToolsTab() {
                   })}
                 </ul>
               ) : (
-                <p className="text-xs text-foreground-muted">Nenhuma skill encontrada.</p>
+                <p className="text-xs text-foreground-muted">{t('tools.skills.empty')}</p>
               )}
             </div>
           </SettingsBlock>

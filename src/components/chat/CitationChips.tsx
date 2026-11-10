@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 import { citationDomain, MAX_INLINE_CITATIONS, uniqueCitations } from '@/lib/citations';
 import { useUiStore } from '@/lib/store';
@@ -13,9 +14,10 @@ export interface CitationChipsProps {
 /**
  * Source chips for tool citations (DESIGN §6.3): domain + truncated title, with
  * at most `MAX_INLINE_CITATIONS` chips. The remaining sources are not expanded
- * inline anymore — the "+ N fontes" button opens the sources side panel.
+ * inline anymore — the "+ N sources" button opens the sources side panel.
  */
 export function CitationChips({ citations, className }: CitationChipsProps) {
+  const { t } = useTranslation('chat');
   const unique = uniqueCitations(citations);
   if (!unique.length) return null;
 
@@ -59,7 +61,7 @@ export function CitationChips({ citations, className }: CitationChipsProps) {
         <button
           type="button"
           onClick={() => useUiStore.getState().openSourcesPanel()}
-          aria-label={`Abrir ${hidden} ${hidden === 1 ? 'fonte' : 'fontes'} no painel lateral`}
+          aria-label={t('citations.openHidden', { count: hidden })}
           className={cn(
             'flex h-6 items-center gap-1 rounded-full border border-dashed border-border bg-transparent px-2',
             'text-[11px] font-medium text-foreground-subtle transition-colors duration-150',
@@ -68,7 +70,7 @@ export function CitationChips({ citations, className }: CitationChipsProps) {
           )}
         >
           <Plus aria-hidden className="size-3" />
-          {hidden} fonte{hidden > 1 ? 's' : ''}
+          {t('citations.hidden', { count: hidden })}
         </button>
       ) : null}
     </div>

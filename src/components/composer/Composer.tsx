@@ -8,6 +8,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, FilePlus, Globe, Plus, Square, Target, TriangleAlert, Zap } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
@@ -41,7 +42,7 @@ import {
 } from './attachmentFiles';
 import { CacheMeterChip } from './CacheMeterChip';
 import { CodeSessionControls } from './CodeSessionControls';
-import { filterSlashCommands, type SlashCommand } from './commands';
+import { filterSlashCommands, type SlashCommand, type SlashCommandView } from './commands';
 import { ComposerActivity } from './ComposerActivity';
 import { MentionChips } from './MentionChips';
 import {
@@ -72,6 +73,7 @@ function describeError(error: unknown): string {
 
 /** Message composer pinned to the bottom of the chat column. */
 export function Composer() {
+  const { t, i18n } = useTranslation('composer');
   const [value, setValue] = useState('');
   const [attaching, setAttaching] = useState(false);
   const [mentioned, setMentioned] = useState<MentionedFile[]>([]);
@@ -155,7 +157,11 @@ export function Composer() {
   const canSend = !isStreaming && !providerBlocked && hasDraft;
 
   const slashQuery = menu?.kind === 'slash' ? menu.query : '';
-  const slashCommands = useMemo(() => filterSlashCommands(slashQuery), [slashQuery]);
+  // The catalog resolves its copy, so the language is a dependency.
+  const slashCommands = useMemo(
+    () => filterSlashCommands(slashQuery),
+    [slashQuery, i18n.language],
+  );
   const mentionQuery = menu?.kind === 'mention' ? menu.query : null;
   const optionCount =
     menu?.kind === 'mention' ? mentionResults.length : menu?.kind === 'slash' ? slashCommands.length : 0;
@@ -247,7 +253,7 @@ export function Composer() {
       if (typeof api.searchWorkspaceFiles !== 'function') {
         if (cancelled) return;
         setMentionLoading(false);
-        setMentionError('A busca de arquivos não está disponível nesta versão.');
+        setMentionError(t('mention.searchUnavailable'));
         return;
       }
       void api
@@ -267,7 +273,7 @@ export function Composer() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [mentionQuery, workspaceId]);
+  }, [mentionQuery, workspaceId, t]);
 
   const focusTextareaAt = useCallback(
     (caret: number) => {
@@ -280,7 +286,7 @@ export function Composer() {
         resizeTextarea();
       });
     },
-    [resizeTextarea],
+    [resizeTextarea, t],
   );
 
   /** Detecta `@arquivo` ou `/comando` na posição do cursor. */
@@ -344,18 +350,18 @@ export function Composer() {
       switch (command.invoke) {
         case 'compact': {
           if (!conversationId) {
-            toast.info('Nenhuma sessão ativa para compactar', {
-              description: 'Abra uma sessão de código para compactar o contexto.',
+            toast.info(t('toasts.compactNoSession'), {
+              description: t('toasts.compactNoSessionHint'),
             });
             return;
           }
           void api
             .compactSession(conversationId)
-            .then(() => toast.success('Contexto compactado'))
+            .then(() => toast.success(t('toasts.compacted')))
             .catch((error: unknown) => {
               // O backend do harness ainda não implementa `/compact`: o toast
               // precisa ser honesto em vez de fingir que a compactação ocorreu.
-              toast.error('Compactação ainda não disponível', {
+              toast.error(t('toasts.compactUnavailable'), {
                 description: describeError(error),
               });
             });
@@ -368,8 +374,8 @@ export function Composer() {
           return;
         }
         case 'permissoes': {
-          toast.info('Modo de permissão fica no campo de mensagem', {
-            description: 'Use o chip Leitura / Revisar / Editar / Autônomo ao lado do anexo.',
+          toast.info(t('toasts.permissionsInComposer'), {
+            description: t('toasts.permissionsInComposerHint'),
           });
           return;
         }
@@ -386,14 +392,14 @@ export function Composer() {
         }
         case 'plan-on': {
           if (!conversationId) {
-            toast.info('Nenhuma sessão ativa', {
-              description: 'Abra uma sessão de código para ativar o modo Plano.',
+            toast.info(t('toasts.noActiveSession'), {
+              description: t('toasts.noActiveSessionPlanOnHint'),
             });
             return;
           }
           const current = useCodeStore.getState().byConversation[conversationId];
           if (current?.planMode) {
-            toast.info('Modo Plano já está ativo');
+            toast.info(t('toasts.planAlreadyActive'));
             return;
           }
           // Estado da sessão vive no `codeStore` (não chamar `api` direto): o
@@ -402,14 +408,14 @@ export function Composer() {
             .getState()
             .setPlanMode(conversationId, true)
             .then((ok) => {
-              if (ok) toast.success('Modo Plano ativado');
+              if (ok) toast.success(t('toasts.planEnabled'));
             });
           return;
         }
         case 'plan-off': {
           if (!conversationId) {
-            toast.info('Nenhuma sessão ativa', {
-              description: 'Abra uma sessão de código para desativar o modo Plano.',
+            toast.info(t('toasts.noActiveSession'), {
+              description: t('toasts.noActiveSessionPlanOffHint'),
             });
             return;
           }
@@ -417,7 +423,7 @@ export function Composer() {
             .getState()
             .setPlanMode(conversationId, false)
             .then((ok) => {
-              if (ok) toast.success('Modo Plano desativado');
+              if (ok) toast.success(t('toasts.planDisabled'));
             });
           return;
         }
@@ -429,7 +435,7 @@ export function Composer() {
   );
 
   const selectSlash = useCallback(
-    (command: SlashCommand) => {
+    (command: SlashCommandView) => {
       if (!menu || menu.kind !== 'slash') return;
       const start = menu.start;
       const end = menu.end;
@@ -557,7 +563,7 @@ export function Composer() {
       const paths = await pickAttachmentPaths();
       if (paths.length) await useChatStore.getState().addAttachments(paths);
     } catch (error) {
-      toast.error('Não foi possível anexar', { description: String(error) });
+      toast.error(t('toasts.attachFailed'), { description: String(error) });
     } finally {
       setAttaching(false);
     }
@@ -583,15 +589,16 @@ export function Composer() {
     void useAppStore.getState().saveSettings({ fileCreationEnabled: !fileCreationEnabled });
   };
 
+  const agentName = activeAgent?.name ?? t('agentFallback');
   const placeholder = goalIntent
-    ? 'Descreva o objetivo e o trabalho a fazer…'
+    ? t('placeholder.goal')
     : isAgentLayout
-      ? `Converse com ${activeAgent?.name ?? 'o agente'}…`
+      ? t('placeholder.agent', { name: agentName })
       : !isCodeLayout
-        ? 'Pergunte alguma coisa…'
+        ? t('placeholder.chat')
         : codeMenusEnabled
-          ? 'Descreva a tarefa… @ para arquivos, / para comandos'
-          : 'Descreva a tarefa para o agente…';
+          ? t('placeholder.code')
+          : t('placeholder.codePlain');
 
   const menuControls = menu
     ? menu.kind === 'mention'
@@ -618,7 +625,7 @@ export function Composer() {
             {credentialGateMessage(selectedProvider)}
           </span>
           <Button variant="secondary" size="sm" onClick={() => openSettings('providers')}>
-            Abrir Provedores
+            {t('actions.openProviders')}
           </Button>
         </div>
       ) : null}
@@ -646,10 +653,10 @@ export function Composer() {
                   {goalIntent ? (
                     // Mesmo padrão do badge de Plano: um único botão-pill accent;
                     // clicar em qualquer parte remove a intenção.
-                    <Tooltip side="top" content="Objetivo ativo — clique para desativar">
+                    <Tooltip side="top" content={t('goalChip.tooltipActive')}>
                       <button
                         type="button"
-                        aria-label="Desativar objetivo"
+                        aria-label={t('goalChip.disable')}
                         aria-pressed={true}
                         onClick={() => {
                           setGoalIntent(false);
@@ -706,10 +713,10 @@ export function Composer() {
                 placeholder={placeholder}
                 aria-label={
                   isAgentLayout
-                    ? `Mensagem para ${activeAgent?.name ?? 'o agente'}`
+                    ? t('aria.agent', { name: agentName })
                     : isCodeLayout
-                      ? 'Tarefa para o agente'
-                      : 'Mensagem para o Zylara'
+                      ? t('aria.code')
+                      : t('aria.chat')
                 }
                 aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
                 aria-expanded={menu ? true : undefined}
@@ -765,7 +772,7 @@ export function Composer() {
 
         <div className="@container flex items-center gap-1 px-2 pb-2 pt-1">
           <IconButton
-            label="Anexar arquivos"
+            label={t('actions.attach')}
             size="sm"
             variant="ghost"
             loading={attaching}
@@ -784,13 +791,13 @@ export function Composer() {
             <>
               <ToolsToggle
                 icon={Globe}
-                label="Busca web"
+                label={t('tools.webSearch')}
                 active={webSearchEnabled}
                 onToggle={toggleWebSearch}
               />
               <ToolsToggle
                 icon={FilePlus}
-                label="Criar arquivos"
+                label={t('tools.fileCreation')}
                 active={fileCreationEnabled}
                 onToggle={toggleFileCreation}
               />
@@ -820,8 +827,8 @@ export function Composer() {
                   <button
                     type="button"
                     onClick={() => void submit('now')}
-                    aria-label="Enviar agora"
-                    title="Interromper a resposta atual e enviar"
+                    aria-label={t('actions.sendNow')}
+                    title={t('actions.sendNowTitle')}
                     className={cn(
                       'flex size-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150',
                       'bg-surface-active text-foreground hover:bg-surface-hover',
@@ -835,8 +842,8 @@ export function Composer() {
                   <button
                     type="button"
                     onClick={() => void submit('queue')}
-                    aria-label="Enfileirar mensagem"
-                    title="Enfileirar mensagem"
+                    aria-label={t('actions.queue')}
+                    title={t('actions.queue')}
                     className={cn(
                       'flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150',
                       'bg-linear-to-br from-accent to-accent-hover text-accent-foreground hover:brightness-105',
@@ -850,7 +857,7 @@ export function Composer() {
                 <button
                   type="button"
                   onClick={() => void useChatStore.getState().stop()}
-                  aria-label="Parar resposta"
+                  aria-label={t('actions.stop')}
                   className={cn(
                     'flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background',
                     'transition-colors duration-150 hover:bg-foreground/90',
@@ -865,7 +872,7 @@ export function Composer() {
                 type="button"
                 onClick={() => void submit()}
                 disabled={!canSend}
-                aria-label="Enviar mensagem"
+                aria-label={t('actions.send')}
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -883,7 +890,7 @@ export function Composer() {
       </div>
 
       <p className="mt-1.5 text-center text-[11px] leading-relaxed text-foreground-subtle">
-        Zylara pode cometer erros. Verifique informações importantes.
+        {t('disclaimer')}
       </p>
     </div>
   );

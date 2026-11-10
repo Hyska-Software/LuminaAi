@@ -18,6 +18,7 @@ import {
   useChatStore,
   useUiStore,
 } from '@/lib/store';
+import { i18n } from '@/lib/i18n';
 
 // The store persists the selection through the settings command; there is no
 // Tauri IPC in jsdom, so the call stays pending (the pill never awaits it).
@@ -696,7 +697,7 @@ describe('ModelPill (model locked)', () => {
     expect(trigger.getAttribute('aria-disabled')).toBe('true');
     expect(trigger.getAttribute('aria-haspopup')).toBeNull();
     expect(trigger.getAttribute('aria-expanded')).toBeNull();
-    expect(trigger.getAttribute('title')).toBe(MODEL_LOCKED_DESCRIPTION);
+    expect(trigger.getAttribute('title')).toBe(i18n.t(MODEL_LOCKED_DESCRIPTION));
     expect(trigger.disabled).toBe(false);
     expect(trigger.querySelector('svg.lucide-lock')).toBeTruthy();
     expect(trigger.querySelector('svg.lucide-chevron-down')).toBeNull();
@@ -706,8 +707,8 @@ describe('ModelPill (model locked)', () => {
     // Clicking does not open the picker; it explains why instead.
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(document.activeElement).toBe(trigger);
-    expect(toast.info).toHaveBeenCalledWith(MODEL_LOCKED_TITLE, {
-      description: MODEL_LOCKED_DESCRIPTION,
+    expect(toast.info).toHaveBeenCalledWith(i18n.t(MODEL_LOCKED_TITLE), {
+      description: i18n.t(MODEL_LOCKED_DESCRIPTION),
     });
   });
 
@@ -854,14 +855,14 @@ describe('ModelPill (model locked)', () => {
     );
     expect(trigger.getAttribute('aria-disabled')).toBe('true');
     expect(trigger.getAttribute('aria-haspopup')).toBeNull();
-    expect(trigger.getAttribute('title')).toBe(MODEL_STREAMING_LOCKED_DESCRIPTION);
+    expect(trigger.getAttribute('title')).toBe(i18n.t(MODEL_STREAMING_LOCKED_DESCRIPTION));
     expect(trigger.querySelector('svg.lucide-lock')).toBeTruthy();
 
     await user.click(trigger);
 
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(toast.info).toHaveBeenCalledWith(MODEL_STREAMING_LOCKED_TITLE, {
-      description: MODEL_STREAMING_LOCKED_DESCRIPTION,
+    expect(toast.info).toHaveBeenCalledWith(i18n.t(MODEL_STREAMING_LOCKED_TITLE), {
+      description: i18n.t(MODEL_STREAMING_LOCKED_DESCRIPTION),
     });
   });
 });

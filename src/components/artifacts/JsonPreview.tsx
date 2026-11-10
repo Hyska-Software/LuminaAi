@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'lucide-react';
 import { languageLabel } from '@/lib/highlight';
 import { cn } from '@/lib/utils';
@@ -10,11 +11,6 @@ import type { ArtifactViewProps } from './previewSupport';
 export type JsonPreviewProps = ArtifactViewProps;
 
 type ViewMode = 'tree' | 'code';
-
-const MODE_OPTIONS: SegmentedOption[] = [
-  { value: 'tree', label: 'Árvore' },
-  { value: 'code', label: 'Código' },
-];
 
 type JsonParseResult =
   | { status: 'empty' }
@@ -41,10 +37,6 @@ function parseJson(raw: string): JsonParseResult {
   }
 }
 
-function lineCountLabel(count: number): string {
-  return count === 1 ? '1 linha' : `${count} linhas`;
-}
-
 /** Discreet empty state consistent with the other artifact previews. */
 function JsonEmpty({ message, className }: { message: string; className?: string }) {
   return (
@@ -60,25 +52,30 @@ function JsonEmpty({ message, className }: { message: string; className?: string
  * discrete warning instead of a broken preview.
  */
 export function JsonPreview({ content, className }: JsonPreviewProps) {
+  const { t } = useTranslation('artifacts');
   const { artifact, content: text } = content;
   const parsed = useMemo(() => parseJson(text ?? ''), [text]);
   const [mode, setMode] = useState<ViewMode>('tree');
+  const modeOptions: SegmentedOption[] = [
+    { value: 'tree', label: t('artifacts:json.tree') },
+    { value: 'code', label: t('artifacts:json.code') },
+  ];
 
   if (parsed.status === 'empty') {
-    return <JsonEmpty message="JSON vazio." className={className} />;
+    return <JsonEmpty message={t('artifacts:json.empty')} className={className} />;
   }
 
   if (parsed.status === 'invalid') {
     // Prose/base64 masquerading as JSON: an empty state is more honest than a
     // giant invalid-code card.
     if (!parsed.looksLikeJson) {
-      return <JsonEmpty message="Conteúdo sem JSON para visualizar." className={className} />;
+      return <JsonEmpty message={t('artifacts:json.noJson')} className={className} />;
     }
     return (
       <div className={cn('flex h-full flex-col gap-2 p-3', className)}>
         <p className="flex items-center gap-1.5 text-[11px] text-foreground-muted">
           <AlertTriangle aria-hidden className="size-3.5 shrink-0 text-warning" />
-          JSON inválido — exibindo o conteúdo original.
+          {t('artifacts:json.invalid')}
         </p>
         <div className="min-h-0 flex-1 overflow-auto">
           <CodeBlock
@@ -104,13 +101,16 @@ export function JsonPreview({ content, className }: JsonPreviewProps) {
           size="sm"
           value={mode}
           onChange={(value) => setMode(value === 'code' ? 'code' : 'tree')}
-          options={MODE_OPTIONS}
-          ariaLabel="Modo de visualização do JSON"
+          options={modeOptions}
+          ariaLabel={t('artifacts:json.viewAria')}
         />
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {mode === 'tree' ? (
-          <JsonTree value={parsed.value} ariaLabel={`Árvore do JSON ${artifact.name}`} />
+          <JsonTree
+            value={parsed.value}
+            ariaLabel={t('artifacts:json.treeAria', { name: artifact.name })}
+          />
         ) : (
           <CodeBlock
             code={parsed.pretty}
@@ -119,7 +119,7 @@ export function JsonPreview({ content, className }: JsonPreviewProps) {
             showLineNumbers
             wrap={false}
             maxHeight={100_000}
-            meta={lineCountLabel(parsed.lineCount)}
+            meta={t('artifacts:json.lineCount', { count: parsed.lineCount })}
           />
         )}
       </div>

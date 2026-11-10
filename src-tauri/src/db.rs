@@ -2548,8 +2548,6 @@ fn migrate_workspaces_schema(conn: &Connection) -> Result<()> {
 /* Agent main conversation helpers                                     */
 /* ------------------------------------------------------------------ */
 
-const AGENT_MAIN_CONVERSATION_TITLE: &str = "Conversa principal";
-
 /// Inserts (or returns the existing) primary conversation for one agent.
 /// The partial unique index makes concurrent `INSERT OR IGNORE`s safe.
 fn insert_agent_main_conversation(
@@ -2570,7 +2568,7 @@ fn insert_agent_main_conversation(
          VALUES (?1, ?2, ?3, ?3, 1, 0, ?4, ?5, 0, NULL, ?6, 0, ?7, 'zylara', ?8, ?9, 1)",
         params![
             &id,
-            AGENT_MAIN_CONVERSATION_TITLE,
+            crate::i18n::t("agents.threads.main"),
             now,
             provider_id,
             model_id,
@@ -3171,7 +3169,11 @@ impl Db {
             ));
         }
         let title = title.trim();
-        let title = if title.is_empty() { "Nova conversa" } else { title };
+        let title = if title.is_empty() {
+            crate::i18n::t("common.defaultConversationTitle")
+        } else {
+            title.to_string()
+        };
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
         {
@@ -3183,7 +3185,7 @@ impl Db {
                  VALUES (?1, ?2, ?3, ?3, 0, ?4, ?5, 0, NULL, ?6, 0, ?7, 'zylara', ?8, ?9, ?10)",
                 params![
                     &id,
-                    title,
+                    &title,
                     now,
                     &agent.provider_id,
                     &agent.model_id,
@@ -3194,7 +3196,7 @@ impl Db {
                     channel_id,
                 ],
             )
-            .context("falha ao criar conversa do agente")?;
+            .context(crate::i18n::t("db.errors.createAgentConversation"))?;
         }
         self.get_conversation(&id)?
             .ok_or_else(|| anyhow::anyhow!("conversa do agente recém-criada não encontrada"))

@@ -11,6 +11,7 @@
  * `role="alert"` (assertive) para bloqueado, com `aria-busy` durante ações e
  * botão X com `aria-label="Dispensar"`.
  */
+import { useTranslation } from 'react-i18next';
 import { Target, TriangleAlert, X } from 'lucide-react';
 
 import { Badge, Button, IconButton } from '@/components/ui';
@@ -44,34 +45,12 @@ const TONE: Record<GoalStatus, { panel: string; text: string }> = {
   blocked: { panel: 'bg-danger-soft', text: 'text-danger' },
 };
 
-const TITLE: Record<GoalStatus, string> = {
-  active: 'Objetivo ativo',
-  paused: 'Objetivo pausado',
-  blocked: 'Objetivo bloqueado',
-  completed: 'Objetivo concluído',
+const TITLE_KEY: Record<GoalStatus, string> = {
+  active: 'goalAttention.title.active',
+  paused: 'goalAttention.title.paused',
+  blocked: 'goalAttention.title.blocked',
+  completed: 'goalAttention.title.completed',
 };
-
-function completedLabel(completedAt?: number | null): string {
-  if (completedAt == null || !Number.isFinite(completedAt)) return 'Objetivo concluído.';
-  const relative = relativeTime(completedAt);
-  return relative === 'agora' ? 'Concluído agora.' : `Concluído há ${relative}.`;
-}
-
-/** Resumo curto de rodadas/tokens/custo e última atividade. */
-function summaryParts(goal: GoalView): string[] {
-  const parts = [`${goal.rounds} de ${goal.maxRounds} rodadas`];
-  if (goal.tokens != null && Number.isFinite(goal.tokens)) {
-    parts.push(`~${formatTokens(goal.tokens)} tokens`);
-  }
-  if (goal.cost != null && Number.isFinite(goal.cost)) {
-    parts.push(formatCost(goal.cost));
-  }
-  const lastActivity = goal.lastRoundAt ?? goal.updatedAt;
-  if (lastActivity != null && Number.isFinite(lastActivity)) {
-    parts.push(`última atividade ${relativeTime(lastActivity)}`);
-  }
-  return parts;
-}
 
 /**
  * Card de atenção do objetivo. Não renderiza nada para estados que não pedem
@@ -88,23 +67,48 @@ export function GoalAttentionCard({
   onOpen,
   onDismiss,
 }: GoalAttentionCardProps) {
+  const { t } = useTranslation('agents');
   if (!goalNeedsAttention(goal) || goal.status === 'active') return null;
 
   const tone = TONE[goal.status];
-  const title = TITLE[goal.status];
+  const title = t(TITLE_KEY[goal.status]);
   const role = goal.status === 'blocked' ? 'alert' : 'status';
-  const summary = summaryParts(goal);
+
+  const completedLabel = (completedAt?: number | null): string => {
+    if (completedAt == null || !Number.isFinite(completedAt)) {
+      return t('goalAttention.completed.body');
+    }
+    if (Date.now() - completedAt < 60_000) return t('goalAttention.completed.now');
+    return t('goalAttention.completed.ago', { relative: relativeTime(completedAt) });
+  };
+
+  const summaryParts = (): string[] => {
+    const parts = [t('goalAttention.rounds', { current: goal.rounds, max: goal.maxRounds })];
+    if (goal.tokens != null && Number.isFinite(goal.tokens)) {
+      parts.push(t('goalAttention.tokens', { tokens: formatTokens(goal.tokens) }));
+    }
+    if (goal.cost != null && Number.isFinite(goal.cost)) {
+      parts.push(formatCost(goal.cost));
+    }
+    const lastActivity = goal.lastRoundAt ?? goal.updatedAt;
+    if (lastActivity != null && Number.isFinite(lastActivity)) {
+      parts.push(t('goalAttention.lastActivity', { time: relativeTime(lastActivity) }));
+    }
+    return parts;
+  };
+
+  const summary = summaryParts();
   const guidance = (() => {
     if (goal.status !== 'paused') return null;
     switch (goal.pauseReason) {
       case 'max_rounds':
-        return 'Estenda o limite para continuar.';
+        return t('goalAttention.guidance.maxRounds');
       case 'stalled':
-        return 'Objetivo pausado para você decidir.';
+        return t('goalAttention.guidance.stalled');
       case 'interrupted':
-        return 'A última rodada foi interrompida. Retome para continuar.';
+        return t('goalAttention.guidance.interrupted');
       case 'error':
-        return 'Revise o erro e retome para continuar de onde parou.';
+        return t('goalAttention.guidance.error');
       default:
         return null;
     }
@@ -112,10 +116,10 @@ export function GoalAttentionCard({
 
   const label = (() => {
     if (goal.status === 'paused') {
-      return goalPauseReasonLabel(goal.pauseReason) ?? 'Objetivo pausado';
+      return goalPauseReasonLabel(goal.pauseReason) ?? t('goalAttention.pausedFallback');
     }
     if (goal.status === 'blocked') {
-      return `Bloqueio registrado (${goal.blockerStreak ?? 1} de 3).`;
+      return t('goalAttention.blockedLabel', { count: goal.blockerStreak ?? 1 });
     }
     return completedLabel(goal.completedAt);
   })();
@@ -165,7 +169,7 @@ export function GoalAttentionCard({
         {onDismiss ? (
           <IconButton
             size="sm"
-            label="Dispensar"
+            label={t('goalAttention.dismiss')}
             disabled={busy}
             onClick={() => run(onDismiss)}
             className="shrink-0"
@@ -207,7 +211,7 @@ export function GoalAttentionCard({
               leftIcon={<Target aria-hidden className="size-3.5" />}
               onClick={() => run(onResume)}
             >
-              Retomar objetivo
+              {t('goalAttention.actions.resume')}
             </Button>
           ) : null}
           {canExtend && onExtend ? (
@@ -217,7 +221,7 @@ export function GoalAttentionCard({
               disabled={busy}
               onClick={() => run(onExtend)}
             >
-              Estender limite
+              {t('goalAttention.actions.extend')}
             </Button>
           ) : null}
           {canComplete && onComplete ? (
@@ -227,7 +231,7 @@ export function GoalAttentionCard({
               disabled={busy}
               onClick={() => run(onComplete)}
             >
-              Concluir objetivo
+              {t('goalAttention.actions.complete')}
             </Button>
           ) : null}
           {canReopen && onReopen ? (
@@ -238,12 +242,12 @@ export function GoalAttentionCard({
               leftIcon={<Target aria-hidden className="size-3.5" />}
               onClick={() => run(onReopen)}
             >
-              Reabrir objetivo
+              {t('goalAttention.actions.reopen')}
             </Button>
           ) : null}
           {onOpen ? (
             <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(onOpen)}>
-              Abrir objetivo
+              {t('goalAttention.actions.open')}
             </Button>
           ) : null}
         </div>

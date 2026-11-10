@@ -18,9 +18,14 @@ use super::{UpdateAsset, UpdateState};
 /// was modified, truncated or tampered with after the download.
 pub fn verify_download(path: &Path, asset: &UpdateAsset) -> Result<()> {
     let metadata = std::fs::metadata(path)
-        .with_context(|| format!("download não encontrado em {}", path.display()))?;
+        .with_context(|| {
+            crate::i18n::t_args(
+                "update.errors.downloadNotFoundAt",
+                &[("path", &path.display().to_string())],
+            )
+        })?;
     if !metadata.is_file() {
-        bail!("o download não é um arquivo");
+        bail!(crate::i18n::t("update.errors.downloadNotFile"));
     }
     if metadata.len() != asset.size {
         bail!(
@@ -31,7 +36,7 @@ pub fn verify_download(path: &Path, asset: &UpdateAsset) -> Result<()> {
     }
     let digest = download::sha256_file(path)?;
     if !digest.eq_ignore_ascii_case(&asset.sha256) {
-        bail!("o arquivo baixado não corresponde ao SHA-256 esperado");
+        bail!(crate::i18n::t("update.errors.hashMismatch"));
     }
     Ok(())
 }
@@ -44,7 +49,7 @@ pub fn install(
 ) -> Result<()> {
     let path = state
         .download_path(version, &asset.name)
-        .context("nome de artefato inválido")?;
+        .context(crate::i18n::t("update.errors.invalidArtifactName"))?;
     verify_download(&path, asset)?;
 
     match asset.kind.as_str() {
@@ -56,7 +61,7 @@ pub fn install(
             }
             #[cfg(not(windows))]
             {
-                bail!("este instalador é exclusivo do Windows");
+                bail!(crate::i18n::t("update.errors.windowsOnly"));
             }
         }
         "dmg" | "deb" | "rpm" => app
@@ -66,8 +71,14 @@ pub fn install(
         "appimage" => app
             .opener()
             .reveal_item_in_dir(&path)
-            .map_err(|error| anyhow::anyhow!("falha ao abrir a pasta da atualização: {error}")),
-        other => bail!("tipo de atualização desconhecido: {other}"),
+            .map_err(|error| anyhow::anyhow!(crate::i18n::t_args(
+                "update.errors.openUpdateFolder",
+                &[("error", &error.to_string())],
+            ))),
+        other => bail!(crate::i18n::t_args(
+            "update.errors.unknownKind",
+            &[("kind", other)],
+        )),
     }
 }
 

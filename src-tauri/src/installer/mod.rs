@@ -316,7 +316,7 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
 
     if mode == InstallerMode::Install {
         if let Err(error) = windows::ensure_webview2(true) {
-            windows::fatal_message("Zylara Setup", &format!("{error:#}"));
+            windows::fatal_message(&crate::i18n::t("installer.window.install"), &format!("{error:#}"));
             std::process::exit(1);
         }
     }
@@ -325,10 +325,9 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
         window.create = false;
     }
 
-    let title = match mode {
-        InstallerMode::Install => "Zylara Setup",
-        InstallerMode::Uninstall => "Desinstalar Zylara",
-    };
+    // The installer starts in English regardless of the app's saved locale.
+    crate::i18n::set_language("en");
+    let title = installer_window_title(mode);
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -344,6 +343,7 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
             installer_finish,
             installer_open_log,
             installer_open_folder,
+            installer_set_language,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -398,6 +398,25 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
 }
 
 #[tauri::command]
+fn installer_window_title(mode: InstallerMode) -> String {
+    match mode {
+        InstallerMode::Install => crate::i18n::t("installer.window.install"),
+        InstallerMode::Uninstall => crate::i18n::t("installer.window.uninstall"),
+    }
+}
+
+/// Switches the backend language and retitles the setup window. The renderer
+/// calls this on mount and whenever the user changes the installer language.
+#[tauri::command]
+pub fn installer_set_language(app: AppHandle, locale: String) {
+    crate::i18n::set_language(&locale);
+    let mode = app.state::<InstallerState>().mode;
+    if let Some(window) = app.get_webview_window("setup") {
+        let _ = window.set_title(&installer_window_title(mode));
+    }
+}
+
+#[tauri::command]
 pub fn installer_context(state: State<'_, InstallerState>) -> Result<InstallerContext, String> {
     eprintln!("[zylara-setup] installer_context invoked");
     windows::write_log(&state, "contexto do instalador solicitado pela UI");
@@ -413,7 +432,7 @@ pub async fn installer_start(
     {
         let state = app.state::<InstallerState>();
         if state.busy.swap(true, Ordering::SeqCst) {
-            return Err("Já existe uma instalação em andamento.".to_string());
+            return Err(crate::i18n::t("installer.errors.installInProgress"));
         }
         state.cancel.store(false, Ordering::SeqCst);
     }
@@ -432,7 +451,12 @@ pub async fn installer_start(
             .busy
             .store(false, Ordering::SeqCst);
     }
-    let result = joined.map_err(|error| format!("a thread do instalador falhou: {error}"))?;
+    let result = joined.map_err(|error| {
+        crate::i18n::t_args(
+            "installer.errors.threadFailed",
+            &[("error", &error.to_string())],
+        )
+    })?;
 
     result.map_err(|error| {
         let message = format!("{error:#}");
@@ -455,7 +479,7 @@ pub async fn installer_uninstall(
     {
         let state = app.state::<InstallerState>();
         if state.busy.swap(true, Ordering::SeqCst) {
-            return Err("Já existe uma operação em andamento.".to_string());
+            return Err(crate::i18n::t("installer.errors.operationInProgress"));
         }
         state.cancel.store(false, Ordering::SeqCst);
     }
@@ -474,7 +498,12 @@ pub async fn installer_uninstall(
             .busy
             .store(false, Ordering::SeqCst);
     }
-    let result = joined.map_err(|error| format!("a thread do instalador falhou: {error}"))?;
+    let result = joined.map_err(|error| {
+        crate::i18n::t_args(
+            "installer.errors.threadFailed",
+            &[("error", &error.to_string())],
+        )
+    })?;
 
     result.map_err(|error| {
         let message = format!("{error:#}");
@@ -512,7 +541,7 @@ pub fn installer_relaunch_elevated(
 pub fn installer_finish(app: AppHandle, launch: bool) -> Result<(), String> {
     if launch {
         let install = windows::find_install().ok_or_else(|| {
-            "A instalação não foi encontrada no registro do Windows.".to_string()
+            crate::i18n::t("installer.errors.notInRegistry")
         })?;
         windows::launch_installed(&install.path).map_err(|error| format!("{error:#}"))?;
     }
@@ -525,14 +554,24 @@ pub fn installer_open_log(app: AppHandle, state: State<'_, InstallerState>) -> R
     let path = state.log_path();
     app.opener()
         .open_path(path.to_string_lossy().to_string(), None::<&str>)
-        .map_err(|error| format!("falha ao abrir o log: {error}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "installer.errors.openLog",
+                &[("error", &error.to_string())],
+            )
+        })
 }
 
 #[tauri::command]
 pub fn installer_open_folder(app: AppHandle) -> Result<(), String> {
     let install = windows::find_install()
-        .ok_or_else(|| "A instalação não foi encontrada no registro do Windows.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("installer.errors.notInRegistry"))?;
     app.opener()
         .open_path(install.path, None::<&str>)
-        .map_err(|error| format!("falha ao abrir a pasta: {error}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "installer.errors.openFolder",
+                &[("error", &error.to_string())],
+            )
+        })
 }

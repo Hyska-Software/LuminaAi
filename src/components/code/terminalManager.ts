@@ -15,6 +15,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm, type IDisposable, type ITheme } from '@xterm/xterm';
 
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import type { TerminalEvent, TerminalInfo } from '@/lib/types';
 import {
   buildTerminalTheme,
@@ -97,21 +98,39 @@ const EMPTY_SNAPSHOT: TerminalSnapshot = {
   limit: TERMINAL_TAB_LIMIT,
 };
 
-const ERROR_MESSAGES: Record<string, string> = {
-  TERMINAL_LIMIT: 'Limite de 4 terminais por sessão. Feche uma aba para abrir outro.',
-  TERMINAL_NO_WORKSPACE: 'Abra uma pasta para usar o terminal.',
-  TERMINAL_WORKSPACE_MISSING: 'A pasta do workspace não está disponível no disco.',
-  TERMINAL_CONVERSATION_NOT_FOUND: 'A sessão deste terminal não existe mais.',
-  TERMINAL_CONVERSATION: 'Não foi possível ler a sessão deste terminal.',
-  TERMINAL_SPAWN: 'Não foi possível iniciar o shell do sistema.',
-  TERMINAL_READ: 'O terminal perdeu a conexão com o processo.',
-  TERMINAL_WRITE: 'Não foi possível enviar dados para o terminal.',
-  TERMINAL_RESIZE: 'Não foi possível redimensionar o terminal.',
-  TERMINAL_NOT_FOUND: 'Este terminal já foi encerrado.',
-  TERMINAL_EXITED: 'O processo deste terminal já terminou.',
-  TERMINAL_CLOSE: 'Não foi possível encerrar o processo do terminal.',
-  TERMINAL_KILL: 'Não foi possível matar o processo do terminal.',
-};
+/** Human copy for the stable `TERMINAL_*` error codes, resolved at call time. */
+function terminalErrorMessage(code: string): string {
+  switch (code) {
+    case 'TERMINAL_LIMIT':
+      return t('code:terminal.error.limit');
+    case 'TERMINAL_NO_WORKSPACE':
+      return t('code:terminal.error.noWorkspace');
+    case 'TERMINAL_WORKSPACE_MISSING':
+      return t('code:terminal.error.workspaceMissing');
+    case 'TERMINAL_CONVERSATION_NOT_FOUND':
+      return t('code:terminal.error.conversationNotFound');
+    case 'TERMINAL_CONVERSATION':
+      return t('code:terminal.error.conversation');
+    case 'TERMINAL_SPAWN':
+      return t('code:terminal.error.spawn');
+    case 'TERMINAL_READ':
+      return t('code:terminal.error.read');
+    case 'TERMINAL_WRITE':
+      return t('code:terminal.error.write');
+    case 'TERMINAL_RESIZE':
+      return t('code:terminal.error.resize');
+    case 'TERMINAL_NOT_FOUND':
+      return t('code:terminal.error.notFound');
+    case 'TERMINAL_EXITED':
+      return t('code:terminal.error.exited');
+    case 'TERMINAL_CLOSE':
+      return t('code:terminal.error.close');
+    case 'TERMINAL_KILL':
+      return t('code:terminal.error.kill');
+    default:
+      return t('code:terminal.error.fallback');
+  }
+}
 
 const RETRYABLE_CODES = new Set([
   'TERMINAL_SPAWN',
@@ -134,7 +153,7 @@ function toTerminalError(error: unknown): TerminalErrorState {
   const code = errorCode(error);
   return {
     code,
-    message: ERROR_MESSAGES[code] ?? 'Não foi possível concluir a operação no terminal.',
+    message: terminalErrorMessage(code),
     detail: raw,
     canRetry: RETRYABLE_CODES.has(code),
   };
@@ -154,7 +173,7 @@ function terminalHost(): HTMLDivElement {
   host.dataset.terminalHost = 'true';
   host.style.opacity = '0';
   host.setAttribute('role', 'group');
-  host.setAttribute('aria-label', 'Terminal interativo');
+  host.setAttribute('aria-label', t('code:terminal.hostLabel'));
   return host;
 }
 
@@ -314,7 +333,7 @@ class TerminalManager {
       }
       instance.cols = info.cols || instance.cols;
       instance.rows = info.rows || instance.rows;
-      instance.title = `Terminal ${runtime.nextIndex}`;
+      instance.title = t('code:terminal.title', { index: runtime.nextIndex });
       instance.host.dataset.terminalId = instance.id;
       runtime.nextIndex += 1;
 
@@ -336,7 +355,7 @@ class TerminalManager {
           if (code === 'TERMINAL_EXITED' || code === 'TERMINAL_NOT_FOUND') return;
           instance.writeErrorWritten = true;
           instance.term.write(
-            `\r\n\x1b[31m${ERROR_MESSAGES.TERMINAL_WRITE ?? 'Erro ao escrever no terminal'}\x1b[0m\r\n`,
+            `\r\n\x1b[31m${terminalErrorMessage('TERMINAL_WRITE')}\x1b[0m\r\n`,
           );
         });
       });
@@ -410,7 +429,7 @@ class TerminalManager {
       runtime.error = {
         ...toTerminalError(closeError),
         code: 'TERMINAL_CLOSE',
-        message: ERROR_MESSAGES.TERMINAL_CLOSE,
+        message: terminalErrorMessage('TERMINAL_CLOSE'),
         canRetry: false,
       };
       this.notify(runtime);
@@ -431,7 +450,7 @@ class TerminalManager {
       runtime.error = {
         ...toTerminalError(killError),
         code: 'TERMINAL_KILL',
-        message: ERROR_MESSAGES.TERMINAL_KILL,
+        message: terminalErrorMessage('TERMINAL_KILL'),
         canRetry: false,
       };
       this.notify(runtime);
@@ -653,9 +672,11 @@ class TerminalManager {
       instance.exitWritten = true;
       const detail =
         instance.exitCode !== null && instance.exitCode !== undefined
-          ? ` (código ${instance.exitCode})`
+          ? t('code:terminal.exitCode', { code: instance.exitCode })
           : '';
-      instance.term.write(`\r\n\x1b[90m[processo finalizado${detail}]\x1b[0m\r\n`);
+      instance.term.write(
+        `\r\n\x1b[90m${t('code:terminal.exitNotice', { detail })}\x1b[0m\r\n`,
+      );
     }
     const runtime = this.runtimes.get(instance.conversationId);
     if (runtime) this.notify(runtime);

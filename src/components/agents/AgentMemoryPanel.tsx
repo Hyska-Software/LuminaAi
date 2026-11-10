@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Loader2, Pin, PinOff, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -7,17 +9,22 @@ import { api } from '@/lib/api';
 import type { AgentMemory, AgentMemoryKind, AgentSharedMemory } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
-const KIND_LABELS: Record<AgentMemoryKind, string> = {
-  fact: 'Fato',
-  preference: 'Preferência',
-  procedure: 'Procedimento',
-  note: 'Nota',
-};
-
 const KIND_OPTIONS: AgentMemoryKind[] = ['fact', 'preference', 'procedure', 'note'];
 
-function kindLabel(kind: AgentMemoryKind): string {
-  return KIND_LABELS[kind] ?? KIND_LABELS.fact;
+type Translate = TFunction<'agents'>;
+
+function kindLabel(kind: AgentMemoryKind, t: Translate): string {
+  switch (kind) {
+    case 'preference':
+      return t('memory.kinds.preference');
+    case 'procedure':
+      return t('memory.kinds.procedure');
+    case 'note':
+      return t('memory.kinds.note');
+    case 'fact':
+    default:
+      return t('memory.kinds.fact');
+  }
 }
 
 /**
@@ -34,6 +41,7 @@ export function AgentMemoryPanel({
   memoryEnabled: boolean;
   className?: string;
 }) {
+  const { t } = useTranslation('agents');
   const [memories, setMemories] = useState<AgentMemory[]>([]);
   const [shared, setShared] = useState<AgentSharedMemory[]>([]);
   const [tab, setTab] = useState<'private' | 'shared'>('private');
@@ -72,7 +80,7 @@ export function AgentMemoryPanel({
 
   const add = async () => {
     if (!agentId) {
-      toast.info('Salve o agente antes de adicionar memórias');
+      toast.info(t('memory.saveAgentFirst'));
       return;
     }
     const content = draft.trim();
@@ -82,9 +90,9 @@ export function AgentMemoryPanel({
       const memory = await api.createAgentMemory(agentId, { kind: draftKind, content });
       setMemories((current) => [memory, ...current]);
       setDraft('');
-      toast.success('Memória salva');
+      toast.success(t('memory.saved'));
     } catch (caught) {
-      toast.error('Não foi possível salvar a memória', { description: String(caught) });
+      toast.error(t('memory.saveError'), { description: String(caught) });
     } finally {
       setSaving(false);
     }
@@ -103,7 +111,7 @@ export function AgentMemoryPanel({
       setEditingId(null);
       setEditingText('');
     } catch (caught) {
-      toast.error('Não foi possível atualizar a memória', { description: String(caught) });
+      toast.error(t('memory.updateError'), { description: String(caught) });
     }
   };
 
@@ -116,7 +124,7 @@ export function AgentMemoryPanel({
       });
       setMemories((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     } catch (caught) {
-      toast.error('Não foi possível fixar a memória', { description: String(caught) });
+      toast.error(t('memory.pinError'), { description: String(caught) });
     }
   };
 
@@ -125,20 +133,20 @@ export function AgentMemoryPanel({
       await api.deleteAgentMemory(memory.agentId, memory.id);
       setMemories((current) => current.filter((item) => item.id !== memory.id));
     } catch (caught) {
-      toast.error('Não foi possível excluir a memória', { description: String(caught) });
+      toast.error(t('memory.deleteError'), { description: String(caught) });
     }
   };
 
   const clearAll = async () => {
     if (!agentId || memories.length === 0) return;
     // eslint-disable-next-line no-alert -- destructive action needs a native confirmation here
-    if (!window.confirm(`Apagar as ${memories.length} memórias deste agente?`)) return;
+    if (!window.confirm(t('memory.clearConfirm', { count: memories.length }))) return;
     try {
       await api.clearAgentMemories(agentId);
       setMemories([]);
-      toast.success('Memórias apagadas');
+      toast.success(t('memory.cleared'));
     } catch (caught) {
-      toast.error('Não foi possível apagar as memórias', { description: String(caught) });
+      toast.error(t('memory.clearError'), { description: String(caught) });
     }
   };
 
@@ -147,7 +155,7 @@ export function AgentMemoryPanel({
       await api.deleteSharedAgentMemory(memory.id);
       setShared((current) => current.filter((item) => item.id !== memory.id));
     } catch (caught) {
-      toast.error('Não foi possível excluir a memória compartilhada', {
+      toast.error(t('memory.sharedDeleteError'), {
         description: String(caught),
       });
     }
@@ -156,8 +164,7 @@ export function AgentMemoryPanel({
   if (!agentId) {
     return (
       <p className={cn('text-[12px] leading-relaxed text-foreground-muted', className)}>
-        Salve o agente primeiro. Depois disso, ele poderá guardar fatos, preferências e
-        procedimentos entre conversas.
+        {t('memory.saveFirst')}
       </p>
     );
   }
@@ -175,7 +182,7 @@ export function AgentMemoryPanel({
           )}
           onClick={() => setTab('private')}
         >
-          Privadas
+          {t('memory.tabs.private')}
         </button>
         <button
           type="button"
@@ -187,19 +194,18 @@ export function AgentMemoryPanel({
           )}
           onClick={() => setTab('shared')}
         >
-          Compartilhadas
+          {t('memory.tabs.shared')}
         </button>
       </div>
 
       {tab === 'shared' ? (
         <div className="space-y-2">
           <p className="text-[12px] leading-relaxed text-foreground-muted">
-            Notas visíveis a todos os agentes com a capability “Memória compartilhada”. O agente
-            escreve pelas tools; aqui você revisa e exclui.
+            {t('memory.shared.description')}
           </p>
           {shared.length === 0 ? (
             <p className="rounded-xl border border-border bg-surface/50 p-3 text-[12px] text-foreground-muted">
-              Nenhuma memória compartilhada.
+              {t('memory.shared.empty')}
             </p>
           ) : (
             shared.map((memory) => (
@@ -210,11 +216,12 @@ export function AgentMemoryPanel({
                 <div className="min-w-0 flex-1">
                   <p className="text-[12px] leading-relaxed text-foreground">{memory.content}</p>
                   <p className="mt-1 text-[10px] text-foreground-subtle">
-                    {kindLabel(memory.kind)} · {memory.sourceAgentName ?? 'agente removido'}
+                    {kindLabel(memory.kind, t)}{' '}
+                    · {memory.sourceAgentName ?? t('memory.shared.removedAgent')}
                   </p>
                 </div>
                 <IconButton
-                  label="Excluir memória compartilhada"
+                  label={t('memory.shared.deleteAria')}
                   size="sm"
                   variant="ghost"
                   onClick={() => void removeShared(memory)}
@@ -230,12 +237,12 @@ export function AgentMemoryPanel({
       <div className="flex items-start justify-between gap-3">
         <p className="text-[12px] leading-relaxed text-foreground-muted">
           {memoryEnabled
-            ? 'Esta memória é compartilhada por todas as conversas do agente. Evite segredos e dados transitórios.'
-            : 'A memória está desativada para este agente; as notas abaixo ficam guardadas, mas não entram no contexto.'}
+            ? t('memory.private.enabledNote')
+            : t('memory.private.disabledNote')}
         </p>
         {memories.length > 0 ? (
           <Button size="sm" variant="ghost" className="shrink-0 text-danger" onClick={() => void clearAll()}>
-            Limpar
+            {t('memory.clear')}
           </Button>
         ) : null}
       </div>
@@ -244,13 +251,13 @@ export function AgentMemoryPanel({
         <div className="flex items-center gap-2">
           <NativeSelect
             value={draftKind}
-            aria-label="Tipo da memória"
+            aria-label={t('memory.kindAria')}
             className="h-8 w-36 text-[12px]"
             onChange={(event) => setDraftKind(event.target.value as AgentMemoryKind)}
           >
             {KIND_OPTIONS.map((kind) => (
               <option key={kind} value={kind}>
-                {kindLabel(kind)}
+                {kindLabel(kind, t)}
               </option>
             ))}
           </NativeSelect>
@@ -261,15 +268,15 @@ export function AgentMemoryPanel({
             onClick={() => void add()}
           >
             {saving ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Plus className="mr-1.5 size-3.5" />}
-            Adicionar
+            {t('memory.add')}
           </Button>
         </div>
         <Textarea
           value={draft}
           rows={2}
           maxLength={4096}
-          placeholder="Ex.: prefere respostas curtas e cita as fontes."
-          aria-label="Nova memória"
+          placeholder={t('memory.placeholder')}
+          aria-label={t('memory.newAria')}
           className="min-h-16 resize-y text-[12px]"
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -279,17 +286,17 @@ export function AgentMemoryPanel({
       </div>
 
       {loading ? (
-        <p className="text-[12px] text-foreground-muted">Carregando memórias…</p>
+        <p className="text-[12px] text-foreground-muted">{t('memory.loading')}</p>
       ) : error ? (
         <div className="text-[12px] text-foreground-muted">
-          Não foi possível carregar as memórias.
+          {t('memory.loadError')}
           <Button size="sm" variant="ghost" className="ml-2 px-0" onClick={() => void load()}>
-            Tentar novamente
+            {t('common:actions.retry')}
           </Button>
         </div>
       ) : memories.length === 0 ? (
         <p className="py-2 text-center text-[12px] text-foreground-subtle">
-          Nenhuma memória ainda.
+          {t('memory.empty')}
         </p>
       ) : (
         <ul className="space-y-1.5">
@@ -300,7 +307,7 @@ export function AgentMemoryPanel({
             >
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium text-accent">
-                  {kindLabel(memory.kind)}
+                  {kindLabel(memory.kind, t)}
                 </span>
                 <div className="min-w-0 flex-1">
                   {editingId === memory.id ? (
@@ -314,10 +321,10 @@ export function AgentMemoryPanel({
                       />
                       <div className="flex justify-end gap-2">
                         <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                          Cancelar
+                          {t('common:actions.cancel')}
                         </Button>
                         <Button size="sm" onClick={() => void saveEdit(memory)}>
-                          Salvar
+                          {t('common:actions.save')}
                         </Button>
                       </div>
                     </div>
@@ -335,7 +342,7 @@ export function AgentMemoryPanel({
                   )}
                 </div>
                 <IconButton
-                  label={memory.pinned ? 'Desafixar memória' : 'Fixar memória'}
+                  label={memory.pinned ? t('memory.unpinAria') : t('memory.pinAria')}
                   size="sm"
                   variant="ghost"
                   onClick={() => void togglePinned(memory)}
@@ -343,7 +350,7 @@ export function AgentMemoryPanel({
                   {memory.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
                 </IconButton>
                 <IconButton
-                  label="Excluir memória"
+                  label={t('memory.deleteAria')}
                   size="sm"
                   variant="ghost"
                   onClick={() => void remove(memory)}
@@ -358,8 +365,7 @@ export function AgentMemoryPanel({
 
       {!memoryEnabled && memories.length > 0 ? (
         <p className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-[11px] text-foreground-muted">
-          As memórias ficam preservadas, mas só entram no contexto quando a memória do agente está
-          ligada.
+          {t('memory.disabledFootnote')}
         </p>
       ) : null}
         </>

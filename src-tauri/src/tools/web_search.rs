@@ -12,6 +12,7 @@ use scraper::{ElementRef, Html};
 use serde_json::{json, Value};
 
 use crate::domain::Citation;
+use crate::i18n;
 use crate::providers::ToolDefinition;
 
 use super::{
@@ -80,7 +81,7 @@ pub fn definition() -> ToolDefinition {
 pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let query = match json_str(args, "query") {
         Some(query) if !query.trim().is_empty() => query.trim().to_string(),
-        _ => return ToolOutcome::error("o argumento `query` é obrigatório"),
+        _ => return ToolOutcome::error(i18n::t("tools.web_search.queryRequired")),
     };
     let limit = json_u32(args, "max_results")
         .unwrap_or(MAX_RESULTS as u32)
@@ -92,11 +93,12 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         let payload = json!({
             "query": query,
             "results": [],
-            "note": "Nenhum resultado encontrado. Tente uma consulta diferente ou use fetch_url com uma URL conhecida."
+            "note": i18n::t("tools.web_search.emptyNote")
         });
         return ToolOutcome {
             content: payload.to_string(),
-            summary: Some("0 resultados".to_string()),
+            summary: Some(i18n::t_count("tools.web_search.summary", 0, &[])),
+            presentation: Some(json!({ "kind": "search", "total": 0 })),
             ..Default::default()
         };
     }
@@ -124,8 +126,13 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
 
     ToolOutcome {
         content: payload.to_string(),
-        summary: Some(format!("{} resultado(s)", results.len())),
+        summary: Some(i18n::t_count(
+            "tools.web_search.summary",
+            results.len(),
+            &[("count", &results.len().to_string())],
+        )),
         citations,
+        presentation: Some(json!({ "kind": "search", "total": results.len() })),
         ..Default::default()
     }
 }
@@ -183,25 +190,32 @@ async fn fetch_html(client: &reqwest::Client, url: &str) -> Result<String, Strin
         )
         .header(
             reqwest::header::ACCEPT_LANGUAGE,
-            "pt-BR,pt;q=0.9,en;q=0.8",
+            i18n::accept_language(),
         )
         .timeout(Duration::from_secs(15))
         .send()
         .await
-        .map_err(|error| format!("falha na busca: {error}"))?;
+        .map_err(|error| {
+            i18n::t_args("tools.web_search.requestFailed", &[("error", &error.to_string())])
+        })?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("busca respondeu HTTP {status}"));
+        return Err(i18n::t_args(
+            "tools.web_search.httpStatus",
+            &[("status", &status.to_string())],
+        ));
     }
     if let Some(length) = response.content_length() {
         if length > MAX_DOWNLOAD_BYTES as u64 {
-            return Err("resposta da busca grande demais".to_string());
+            return Err(i18n::t("tools.web_search.tooLarge"));
         }
     }
     let bytes = response
         .bytes()
         .await
-        .map_err(|error| format!("falha ao ler a busca: {error}"))?;
+        .map_err(|error| {
+            i18n::t_args("tools.web_search.readFailed", &[("error", &error.to_string())])
+        })?;
     Ok(crate::documents::decode_text(&bytes, None))
 }
 

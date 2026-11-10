@@ -46,8 +46,9 @@ impl JobsError {
     pub fn limit(limit: usize) -> Self {
         Self {
             code: "JOB_LIMIT",
-            message: format!(
-                "já existem {limit} jobs em execução nesta sessão; aguarde ou mate um job antes de iniciar outro"
+            message: crate::i18n::t_args(
+                "jobs.errors.limit",
+                &[("limit", &limit.to_string())],
             ),
         }
     }
@@ -55,7 +56,10 @@ impl JobsError {
     pub fn not_found(job_id: &str) -> Self {
         Self {
             code: "JOB_NOT_FOUND",
-            message: format!("job `{job_id}` não existe (já terminou e foi removido?)"),
+            message: crate::i18n::t_args(
+                "jobs.errors.notFound",
+                &[("job_id", &job_id)],
+            ),
         }
     }
 }
@@ -152,7 +156,7 @@ impl JobInner {
                 }
                 if output.truncated {
                     state.append(
-                        "[truncated: saída excedeu o limite; cauda preservada]\n".as_bytes(),
+                        crate::i18n::t("jobs.truncatedHead").as_bytes(),
                     );
                 }
                 state.duration_ms = output.duration_ms;
@@ -325,8 +329,9 @@ impl JobRegistry {
         if cursor < retained_start && !output.is_empty() {
             output.insert_str(
                 0,
-                &format!(
-                    "…[início da saída descartado pelo ring buffer: {retained_start} bytes omitidos]\n"
+                &crate::i18n::t_args(
+                    "jobs.ringBufferDropped",
+                    &[("bytes", &retained_start.to_string())],
                 ),
             );
         }

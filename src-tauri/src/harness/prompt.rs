@@ -1,7 +1,7 @@
 //! System prompt + instruções das ferramentas.
 //!
-//! O texto do prompt é escrito em **inglês** — a UI do produto é pt-BR e o modelo é
-//! instruído explicitamente a responder em português do Brasil (seção "Language").
+//! O texto do prompt é escrito em **inglês** e o modelo é instruído a responder no
+//! idioma configurado (`Settings.locale`, seção "Language").
 //! A seção de UI generativa é **gerada a partir de `data/genui-contract.json`**:
 //! catálogo de componentes, regras de design, interações, limites, exemplo canônico
 //! e autoverificação. Nenhuma lista de componentes/limites/regras é duplicada aqui —
@@ -23,7 +23,7 @@ use crate::tools::skills::Skill;
 /// Part of the persisted `prompt_snapshots` identity (`snapshot_key`, F2a):
 /// bump it whenever the prompt text/sections change so a session never reuses a
 /// snapshot built by an older prompt.
-pub const PROMPT_VERSION: u32 = 2;
+pub const PROMPT_VERSION: u32 = 3;
 
 /// Session date (`YYYY-MM-DD`) frozen from the conversation creation time.
 ///
@@ -86,6 +86,7 @@ fn build_system_prompt_inner(
 ) -> String {
     let model_name = model.name.as_str();
     let extra = extra_instructions(settings, options);
+    let language = crate::i18n::language_meta(&settings.locale).prompt_name;
 
     let mut prompt = String::with_capacity(24_000);
     prompt.push_str(&format!(
@@ -95,7 +96,7 @@ fn build_system_prompt_inner(
          in this conversation is `{model_name}`.\n\n\
          Session date: {session_date}.\n\n\
          # Language\n\
-         - Always respond in **Brazilian Portuguese**, unless the user writes in another \
+         - Always respond in **{language}**, unless the user writes in another \
          language — in that case respond in the user's language.\n\
          - Keep technical terms, product names, code identifiers, and URLs as they are.\n\n\
          # Response style\n\
@@ -766,14 +767,20 @@ mod tests {
         ]
     }
 
-    fn default_prompt() -> String {
+    fn prompt_for_locale(locale: &str) -> String {
+        let mut settings = Settings::default();
+        settings.locale = locale.to_string();
         build_system_prompt(
             &model(),
             &TurnOptions::default(),
-            &Settings::default(),
+            &settings,
             &sample_skills(),
             SESSION_DATE,
         )
+    }
+
+    fn default_prompt() -> String {
+        prompt_for_locale("pt-BR")
     }
 
     #[test]
@@ -794,6 +801,15 @@ mod tests {
         assert!(prompt.contains("validate_ui"));
         assert!(prompt.contains("run_code"));
         assert!(prompt.contains("# Skills"));
+    }
+
+    #[test]
+    fn language_section_follows_the_configured_locale() {
+        assert!(prompt_for_locale("pt-BR").contains("**Brazilian Portuguese**"));
+        assert!(prompt_for_locale("en").contains("**English**"));
+        assert!(prompt_for_locale("es").contains("**Spanish**"));
+        // Unknown locale falls back to the English default.
+        assert!(prompt_for_locale("xx").contains("**English**"));
     }
 
     #[test]

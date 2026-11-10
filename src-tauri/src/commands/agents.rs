@@ -26,12 +26,15 @@ fn validate_workspace(state: &AppState, input: &AgentInput) -> Result<(), String
         .get_workspace(workspace_id)
         .map_err(to_error)?
         .ok_or_else(|| {
-            format!("AGENT_WORKSPACE_INVALID: workspace `{workspace_id}` não existe")
+            crate::i18n::t_args(
+                "agents.commands.workspaceMissing",
+                &[("workspace_id", &workspace_id)],
+            )
         })?;
     if !workspace.trusted {
-        return Err(format!(
-            "AGENT_WORKSPACE_UNTRUSTED: confie na pasta `{}` antes de usá-la no agente",
-            workspace.path
+        return Err(crate::i18n::t_args(
+            "agents.commands.workspaceUntrusted",
+            &[("path", &workspace.path)],
         ));
     }
     Ok(())
@@ -50,19 +53,21 @@ fn validate_fallback(state: &AppState, input: &AgentInput) -> Result<(), String>
             let known_provider = state.catalog.provider(provider_id).is_some()
                 || state.dynamic_models_for(provider_id).is_some();
             if !known_provider {
-                return Err(format!(
-                    "AGENT_FALLBACK_INVALID: provedor `{provider_id}` não está no catálogo"
+                return Err(crate::i18n::t_args(
+                    "agents.commands.fallbackProviderMissing",
+                    &[("provider_id", &provider_id)],
                 ));
             }
             if state.model(provider_id, model_id).is_none() {
-                return Err(format!(
-                    "AGENT_FALLBACK_INVALID: o modelo `{model_id}` não pertence ao provedor `{provider_id}`"
+                return Err(crate::i18n::t_args(
+                    "agents.commands.fallbackModelMismatch",
+                    &[("model_id", &model_id), ("provider_id", &provider_id)],
                 ));
             }
             Ok(())
         }
         _ => Err(
-            "AGENT_FALLBACK_INVALID: informe provedor e modelo de reserva juntos.".to_string(),
+            crate::i18n::t("agents.errors.fallbackPairRequired").to_string(),
         ),
     }
 }
@@ -71,9 +76,9 @@ fn validate_model(state: &AppState, input: &AgentInput) -> Result<(), String> {
     let known_provider = state.catalog.provider(&input.provider_id).is_some()
         || state.dynamic_models_for(&input.provider_id).is_some();
     if !known_provider {
-        return Err(format!(
-            "AGENT_MODEL_INVALID: provedor `{}` não está no catálogo",
-            input.provider_id
+        return Err(crate::i18n::t_args(
+            "agents.commands.providerMissing",
+            &[("provider_id", &input.provider_id)],
         ));
     }
     // Account-only models (ChatGPT plan / Anthropic account list) are valid
@@ -82,9 +87,12 @@ fn validate_model(state: &AppState, input: &AgentInput) -> Result<(), String> {
         .model(&input.provider_id, &input.model_id)
         .is_none()
     {
-        return Err(format!(
-            "AGENT_MODEL_INVALID: o modelo `{}` não pertence ao provedor `{}`",
-            input.model_id, input.provider_id
+        return Err(crate::i18n::t_args(
+            "agents.commands.modelMismatch",
+            &[
+                ("model_id", &input.model_id),
+                ("provider_id", &input.provider_id),
+            ],
         ));
     }
     Ok(())
@@ -107,7 +115,9 @@ pub fn get_agent(state: State<'_, AppState>, agent_id: String) -> Result<Agent, 
         .db
         .get_agent(&agent_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_NOT_FOUND: agente `{agent_id}` não existe"))
+        .ok_or_else(|| {
+            crate::i18n::t_args("agents.commands.notFound", &[("agent_id", &agent_id)])
+        })
 }
 
 #[tauri::command]
@@ -308,8 +318,13 @@ pub fn duplicate_agent(state: State<'_, AppState>, agent_id: String) -> Result<A
         .db
         .get_agent(&agent_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_NOT_FOUND: agente `{agent_id}` não existe"))?;
-    let name = format!("Cópia de {}", current.name);
+        .ok_or_else(|| {
+            crate::i18n::t_args("agents.commands.notFound", &[("agent_id", &agent_id)])
+        })?;
+    let name = crate::i18n::t_args(
+        "agents.commands.duplicateName",
+        &[("name", &current.name)],
+    );
     let name: String = name.chars().take(40).collect();
     let input = AgentInput {
         name,
@@ -356,7 +371,7 @@ pub fn import_agent_avatar_image(path: String) -> Result<String, String> {
     let metadata = std::fs::metadata(&path)
         .map_err(|error| format!("falha ao ler a imagem: {error}"))?;
     if !metadata.is_file() {
-        return Err("AGENT_AVATAR_INVALID: o caminho não é um arquivo.".to_string());
+        return Err(crate::i18n::t("agents.commands.avatarNotFile"));
     }
     if metadata.len() > 10 * 1024 * 1024 {
         return Err("AGENT_AVATAR_TOO_LARGE: a imagem passa de 10 MB.".to_string());
@@ -379,7 +394,7 @@ fn safe_file_stem(value: &str) -> String {
         .collect();
     let stem = stem.trim_matches('-').to_lowercase();
     if stem.is_empty() {
-        "agente".to_string()
+        crate::i18n::t("agents.commands.defaultFileStem")
     } else {
         stem.chars().take(60).collect()
     }
@@ -396,24 +411,37 @@ pub fn export_agent(
         .db
         .get_agent(&agent_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_NOT_FOUND: agente `{agent_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args("agents.commands.notFound", &[("agent_id", &agent_id)])
+        })?;
     let memories = state.db.list_agent_memories(&agent_id).map_err(to_error)?;
     let document = AgentExportDocument::from_agent(&agent, &memories);
     let json = serde_json::to_string_pretty(&document)
-        .map_err(|error| format!("falha ao serializar o agente: {error}"))?;
-    let file_name = format!("agente-{}.json", safe_file_stem(&agent.name));
+        .map_err(|error| crate::i18n::t_args(
+        "agents.commands.serializeFailed",
+        &[("error", &error.to_string())],
+    ))?;
+    let file_name = crate::i18n::t_args(
+        "agents.commands.exportFileName",
+        &[("name", &safe_file_stem(&agent.name))],
+    );
     let Some(selected) = app
         .dialog()
         .file()
         .set_file_name(&file_name)
-        .add_filter("Agente Zylara", &["json"])
+        .add_filter(&crate::i18n::t("agents.commands.importType"), &["json"])
         .blocking_save_file()
     else {
         return Ok(None);
     };
     let path = selected
         .into_path()
-        .map_err(|error| format!("caminho de destino inválido: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.commands.invalidDestination",
+                &[("error", &error.to_string())],
+            )
+        })?;
     std::fs::write(&path, json)
         .map_err(|error| format!("falha ao gravar {}: {error}", path.display()))?;
     Ok(Some(path.to_string_lossy().to_string()))
@@ -431,21 +459,23 @@ pub async fn suggest_agent(
 ) -> Result<AgentInput, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
-        return Err("AGENT_VALIDATION: descreva o agente que você quer criar.".to_string());
+        return Err(crate::i18n::t("agents.commands.briefRequired"));
     }
     if prompt.chars().count() > 4_000 {
-        return Err("AGENT_VALIDATION: o pedido passa de 4.000 caracteres.".to_string());
+        return Err(crate::i18n::t("agents.errors.briefTooLong"));
     }
     let known_provider = state.catalog.provider(&provider_id).is_some()
         || state.dynamic_models_for(&provider_id).is_some();
     if !known_provider {
-        return Err(format!(
-            "AGENT_MODEL_INVALID: provedor `{provider_id}` não está no catálogo"
+        return Err(crate::i18n::t_args(
+            "agents.commands.providerMissing",
+            &[("provider_id", &provider_id)],
         ));
     }
     if state.model(&provider_id, &model_id).is_none() {
-        return Err(format!(
-            "AGENT_MODEL_INVALID: o modelo `{model_id}` não pertence ao provedor `{provider_id}`"
+        return Err(crate::i18n::t_args(
+            "agents.commands.modelMismatch",
+            &[("model_id", &model_id), ("provider_id", &provider_id)],
         ));
     }
     // Clone the state pieces before awaiting; the command does not hold the
@@ -469,13 +499,16 @@ pub async fn suggest_agent(
         refresh_override: None,
         model_source: None,
     };
-    let system = "You design AI agent personas for Zylara, a desktop AI workspace. \
-                  Reply with ONLY one JSON object, no markdown fences and no commentary. \
-                  Keys: name (<=40 chars), role (<=80), description (<=500, one sentence), \
-                  emoji (one emoji), department (<=40), instructions (3-8 short sentences in \
-                  Brazilian Portuguese: identity, priorities, tone and working method), and \
-                  starters (array of 1-3 short prompts in Brazilian Portuguese). \
-                  Never claim permissions or tools; the app controls those.";
+    let system = format!(
+        "You design AI agent personas for Zylara, a desktop AI workspace. \
+         Reply with ONLY one JSON object, no markdown fences and no commentary. \
+         Keys: name (<=40 chars), role (<=80), description (<=500, one sentence), \
+         emoji (one emoji), department (<=40), instructions (3-8 short sentences in \
+         {language}: identity, priorities, tone and working method), and \
+         starters (array of 1-3 short prompts in {language}). \
+         Never claim permissions or tools; the app controls those.",
+        language = crate::i18n::prompt_name(),
+    );
     let user = format!(
         "Create an agent for this brief:\n\n{prompt}\n\n\
          The agent will run on Zylara. Keep the instructions concrete, safe and useful."
@@ -485,7 +518,7 @@ pub async fn suggest_agent(
         harness::batch::BatchRequest {
             provider_id: &provider_id,
             model_id: &model_id,
-            system_prompt: system,
+            system_prompt: &system,
             user_text: &user,
             max_output_tokens: 2_048,
             temperature: Some(0.4),
@@ -494,9 +527,14 @@ pub async fn suggest_agent(
     .await
     .map_err(|error| format!("AGENT_SUGGEST_FAILED: {error:#}"))?;
     let json = extract_json_object(&text)
-        .ok_or_else(|| "AGENT_SUGGEST_FAILED: o modelo não devolveu um objeto JSON.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("agents.commands.suggestNoJson"))?;
     let value: serde_json::Value = serde_json::from_str(&json)
-        .map_err(|error| format!("AGENT_SUGGEST_FAILED: JSON inválido: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.commands.suggestInvalidJson",
+                &[("error", &error.to_string())],
+            )
+        })?;
     let name = value
         .get("name")
         .and_then(|value| value.as_str())
@@ -591,12 +629,15 @@ pub async fn revise_agent(
         .db
         .get_agent(&agent_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_NOT_FOUND: agente `{agent_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args("agents.commands.notFound", &[("agent_id", &agent_id)])
+        })?;
     let known_provider = state.catalog.provider(&provider_id).is_some()
         || state.dynamic_models_for(&provider_id).is_some();
     if !known_provider || state.model(&provider_id, &model_id).is_none() {
-        return Err(format!(
-            "AGENT_MODEL_INVALID: a rota `{provider_id}/{model_id}` não está disponível"
+        return Err(crate::i18n::t_args(
+            "agents.commands.routeUnavailable",
+            &[("provider_id", &provider_id), ("model_id", &model_id)],
         ));
     }
     let before = AgentInput::from(&agent);
@@ -626,13 +667,16 @@ pub async fn revise_agent(
         refresh_override: None,
         model_source: None,
     };
-    let system = "You revise an existing AI agent for Zylara, a desktop AI workspace. \
-                  The current configuration is JSON. Reply with ONLY one JSON object containing \
-                  only the fields you changed. Allowed keys: name, role, description, \
-                  department, instructions, starters (array of 1-3 strings), memoryEnabled. \
-                  Keep the identity unless the user explicitly asks to change it. Write in \
-                  Brazilian Portuguese. Never add tools, permissions, model routes or claims \
-                  about what the app allows. Do not wrap the JSON in markdown fences.";
+    let system = format!(
+        "You revise an existing AI agent for Zylara, a desktop AI workspace. \
+         The current configuration is JSON. Reply with ONLY one JSON object containing \
+         only the fields you changed. Allowed keys: name, role, description, \
+         department, instructions, starters (array of 1-3 strings), memoryEnabled. \
+         Keep the identity unless the user explicitly asks to change it. Write in \
+         {language}. Never add tools, permissions, model routes or claims \
+         about what the app allows. Do not wrap the JSON in markdown fences.",
+        language = crate::i18n::prompt_name(),
+    );
     let user = format!(
         "Current agent:\n{current}\n\nUser request:\n{prompt}\n\n\
          Return the minimal JSON patch that satisfies the request."
@@ -642,7 +686,7 @@ pub async fn revise_agent(
         harness::batch::BatchRequest {
             provider_id: &provider_id,
             model_id: &model_id,
-            system_prompt: system,
+            system_prompt: &system,
             user_text: &user,
             max_output_tokens: 2_048,
             temperature: Some(0.3),
@@ -651,10 +695,15 @@ pub async fn revise_agent(
     .await
     .map_err(|error| format!("AGENT_REVISION_FAILED: {error:#}"))?;
     let json = extract_json_object(&text).ok_or_else(|| {
-        "AGENT_REVISION_FAILED: o modelo não devolveu um objeto JSON.".to_string()
+        crate::i18n::t("agents.commands.revisionNoJson").to_string()
     })?;
     let partial: serde_json::Value = serde_json::from_str(&json)
-        .map_err(|error| format!("AGENT_REVISION_FAILED: JSON inválido: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.commands.revisionInvalidJson",
+                &[("error", &error.to_string())],
+            )
+        })?;
     let after = crate::agents::apply_agent_revision(before.clone(), &partial)?;
     validate_model(&state, &after)?;
     validate_fallback(&state, &after)?;
@@ -688,23 +737,38 @@ pub fn import_agent(
     let Some(selected) = app
         .dialog()
         .file()
-        .add_filter("Agente Zylara", &["json"])
+        .add_filter(&crate::i18n::t("agents.commands.importType"), &["json"])
         .blocking_pick_file()
     else {
         return Ok(None);
     };
     let path = selected
         .into_path()
-        .map_err(|error| format!("caminho inválido: {error}"))?;
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|error| format!("falha ao ler {}: {error}", path.display()))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.commands.invalidPath",
+                &[("error", &error.to_string())],
+            )
+        })?;
+    let raw = std::fs::read_to_string(&path).map_err(|error| {
+        crate::i18n::t_args(
+            "agents.commands.readExportFailed",
+            &[("path", &path.display().to_string()), ("error", &error.to_string())],
+        )
+    })?;
     let mut value: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|error| format!("AGENT_IMPORT_INVALID: JSON inválido: {error}"))?;
+        .map_err(|error| crate::i18n::t_args(
+        "agents.errors.importInvalidJson",
+        &[("error", &error.to_string())],
+    ))?;
     if value.get("version").and_then(|version| version.as_u64()) == Some(1) {
         crate::agents::upgrade_agent_export_v1(&mut value)?;
     }
     let document: AgentExportDocument = serde_json::from_value(value)
-        .map_err(|error| format!("AGENT_IMPORT_INVALID: JSON inválido: {error}"))?;
+        .map_err(|error| crate::i18n::t_args(
+        "agents.errors.importInvalidJson",
+        &[("error", &error.to_string())],
+    ))?;
     let document = document.normalize()?;
     validate_model(&state, &document.agent)?;
     validate_fallback(&state, &document.agent)?;

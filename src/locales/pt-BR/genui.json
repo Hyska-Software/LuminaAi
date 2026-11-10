@@ -1,0 +1,81 @@
+{
+  "actions": {
+    "group": "Ações sugeridas",
+    "copied": "Copiado para a área de transferência",
+    "errors": {
+      "prepareSuggestion": "Não foi possível preparar a sugestão.",
+      "copy": "Não foi possível copiar para a área de transferência.",
+      "empty": "Esta ação não tem conteúdo para executar.",
+      "run": "Não foi possível executar a ação."
+    }
+  },
+  "block": {
+    "title": "UI generativa",
+    "parseError": "Não foi possível interpretar o bloco de UI generativa.",
+    "diagnosticsAria": "Diagnósticos da UI generativa"
+  },
+  "renderer": {
+    "depthExceeded": "Nível de aninhamento excedido nesta UI.",
+    "unsupportedComponent": "Componente \"{{type}}\" não suportado.",
+    "emptyTabs": "Abas sem painéis.",
+    "defaultTab": "Aba {{index}}"
+  },
+  "choices": {
+    "group": "Escolhas",
+    "defaultPrefix": "Seleção:"
+  },
+  "reveal": {
+    "defaultTitle": "Detalhes"
+  },
+  "stat": {
+    "defaultLabel": "Métrica"
+  },
+  "progress": {
+    "defaultLabel": "Progresso"
+  },
+  "timeline": {
+    "defaultTitle": "Etapa {{index}}"
+  },
+  "image": {
+    "defaultAlt": "Imagem",
+    "loadError": "Não foi possível carregar a imagem.",
+    "unavailable": "Imagem indisponível."
+  },
+  "table": {
+    "empty": "Tabela sem dados."
+  },
+  "chart": {
+    "invalid": "Gráfico inválido.",
+    "titleFallback": "Gráfico",
+    "parseError": "Não foi possível interpretar os dados do gráfico.",
+    "noData": "Sem dados para exibir.",
+    "invalidValues": "Valores inválidos para o gráfico.",
+    "total": "total",
+    "title_one": "Gráfico de {{count}} item",
+    "title_other": "Gráfico de {{count}} itens"
+  },
+  "source": {
+    "openAria": "Abrir {{label}} em nova aba"
+  },
+  "status": {
+    "done": "Concluído",
+    "active": "Em andamento",
+    "pending": "Pendente",
+    "disabled": "Desativado",
+    "error": "Erro"
+  },
+  "code": {
+    "copy": "Copiar código",
+    "copied": "Copiado",
+    "copiedTooltip": "Copiado!"
+  },
+  "html": {
+    "title": "Prévia HTML",
+    "sandboxHint": "O conteúdo roda isolado, sem acesso ao aplicativo"
+  },
+  "mermaid": {
+    "title": "Diagrama Mermaid",
+    "renderError": "Não foi possível renderizar o diagrama: {{error}}",
+    "rendering": "Renderizando diagrama…"
+  }
+}

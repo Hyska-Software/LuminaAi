@@ -30,17 +30,17 @@ pub async fn run(
     on_event: &Channel<UpdateEvent>,
 ) -> Result<DownloadResult> {
     if !feed::is_allowed_url(&asset.download_url, base) {
-        bail!("URL de download fora do repositório oficial");
+        bail!(crate::i18n::t("update.errors.urlOutsideRepo"));
     }
     if asset.size == 0 || asset.size > MAX_DOWNLOAD_BYTES {
-        bail!("tamanho de atualização inválido");
+        bail!(crate::i18n::t("update.errors.invalidSize"));
     }
     let final_path = state
         .download_path(version, &asset.name)
-        .context("nome de artefato inválido")?;
+        .context(crate::i18n::t("update.errors.invalidArtifactName"))?;
     let parent = final_path
         .parent()
-        .context("pasta de atualizações inválida")?;
+        .context(crate::i18n::t("update.errors.invalidUpdatesDir"))?;
     tokio::fs::create_dir_all(parent)
         .await
         .with_context(|| format!("falha ao criar {}", parent.display()))?;
@@ -79,19 +79,19 @@ async fn stream(
         .header("Accept", "application/octet-stream")
         .send()
         .await
-        .context("falha ao baixar a atualização")?;
+        .context(crate::i18n::t("update.errors.downloadFailed"))?;
     if !response.status().is_success() {
-        bail!(
-            "servidor respondeu {} ao baixar a atualização",
-            response.status()
-        );
+        bail!(crate::i18n::t_args(
+            "update.errors.downloadStatus",
+            &[("status", &response.status().to_string())],
+        ));
     }
     if let Some(length) = response.content_length() {
         if length != asset.size {
-            bail!(
-                "tamanho do download ({length}) difere do release.json ({})",
-                asset.size
-            );
+            bail!(crate::i18n::t_args(
+                "update.errors.sizeMismatch",
+                &[("actual", &length.to_string()), ("expected", &asset.size.to_string())],
+            ));
         }
     }
     if state.cancel_requested() {
@@ -142,7 +142,7 @@ async fn stream(
         hasher.update(&chunk);
         file.write_all(&chunk)
             .await
-            .context("falha ao gravar a atualização")?;
+            .context(crate::i18n::t("update.errors.writeFailed"))?;
 
         let percent = progress_percent(received, asset.size);
         let elapsed = started.elapsed();
@@ -186,7 +186,7 @@ async fn stream(
         .map(|byte| format!("{byte:02x}"))
         .collect();
     if !digest.eq_ignore_ascii_case(&asset.sha256) {
-        bail!("o arquivo baixado não corresponde ao SHA-256 esperado");
+        bail!(crate::i18n::t("update.errors.hashMismatch"));
     }
     if state.cancel_requested() {
         let _ = tokio::fs::remove_file(partial_path).await;

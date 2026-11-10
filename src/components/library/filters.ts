@@ -6,6 +6,8 @@
  * without a DOM — the view only composes these functions.
  */
 import { artifactKindMeta } from '@/components/artifacts/kinds';
+import { compareText, formatDate } from '@/lib/i18n/format';
+import { t } from '@/lib/i18n';
 import type { ArtifactKind, LibraryArtifact } from '@/lib/types';
 
 /** Categories shown as pills, in canonical order (PLAN §4.2). */
@@ -23,17 +25,17 @@ export type LibraryFilterId = (typeof LIBRARY_FILTER_IDS)[number];
 
 export interface LibraryFilterDefinition {
   id: LibraryFilterId;
-  label: string;
+  labelKey: `library:filters.${LibraryFilterId}`;
 }
 
 export const LIBRARY_FILTERS: readonly LibraryFilterDefinition[] = [
-  { id: 'all', label: 'Tudo' },
-  { id: 'favorites', label: 'Favoritos' },
-  { id: 'images', label: 'Imagens' },
-  { id: 'documents', label: 'Documentos' },
-  { id: 'code', label: 'Código' },
-  { id: 'media', label: 'Mídia' },
-  { id: 'others', label: 'Outros' },
+  { id: 'all', labelKey: 'library:filters.all' },
+  { id: 'favorites', labelKey: 'library:filters.favorites' },
+  { id: 'images', labelKey: 'library:filters.images' },
+  { id: 'documents', labelKey: 'library:filters.documents' },
+  { id: 'code', labelKey: 'library:filters.code' },
+  { id: 'media', labelKey: 'library:filters.media' },
+  { id: 'others', labelKey: 'library:filters.others' },
 ];
 
 /** Kind → category mapping. Every `ArtifactKind` belongs to exactly one pill. */
@@ -47,7 +49,8 @@ const FILTER_KINDS: Record<Exclude<LibraryFilterId, 'all' | 'favorites'>, Readon
   };
 
 export function libraryFilterLabel(id: LibraryFilterId): string {
-  return LIBRARY_FILTERS.find((filter) => filter.id === id)?.label ?? id;
+  const definition = LIBRARY_FILTERS.find((filter) => filter.id === id);
+  return definition ? t(definition.labelKey) : id;
 }
 
 /** True when the artifact belongs to the selected category (`all` matches everything). */
@@ -68,10 +71,10 @@ export function normalizeLibraryQuery(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 }
 
-/** Human origin of an artifact: the conversation title, or "Biblioteca" for uploads. */
+/** Human origin of an artifact: the conversation title, or the library label for uploads. */
 export function libraryArtifactOrigin(artifact: LibraryArtifact): string {
   const title = artifact.conversationTitle?.trim();
-  return title ? title : 'Biblioteca';
+  return title ? title : t('library:card.originFallback');
 }
 
 /** Everything the search box matches: name, kind label/description and origin. */
@@ -98,23 +101,22 @@ export type LibrarySortId = (typeof LIBRARY_SORT_IDS)[number];
 
 export interface LibrarySortDefinition {
   id: LibrarySortId;
-  label: string;
+  labelKey: `library:sorts.${LibrarySortId}`;
 }
 
 export const LIBRARY_SORTS: readonly LibrarySortDefinition[] = [
-  { id: 'recent', label: 'Recentes' },
-  { id: 'oldest', label: 'Mais antigos' },
-  { id: 'name', label: 'Nome (A–Z)' },
-  { id: 'size', label: 'Tamanho' },
+  { id: 'recent', labelKey: 'library:sorts.recent' },
+  { id: 'oldest', labelKey: 'library:sorts.oldest' },
+  { id: 'name', labelKey: 'library:sorts.name' },
+  { id: 'size', labelKey: 'library:sorts.size' },
 ];
 
 export function librarySortLabel(id: LibrarySortId): string {
-  return LIBRARY_SORTS.find((sort) => sort.id === id)?.label ?? id;
+  const definition = LIBRARY_SORTS.find((sort) => sort.id === id);
+  return definition ? t(definition.labelKey) : id;
 }
 
-const nameCollator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
-
-/** Orders a copy of the list according to the selected sort (Recentes by default). */
+/** Orders a copy of the list according to the selected sort (Recent by default). */
 export function sortLibraryArtifacts(
   artifacts: readonly LibraryArtifact[],
   sort: LibrarySortId,
@@ -122,17 +124,19 @@ export function sortLibraryArtifacts(
   const sorted = [...artifacts];
   switch (sort) {
     case 'oldest':
-      return sorted.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id));
+      return sorted.sort(
+        (left, right) => left.createdAt - right.createdAt || compareText(left.id, right.id),
+      );
     case 'name':
       return sorted.sort(
-        (left, right) => nameCollator.compare(left.name, right.name) || left.id.localeCompare(right.id),
+        (left, right) => compareText(left.name, right.name) || compareText(left.id, right.id),
       );
     case 'size':
-      return sorted.sort((left, right) => right.size - left.size || left.id.localeCompare(right.id));
+      return sorted.sort((left, right) => right.size - left.size || compareText(left.id, right.id));
     case 'recent':
     default:
       return sorted.sort(
-        (left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id),
+        (left, right) => right.createdAt - left.createdAt || compareText(right.id, left.id),
       );
   }
 }
@@ -181,8 +185,8 @@ export function formatLibraryDate(timestamp: number): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return '—';
   const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(
-    'pt-BR',
+  return formatDate(
+    date,
     sameYear
       ? { day: '2-digit', month: 'short' }
       : { day: '2-digit', month: 'short', year: 'numeric' },
@@ -191,10 +195,10 @@ export function formatLibraryDate(timestamp: number): string {
 
 /** “1 arquivo” / “3 arquivos”. */
 export function pluralizeFiles(count: number): string {
-  return `${count} ${count === 1 ? 'arquivo' : 'arquivos'}`;
+  return t('library:view.count', { count });
 }
 
 /** “1 arquivo enviado” / “3 arquivos enviados”. */
 export function importResultMessage(count: number): string {
-  return `${count} ${count === 1 ? 'arquivo enviado' : 'arquivos enviados'}`;
+  return t('library:view.import', { count });
 }

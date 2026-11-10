@@ -63,18 +63,18 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
     };
     let agent = match db.get_agent(&item.recipient_agent_id) {
         Ok(Some(agent)) if !agent.is_archived() => agent,
-        Ok(Some(_)) => return fail("destinatário arquivado".to_string()),
-        Ok(None) => return fail("destinatário não existe".to_string()),
+        Ok(Some(_)) => return fail(crate::i18n::t("inbox.errors.recipientArchived")),
+        Ok(None) => return fail(crate::i18n::t("inbox.errors.recipientMissing")),
         Err(error) => return fail(format!("{error:#}")),
     };
     let channel = match db.get_agent_channel(&item.channel_id) {
         Ok(Some(channel)) if channel.kind == "dm" => channel,
-        Ok(Some(_)) => return fail("canal não é uma conversa direta".to_string()),
-        Ok(None) => return fail("canal direto não existe".to_string()),
+        Ok(Some(_)) => return fail(crate::i18n::t("inbox.errors.channelNotDirect")),
+        Ok(None) => return fail(crate::i18n::t("inbox.errors.directMissing")),
         Err(error) => return fail(format!("{error:#}")),
     };
     if !channel.member_ids.iter().any(|id| id == &agent.id) {
-        return fail("destinatário não participa do canal".to_string());
+        return fail(crate::i18n::t("inbox.errors.recipientNotMember"));
     }
     let conversation = match db.get_or_create_channel_conversation(
         &channel.id,

@@ -1372,7 +1372,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: "system".into(),
-            locale: "pt-BR".into(),
+            locale: "en".into(),
             default_provider: "opencode-go".into(),
             default_model: "deepseek-v4.1-flash".into(),
             reasoning_default: "max".into(),

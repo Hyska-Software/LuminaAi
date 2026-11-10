@@ -9,8 +9,10 @@
  * divisor, mensagens sem `modelId` (legado) são ignoradas e a troca pode ser só
  * de modelo, só de provedor ou de ambos.
  */
+import { useTranslation } from 'react-i18next';
 import { ArrowRightLeft } from 'lucide-react';
 
+import { t } from '@/lib/i18n';
 import { findModel, getModel, providerLabel } from '@/lib/catalog';
 import type { ChatMessage } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -82,9 +84,13 @@ export function modelSwitchAt(
 
 /** Rótulo visível e título completo (com provedor) do divisor. */
 export function modelSwitchLabel(route: ModelRoute): { text: string; title: string } {
-  const text = `Modelo alterado para ${modelName(route)}`;
+  const model = modelName(route);
   const provider = route.providerId ? providerLabel(route.providerId) : null;
-  return { text, title: provider ? `${text} · ${provider}` : text };
+  const text = t('chat:modelSwitch.label', { model });
+  return {
+    text,
+    title: provider ? t('chat:modelSwitch.labelWithProvider', { model, provider }) : text,
+  };
 }
 
 export interface ModelSwitchDividerProps {
@@ -98,6 +104,8 @@ export interface ModelSwitchDividerProps {
  * `title`/`aria-label`.
  */
 export function ModelSwitchDivider({ route, className }: ModelSwitchDividerProps) {
+  // Subscribes to language changes: the label is resolved by the global translator.
+  useTranslation('chat');
   const { text, title } = modelSwitchLabel(route);
 
   return (

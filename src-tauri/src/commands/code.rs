@@ -98,7 +98,10 @@ async fn session_state(state: &AppState, conversation_id: &str) -> Result<CodeSe
         .db
         .get_conversation(conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
 
     let mut workspace: Option<Workspace> = None;
     let mut project = None;
@@ -177,7 +180,7 @@ fn degrade_orphan_review(
     let mut plan = plan?;
     if plan.state == PlanState::Reviewing && !has_pending_plan_approval {
         plan.state = PlanState::Planning;
-        plan.feedback = Some(crate::harness::code::session::STALE_REVIEW_FEEDBACK.to_string());
+        plan.feedback = Some(crate::harness::code::session::stale_review_feedback());
     }
     Some(plan)
 }
@@ -363,7 +366,10 @@ fn ensure_conversation(
 ) -> Result<crate::domain::Conversation, String> {
     db.get_conversation(conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))
 }
 
 /// Status dos servidores MCP configurados (`mcp.json`) e tools descobertas.
@@ -393,7 +399,7 @@ pub async fn respond_question(
         skipped,
     };
     if !state.questions.resolve(response) {
-        return Err("QUESTION_NOT_FOUND: esta pergunta já foi resolvida".to_string());
+        return Err(crate::i18n::t("code.errors.questionResolved"));
     }
     Ok(true)
 }
@@ -461,13 +467,13 @@ fn apply_approval_decision(
 ) -> Result<bool, String> {
     let request = approvals
         .request(approval_id)
-        .ok_or_else(|| "APPROVAL_NOT_FOUND: esta aprovação já foi resolvida".to_string())?;
+        .ok_or_else(|| crate::i18n::t("code.errors.approvalResolved"))?;
     let is_plan = request.tool == "submit_plan";
 
     if is_plan {
         if answer.scope.is_some() {
             return Err(
-                "APPROVAL_INVALID: aprovações de plano não criam regra de permissão".to_string(),
+                crate::i18n::t("code.errors.planApprovalNoRule"),
             );
         }
         if answer.decision == ApprovalDecision::Approved {
@@ -475,8 +481,7 @@ fn apply_approval_decision(
         }
     } else if answer.choice.is_some() || answer.plan_markdown.is_some() {
         return Err(
-            "APPROVAL_INVALID: `choice`/`planMarkdown` só se aplicam à aprovação de plano"
-                .to_string(),
+            crate::i18n::t("code.errors.planOnlyFields"),
         );
     }
 
@@ -507,7 +512,7 @@ fn apply_approval_decision(
         outcome.feedback = answer.feedback.clone();
     }
     if !approvals.resolve(approval_id, outcome.clone()) {
-        return Err("APPROVAL_NOT_FOUND: esta aprovação já foi resolvida".to_string());
+        return Err(crate::i18n::t("code.errors.approvalResolved"));
     }
 
     // A partir daqui a tool já destravou: regra/auditoria são efeitos
@@ -561,7 +566,10 @@ fn state_create_rule(
         decision: ApprovalDecision::Approved,
     })
     .map(|_| ())
-    .map_err(|error| format!("não foi possível salvar a regra: {error}"))
+    .map_err(|error| crate::i18n::t_args(
+        "code.errors.saveRule",
+        &[("error", &error.to_string())],
+    ))
 }
 
 /// Valida a escolha do gate de plano e o markdown revisado (D3/D5).
@@ -579,11 +587,11 @@ fn validate_plan_choice(choice: Option<&str>, plan_markdown: Option<&str>) -> Re
     if let Some(markdown) = plan_markdown {
         let trimmed = markdown.trim();
         if trimmed.is_empty() {
-            return Err("APPROVAL_INVALID: o plano revisado não pode ficar vazio".to_string());
+            return Err(crate::i18n::t("code.errors.revisedPlanEmpty"));
         }
         if trimmed.chars().count() > 20_000 {
             return Err(
-                "APPROVAL_INVALID: o plano revisado excede 20 000 caracteres".to_string(),
+                crate::i18n::t("code.errors.revisedPlanTooLong"),
             );
         }
     }
@@ -604,8 +612,7 @@ fn rule_from_request(
         ApprovalScope::Workspace => {
             let conversation = ensure_conversation(db, &request.conversation_id)?;
             Some(conversation.workspace_id.ok_or_else(|| {
-                "APPROVAL_INVALID: a sessão não tem workspace; escolha \"esta sessão\" ou \"sempre\""
-                    .to_string()
+                crate::i18n::t("code.errors.sessionNoWorkspace")
             })?)
         }
         ApprovalScope::Global => None,
@@ -637,7 +644,10 @@ pub async fn list_approval_rules(
         .db
         .get_conversation(&conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
     state
         .db
         .list_approval_rules_for_context(
@@ -702,7 +712,7 @@ pub async fn save_approval_rule(
 pub async fn delete_approval_rule(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let removed = state.db.delete_approval_rule(&id).map_err(map_err)?;
     if !removed {
-        return Err(format!("regra não encontrada: {id}"));
+        return Err(crate::i18n::t_args("code.errors.ruleNotFound", &[("rule_id", &id)]));
     }
     Ok(())
 }
@@ -717,7 +727,10 @@ pub async fn get_workspace_changes(
         .db
         .get_conversation(&conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
     let mut workspace = None;
     if let Some(workspace_id) = conversation.workspace_id.as_deref() {
         workspace = state.db.get_workspace(workspace_id).map_err(map_err)?;
@@ -913,10 +926,13 @@ pub async fn revert_file(
         .db
         .get_conversation(&conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
     let workspace_id = conversation
         .workspace_id
-        .ok_or_else(|| "FS_NO_WORKSPACE: a sessão não tem workspace".to_string())?;
+        .ok_or_else(|| crate::i18n::t("code.errors.noWorkspace"))?;
     let root = workspace_path(&state, &workspace_id)?;
     let entries: Vec<_> = state
         .db
@@ -926,7 +942,7 @@ pub async fn revert_file(
         .filter(|entry| entry.path == path)
         .collect();
     if entries.is_empty() {
-        return Err(format!("não há alteração registrada para `{path}`"));
+        return Err(crate::i18n::t_args("code.errors.noChangeForPath", &[("path", &path)]));
     }
     let reverted = revert_entries(&state, &conversation_id, &root, entries)?;
     let payload = serde_json::json!({ "files": [path], "reverted": reverted }).to_string();
@@ -949,17 +965,20 @@ pub async fn revert_turn(
         .db
         .get_conversation(&conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
     let workspace_id = conversation
         .workspace_id
-        .ok_or_else(|| "FS_NO_WORKSPACE: a sessão não tem workspace".to_string())?;
+        .ok_or_else(|| crate::i18n::t("code.errors.noWorkspace"))?;
     let root = workspace_path(&state, &workspace_id)?;
     let entries = state
         .db
         .list_file_journal_for_turn(&conversation_id, &turn_id)
         .map_err(map_err)?;
     if entries.is_empty() {
-        return Err("o turno não registrou alterações de arquivo".to_string());
+        return Err(crate::i18n::t("code.errors.noTurnChanges"));
     }
     let paths: Vec<String> = entries.iter().map(|entry| entry.path.clone()).collect();
     let reverted = revert_entries(&state, &conversation_id, &root, entries)?;
@@ -1034,7 +1053,10 @@ pub async fn compact_session(
         .db
         .get_conversation(&conversation_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("conversa não encontrada: {conversation_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.conversationNotFound",
+            &[("conversation_id", &conversation_id)],
+        ))?;
     // Guarda amigável antes de resolver provider/credencial (o harness também
     // devolve `None` para histórico curto/inválido).
     let messages = state
@@ -1072,7 +1094,7 @@ pub async fn compact_session(
     )
     .await
     .map_err(|error| format!("falha ao compactar: {error:#}"))?
-    .ok_or_else(|| "não há trecho antigo suficiente para compactar".to_string())?;
+    .ok_or_else(|| crate::i18n::t("code.errors.nothingToCompact"))?;
 
     // `to_seq` = `outcome.covered` (ordinal estável de mensagens); a coluna
     // `tokens` guarda a estimativa de tokens liberados (informativa).
@@ -1105,8 +1127,9 @@ pub async fn compact_session(
 const ROUND_OUTCOME_INTERRUPTED: &str = "interrupted";
 
 /// Texto do snapshot/card quando a última rodada não fechou (`PLAN.md` §10.9).
-pub(crate) const ORPHAN_ROUND_DETAIL: &str =
-    "A última rodada foi interrompida. Retome para continuar.";
+pub(crate) fn orphan_round_detail() -> String {
+    crate::i18n::t("code.goal.orphanRoundDetail")
+}
 
 /// Sessão do layout Code? Nativo (`mode == "code"`) ou sessão do Chat
 /// explicitamente adicionada ao Code (`codeLinked`) — PLAN D18.
@@ -1121,7 +1144,7 @@ pub(crate) fn is_code_session(conversation: &Conversation) -> bool {
 /// permite a UI/pill traduzir a recusa.
 fn validate_goal_session(conversation: &Conversation) -> Result<(), String> {
     if !is_code_session(conversation) {
-        return Err("GOAL_NOT_CODE: o objetivo só existe em sessões do layout Code".to_string());
+        return Err(crate::i18n::t("code.errors.goalNotCode"));
     }
     Ok(())
 }
@@ -1134,17 +1157,20 @@ fn goal_workspace_root(
     conversation: &Conversation,
 ) -> Result<PathBuf, String> {
     let workspace_id = conversation.workspace_id.as_deref().ok_or_else(|| {
-        "GOAL_NO_WORKSPACE: abra uma pasta para definir o objetivo da sessão".to_string()
+        crate::i18n::t("code.errors.goalNoWorkspace")
     })?;
     let workspace = db
         .get_workspace(workspace_id)
         .map_err(map_err)?
-        .ok_or_else(|| format!("GOAL_NO_WORKSPACE: workspace não encontrado: {workspace_id}"))?;
+        .ok_or_else(|| crate::i18n::t_args(
+            "code.errors.goalWorkspaceMissing",
+            &[("workspace_id", &workspace_id)],
+        ))?;
     let root = PathBuf::from(&workspace.path);
     if !root.is_dir() {
-        return Err(format!(
-            "GOAL_NO_WORKSPACE: a pasta do workspace não existe mais: {}",
-            workspace.path
+        return Err(crate::i18n::t_args(
+            "code.errors.goalWorkspaceGone",
+            &[("path", &workspace.path)],
         ));
     }
     Ok(root)
@@ -1176,7 +1202,7 @@ pub(crate) fn degrade_orphan_goal(
     if goal.status == GoalStatus::Active && last_round_interrupted && !has_active_turn {
         goal.status = GoalStatus::Paused;
         goal.pause_reason = Some(GoalPauseReason::Interrupted);
-        goal.pause_detail = Some(ORPHAN_ROUND_DETAIL.to_string());
+        goal.pause_detail = Some(orphan_round_detail());
         goal.auto_continue = false;
     }
     Some(goal)
@@ -1631,8 +1657,8 @@ mod tests {
             .expect("plano");
         assert_eq!(degraded.state, PlanState::Planning);
         assert_eq!(
-            degraded.feedback.as_deref(),
-            Some(session::STALE_REVIEW_FEEDBACK)
+            degraded.feedback,
+            Some(session::stale_review_feedback())
         );
         assert_eq!(degraded.markdown.as_deref(), Some("# Draft"));
 
@@ -2306,8 +2332,8 @@ mod tests {
             Some(GoalPauseReason::Interrupted)
         );
         assert_eq!(
-            projected.pause_detail.as_deref(),
-            Some(ORPHAN_ROUND_DETAIL)
+            projected.pause_detail,
+            Some(orphan_round_detail())
         );
         assert!(!projected.auto_continue);
         let persisted = goal::current(&db, &conversation_id)
@@ -2375,7 +2401,7 @@ mod tests {
         let degraded = degrade_orphan_goal(Some(active.clone()), true, false).expect("objetivo");
         assert_eq!(degraded.status, GoalStatus::Paused);
         assert_eq!(degraded.pause_reason, Some(GoalPauseReason::Interrupted));
-        assert_eq!(degraded.pause_detail.as_deref(), Some(ORPHAN_ROUND_DETAIL));
+        assert_eq!(degraded.pause_detail, Some(orphan_round_detail()));
         assert!(!degraded.auto_continue);
 
         // Rodada em andamento (turno ativo): nada a degradar.

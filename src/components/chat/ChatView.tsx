@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowDown } from 'lucide-react';
 import { MessageQueueBar } from './MessageQueueBar';
 import { CodeSessionCards } from '@/components/code/CodeAgentWidgets';
@@ -40,6 +41,7 @@ function lastAssistantFailed(messages: ChatMessage[]): boolean {
  * position survive switching layouts (PLAN §3.3).
  */
 export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
+  const { t } = useTranslation('chat');
   const activeMessages = useChatStore(selectActiveMessages);
   const activeId = useChatStore((state) => state.activeId);
   const conversations = useChatStore((state) => state.conversations);
@@ -208,7 +210,7 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
           <button
             type="button"
             onClick={() => scrollToBottom(reduceMotion ? 'auto' : 'smooth')}
-            aria-label="Ir para o fim da conversa"
+            aria-label={t('chatView.jumpToLatest')}
             className={cn(
               'pointer-events-auto flex size-9 items-center justify-center rounded-full border border-border',
               'bg-surface-raised text-foreground-muted shadow-md',

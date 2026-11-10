@@ -120,9 +120,7 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     if !matches!(settings.theme.as_str(), "light" | "dark" | "system") {
         settings.theme = defaults.theme;
     }
-    if !matches!(settings.locale.as_str(), "pt-BR" | "en") {
-        settings.locale = defaults.locale;
-    }
+    settings.locale = crate::i18n::normalize_language(&settings.locale).to_string();
     if !matches!(settings.send_key.as_str(), "enter" | "ctrl+enter") {
         settings.send_key = defaults.send_key;
     }
@@ -283,6 +281,18 @@ fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
                 );
             }
         }
+        if !object.contains_key("locale") {
+            // Files predating the `locale` field were all pt-BR.
+            object.insert(
+                "locale".to_string(),
+                serde_json::Value::String("pt-BR".to_string()),
+            );
+        } else if !object
+            .get("locale")
+            .is_some_and(serde_json::Value::is_string)
+        {
+            object.remove("locale");
+        }
         let invalid_mode = object
             .get("codeDefaultPermissionMode")
             .and_then(serde_json::Value::as_str)
@@ -305,30 +315,34 @@ fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
 /// existe só no arquivo, para que as migrações de leitura saibam distinguir um
 /// default antigo de uma escolha do usuário.
 fn serialize_settings_json(settings: &Settings) -> anyhow::Result<String> {
-    let mut value = serde_json::to_value(settings).context("falha ao serializar as configurações")?;
+    let mut value = serde_json::to_value(settings).context(crate::i18n::t("config.errors.serializeSettings"))?;
     if let Some(object) = value.as_object_mut() {
         object.insert(
             "settingsVersion".to_string(),
             serde_json::Value::from(SETTINGS_VERSION),
         );
     }
-    serde_json::to_string_pretty(&value).context("falha ao serializar as configurações")
+    serde_json::to_string_pretty(&value).context(crate::i18n::t("config.errors.serializeSettings"))
 }
 
 pub fn load_settings(app: &AppHandle) -> Settings {
     let path = settings_path(app);
-    match std::fs::read_to_string(&path) {
+    let settings = match std::fs::read_to_string(&path) {
         Ok(raw) => parse_settings_json(&raw)
             .map(normalize_settings)
             .unwrap_or_default(),
         Err(_) => Settings::default(),
-    }
+    };
+    crate::i18n::set_language(&settings.locale);
+    settings
 }
 
 pub fn save_settings(app: &AppHandle, settings: &Settings) -> anyhow::Result<()> {
     let normalized = normalize_settings(settings.clone());
     let raw = serialize_settings_json(&normalized)?;
-    write_private(&settings_path(app), &raw)
+    write_private(&settings_path(app), &raw)?;
+    crate::i18n::set_language(&normalized.locale);
+    Ok(())
 }
 
 /* ------------------------------------------------------------------ */
@@ -351,7 +365,10 @@ fn write_private(path: &Path, contents: &str) -> anyhow::Result<()> {
     }
     let file_name = path
         .file_name()
-        .ok_or_else(|| anyhow::anyhow!("caminho inválido: {}", path.display()))?;
+        .ok_or_else(|| anyhow::anyhow!(crate::i18n::t_args(
+            "config.errors.invalidPath",
+            &[("path", &path.display().to_string())],
+        )))?;
     let tmp = path.with_file_name(format!(
         "{}.{}.tmp",
         file_name.to_string_lossy(),
@@ -684,12 +701,20 @@ fn read_secrets_at(path: &Path) -> anyhow::Result<Option<SecretsFile>> {
     match std::fs::read_to_string(path) {
         Ok(raw) => {
             let secrets = serde_json::from_str::<SecretsFile>(&raw).with_context(|| {
-                format!("{} não é um JSON de credenciais válido", path.display())
+                crate::i18n::t_args(
+                    "config.errors.invalidCredentialsJson",
+                    &[("path", &path.display().to_string())],
+                )
             })?;
             Ok(Some(secrets))
         }
         Err(error) if is_not_found(&error) => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("falha ao ler {}", path.display())),
+        Err(error) => Err(error).with_context(|| {
+            crate::i18n::t_args(
+                "config.errors.readFile",
+                &[("path", &path.display().to_string())],
+            )
+        }),
     }
 }
 
@@ -733,10 +758,10 @@ fn read_secrets_for_write_at(path: &Path) -> anyhow::Result<SecretsFile> {
             let message = format!("{error:#}");
             remember_secrets_error(&message);
             backup_corrupt_at(path);
-            bail!(
-                "as credenciais estão corrompidas; nenhuma alteração foi gravada e o \
-                 arquivo original foi preservado (cópia em .bak). Detalhe: {message}"
-            )
+            bail!(crate::i18n::t_args(
+                "config.errors.credentialsCorrupt",
+                &[("error", &message)],
+            ))
         }
     }
 }
@@ -1690,7 +1715,7 @@ mod tests {
         assert_eq!(normalized.max_steps, MAX_STEPS_LIMIT);
         assert_eq!(normalized.font_scale, 1.3);
         assert_eq!(normalized.theme, "system");
-        assert_eq!(normalized.locale, "pt-BR");
+        assert_eq!(normalized.locale, "en");
         assert_eq!(normalized.send_key, "enter");
         assert_eq!(normalized.reasoning_default, "max");
         assert_eq!(normalized.default_provider, "opencode-go");
@@ -1704,6 +1729,27 @@ mod tests {
         // Booleano de preferência não passa por "normalização": preserva o true.
         assert!(normalized.thinking_collapsed_by_default);
         assert_eq!(normalized.disabled_skills, vec!["pdf", "zeta"]);
+    }
+
+    #[test]
+    fn legacy_settings_without_locale_migrate_to_brazilian_portuguese() {
+        let settings = parse_settings_json("{}").expect("parse legado");
+        assert_eq!(settings.locale, "pt-BR");
+    }
+
+    #[test]
+    fn invalid_locale_type_falls_back_to_english() {
+        let settings = parse_settings_json(r#"{"locale": null}"#).expect("parse locale nulo");
+        assert_eq!(settings.locale, "en");
+    }
+
+    #[test]
+    fn supported_locales_are_preserved() {
+        for code in ["en", "pt-BR", "es"] {
+            let raw = format!(r#"{{"locale":"{code}"}}"#);
+            let settings = parse_settings_json(&raw).expect("parse locale suportado");
+            assert_eq!(settings.locale, code);
+        }
     }
 
     #[test]

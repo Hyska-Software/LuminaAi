@@ -105,7 +105,7 @@ pub async fn docker_pull_image(
 ) -> Result<String, String> {
     let image = image.trim();
     if image.is_empty() || image.chars().count() > 200 {
-        return Err("DOCKER_IMAGE_INVALID: informe uma imagem válida".to_string());
+        return Err(crate::i18n::t("docker.errors.invalidImage"));
     }
     let output = docker(
         &state,
@@ -138,7 +138,7 @@ pub async fn docker_validate_image(
 ) -> Result<DockerImageInfo, String> {
     let image = image.trim();
     if image.is_empty() || image.chars().count() > 200 {
-        return Err("DOCKER_IMAGE_INVALID: informe uma imagem válida".to_string());
+        return Err(crate::i18n::t("docker.errors.invalidImage"));
     }
     let inspect = docker(
         &state,

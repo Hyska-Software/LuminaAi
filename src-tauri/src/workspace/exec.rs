@@ -203,9 +203,9 @@ pub async fn run(
     command.process_group(0);
 
     let mut child = command.spawn().map_err(|e| {
-        ExecError::spawn(format!(
-            "não foi possível iniciar '{}': {e}",
-            req.program
+        ExecError::spawn(crate::i18n::t_args(
+            "workspace.errors.spawn",
+            &[("program", &req.program), ("error", &e.to_string())],
         ))
     })?;
     let pid = child.id().unwrap_or(0);
@@ -477,8 +477,8 @@ fn git_readonly_command(args: &[String]) -> bool {
     )
 }
 
-pub fn is_destructive_command(command: &str) -> Option<&'static str> {
-    static MATCHERS: OnceLock<(regex::RegexSet, Vec<&'static str>)> = OnceLock::new();
+pub fn is_destructive_command(command: &str) -> Option<String> {
+    static MATCHERS: OnceLock<(regex::RegexSet, Vec<String>)> = OnceLock::new();
     let (set, reasons) = MATCHERS.get_or_init(|| {
         let set = regex::RegexSet::new(reason_patterns())
             .expect("regex de comandos destrutivos deve compilar");
@@ -487,7 +487,7 @@ pub fn is_destructive_command(command: &str) -> Option<&'static str> {
     set.matches(command)
         .iter()
         .next()
-        .and_then(|index| reasons.get(index).copied())
+        .and_then(|index| reasons.get(index).cloned())
 }
 
 fn reason_patterns() -> Vec<&'static str> {
@@ -511,24 +511,24 @@ fn reason_patterns() -> Vec<&'static str> {
     ]
 }
 
-fn reasons() -> Vec<&'static str> {
+fn reasons() -> Vec<String> {
     vec![
-        "rm recursivo/forçado",
-        "Remove-Item -Recurse",
-        "Remove-Item -Force",
-        "del /s",
-        "formatação de disco",
-        "git reset --hard",
-        "git clean forçado",
-        "git push forçado",
-        "git branch -D",
-        "publicação de pacote",
-        "publicação de crate",
-        "DROP TABLE/DATABASE",
-        "desligar/reiniciar a máquina",
-        "formatação/gerenciamento de disco",
-        "pipe de download para shell",
-        "alteração de registro/execução",
+        crate::i18n::t("workspace.exec.reason.rmRecursive"),
+        "Remove-Item -Recurse".to_string(),
+        "Remove-Item -Force".to_string(),
+        "del /s".to_string(),
+        crate::i18n::t("workspace.exec.reason.formatDisk"),
+        "git reset --hard".to_string(),
+        crate::i18n::t("workspace.exec.reason.gitClean"),
+        crate::i18n::t("workspace.exec.reason.gitPush"),
+        "git branch -D".to_string(),
+        crate::i18n::t("workspace.exec.reason.packagePublish"),
+        crate::i18n::t("workspace.exec.reason.cratePublish"),
+        "DROP TABLE/DATABASE".to_string(),
+        crate::i18n::t("workspace.exec.reason.powerOff"),
+        crate::i18n::t("workspace.exec.reason.diskManagement"),
+        crate::i18n::t("workspace.exec.reason.downloadPipe"),
+        crate::i18n::t("workspace.exec.reason.registry"),
     ]
 }
 
@@ -1158,7 +1158,7 @@ mod tests {
         ];
         for (command, expected) in positives {
             assert_eq!(
-                is_destructive_command(command),
+                is_destructive_command(command).as_deref(),
                 Some(expected),
                 "comando: {command}"
             );

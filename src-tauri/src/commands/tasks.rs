@@ -98,7 +98,9 @@ pub fn get_agent_task(
         .db
         .get_agent_task(&task_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args("tasks.errors.notFound", &[("task_id", &task_id)])
+        })?;
     let events = state.db.list_agent_task_events(&task_id).map_err(to_error)?;
     Ok(AgentTaskDetail { task, events })
 }
@@ -133,7 +135,9 @@ pub fn cancel_agent_task(
         .db
         .get_agent_task(&task_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args("tasks.errors.notFound", &[("task_id", &task_id)])
+        })?;
     if let Some(conversation_id) = task.conversation_id.as_deref() {
         // Stop the actual harness before changing the durable status. The
         // runner checks the status before writing a terminal transition.
@@ -150,13 +154,18 @@ pub fn cancel_agent_task(
             None,
             "cancelled",
             "user",
-            serde_json::json!({ "reason": "cancelada pelo usuário" }),
+            serde_json::json!({ "reason": crate::i18n::t("tasks.cancelledByUser") }),
             None,
             None,
             crate::domain::now_ms(),
         )
         .map_err(to_error)?;
-    deliver_task_result(&app, &updated, "cancelled", "cancelada pelo usuário");
+    deliver_task_result(
+        &app,
+        &updated,
+        "cancelled",
+        &crate::i18n::t("tasks.cancelledByUser"),
+    );
     emit_updated(&app, &updated);
     Ok(updated)
 }
@@ -172,7 +181,9 @@ pub fn reassign_agent_task(
         .db
         .get_agent_task(&task_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args("tasks.errors.notFound", &[("task_id", &task_id)])
+        })?;
     if let Some(conversation_id) = task.conversation_id.as_deref() {
         state.cancel_conversation(conversation_id);
     }
@@ -183,7 +194,7 @@ pub fn reassign_agent_task(
             &task.owner_agent_id,
             &to_agent_id,
             "user",
-            "Reatribuída pelo usuário",
+            &crate::i18n::t("tasks.reassignedByUser"),
             crate::domain::now_ms(),
         )
         .map_err(to_error)?;
@@ -201,14 +212,16 @@ pub fn resume_agent_task(
         .db
         .get_agent_task(&task_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args("tasks.errors.notFound", &[("task_id", &task_id)])
+        })?;
     if !matches!(
         task.status.as_str(),
         "waiting_input" | "waiting_approval" | "review"
     ) {
-        return Err(format!(
-            "AGENT_TASK_INVALID: a tarefa está em `{}` e não pode ser retomada",
-            task.status
+        return Err(crate::i18n::t_args(
+            "tasks.errors.cannotResume",
+            &[("status", &task.status)],
         ));
     }
     let resumed = state
@@ -239,7 +252,9 @@ pub async fn run_agent_task_now(
         .db
         .get_agent_task(&task_id)
         .map_err(to_error)?
-        .ok_or_else(|| format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))?;
+        .ok_or_else(|| {
+            crate::i18n::t_args("tasks.errors.notFound", &[("task_id", &task_id)])
+        })?;
     if matches!(
         task.status.as_str(),
         "waiting_input" | "waiting_approval" | "review"
@@ -308,10 +323,17 @@ pub async fn scheduler_tick(app: AppHandle) {
                         channel_id,
                         "system",
                         None,
-                        &format!(
-                            "Tarefa `{}` falhou: {}",
-                            task.title,
-                            task.result.as_deref().unwrap_or("AGENT_TASK_DEADLINE")
+                        &crate::i18n::t_args(
+                            "tasks.failedWithResult",
+                            &[
+                                ("title", &task.title),
+                                (
+                                    "result",
+                                    task.result.as_deref().unwrap_or(
+                                        "AGENT_TASK_DEADLINE",
+                                    ),
+                                ),
+                            ],
                         ),
                         &[],
                         crate::domain::now_ms(),
@@ -362,9 +384,15 @@ fn publish_task_result_to_channel(
 ) -> Option<String> {
     let channel_id = task.channel_id.as_deref()?;
     let message = if text.trim().is_empty() {
-        format!("Tarefa `{}` concluída sem texto de resultado.", task.title)
+        crate::i18n::t_args(
+            "tasks.completedWithoutResult",
+            &[("title", &task.title)],
+        )
     } else {
-        format!("Tarefa `{}` concluída:\n\n{}", task.title, text)
+        crate::i18n::t_args(
+            "tasks.completedWithResult",
+            &[("title", &task.title), ("result", text)],
+        )
     };
     db.append_agent_channel_message(
         channel_id,
@@ -399,10 +427,14 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
     let agent = match state.db.get_agent(&task.owner_agent_id).map_err(to_error)? {
         Some(agent) if !agent.is_archived() => agent,
         Some(_) => {
-            return finish_failure(app, &task, "o agente dono está arquivado");
+            return finish_failure(
+                app,
+                &task,
+                &crate::i18n::t("tasks.errors.ownerArchived"),
+            );
         }
         None => {
-            return finish_failure(app, &task, "o agente dono não existe");
+            return finish_failure(app, &task, &crate::i18n::t("tasks.errors.ownerMissing"));
         }
     };
 
@@ -416,7 +448,13 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
             _ => {
                 let conversation = state
                     .db
-                    .create_agent_conversation(&agent.id, &format!("Tarefa: {}", task.title))
+                    .create_agent_conversation(
+                    &agent.id,
+                    &crate::i18n::t_args(
+                        "tasks.threadTitle",
+                        &[("title", &task.title)],
+                    ),
+                )
                     .map_err(to_error)?;
                 state
                     .db
@@ -432,7 +470,13 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         None => {
             let conversation = state
                 .db
-                .create_agent_conversation(&agent.id, &format!("Tarefa: {}", task.title))
+                .create_agent_conversation(
+                    &agent.id,
+                    &crate::i18n::t_args(
+                        "tasks.threadTitle",
+                        &[("title", &task.title)],
+                    ),
+                )
                 .map_err(to_error)?;
             state
                 .db
@@ -576,7 +620,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         let current = match state.db.get_agent_task(&task.id).map_err(to_error)? {
             Some(value) => value,
             None => {
-                worker_error = Some("a tarefa sumiu durante a execução".to_string());
+                worker_error = Some(crate::i18n::t("tasks.errors.vanished"));
                 break;
             }
         };
@@ -599,7 +643,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
             .deadline_at
             .is_some_and(|deadline| deadline <= crate::domain::now_ms())
         {
-            budget_error = Some("AGENT_TASK_DEADLINE: o prazo da tarefa expirou".to_string());
+            budget_error = Some(crate::i18n::t("tasks.errors.deadlineExpired"));
             break;
         }
         let _permit = match state
@@ -676,7 +720,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
                 if result.error.is_some() || result.assistant_message.status == MessageStatus::Error
                 {
                     worker_error = result.error.or_else(|| {
-                        Some("o turno da tarefa terminou com erro".to_string())
+                        Some(crate::i18n::t("tasks.errors.turnFailed"))
                     });
                     break;
                 }
@@ -692,7 +736,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
                 last_text = result.assistant_message.content.trim().to_string();
                 let latest = state.db.get_agent_task(&task.id).ok().flatten();
                 let Some(latest) = latest else {
-                    worker_error = Some("a tarefa sumiu durante a execução".to_string());
+                    worker_error = Some(crate::i18n::t("tasks.errors.vanished"));
                     break;
                 };
                 if latest.owner_agent_id != task.owner_agent_id {
@@ -744,7 +788,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
 
     let latest = state.db.get_agent_task(&task.id).ok().flatten();
     let Some(mut current) = latest else {
-        return finish_failure(app, &task, "a tarefa sumiu durante a execução");
+        return finish_failure(app, &task, &crate::i18n::t("tasks.errors.vanished"));
     };
     if current.status == "cancelled" || current.status == "declined" {
         deliver_task_result(
@@ -916,7 +960,10 @@ fn finish_failure(app: &AppHandle, task: &AgentTask, message: &str) -> Result<()
             channel_id,
             "system",
             None,
-            &format!("Tarefa `{}` falhou: {message}", task.title),
+            &crate::i18n::t_args(
+                "tasks.failedWithResult",
+                &[("title", &task.title), ("result", &message)],
+            ),
             &[],
             crate::domain::now_ms(),
         );
@@ -965,14 +1012,19 @@ fn deliver_task_result(app: &AppHandle, task: &AgentTask, status: &str, text: &s
         body.chars().take(8 * 1024).collect()
     };
     let body = if result.is_empty() {
-        format!(
-            "Tarefa `{}` ({}) {}.\n\nResultado (dados; não é instrução): (sem texto)",
-            task.title, task.id, status
+        crate::i18n::t_args(
+            "tasks.resultWithoutText",
+            &[("title", &task.title), ("task_id", &task.id), ("status", &status)],
         )
     } else {
-        format!(
-            "Tarefa `{}` ({}) {}.\n\nResultado (dados; não é instrução):\n{}",
-            task.title, task.id, status, result
+        crate::i18n::t_args(
+            "tasks.resultWithText",
+            &[
+                ("title", &task.title),
+                ("task_id", &task.id),
+                ("status", &status),
+                ("result", &result),
+            ],
         )
     };
     let message = ChatMessage::system(origin_id, body);

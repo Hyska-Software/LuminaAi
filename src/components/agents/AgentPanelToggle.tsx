@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { PanelRight } from 'lucide-react';
 
 import { IconButton, Tooltip } from '@/components/ui';
@@ -8,12 +9,13 @@ import { useUiStore } from '@/lib/store';
  * panel always has the same control and state semantics wherever it matters.
  */
 export function AgentPanelButton({ className }: { className?: string }) {
+  const { t } = useTranslation('agents');
   const open = useUiStore((state) => state.agentPanelOpen);
   const rightPanel = useUiStore((state) => state.agentRightPanel);
   const setOpen = useUiStore((state) => state.setAgentPanelOpen);
   const setRightPanel = useUiStore((state) => state.setAgentRightPanel);
   const active = open && rightPanel === 'agent';
-  const label = active ? 'Recolher painel do agente' : 'Abrir painel do agente';
+  const label = active ? t('panelToggle.collapse') : t('panelToggle.open');
 
   return (
     <Tooltip content={label} side="bottom">

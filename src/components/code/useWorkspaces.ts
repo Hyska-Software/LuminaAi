@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
+import { compareText } from '@/lib/i18n/format';
 import { useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import type { Workspace, WorkspaceContext } from '@/lib/types';
 import { createSerialRunner } from '@/lib/utils';
@@ -75,7 +77,7 @@ function sortWorkspaces(workspaces: Workspace[]): Workspace[] {
       Number(right.pinned) - Number(left.pinned) ||
       (left.sortOrder ?? 0) - (right.sortOrder ?? 0) ||
       (right.lastOpenedAt ?? right.updatedAt) - (left.lastOpenedAt ?? left.updatedAt) ||
-      left.name.localeCompare(right.name),
+      compareText(left.name, right.name),
   );
 }
 
@@ -124,7 +126,7 @@ export async function reorderWorkspaces(ids: string[]): Promise<void> {
     await runReorder(() => api.reorderWorkspaces(ids));
   } catch (error) {
     emit({ workspaces: previous });
-    toast.error('Não foi possível reordenar os projetos', { description: describeError(error) });
+    toast.error(t('code:workspaces.toast.reorderError'), { description: describeError(error) });
     await load(true);
   }
 }
@@ -135,7 +137,7 @@ async function bindConversation(conversationId: string, workspaceId: string | nu
     await api.setConversationWorkspace(conversationId, workspaceId);
     await useChatStore.getState().refreshConversations();
   } catch (error) {
-    toast.error('Não foi possível vincular a sessão ao workspace', {
+    toast.error(t('code:workspaces.toast.bindError'), {
       description: describeError(error),
     });
   }
@@ -171,7 +173,7 @@ export async function openFolder(options: OpenFolderOptions = {}): Promise<Works
   try {
     path = await api.pickWorkspaceFolder();
   } catch (error) {
-    toast.error('Não foi possível abrir o seletor de pasta', { description: describeError(error) });
+    toast.error(t('code:workspaces.toast.pickError'), { description: describeError(error) });
     return null;
   }
   if (!path) return null;
@@ -180,7 +182,7 @@ export async function openFolder(options: OpenFolderOptions = {}): Promise<Works
   try {
     workspace = await api.addWorkspace(path, false);
   } catch (error) {
-    toast.error('Não foi possível abrir a pasta', { description: describeError(error) });
+    toast.error(t('code:workspaces.toast.openError'), { description: describeError(error) });
     return null;
   }
 
@@ -223,13 +225,16 @@ export async function resolvePendingTrust(trusted: boolean): Promise<void> {
     }
     emit({ pendingTrust: null });
     await Promise.all([load(true), useChatStore.getState().refreshConversations()]);
-    toast.success(trusted ? 'Pasta confiada' : 'Pasta aberta em modo leitura', {
-      description: trusted
-        ? 'O agente pode ler, editar e executar comandos neste workspace.'
-        : 'O agente só pode ler arquivos até você confiar na pasta.',
-    });
+    toast.success(
+      trusted ? t('code:workspaces.toast.trusted') : t('code:workspaces.toast.readOnly'),
+      {
+        description: trusted
+          ? t('code:workspaces.toast.trustedDescription')
+          : t('code:workspaces.toast.readOnlyDescription'),
+      },
+    );
   } catch (error) {
-    toast.error('Não foi possível atualizar a confiança da pasta', {
+    toast.error(t('code:workspaces.toast.trustError'), {
       description: describeError(error),
     });
   }
@@ -243,7 +248,7 @@ export async function cancelPendingTrust(): Promise<void> {
   try {
     await api.removeWorkspace(pending.workspace.id);
   } catch (error) {
-    toast.error('Não foi possível cancelar a abertura da pasta', {
+    toast.error(t('code:workspaces.toast.cancelError'), {
       description: describeError(error),
     });
   }
@@ -260,7 +265,7 @@ export async function trustWorkspace(workspace: Workspace, trusted: boolean): Pr
     await api.setWorkspaceTrusted(workspace.id, trusted);
     await load(true);
   } catch (error) {
-    toast.error('Não foi possível atualizar a confiança da pasta', {
+    toast.error(t('code:workspaces.toast.trustError'), {
       description: describeError(error),
     });
   }
@@ -274,7 +279,7 @@ export async function renameWorkspace(workspace: Workspace, name: string): Promi
     await api.renameWorkspace(workspace.id, trimmed);
     await load(true);
   } catch (error) {
-    toast.error('Não foi possível renomear o workspace', { description: describeError(error) });
+    toast.error(t('code:workspaces.toast.renameError'), { description: describeError(error) });
   }
 }
 
@@ -286,7 +291,7 @@ export async function removeWorkspace(workspace: Workspace): Promise<void> {
   try {
     await api.removeWorkspace(workspace.id);
   } catch (error) {
-    toast.error('Não foi possível remover o workspace', { description: describeError(error) });
+    toast.error(t('code:workspaces.toast.removeError'), { description: describeError(error) });
     return;
   }
   useUiStore.getState().setWorkspaceSessions(workspace.id, []);
@@ -313,7 +318,7 @@ export async function refreshWorkspaceContext(id: string): Promise<WorkspaceCont
     }
     return context;
   } catch (error) {
-    toast.error('Não foi possível atualizar o workspace', { description: describeError(error) });
+    toast.error(t('code:workspaces.toast.refreshError'), { description: describeError(error) });
     return null;
   }
 }

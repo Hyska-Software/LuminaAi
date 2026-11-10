@@ -20,7 +20,10 @@ vi.mock('@/lib/api', () => ({
 }));
 
 // Imported after the mock above.
-import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
+import { i18n } from '@/lib/i18n';
+import { AUTONOMOUS_MODE_WARNING_KEY } from '@/lib/permissionModes';
+
+const AUTONOMOUS_MODE_WARNING = i18n.t('code:permissions.autonomousWarning');
 import { ToolsTab } from '@/components/settings/ToolsTab';
 import { useAppStore, useUiStore } from '@/lib/store';
 
@@ -249,8 +252,8 @@ describe('ToolsTab — ambiente de código', () => {
     expect(screen.getByText('1 do Zylara')).toBeTruthy();
     expect(screen.getByText('1 externa')).toBeTruthy();
     expect(screen.getByText('1 embutida')).toBeTruthy();
-    expect(screen.getByText('office-docx')).toBeTruthy();
-    expect(screen.getByText(/Criar documentos Word/)).toBeTruthy();
+    expect(screen.getByText('Documentos Word')).toBeTruthy();
+    expect(screen.getByText(/Cria documentos Word/)).toBeTruthy();
     expect(screen.getByText('relatorios')).toBeTruthy();
     expect(screen.getByText(/Padrão da empresa/)).toBeTruthy();
     expect(screen.getByText('git-helper')).toBeTruthy();

@@ -1,0 +1,210 @@
+{
+  "agentFallback": "the agent",
+  "plan": {
+    "title": "Plan"
+  },
+  "placeholder": {
+    "goal": "Describe the goal and the work to do…",
+    "agent": "Chat with {{name}}…",
+    "chat": "Ask something…",
+    "code": "Describe the task… @ for files, / for commands",
+    "codePlain": "Describe the task for the agent…"
+  },
+  "aria": {
+    "agent": "Message to {{name}}",
+    "code": "Task for the agent",
+    "chat": "Message to Zylara"
+  },
+  "actions": {
+    "attach": "Attach files",
+    "send": "Send message",
+    "sendNow": "Send now",
+    "sendNowTitle": "Interrupt the current response and send",
+    "queue": "Queue message",
+    "stop": "Stop response",
+    "openProviders": "Open Providers"
+  },
+  "goalChip": {
+    "tooltipActive": "Goal active — click to disable",
+    "disable": "Disable goal"
+  },
+  "tools": {
+    "webSearch": "Web search",
+    "fileCreation": "Create files"
+  },
+  "disclaimer": "Zylara can make mistakes. Check important information.",
+  "mention": {
+    "searchUnavailable": "File search is not available in this version.",
+    "title": "Workspace files",
+    "listAria": "Workspace files",
+    "searching": "Searching files…",
+    "emptyQuery": "No files found for “{{query}}”.",
+    "emptyWorkspace": "No files found in this workspace.",
+    "updating": "Updating…"
+  },
+  "mentionChips": {
+    "remove": "Remove mention of {{path}}"
+  },
+  "attachments": {
+    "previewOf": "Preview {{name}}",
+    "preview": "Preview",
+    "remove": "Remove {{name}}",
+    "notFound": "Attachment not found.",
+    "previewAria": "Preview of {{name}}",
+    "loadingPreview": "Loading preview…",
+    "pages": "{{count}} p.",
+    "filters": {
+      "documents": "Documents",
+      "images": "Images",
+      "all": "All files"
+    },
+    "pickerTitle": "Attach files",
+    "kinds": {
+      "image": "Image",
+      "text": "Text",
+      "code": "Code",
+      "unknown": "File"
+    }
+  },
+  "slash": {
+    "header": "Workspace commands",
+    "empty": "No command found.",
+    "listAria": "Code mode commands",
+    "groups": {
+      "session": "Session",
+      "plan": "Plan",
+      "goal": "Goal",
+      "git": "Git",
+      "context": "Context",
+      "project": "Project"
+    },
+    "commands": {
+      "plan": {
+        "title": "Plan before editing",
+        "description": "Enables Plan mode and inserts a plan request for the agent.",
+        "fill": "Plan the solution for this task before changing any files:\n"
+      },
+      "planOff": {
+        "title": "Leave Plan mode",
+        "description": "Disables Plan mode for the active session."
+      },
+      "goal": {
+        "title": "Create session goal",
+        "description": "Activates the goal chip; the next message describes the task and the agent creates the goal."
+      },
+      "permissions": {
+        "title": "Permission mode",
+        "description": "Shows where to switch between Read, Review, Edit and Autonomous."
+      },
+      "new": {
+        "title": "New session",
+        "description": "Creates a new code session in the current workspace."
+      },
+      "clear": {
+        "title": "Clear composer",
+        "description": "Clears the text and the file mentions."
+      },
+      "compact": {
+        "title": "Compact context",
+        "description": "Asks the backend to summarize this session's history."
+      },
+      "commit": {
+        "title": "Open Changes",
+        "description": "Opens the Changes panel to review and commit."
+      },
+      "test": {
+        "title": "Run checks",
+        "description": "Inserts a request to run tests/lint and fix failures.",
+        "fill": "Run the project checks with `run_checks` (tests first) and fix whatever fails. Show the exit code and what changed:\n"
+      },
+      "review": {
+        "title": "Review changes",
+        "description": "Inserts a request to review the current diff.",
+        "fill": "Review the current changes (git diff/status): point out bugs, risks and missing tests. If it makes sense, delegate a review with `task` (subagent_type: \"review\") and consolidate the result:\n"
+      },
+      "init": {
+        "title": "Generate AGENTS.md",
+        "description": "Inserts a request to document the project for agents.",
+        "fill": "Analyze this project and generate/update AGENTS.md with instructions for agents: build/test/lint commands, conventions, pitfalls and a directory map. Before writing, show me the proposed content:\n"
+      }
+    }
+  },
+  "toasts": {
+    "attachFailed": "Could not attach",
+    "compactNoSession": "No active session to compact",
+    "compactNoSessionHint": "Open a code session to compact the context.",
+    "compacted": "Context compacted",
+    "compactUnavailable": "Compaction not available yet",
+    "permissionsInComposer": "The permission mode lives in the message field",
+    "permissionsInComposerHint": "Use the Read / Review / Edit / Autonomous chip next to the attachment button.",
+    "noActiveSession": "No active session",
+    "noActiveSessionPlanOnHint": "Open a code session to enable Plan mode.",
+    "noActiveSessionPlanOffHint": "Open a code session to disable Plan mode.",
+    "planAlreadyActive": "Plan mode is already active",
+    "planEnabled": "Plan mode enabled",
+    "planDisabled": "Plan mode disabled"
+  },
+  "permissions": {
+    "readOnly": {
+      "label": "Read",
+      "description": "The agent can only read files and query the workspace."
+    },
+    "review": {
+      "label": "Review",
+      "description": "The agent can propose edits, but every write needs approval."
+    },
+    "edit": {
+      "label": "Edit",
+      "description": "The agent can edit files; commands need approval."
+    },
+    "autonomous": {
+      "label": "Autonomous",
+      "description": "The agent runs commands, edits, secret access and computer control without asking for confirmation."
+    }
+  },
+  "session": {
+    "permissionAria": "Permission mode: {{mode}}",
+    "permissionMenu": "Permission mode",
+    "planAria": "Plan mode: {{state}}",
+    "planStateOn": "enabled",
+    "planStateOff": "disabled",
+    "planTitleOn": "Plan mode active: the agent plans before editing",
+    "planTitleOff": "Enable Plan mode (plan before editing)",
+    "planTitle": "Plan, tasks and background jobs",
+    "planState": {
+      "planning": "Preparing",
+      "reviewing": "Awaiting approval",
+      "approved": "Approved"
+    },
+    "planWithState": "Plan · {{state}}",
+    "noPlan": "No plan in this session.",
+    "noTasks": "No task recorded.",
+    "noJobs": "No background job.",
+    "jobsTitle": "{{running}} running · {{total}} total"
+  },
+  "planMode": {
+    "tooltip": "Plan mode active — click to disable",
+    "disable": "Disable Plan mode",
+    "label": "Plan"
+  },
+  "goal": {
+    "tooltipActive": "Goal active — click to disable",
+    "tooltipIdle": "Create a goal: use /goal and describe the task in the next message.",
+    "disable": "Disable goal",
+    "create": "Create goal with /goal",
+    "pillAria": "Goal: {{status}} — {{round}}",
+    "pillTitle": "{{status}} — {{round}}",
+    "paused": "Goal paused",
+    "blocked": "Goal blocked",
+    "completed": "Goal completed",
+    "running": "Round in progress — the agent is working on the goal.",
+    "confirmBody": "Complete the goal? The agent stops continuing on its own in this session.",
+    "confirmAria": "Confirm goal completion",
+    "confirmAction": "Complete goal",
+    "pauseAfterRound": "Pause after this round",
+    "pauseAfterRoundHint": "The current round finishes before pausing.",
+    "newRound": "New round now",
+    "newRoundUnavailable": "Unavailable while a plan, pending approval/question or an exhausted budget exists.",
+    "costNote": "Each round is a full turn and consumes provider tokens."
+  }
+}

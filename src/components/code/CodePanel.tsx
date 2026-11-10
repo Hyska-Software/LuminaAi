@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   FileDiff,
   Files,
@@ -35,11 +36,18 @@ import { useWorkspacePanel } from './useWorkspacePanel';
 import { useWorkspaces } from './useWorkspaces';
 
 /** Tabs of the Code right panel (WORKBENCH §7). */
-const PANEL_TABS: ReadonlyArray<{ id: CodePanelTab; label: string; icon: LucideIcon }> = [
-  { id: 'files', label: 'Arquivos', icon: Files },
-  { id: 'changes', label: 'Alterações', icon: FileDiff },
-  { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
+const PANEL_TABS: ReadonlyArray<{ id: CodePanelTab; icon: LucideIcon }> = [
+  { id: 'files', icon: Files },
+  { id: 'changes', icon: FileDiff },
+  { id: 'terminal', icon: SquareTerminal },
 ];
+
+/** Stable catalog key per panel tab. */
+const PANEL_TAB_KEYS = {
+  files: 'code:panel.tabs.files',
+  changes: 'code:panel.tabs.changes',
+  terminal: 'code:panel.tabs.terminal',
+} as const;
 
 /** Single content region controlled by both tabs (only the active one renders). */
 const PANEL_BODY_ID = 'code-panel-body';
@@ -104,6 +112,7 @@ function PanelEmptyState({ icon: Icon, title, description }: EmptyStateProps) {
  * at least 480px.
  */
 export function CodePanel() {
+  const { t } = useTranslation('code');
   const open = useUiStore((state) => state.codePanelOpen);
   const tab = useUiStore((state) => state.codePanelTab);
   const setTab = useUiStore((state) => state.setCodePanelTab);
@@ -158,7 +167,7 @@ export function CodePanel() {
         const entries = await api.listWorkspaceFiles(workspaceId, path, 2);
         setLazyChildren((current) => ({ ...current, [path]: entries ?? [] }));
       } catch (error) {
-        toast.error('Não foi possível abrir a pasta', { description: String(error) });
+        toast.error(t('code:panel.toast.openFolderError'), { description: String(error) });
       } finally {
         setLazyLoading((current) => {
           const next = new Set(current);
@@ -261,14 +270,14 @@ export function CodePanel() {
 
   return (
     <aside
-      aria-label="Painel de arquivos e alterações"
+      aria-label={t('code:panel.aria')}
       style={{ width: layout.width }}
       className="relative z-10 flex h-full shrink-0 flex-col bg-surface"
     >
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
           role="tablist"
-          aria-label="Conteúdo do painel"
+          aria-label={t('code:panel.tablist')}
           className="flex min-w-0 flex-1 items-center gap-0.5"
         >
           {PANEL_TABS.map((entry) => {
@@ -289,8 +298,8 @@ export function CodePanel() {
                 }}
                 onClick={() => setTab(entry.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, entry.id)}
-                aria-label={entry.label}
-                title={entry.label}
+                aria-label={t(PANEL_TAB_KEYS[entry.id])}
+                title={t(PANEL_TAB_KEYS[entry.id])}
                 className={cn(
                   'flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium',
                   'transition-colors duration-150',
@@ -302,19 +311,19 @@ export function CodePanel() {
                 )}
               >
                 <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
-                {compactTabs ? null : entry.label}
+                {compactTabs ? null : t(PANEL_TAB_KEYS[entry.id])}
               </button>
             );
           })}
         </div>
 
-        <Tooltip content="Atualizar" side="bottom">
-          <IconButton label="Atualizar painel" size="sm" onClick={refreshAll}>
+        <Tooltip content={t('code:panel.refreshTooltip')} side="bottom">
+          <IconButton label={t('code:panel.refresh')} size="sm" onClick={refreshAll}>
             <RefreshCw aria-hidden className="size-3.5" />
           </IconButton>
         </Tooltip>
-        <Tooltip content="Recolher painel" side="bottom">
-          <IconButton label="Recolher painel" size="sm" onClick={() => setOpen(false)}>
+        <Tooltip content={t('code:panel.collapse')} side="bottom">
+          <IconButton label={t('code:panel.collapse')} size="sm" onClick={() => setOpen(false)}>
             <PanelRightClose className="size-4" />
           </IconButton>
         </Tooltip>
@@ -333,7 +342,7 @@ export function CodePanel() {
             <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border px-3 text-[12px] text-foreground-muted">
               <GitBranch aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
               <span className="min-w-0 flex-1 truncate">
-                {workspace ? workspace.name : 'Sem workspace'}
+                {workspace ? workspace.name : t('code:panel.workspaceNone')}
                 {branch ? ` · ${branch}` : ''}
               </span>
               {workspaceId && panel.gitStatus?.isRepo ? (
@@ -348,9 +357,9 @@ export function CodePanel() {
                     className="h-6 shrink-0 px-2 text-[11px]"
                     leftIcon={<History className="size-3.5" strokeWidth={1.75} />}
                     onClick={() => openCodeCommits(workspaceId)}
-                    aria-label="Ver histórico de commits"
+                    aria-label={t('code:panel.commitsHistoryAria')}
                   >
-                    Histórico
+                    {t('code:panel.commitsHistory')}
                   </Button>
                   <GitActionsMenu
                     workspaceId={workspaceId}
@@ -397,16 +406,16 @@ export function CodePanel() {
             ) : (
               <PanelEmptyState
                 icon={FolderOpen}
-                title="Nenhum workspace aberto"
-                description="Abra uma pasta na barra lateral para o agente ler, editar e rodar comandos aqui."
+                title={t('code:panel.empty.noWorkspaceTitle')}
+                description={t('code:panel.empty.noWorkspaceDescription')}
               />
             )}
           </div>
         ) : !workspaceId ? (
           <PanelEmptyState
             icon={FolderOpen}
-            title="Nenhum workspace aberto"
-            description="Abra uma pasta na barra lateral para o agente ler, editar e rodar comandos aqui."
+            title={t('code:panel.empty.noWorkspaceTitle')}
+            description={t('code:panel.empty.noWorkspaceDescription')}
           />
         ) : tab === 'terminal' ? (
           activeId ? (
@@ -414,8 +423,8 @@ export function CodePanel() {
           ) : (
             <PanelEmptyState
               icon={SquareTerminal}
-              title="Nenhuma sessão ativa"
-              description="Abra uma sessão para usar o terminal no diretório do workspace."
+              title={t('code:panel.empty.noSessionTitle')}
+              description={t('code:panel.empty.noSessionDescription')}
             />
           )
         ) : (
@@ -448,7 +457,7 @@ export function CodePanel() {
         min={SIDE_PANEL_WIDTH_MIN}
         max={layout.maxWidth}
         step={SIDE_PANEL_WIDTH_STEP}
-        label="Redimensionar painel de arquivos"
+        label={t('code:panel.resizer')}
         className="absolute inset-y-0 -left-2 z-10"
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}

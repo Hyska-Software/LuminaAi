@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from '@/lib/api';
 import type {
   ArtifactContent,
@@ -79,6 +80,7 @@ export function AttachmentPreviewDialog({
   attachment,
   onClose,
 }: AttachmentPreviewDialogProps) {
+  const { t } = useTranslation('composer');
   const [state, setState] = useState<ContentState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
 
@@ -90,7 +92,7 @@ export function AttachmentPreviewDialog({
       .then((content) => {
         if (cancelled) return;
         if (!content) {
-          setState({ status: 'error', message: 'Anexo não encontrado.' });
+          setState({ status: 'error', message: t('attachments.notFound') });
           return;
         }
         setState({ status: 'ready', content });
@@ -127,7 +129,9 @@ export function AttachmentPreviewDialog({
             <Badge tone="muted">{attachmentFormatLabel(attachment)}</Badge>
             <Badge tone="muted">{formatBytes(attachment.size)}</Badge>
             {attachment.pageCount ? (
-              <Badge tone="muted">{attachment.pageCount} pág.</Badge>
+              <Badge tone="muted">
+                {t('attachments.pages', { count: attachment.pageCount })}
+              </Badge>
             ) : null}
             {attachment.width && attachment.height ? (
               <Badge tone="muted">
@@ -139,11 +143,11 @@ export function AttachmentPreviewDialog({
 
         <div
           role="region"
-          aria-label={`Prévia de ${attachment.name}`}
+          aria-label={t('attachments.previewAria', { name: attachment.name })}
           className="h-[min(64vh,520px)] min-h-0 overflow-hidden border-t border-border"
         >
           {state.status === 'loading' ? (
-            <PreviewLoading label="Carregando prévia…" />
+            <PreviewLoading label={t('attachments.loadingPreview')} />
           ) : null}
 
           {state.status === 'error' ? (

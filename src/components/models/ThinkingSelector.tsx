@@ -1,4 +1,6 @@
+import { useTranslation } from 'react-i18next';
 import { effortLabel, reasoningUi } from '@/lib/catalog';
+import { formatNumber } from '@/lib/i18n/format';
 import type { ModelInfo, ReasoningSelection } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { SegmentedControl, Slider, type SegmentedOption } from '@/components/ui';
@@ -19,10 +21,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function formatTokens(value: number): string {
-  return value.toLocaleString('pt-BR');
-}
-
 /**
  * Reasoning controls driven by the catalog's `reasoningOptions`:
  * - toggle / efforts → segmented control (Desligado + esforços);
@@ -37,12 +35,13 @@ export function ThinkingSelector({
   disabled = false,
   className,
 }: ThinkingSelectorProps) {
+  const { t } = useTranslation('models');
   const ui = reasoningUi(model);
 
   if (!model || !ui.supported) {
     return (
       <p className={cn('text-xs leading-relaxed text-foreground-subtle', className)}>
-        Este modelo não expõe controle de raciocínio.
+        {t('thinking.empty')}
       </p>
     );
   }
@@ -62,14 +61,14 @@ export function ThinkingSelector({
 
   const options: SegmentedOption[] = [];
   if (!budgetOnly) {
-    if (ui.canDisable) options.push({ value: 'off', label: 'Desligado' });
+    if (ui.canDisable) options.push({ value: 'off', label: t('thinking.offLabel') });
     for (const effort of efforts) {
       options.push({ value: `effort:${effort}`, label: effortLabel(effort) });
     }
     if (!efforts.length && !ui.budget && ui.canDisable) {
-      options.push({ value: 'on', label: 'Ligado' });
+      options.push({ value: 'on', label: t('thinking.onLabel') });
     }
-    if (ui.budget) options.push({ value: 'budget', label: 'Orçamento' });
+    if (ui.budget) options.push({ value: 'budget', label: t('thinking.budgetLabel') });
   }
 
   let selected: string | null = null;
@@ -104,9 +103,11 @@ export function ThinkingSelector({
     <div className={cn('flex flex-col gap-3', className)}>
       {!compact ? (
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[13px] font-medium text-foreground">Modo de pensamento</span>
+          <span className="text-[13px] font-medium text-foreground">{t('thinking.modeLabel')}</span>
           {budgetOnly ? (
-            <span className="text-xs tabular-nums text-foreground-muted">{formatTokens(activeBudget)} tokens</span>
+            <span className="text-xs tabular-nums text-foreground-muted">
+              {t('thinking.tokens', { value: formatNumber(activeBudget) })}
+            </span>
           ) : null}
         </div>
       ) : null}
@@ -117,7 +118,7 @@ export function ThinkingSelector({
           value={selected}
           onChange={handleModeChange}
           size={compact ? 'sm' : 'md'}
-          ariaLabel="Modo de pensamento"
+          ariaLabel={t('thinking.modeLabel')}
           disabled={disabled}
           fullWidth
           className="flex-wrap"
@@ -126,18 +127,21 @@ export function ThinkingSelector({
 
       {showBudget ? (
         <Slider
-          label={compact ? undefined : 'Orçamento de raciocínio'}
-          valueLabel={`${formatTokens(activeBudget)} tokens`}
+          label={compact ? undefined : t('thinking.budgetSliderLabel')}
+          valueLabel={t('thinking.tokens', { value: formatNumber(activeBudget) })}
           value={activeBudget}
           min={budgetMin}
           max={budgetMax}
           step={256}
           disabled={disabled}
           onValueChange={(budget) => onChange({ mode: 'budget', budget })}
-          aria-label="Orçamento de raciocínio em tokens"
+          aria-label={t('thinking.budgetSliderAria')}
           description={
             !compact
-              ? `De ${formatTokens(budgetMin)} a ${formatTokens(budgetMax)} tokens reservados para o raciocínio.`
+              ? t('thinking.budgetRange', {
+                  min: formatNumber(budgetMin),
+                  max: formatNumber(budgetMax),
+                })
               : undefined
           }
         />
@@ -145,7 +149,7 @@ export function ThinkingSelector({
 
       {!compact && !ui.budget && efforts.length === 0 && !ui.canDisable && !options.length ? (
         <p className="text-xs leading-relaxed text-foreground-subtle">
-          Este modelo não expõe controle de raciocínio.
+          {t('thinking.empty')}
         </p>
       ) : null}
     </div>

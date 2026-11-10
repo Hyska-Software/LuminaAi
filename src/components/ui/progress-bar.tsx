@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 export interface ProgressBarProps {
@@ -34,6 +35,7 @@ export function ProgressBar({
   label,
   indeterminate,
 }: ProgressBarProps) {
+  const { t } = useTranslation('common');
   const isIndeterminate = indeterminate ?? value == null;
   const pct =
     value == null || !Number.isFinite(value) ? 0 : Math.min(100, Math.max(0, (value / max) * 100));
@@ -45,7 +47,7 @@ export function ProgressBar({
       aria-valuemin={isIndeterminate ? undefined : 0}
       aria-valuemax={isIndeterminate ? undefined : max}
       aria-valuenow={isIndeterminate ? undefined : Math.round(value ?? 0)}
-      aria-valuetext={isIndeterminate ? 'Carregando' : undefined}
+      aria-valuetext={isIndeterminate ? t('status.loading') : undefined}
       className={cn('w-full overflow-hidden rounded-full bg-surface-active', SIZES[size], className)}
     >
       {isIndeterminate ? (

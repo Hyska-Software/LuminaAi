@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CalendarClock,
   ChevronRight,
@@ -28,6 +29,7 @@ import { cn } from '@/lib/utils';
 
 /** Routine list, quick actions and execution log links for one agent. */
 export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) {
+  const { t } = useTranslation('agents');
   const { agent, openThread } = context;
   const [routines, setRoutines] = useState<AgentRoutine[]>([]);
   const [loading, setLoading] = useState(false);
@@ -65,7 +67,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
     } catch (caught) {
-      toast.error('Não foi possível alterar a rotina', { description: String(caught) });
+      toast.error(t('routinesView.updateError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -79,15 +81,17 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
         current.map((entry) => (entry.id === updated.id ? updated : entry)),
       );
       if (updated.lastStatus === 'queued') {
-        toast.success('Rotina enfileirada', { description: routine.title });
+        toast.success(t('routinesView.queued'), { description: routine.title });
       } else {
-        toast.success('Rotina executada', {
+        toast.success(t('routinesView.ran'), {
           description:
-            updated.lastStatus === 'error' ? updated.lastError ?? 'Erro' : routine.title,
+            updated.lastStatus === 'error'
+              ? updated.lastError ?? t('panelRoutines.error')
+              : routine.title,
         });
       }
     } catch (caught) {
-      toast.error('Não foi possível executar a rotina', { description: String(caught) });
+      toast.error(t('routinesView.runError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -97,7 +101,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
     // eslint-disable-next-line no-alert -- destructive action needs a native confirmation here
     if (
       !window.confirm(
-        `Excluir a rotina “${routine.title}”? A conversa principal do agente é preservada.`,
+        t('panelRoutines.deleteConfirm', { title: routine.title }),
       )
     ) {
       return;
@@ -107,9 +111,9 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
       await api.deleteAgentRoutine(routine.id);
       setRoutines((current) => current.filter((entry) => entry.id !== routine.id));
       if (editor?.routine?.id === routine.id) setEditor(null);
-      toast.success('Rotina excluída');
+      toast.success(t('routinesView.deleted'));
     } catch (caught) {
-      toast.error('Não foi possível excluir a rotina', { description: String(caught) });
+      toast.error(t('routinesView.deleteError'), { description: String(caught) });
     } finally {
       setBusyId(null);
     }
@@ -158,9 +162,9 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
             <div className="flex items-center gap-2">
               <CalendarClock className="size-4 text-accent" />
               <div>
-                <p className="text-[13px] font-medium text-foreground">Rotinas</p>
+                <p className="text-[13px] font-medium text-foreground">{t('panel.tabs.routines')}</p>
                 <p className="text-[11px] text-foreground-muted">
-                  {routines.length} agendamento(s) para {agent.name}
+                  {t('panelRoutines.schedules', { count: routines.length, name: agent.name })}
                 </p>
               </div>
             </div>
@@ -169,7 +173,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
               variant="ghost"
               onClick={() => void load()}
               disabled={loading}
-              aria-label="Recarregar rotinas"
+              aria-label={t('routinesView.reloadAria')}
             >
               {loading ? (
                 <Loader2 className="size-3.5 animate-spin" />
@@ -181,7 +185,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
           <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setEditor({ routine: null })}>
               <Plus className="mr-1.5 size-3.5" />
-              Nova rotina
+              {t('routinesView.newRoutine')}
             </Button>
             <Button
               size="sm"
@@ -189,7 +193,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
               onClick={() => setLogsOpen((current) => !current)}
             >
               <ScrollText className="mr-1.5 size-3.5" />
-              Registros de execução
+              {t('panelRoutines.logs')}
             </Button>
           </div>
         </section>
@@ -201,9 +205,9 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
         ) : null}
 
         {logsOpen ? (
-          <section aria-label="Registros de execução" className="flex flex-col gap-2">
+          <section aria-label={t('panelRoutines.logs')} className="flex flex-col gap-2">
             <h3 className="text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">
-              Últimas execuções
+              {t('panelRoutines.lastRuns')}
             </h3>
             {runsLoading ? (
               <div className="flex items-center justify-center py-4">
@@ -211,7 +215,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
               </div>
             ) : runs.length === 0 ? (
               <p className="rounded-lg border border-border bg-surface-raised/40 px-3 py-3 text-[11px] text-foreground-muted">
-                Nenhuma execução registrada ainda.
+                {t('panelRoutines.noRuns')}
               </p>
             ) : (
               runs.map(({ run, routine }) => {
@@ -249,8 +253,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
             </div>
           ) : routines.length === 0 ? (
             <p className="rounded-xl border border-border bg-surface-raised/40 px-3 py-6 text-center text-[12px] text-foreground-muted">
-              Nenhuma rotina. Crie um agendamento para {agent.name} trabalhar sozinho enquanto o
-              app estiver aberto.
+              {t('panelRoutines.empty', { name: agent.name })}
             </p>
           ) : (
             routines.map((routine) => {
@@ -274,7 +277,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                         {routineScheduleLabel(routine)}
                       </p>
                       <p className="mt-0.5 text-[10px] text-foreground-subtle">
-                        {routine.enabled ? 'Ativa' : 'Pausada'} ·{' '}
+                        {routine.enabled ? t('routineEditor.active') : t('routinesView.paused')} ·{' '}
                         {routineLastRunLabel(routine)} · {routineNextRunLabel(routine)}
                       </p>
                     </div>
@@ -284,7 +287,12 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                         checked={routine.enabled}
                         onCheckedChange={() => void toggle(routine)}
                         disabled={busyId === routine.id}
-                        aria-label={`${routine.enabled ? 'Pausar' : 'Ativar'} ${routine.title}`}
+                        aria-label={t('panelRoutines.switchAria', {
+                          action: routine.enabled
+                            ? t('panelRoutines.pause')
+                            : t('panelRoutines.enable'),
+                          title: routine.title,
+                        })}
                       />
                     </div>
                   </div>
@@ -300,7 +308,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                       ) : (
                         <Play className="mr-1.5 size-3.5" />
                       )}
-                      Executar agora
+                      {t('routinesView.runNow')}
                     </Button>
                     <Button
                       size="sm"
@@ -309,7 +317,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                       onClick={() => setEditor({ routine })}
                     >
                       <Pencil className="mr-1.5 size-3.5" />
-                      Editar
+                      {t('common:actions.edit')}
                     </Button>
                     <Button
                       size="sm"
@@ -318,7 +326,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                       onClick={() => void remove(routine)}
                     >
                       <Trash2 className="mr-1.5 size-3.5" />
-                      Excluir
+                      {t('common:actions.delete')}
                     </Button>
                     {routine.conversationId ? (
                       <Button
@@ -327,7 +335,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                         onClick={() => openThread(routine.conversationId!)}
                       >
                         <ScrollText className="mr-1.5 size-3.5" />
-                        Abrir conversa
+                        {t('routinesView.openConversation')}
                       </Button>
                     ) : null}
                   </div>

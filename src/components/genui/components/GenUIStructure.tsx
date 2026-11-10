@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { openExternal } from '@/lib/genui/open-external';
@@ -76,6 +77,7 @@ const SOURCE_BASE =
 
 /** Chip de fonte/link externo: quadrado com a inicial do domínio + label. */
 export function GenUISource({ props }: GenUINodeProps) {
+  const { t } = useTranslation('genui');
   const label = propString(props, 'label');
   const href = propString(props, 'href');
   const title = propString(props, 'title');
@@ -103,7 +105,7 @@ export function GenUISource({ props }: GenUINodeProps) {
       // O `title` é um detalhe opcional (ex.: manchete); o nome acessível é o
       // aria-label explícito para não depender do texto truncado.
       title={title || undefined}
-      aria-label={`Abrir ${label} em nova aba`}
+      aria-label={t('source.openAria', { label })}
       onClick={() => void openExternal(safeHref)}
       className={cn(
         SOURCE_BASE,
@@ -120,6 +122,7 @@ export function GenUISource({ props }: GenUINodeProps) {
 
 /** Lista com ícone/estado por item (simulações, etapas, capacidades). */
 export function GenUIChecklist({ props }: GenUINodeProps) {
+  useTranslation('genui');
   const items = propObjectArray(props, 'items');
   if (!items.length) return null;
 

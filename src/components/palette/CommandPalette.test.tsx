@@ -34,6 +34,7 @@ import {
   useUiStore,
 } from '@/lib/store';
 import { PALETTE_RECENTS_KEY } from '@/lib/palette/recents';
+import { i18n } from '@/lib/i18n';
 
 function settings(overrides: Partial<Settings> = {}): Settings {
   return {
@@ -515,7 +516,9 @@ describe('CommandPalette — comandos contextuais e deep-links', () => {
     renderPalette();
     typeQuery('trocar modelo');
 
-    const option = await screen.findByRole('option', { name: new RegExp(MODEL_LOCKED_TITLE) });
+    const option = await screen.findByRole('option', {
+      name: new RegExp(i18n.t(MODEL_LOCKED_TITLE)),
+    });
     fireEvent.click(option);
     await waitFor(() => expect(vi.mocked(toast.info)).toHaveBeenCalled());
     expect(mocks.saveSettings).not.toHaveBeenCalled();
@@ -537,7 +540,7 @@ describe('CommandPalette — comandos contextuais e deep-links', () => {
 
     await waitFor(() => expect(useUiStore.getState().modelPickerOpen).toBe(true));
     expect(vi.mocked(toast.info)).not.toHaveBeenCalledWith(
-      MODEL_LOCKED_TITLE,
+      i18n.t(MODEL_LOCKED_TITLE),
       expect.anything(),
     );
   });
@@ -555,14 +558,17 @@ describe('CommandPalette — comandos contextuais e deep-links', () => {
     typeQuery('trocar modelo');
 
     const option = await screen.findByRole('option', {
-      name: new RegExp(MODEL_STREAMING_LOCKED_TITLE),
+      name: new RegExp(i18n.t(MODEL_STREAMING_LOCKED_TITLE)),
     });
     fireEvent.click(option);
 
     await waitFor(() =>
-      expect(vi.mocked(toast.info)).toHaveBeenCalledWith(MODEL_STREAMING_LOCKED_TITLE, {
-        description: MODEL_STREAMING_LOCKED_DESCRIPTION,
-      }),
+      expect(vi.mocked(toast.info)).toHaveBeenCalledWith(
+        i18n.t(MODEL_STREAMING_LOCKED_TITLE),
+        {
+          description: i18n.t(MODEL_STREAMING_LOCKED_DESCRIPTION),
+        },
+      ),
     );
     expect(useUiStore.getState().modelPickerOpen).toBe(false);
   });

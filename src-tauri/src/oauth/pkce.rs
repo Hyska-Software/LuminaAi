@@ -15,7 +15,12 @@ pub struct PkceCodes {
 
 fn random_b64(bytes: usize) -> Result<String> {
     let mut buf = vec![0_u8; bytes];
-    getrandom::getrandom(&mut buf).map_err(|error| anyhow!("falha ao gerar entropia: {error}"))?;
+    getrandom::getrandom(&mut buf).map_err(|error| {
+        anyhow!(crate::i18n::t_args(
+            "oauth.errors.entropy",
+            &[("error", &error.to_string())],
+        ))
+    })?;
     Ok(URL_SAFE_NO_PAD.encode(buf))
 }
 

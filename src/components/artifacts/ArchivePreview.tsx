@@ -1,4 +1,6 @@
 import { File, FileArchive, Folder } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { formatNumber } from '@/lib/i18n/format';
 import { cn, formatBytes } from '@/lib/utils';
 import { Badge } from '@/components/ui';
 import { BinaryPreview } from './BinaryPreview';
@@ -10,13 +12,19 @@ import {
   type ArtifactViewProps,
 } from './previewSupport';
 
-/** `formatBytes` with the pt-BR decimal comma ("1,2 MB") used in archive summaries. */
-export function archiveSizeLabel(bytes: number): string {
-  return formatBytes(bytes).replace('.', ',');
-}
+const SIZE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
 
-function pluralize(count: number, singular: string, plural: string): string {
-  return `${count} ${count === 1 ? singular : plural}`;
+/** Byte size with the locale decimal separator ("1,2 MB" in pt-BR, "1.2 MB" in en). */
+export function archiveSizeLabel(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return `${formatNumber(0)} ${SIZE_UNITS[0]}`;
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < SIZE_UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${formatNumber(rounded, { maximumFractionDigits: 1 })} ${SIZE_UNITS[unit]}`;
 }
 
 /**
@@ -25,10 +33,11 @@ function pluralize(count: number, singular: string, plural: string): string {
  * archive formats come back as `unsupported` and use the binary card.
  */
 export function ArchivePreview({ content, className }: ArtifactViewProps) {
+  const { t } = useTranslation('artifacts');
   const { state, retry } = useArtifactPreview(content.artifact.id);
 
   if (state.status === 'loading') {
-    return <PreviewLoading label="Lendo arquivo compactado…" className={className} />;
+    return <PreviewLoading label={t('artifacts:archive.loading')} className={className} />;
   }
   if (state.status === 'error') {
     return <PreviewError message={state.message} onRetry={retry} className={className} />;
@@ -43,22 +52,25 @@ export function ArchivePreview({ content, className }: ArtifactViewProps) {
         detail={
           preview?.kind === 'unsupported'
             ? preview.reason
-            : 'Não foi possível listar as entradas do arquivo compactado.'
+            : t('artifacts:archive.listError')
         }
       />
     );
   }
 
   if (!preview.entries.length) {
-    return <PreviewEmpty message="Arquivo compactado vazio." className={className} />;
+    return <PreviewEmpty message={t('artifacts:archive.empty')} className={className} />;
   }
 
   const files = preview.entries.filter((entry) => !entry.isDir);
   const folders = preview.entries.filter((entry) => entry.isDir);
   const totalSize = files.reduce((sum, entry) => sum + Math.max(0, entry.size), 0);
-  const summary = `${pluralize(files.length, 'arquivo', 'arquivos')} · ${archiveSizeLabel(totalSize)}`;
+  const summary = t('artifacts:archive.summary', {
+    count: files.length,
+    size: archiveSizeLabel(totalSize),
+  });
   const directorySummary = folders.length
-    ? ` · ${pluralize(folders.length, 'pasta', 'pastas')}`
+    ? t('artifacts:archive.directorySummary', { count: folders.length })
     : '';
 
   return (
@@ -68,20 +80,23 @@ export function ArchivePreview({ content, className }: ArtifactViewProps) {
         <Badge tone="neutral" size="sm">
           {preview.format.toUpperCase() || 'ZIP'}
         </Badge>
-        <span className="tabular-nums" title="Resumo do conteúdo">
+        <span className="tabular-nums" title={t('artifacts:archive.summaryTitle')}>
           {summary}
           {directorySummary}
         </span>
         {preview.truncated ? (
           <span role="status" className="ml-auto text-foreground-subtle">
-            Mostrando {preview.entries.length} de {preview.totalEntries} entradas
+            {t('artifacts:archive.showing', {
+              shown: preview.entries.length,
+              total: preview.totalEntries,
+            })}
           </span>
         ) : null}
       </div>
 
       <ul
         role="list"
-        aria-label="Entradas do arquivo compactado"
+        aria-label={t('artifacts:archive.entriesAria')}
         className="min-h-0 flex-1 divide-y divide-border overflow-y-auto"
       >
         {preview.entries.map((entry, index) => (

@@ -1,9 +1,9 @@
 /**
  * Settings dialog tabs (DESIGN §9).
  *
- * Single source of truth for the tab ids and labels shared by the settings
- * dialog and the command palette ("Configurações › Dados"). Icons stay in the
- * UI layer (`components/settings`) because they are presentation-only.
+ * Single source of truth for the tab ids and translation keys shared by the
+ * settings dialog and the command palette ("Settings › Data"). Icons stay in
+ * the UI layer (`components/settings`) because they are presentation-only.
  */
 
 export type SettingsTabId =
@@ -18,19 +18,19 @@ export type SettingsTabId =
 
 export interface SettingsTabDefinition {
   id: SettingsTabId;
-  label: string;
+  labelKey: string;
 }
 
-export const SETTINGS_TABS: readonly SettingsTabDefinition[] = [
-  { id: 'general', label: 'Geral' },
-  { id: 'providers', label: 'Provedores' },
-  { id: 'model', label: 'Modelo padrão' },
-  { id: 'instructions', label: 'Instruções' },
-  { id: 'tools', label: 'Ferramentas' },
-  { id: 'agents', label: 'Agentes' },
-  { id: 'data', label: 'Dados' },
-  { id: 'about', label: 'Sobre' },
-];
+export const SETTINGS_TABS = [
+  { id: 'general', labelKey: 'tabs.general' },
+  { id: 'providers', labelKey: 'tabs.providers' },
+  { id: 'model', labelKey: 'tabs.model' },
+  { id: 'instructions', labelKey: 'tabs.instructions' },
+  { id: 'tools', labelKey: 'tabs.tools' },
+  { id: 'agents', labelKey: 'tabs.agents' },
+  { id: 'data', labelKey: 'tabs.data' },
+  { id: 'about', labelKey: 'tabs.about' },
+] as const satisfies readonly SettingsTabDefinition[];
 
 export const DEFAULT_SETTINGS_TAB: SettingsTabId = 'general';
 

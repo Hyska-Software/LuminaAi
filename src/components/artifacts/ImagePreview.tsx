@@ -11,6 +11,7 @@ import {
   type SyntheticEvent,
 } from 'react';
 import { Maximize2, Minimize2, ZoomIn, ZoomOut } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { isSvgMarkup, sanitizeSvg } from '@/lib/genui/sanitize';
 import { cn } from '@/lib/utils';
 import { Badge, Button, IconButton } from '@/components/ui';
@@ -286,6 +287,7 @@ function ViewerToolbar({
   dimensions: string | null;
   controls: ViewerControls;
 }) {
+  const { t } = useTranslation('artifacts');
   return (
     <div
       role="toolbar"
@@ -300,13 +302,13 @@ function ViewerToolbar({
           'px-1 text-[11px] tabular-nums',
           dimensions ? 'text-foreground-muted' : 'text-foreground-subtle',
         )}
-        title="Dimensões da imagem em pixels"
+        title={t('artifacts:image.dimensionsTitle')}
       >
         {dimensions ?? '—'}
       </span>
       <span aria-hidden className="mx-1 h-4 w-px bg-border" />
       <IconButton
-        label="Diminuir zoom"
+        label={t('artifacts:image.zoomOut')}
         size="sm"
         disabled={controls.zoom <= MIN_ZOOM}
         onClick={controls.zoomOut}
@@ -320,7 +322,7 @@ function ViewerToolbar({
         {Math.round(controls.zoom * 100)}%
       </span>
       <IconButton
-        label="Aumentar zoom"
+        label={t('artifacts:image.zoomIn')}
         size="sm"
         disabled={controls.zoom >= MAX_ZOOM}
         onClick={controls.zoomIn}
@@ -335,7 +337,7 @@ function ViewerToolbar({
         onClick={controls.fitToWindow}
         leftIcon={<Minimize2 aria-hidden className="size-3.5" strokeWidth={1.8} />}
       >
-        Ajustar à janela
+        {t('artifacts:image.fit')}
       </Button>
       <Button
         size="sm"
@@ -344,7 +346,7 @@ function ViewerToolbar({
         onClick={controls.actualSize}
         leftIcon={<Maximize2 aria-hidden className="size-3.5" strokeWidth={1.8} />}
       >
-        Tamanho real
+        {t('artifacts:image.actual')}
       </Button>
     </div>
   );
@@ -399,6 +401,7 @@ function isDataUrlPayload(value: string): boolean {
  * back to the binary card.
  */
 export function ImagePreview({ content, className, showArtifactActions }: ArtifactViewProps) {
+  const { t } = useTranslation('artifacts');
   const { artifact, dataBase64, content: text } = content;
   const { state, retry } = useArtifactPreview(artifact.id);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -441,16 +444,14 @@ export function ImagePreview({ content, className, showArtifactActions }: Artifa
 
   if (!src) {
     if (state.status === 'loading') {
-      return <PreviewLoading label="Carregando imagem…" className={className} />;
+      return <PreviewLoading label={t('artifacts:image.loading')} className={className} />;
     }
     return (
       <BinaryPreview
         content={content}
         className={className}
         showArtifactActions={showArtifactActions}
-        detail={
-          errorMessage ?? unsupportedReason ?? 'A imagem não tem dados para visualização.'
-        }
+        detail={errorMessage ?? unsupportedReason ?? t('artifacts:image.noData')}
         onRetry={errorMessage ? retry : undefined}
       />
     );
@@ -462,7 +463,7 @@ export function ImagePreview({ content, className, showArtifactActions }: Artifa
         content={content}
         className={className}
         showArtifactActions={showArtifactActions}
-        detail={unsupportedReason ?? 'Não foi possível decodificar a imagem.'}
+        detail={unsupportedReason ?? t('artifacts:image.decodeError')}
         onRetry={() => {
           setLoadFailed(false);
           retry();
@@ -479,12 +480,12 @@ export function ImagePreview({ content, className, showArtifactActions }: Artifa
   return (
     <div className={cn('flex h-full flex-col', className)}>
       <ViewerToolbar
-        label="Controles da imagem"
+        label={t('artifacts:image.toolbarAria')}
         formatLabel={formatLabel}
         dimensions={dimensions}
         controls={controls}
       />
-      <ViewerStage label="Visualização da imagem" controls={controls}>
+      <ViewerStage label={t('artifacts:image.stageAria')} controls={controls}>
         <img
           src={src}
           alt={artifact.name}
@@ -509,6 +510,7 @@ export function ImagePreview({ content, className, showArtifactActions }: Artifa
  * `javascript:` URLs). Markup that is not an SVG document is shown as text.
  */
 export function SvgPreview({ content, className }: ArtifactViewProps) {
+  const { t } = useTranslation('artifacts');
   const { artifact, content: markup } = content;
   const raw = markup ?? '';
   const sanitized = useMemo(() => sanitizeSvg(raw), [raw]);
@@ -524,7 +526,7 @@ export function SvgPreview({ content, className }: ArtifactViewProps) {
             SVG
           </Badge>
           <span className="text-[11px] text-foreground-subtle">
-            Markup não reconhecido como SVG; exibindo como texto.
+            {t('artifacts:image.svgNotRecognized')}
           </span>
         </div>
         <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[12px] leading-relaxed text-foreground-muted">
@@ -539,12 +541,12 @@ export function SvgPreview({ content, className }: ArtifactViewProps) {
   return (
     <div className={cn('flex h-full flex-col', className)}>
       <ViewerToolbar
-        label="Controles do SVG"
+        label={t('artifacts:image.svgToolbarAria')}
         formatLabel="SVG"
         dimensions={dimensions ? `${dimensions.width} × ${dimensions.height}` : null}
         controls={controls}
       />
-      <ViewerStage label="Visualização do SVG" controls={controls}>
+      <ViewerStage label={t('artifacts:image.svgStageAria')} controls={controls}>
         <div
           style={controls.contentStyle}
           className={cn(

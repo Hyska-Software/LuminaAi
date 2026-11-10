@@ -90,58 +90,60 @@ fn toggle(settings: &mut Settings, name: &str, enabled: bool) -> bool {
 fn remove_user_skill(data_dir: &Path, skill: &Skill) -> anyhow::Result<()> {
     match skill.source {
         SkillSource::User => {}
-        SkillSource::Bundled => bail!(
-            "a skill `{}` é embutida e não pode ser excluída; desative-a em vez disso",
-            skill.name
-        ),
-        external => bail!(
-            "a skill `{}` vem de `{}` e é somente leitura; desative-a em vez disso",
-            skill.name,
-            external.as_str()
-        ),
+        SkillSource::Bundled => bail!(crate::i18n::t_args(
+            "skills.errors.bundledReadonly",
+            &[("skill", &skill.name)],
+        )),
+        external => bail!(crate::i18n::t_args(
+            "skills.errors.externalReadonly",
+            &[("skill", &skill.name), ("source", external.as_str())],
+        )),
     }
 
     let root = user_skills_dir(data_dir);
     let root = root.canonicalize().with_context(|| {
-        format!(
-            "pasta de skills do usuário não encontrada: {}",
-            root.display()
+        crate::i18n::t_args(
+            "skills.errors.userDirMissing",
+            &[("path", &root.display().to_string())],
         )
     })?;
 
     let metadata = std::fs::symlink_metadata(&skill.dir).with_context(|| {
-        format!(
-            "skill `{}` não encontrada em {}",
-            skill.name,
-            skill.dir.display()
+        crate::i18n::t_args(
+            "skills.errors.notFoundAt",
+            &[("skill", &skill.name), ("path", &skill.dir.display().to_string())],
         )
     })?;
     if metadata.file_type().is_symlink() {
-        bail!(
-            "a skill `{}` é um link simbólico; recusando excluir",
-            skill.name
-        );
+        bail!(crate::i18n::t_args(
+            "skills.errors.symlink",
+            &[("skill", &skill.name)],
+        ));
     }
     if !metadata.is_dir() {
-        bail!("a skill `{}` não é um diretório", skill.name);
+        bail!(crate::i18n::t_args(
+            "skills.errors.notDirectory",
+            &[("skill", &skill.name)],
+        ));
     }
 
     let dir = skill.dir.canonicalize().with_context(|| {
-        format!(
-            "não foi possível resolver o caminho da skill `{}`",
-            skill.name
+        crate::i18n::t_args(
+            "skills.errors.resolvePath",
+            &[("skill", &skill.name)],
         )
     })?;
     if dir.parent() != Some(root.as_path()) {
-        bail!(
-            "o caminho da skill `{}` não é um filho direto de {}",
-            skill.name,
-            root.display()
-        );
+        bail!(crate::i18n::t_args(
+            "skills.errors.notDirectChild",
+            &[("skill", &skill.name), ("path", &root.display().to_string())],
+        ));
     }
 
     std::fs::remove_dir_all(&dir)
-        .with_context(|| format!("falha ao excluir a skill `{}`", skill.name))?;
+        .with_context(|| {
+            crate::i18n::t_args("skills.errors.deleteFailed", &[("skill", &skill.name)])
+        })?;
     Ok(())
 }
 
@@ -155,13 +157,15 @@ fn find_skill_with_roots(
 ) -> anyhow::Result<Skill> {
     let name = name.trim();
     if name.is_empty() {
-        bail!("o nome da skill é obrigatório");
+        bail!(crate::i18n::t("skills.errors.nameRequired"));
     }
     let catalog = skills::catalog_with_roots(data_dir, roots)?;
     catalog
         .into_iter()
         .find(|skill| skill.name == name)
-        .with_context(|| format!("skill `{name}` não encontrada"))
+        .with_context(|| {
+            crate::i18n::t_args("skills.errors.notFound", &[("skill", name)])
+        })
 }
 
 /// Produção: resolve o nome no catálogo completo (incluindo externas). A função
@@ -169,9 +173,11 @@ fn find_skill_with_roots(
 fn find_skill(data_dir: &Path, name: &str) -> anyhow::Result<Skill> {
     let name = name.trim();
     if name.is_empty() {
-        bail!("o nome da skill é obrigatório");
+        bail!(crate::i18n::t("skills.errors.nameRequired"));
     }
-    skills::read(data_dir, name)?.with_context(|| format!("skill `{name}` não encontrada"))
+    skills::read(data_dir, name)?.with_context(|| {
+        crate::i18n::t_args("skills.errors.notFound", &[("skill", name)])
+    })
 }
 
 /// Monta o [`SkillContent`] da pré-visualização a partir de uma skill já lida.

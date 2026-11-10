@@ -8,6 +8,7 @@
  * a aba não perde o commit selecionado na mesma sessão.
  */
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   ChevronDown,
@@ -23,6 +24,8 @@ import { toast } from 'sonner';
 
 import { Badge, Button, IconButton, Spinner, Tooltip } from '@/components/ui';
 import { api } from '@/lib/api';
+import { t } from '@/lib/i18n';
+import { formatDate as formatIntlDate } from '@/lib/i18n/format';
 import type { WorkspaceCommitDetail, WorkspaceCommitFile, WorkspaceGitCommit } from '@/lib/types';
 import { cn, copyText } from '@/lib/utils';
 import { DiffView } from './DiffView';
@@ -49,14 +52,24 @@ const STATUS_STYLES: Record<string, string> = {
   T: 'text-foreground-subtle',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  A: 'Adicionado',
-  M: 'Modificado',
-  D: 'Removido',
-  R: 'Renomeado',
-  C: 'Copiado',
-  T: 'Tipo alterado',
-};
+function statusLabel(status: string): string {
+  switch (status) {
+    case 'A':
+      return t('code:commits.status.A');
+    case 'M':
+      return t('code:commits.status.M');
+    case 'D':
+      return t('code:commits.status.D');
+    case 'R':
+      return t('code:commits.status.R');
+    case 'C':
+      return t('code:commits.status.C');
+    case 'T':
+      return t('code:commits.status.T');
+    default:
+      return status;
+  }
+}
 
 function describeError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
@@ -71,7 +84,7 @@ function shortHash(hash: string): string {
 function formatDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString('pt-BR', {
+  return formatIntlDate(date, {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -88,6 +101,7 @@ function CommitList({
   workspaceId: string;
   onSelect: (revision: string) => void;
 }) {
+  const { t: translate } = useTranslation('code');
   const [commits, setCommits] = useState<WorkspaceGitCommit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +113,7 @@ function CommitList({
       const list = await api.gitLog(workspaceId, 100);
       setCommits(Array.isArray(list) ? list : []);
     } catch (loadError) {
-      setError(describeError(loadError, 'Não foi possível carregar os commits.'));
+      setError(describeError(loadError, translate('code:commits.loadListError')));
       setCommits([]);
     } finally {
       setLoading(false);
@@ -112,8 +126,8 @@ function CommitList({
 
   if (loading && commits.length === 0) {
     return (
-      <div role="status" aria-label="Carregando commits" className="flex flex-1 items-center justify-center gap-2 text-[12px] text-foreground-muted">
-        <Spinner size="sm" /> Carregando commits…
+      <div role="status" aria-label={translate('code:commits.loadingList')} className="flex flex-1 items-center justify-center gap-2 text-[12px] text-foreground-muted">
+        <Spinner size="sm" /> {translate('code:commits.loadingListText')}
       </div>
     );
   }
@@ -124,10 +138,10 @@ function CommitList({
         <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
           <CircleAlert aria-hidden className="size-4" strokeWidth={1.75} />
         </span>
-        <p className="text-[12.5px] font-medium text-foreground">Não foi possível ler os commits</p>
+        <p className="text-[12.5px] font-medium text-foreground">{translate('code:commits.errorTitle')}</p>
         <p className="max-w-80 text-[12px] leading-relaxed text-foreground-muted">{error}</p>
         <Button variant="secondary" size="sm" onClick={() => void load()} leftIcon={<RefreshCw className="size-3.5" />}>
-          Tentar novamente
+          {translate('common:actions.retry')}
         </Button>
       </div>
     );
@@ -137,9 +151,9 @@ function CommitList({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-6 py-8 text-center">
         <History aria-hidden className="size-5 text-foreground-subtle" strokeWidth={1.75} />
-        <p className="text-[12.5px] font-medium text-foreground">Nenhum commit ainda</p>
+        <p className="text-[12.5px] font-medium text-foreground">{translate('code:commits.empty.title')}</p>
         <p className="max-w-72 text-[12px] leading-relaxed text-foreground-muted">
-          Os commits deste workspace aparecem aqui; faça o primeiro commit pela aba Alterações.
+          {translate('code:commits.empty.description')}
         </p>
       </div>
     );
@@ -147,7 +161,7 @@ function CommitList({
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <ul role="list" aria-label="Commits do workspace" className="divide-y divide-border">
+      <ul role="list" aria-label={translate('code:commits.listAria')} className="divide-y divide-border">
         {commits.map((commit) => (
           <li key={commit.hash}>
             <button
@@ -189,14 +203,15 @@ function CommitFileSection({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const { t: translate } = useTranslation('code');
   const title =
     file.oldPath && file.oldPath !== file.path
       ? `${file.oldPath} → ${file.path}`
       : file.path;
-  const status = STATUS_LABELS[file.status] ?? file.status;
+  const status = statusLabel(file.status);
   const statusClass = STATUS_STYLES[file.status] ?? 'text-foreground-subtle';
   return (
-    <section aria-label={`Arquivo ${file.path}`} className="border-b border-border">
+    <section aria-label={translate('code:commits.fileAria', { path: file.path })} className="border-b border-border">
       <button
         type="button"
         aria-expanded={expanded}
@@ -219,7 +234,7 @@ function CommitFileSection({
         </span>
         {file.binary ? (
           <Badge tone="neutral" size="sm" className="shrink-0">
-            binário
+            {translate('code:commits.binaryBadge')}
           </Badge>
         ) : (
           <span className="shrink-0 text-[11px] tabular-nums">
@@ -232,7 +247,7 @@ function CommitFileSection({
         <div className="h-72 min-h-0 border-t border-border">
           {file.binary ? (
             <p className="px-4 py-6 text-center text-[12px] text-foreground-muted">
-              Arquivo binário — sem diff de texto.
+              {translate('code:commits.binaryDiff')}
             </p>
           ) : (
             <DiffView path={file.path} diff={file.diff} className="h-full" />
@@ -254,6 +269,7 @@ function CommitDetail({
   revision: string;
   onBack: () => void;
 }) {
+  const { t: translate } = useTranslation('code');
   const [detail, setDetail] = useState<WorkspaceCommitDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -268,7 +284,7 @@ function CommitDetail({
       // O primeiro arquivo já vem aberto (como no Zed); o resto sob demanda.
       setExpanded(new Set(result?.files[0] ? [result.files[0].path] : []));
     } catch (loadError) {
-      setError(describeError(loadError, 'Não foi possível carregar o commit.'));
+      setError(describeError(loadError, translate('code:commits.loadDetailError')));
       setDetail(null);
     } finally {
       setLoading(false);
@@ -281,8 +297,8 @@ function CommitDetail({
 
   if (loading && !detail) {
     return (
-      <div role="status" aria-label="Carregando commit" className="flex flex-1 items-center justify-center gap-2 text-[12px] text-foreground-muted">
-        <Spinner size="sm" /> Carregando commit…
+      <div role="status" aria-label={translate('code:commits.loadingDetail')} className="flex flex-1 items-center justify-center gap-2 text-[12px] text-foreground-muted">
+        <Spinner size="sm" /> {translate('code:commits.loadingDetailText')}
       </div>
     );
   }
@@ -293,14 +309,14 @@ function CommitDetail({
         <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
           <CircleAlert aria-hidden className="size-4" strokeWidth={1.75} />
         </span>
-        <p className="text-[12.5px] font-medium text-foreground">Não foi possível abrir o commit</p>
+        <p className="text-[12.5px] font-medium text-foreground">{translate('code:commits.detailErrorTitle')}</p>
         <p className="max-w-80 text-[12px] leading-relaxed text-foreground-muted">{error}</p>
         <div className="mt-1 flex gap-2">
           <Button variant="secondary" size="sm" onClick={() => void load()} leftIcon={<RefreshCw className="size-3.5" />}>
-            Tentar novamente
+            {translate('common:actions.retry')}
           </Button>
           <Button variant="ghost" size="sm" onClick={onBack}>
-            Voltar aos commits
+            {translate('code:commits.backToCommits')}
           </Button>
         </div>
       </div>
@@ -317,12 +333,12 @@ function CommitDetail({
   return (
     <div
       role="region"
-      aria-label="Detalhes do commit"
+      aria-label={translate('code:commits.detailAria')}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
     >
       <div className="border-b border-border bg-surface px-3 py-2">
         <div className="flex items-center gap-1">
-          <IconButton label="Voltar aos commits" size="sm" onClick={onBack}>
+          <IconButton label={translate('code:commits.backToCommits')} size="sm" onClick={onBack}>
             <ArrowLeft aria-hidden className="size-4" strokeWidth={1.75} />
           </IconButton>
           <h3 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground" title={detail.subject}>
@@ -331,14 +347,14 @@ function CommitDetail({
           <span className="shrink-0 font-mono text-[11px] text-accent" title={detail.hash}>
             {shortHash(detail.hash)}
           </span>
-          <Tooltip content="Copiar commit SHA" side="bottom">
+          <Tooltip content={translate('code:commits.copySha')} side="bottom">
             <IconButton
-              label="Copiar commit SHA"
+              label={translate('code:commits.copySha')}
               size="sm"
               onClick={() => {
                 void copyText(detail.hash).then((copied) => {
-                  if (copied) toast.success('Commit SHA copiado');
-                  else toast.error('Não foi possível copiar o SHA');
+                  if (copied) toast.success(translate('code:commits.shaCopied'));
+                  else toast.error(translate('code:commits.shaCopyError'));
                 });
               }}
             >
@@ -359,7 +375,7 @@ function CommitDetail({
           ) : null}
           <span className="inline-flex items-center gap-1">
             <FileDiff aria-hidden className="size-3" />
-            {detail.files.length} {detail.files.length === 1 ? 'arquivo' : 'arquivos'}
+            {translate('code:commits.files', { count: detail.files.length })}
           </span>
           <Button
             variant="ghost"
@@ -367,7 +383,7 @@ function CommitDetail({
             className="ml-auto h-6 px-1.5 text-[11px]"
             onClick={toggleAll}
           >
-            {allExpanded ? 'Recolher diffs' : 'Expandir diffs'}
+            {allExpanded ? translate('code:commits.collapseDiffs') : translate('code:commits.expandDiffs')}
           </Button>
         </div>
         {detail.body ? (
@@ -379,14 +395,14 @@ function CommitDetail({
         ) : null}
         {detail.truncated ? (
           <p role="note" className="mt-1 rounded-md bg-warning-soft px-2 py-1 text-[11px] text-warning">
-            Diff grande demais: o patch foi truncado pelo limite de saída.
+            {translate('code:commits.truncated')}
           </p>
         ) : null}
       </div>
       <div>
         {detail.files.length === 0 ? (
           <p className="px-4 py-6 text-center text-[12px] text-foreground-muted">
-            Este commit não alterou arquivos (merge ou commit vazio).
+            {translate('code:commits.noFiles')}
           </p>
         ) : (
           detail.files.map((file) => (
@@ -412,16 +428,17 @@ function CommitDetail({
 
 /** Aba central do histórico de commits: lista ↔ commit completo. */
 export function CodeCommitHistoryView({ target, onSelect, className }: CodeCommitHistoryViewProps) {
+  const { t: translate } = useTranslation('code');
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)}>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
         <History aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" strokeWidth={1.75} />
         <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-muted">
-          Histórico de commits
+          {translate('code:commits.header')}
         </span>
         <span className="inline-flex items-center gap-1 text-[11px] text-foreground-subtle">
           <GitBranch aria-hidden className="size-3" />
-          {target.revision ? shortHash(target.revision) : 'todos'}
+          {target.revision ? shortHash(target.revision) : translate('code:commits.all')}
         </span>
       </div>
       {target.revision ? (

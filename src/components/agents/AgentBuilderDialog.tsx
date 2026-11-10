@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Sparkles, WandSparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -16,10 +17,10 @@ import {
 import { api } from '@/lib/api';
 import { useAppStore, useUiStore } from '@/lib/store';
 
-const EXAMPLES = [
-  'Um revisor de código rigoroso, que aponta riscos e pede testes antes de aprovar.',
-  'Uma pesquisadora que compara fontes, cita links e separa fatos de opinião.',
-  'Um assistente de operações que transforma pedidos vagos em checklists executáveis.',
+const EXAMPLE_KEYS = [
+  'builder.examples.reviewer',
+  'builder.examples.researcher',
+  'builder.examples.ops',
 ];
 
 /** Prompt-driven agent creation: the model returns a draft, the editor validates
@@ -31,6 +32,7 @@ export function AgentBuilderDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation('agents');
   const selection = useAppStore((state) => state.selection);
   const openEditor = useUiStore((state) => state.openAgentEditor);
   const [prompt, setPrompt] = useState('');
@@ -40,7 +42,7 @@ export function AgentBuilderDialog({
     const value = prompt.trim();
     if (!value) return;
     if (!selection.providerId || !selection.modelId) {
-      toast.error('Configure um provedor e um modelo antes de usar o construtor');
+      toast.error(t('builder.noModel'));
       return;
     }
     setLoading(true);
@@ -50,7 +52,7 @@ export function AgentBuilderDialog({
       setPrompt('');
       onOpenChange(false);
     } catch (error) {
-      toast.error('Não foi possível montar o agente', { description: String(error) });
+      toast.error(t('builder.error'), { description: String(error) });
     } finally {
       setLoading(false);
     }
@@ -62,11 +64,10 @@ export function AgentBuilderDialog({
         <DialogHeader className="pb-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <WandSparkles className="size-4 text-accent" />
-            Criar agente com IA
+            {t('builder.title')}
           </DialogTitle>
           <DialogDescription>
-            Descreva o trabalho, o tom e o que o agente deve priorizar. A IA devolve um rascunho
-            editável — nada é salvo sem a sua revisão.
+            {t('builder.description')}
           </DialogDescription>
         </DialogHeader>
         <AgentDialogBody className="space-y-4">
@@ -76,33 +77,36 @@ export function AgentBuilderDialog({
             maxLength={4000}
             autoFocus
             className="min-h-32 resize-y"
-            placeholder="Ex.: um agente de suporte que responde em português, cita a documentação e escala casos de cobrança."
-            aria-label="Descrição do agente"
+            placeholder={t('builder.placeholder')}
+            aria-label={t('builder.aria')}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void create();
             }}
           />
           <div className="flex flex-wrap gap-1.5">
-            {EXAMPLES.map((example) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => setPrompt(example)}
-                className="max-w-full rounded-full border border-border bg-surface-raised px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-              >
-                <span className="line-clamp-1">{example}</span>
-              </button>
-            ))}
+            {EXAMPLE_KEYS.map((key) => {
+              const example = t(key as never);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setPrompt(example)}
+                  className="max-w-full rounded-full border border-border bg-surface-raised px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <span className="line-clamp-1">{example}</span>
+                </button>
+              );
+            })}
           </div>
           <p className="flex items-center gap-1.5 text-[10px] text-foreground-subtle">
             <Sparkles className="size-3" />
-            Usa o modelo selecionado no composer. Você poderá ajustar tudo antes de salvar.
+            {t('builder.hint')}
           </p>
         </AgentDialogBody>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <Button
             variant="primary"
@@ -110,7 +114,7 @@ export function AgentBuilderDialog({
             onClick={() => void create()}
           >
             {loading ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <Sparkles className="mr-1.5 size-4" />}
-            Montar agente
+            {t('builder.submit')}
           </Button>
         </DialogFooter>
       </DialogContent>

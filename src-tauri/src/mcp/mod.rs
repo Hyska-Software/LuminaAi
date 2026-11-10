@@ -180,11 +180,11 @@ impl McpClient {
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| "MCP_SPAWN: stdin indisponível".to_string())?;
+            .ok_or_else(|| crate::i18n::t("mcp.errors.stdinUnavailable"))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| "MCP_SPAWN: stdout indisponível".to_string())?;
+            .ok_or_else(|| crate::i18n::t("mcp.errors.stdoutUnavailable"))?;
         let stderr = child.stderr.take();
 
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<RpcRequest>();
@@ -269,7 +269,12 @@ impl McpClient {
             ),
         )
         .await
-        .map_err(|_| format!("MCP_TIMEOUT: `{}` não respondeu ao initialize", config.name))?
+        .map_err(|_| {
+            crate::i18n::t_args(
+                "mcp.errors.initializeTimeout",
+                &[("server", &config.name)],
+            )
+        })?
         .map_err(|error| format!("MCP_INIT: `{}`: {error}", config.name))?;
         // Servidores que não declaram tools são inúteis, mas não são um erro fatal.
         if initialized.get("capabilities").is_some() {

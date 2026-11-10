@@ -1,26 +1,15 @@
+import { useTranslation } from 'react-i18next';
+
+import { SUPPORTED_LANGUAGES, type AppLocale } from '@/lib/i18n/languages';
 import type { ThemeMode } from '@/lib/types';
 import { LAYOUT_MODES } from '@/lib/layoutModes';
 import { useAppStore, useUiStore } from '@/lib/store';
-import { SegmentedControl, Slider, Switch } from '@/components/ui';
+import { NativeSelect, SegmentedControl, Slider, Switch } from '@/components/ui';
 import { SettingRow, SettingsSection } from './shared';
 
-const THEME_OPTIONS = [
-  { value: 'light', label: 'Claro' },
-  { value: 'dark', label: 'Escuro' },
-  { value: 'system', label: 'Sistema' },
-];
-
-const LANGUAGE_OPTIONS = [
-  { value: 'pt-BR', label: 'Português (BR)' },
-  { value: 'en', label: 'English', disabled: true, title: 'Disponível em breve' },
-];
-
-const SEND_OPTIONS = [
-  { value: 'enter', label: 'Enter' },
-  { value: 'ctrl+enter', label: 'Ctrl+Enter' },
-];
-
 export function GeneralTab() {
+  const { t } = useTranslation('settings');
+  const common = useTranslation('common');
   const settings = useAppStore((state) => state.settings);
   const saveSettings = useAppStore((state) => state.saveSettings);
   const theme = useUiStore((state) => state.theme);
@@ -28,6 +17,16 @@ export function GeneralTab() {
   const enabledLayouts = useUiStore((state) => state.enabledLayouts);
   const setLayoutEnabled = useUiStore((state) => state.setLayoutEnabled);
   const enabledCount = LAYOUT_MODES.filter((mode) => enabledLayouts[mode.value]).length;
+
+  const themeOptions = [
+    { value: 'light', label: t('general.theme.light') },
+    { value: 'dark', label: t('general.theme.dark') },
+    { value: 'system', label: t('general.theme.system') },
+  ];
+  const sendOptions = [
+    { value: 'enter', label: 'Enter' },
+    { value: 'ctrl+enter', label: 'Ctrl+Enter' },
+  ];
 
   const handleTheme = (value: string) => {
     const next = value as ThemeMode;
@@ -37,34 +36,42 @@ export function GeneralTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="Aparência" description="Tema, idioma e tamanho do texto da interface.">
-        <SettingRow
-          label="Tema"
-          description="“Sistema” acompanha a preferência do seu sistema operacional."
-        >
+      <SettingsSection
+        title={t('general.appearance.title')}
+        description={t('general.appearance.description')}
+      >
+        <SettingRow label={t('general.theme.label')} description={t('general.theme.description')}>
           <SegmentedControl
-            options={THEME_OPTIONS}
+            options={themeOptions}
             value={theme}
             onChange={handleTheme}
-            ariaLabel="Tema da interface"
+            ariaLabel={t('general.theme.aria')}
           />
         </SettingRow>
 
-        <SettingRow label="Idioma" description="Idioma da interface. Inglês chega em breve.">
-          <SegmentedControl
-            options={LANGUAGE_OPTIONS}
+        <SettingRow
+          label={t('general.language.label')}
+          description={t('general.language.description')}
+        >
+          <NativeSelect
             value={settings.locale}
-            onChange={(value) => {
-              if (value === 'pt-BR') void saveSettings({ locale: 'pt-BR' });
-            }}
-            ariaLabel="Idioma da interface"
-          />
+            onChange={(event) => void saveSettings({ locale: event.target.value as AppLocale })}
+            aria-label={t('general.language.aria')}
+          >
+            {SUPPORTED_LANGUAGES.map((language) => (
+              <option key={language.code} value={language.code}>
+                {language.nativeName}
+              </option>
+            ))}
+          </NativeSelect>
         </SettingRow>
 
         <SettingRow
           vertical
-          label="Tamanho da fonte"
-          description={`${Math.round(settings.fontScale * 100)}% do tamanho padrão — afeta toda a interface.`}
+          label={t('general.fontSize.label')}
+          description={t('general.fontSize.description', {
+            percent: Math.round(settings.fontScale * 100),
+          })}
         >
           <Slider
             min={0.9}
@@ -73,71 +80,84 @@ export function GeneralTab() {
             value={settings.fontScale}
             valueLabel={`${Math.round(settings.fontScale * 100)}%`}
             onValueChange={(value) => void saveSettings({ fontScale: Number(value.toFixed(2)) })}
-            aria-label="Tamanho da fonte"
+            aria-label={t('general.fontSize.aria')}
           />
         </SettingRow>
       </SettingsSection>
 
       <SettingsSection
-        title="Layouts"
-        description="Escolha quais modos aparecem no seletor da barra de título. Com apenas um layout ativo, o seletor fica oculto; pelo menos um permanece ativo."
+        title={t('general.layouts.title')}
+        description={t('general.layouts.description')}
       >
-        {LAYOUT_MODES.map(({ value, label, description }) => (
-          <SettingRow key={value} label={label} description={description}>
-            <Switch
-              checked={enabledLayouts[value]}
-              disabled={enabledLayouts[value] && enabledCount === 1}
-              onCheckedChange={(checked) => setLayoutEnabled(value, checked)}
-              aria-label={`Layout ${label}`}
-            />
-          </SettingRow>
-        ))}
+        {LAYOUT_MODES.map((mode) => {
+          const label = common.t(mode.labelKey);
+          return (
+            <SettingRow
+              key={mode.value}
+              label={label}
+              description={common.t(mode.descriptionKey)}
+            >
+              <Switch
+                checked={enabledLayouts[mode.value]}
+                disabled={enabledLayouts[mode.value] && enabledCount === 1}
+                onCheckedChange={(checked) => setLayoutEnabled(mode.value, checked)}
+                aria-label={t('general.layouts.toggleAria', { name: label })}
+              />
+            </SettingRow>
+          );
+        })}
       </SettingsSection>
 
-      <SettingsSection title="Comportamento" description="Como o composer envia e exibe as mensagens.">
-        <SettingRow label="Enviar com" description="Shift+Enter sempre quebra uma nova linha.">
+      <SettingsSection
+        title={t('general.behavior.title')}
+        description={t('general.behavior.description')}
+      >
+        <SettingRow
+          label={t('general.sendWith.label')}
+          description={t('general.sendWith.description')}
+        >
           <SegmentedControl
-            options={SEND_OPTIONS}
+            options={sendOptions}
             value={settings.sendKey}
             onChange={(value) =>
               void saveSettings({ sendKey: value === 'ctrl+enter' ? 'ctrl+enter' : 'enter' })
             }
-            ariaLabel="Tecla para enviar mensagem"
+            ariaLabel={t('general.sendWith.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="Reduzir movimento"
-          description="Desativa animações de transformação, shimmer e transições longas."
+          label={t('general.reduceMotion.label')}
+          description={t('general.reduceMotion.description')}
         >
           <Switch
             checked={settings.reduceMotion}
             onCheckedChange={(checked) => void saveSettings({ reduceMotion: checked })}
-            aria-label="Reduzir movimento"
+            aria-label={t('general.reduceMotion.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="Mostrar uso de tokens"
-          description="Exibe tokens e custo estimado no rodapé das respostas."
+          label={t('general.showTokenUsage.label')}
+          description={t('general.showTokenUsage.description')}
         >
           <Switch
             checked={settings.showTokenUsage}
             onCheckedChange={(checked) => void saveSettings({ showTokenUsage: checked })}
-            aria-label="Mostrar uso de tokens"
+            aria-label={t('general.showTokenUsage.aria')}
           />
         </SettingRow>
 
         <SettingRow
-          label="Raciocínio recolhido por padrão"
-          description="O bloco de raciocínio e passos do agente começa fechado e não abre sozinho durante o streaming. Você pode expandi-lo a qualquer momento."
+          label={t('general.thinkingCollapsed.label')}
+          description={t('general.thinkingCollapsed.description')}
         >
           <Switch
             checked={settings.thinkingCollapsedByDefault}
             onCheckedChange={(checked) =>
               void saveSettings({ thinkingCollapsedByDefault: checked })
             }
-            aria-label="Raciocínio recolhido por padrão"
+            aria-label={t('general.thinkingCollapsed.aria')}
           />
         </SettingRow>
       </SettingsSection>

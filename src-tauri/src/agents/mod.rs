@@ -181,14 +181,15 @@ impl AgentRoutineInput {
         }
         .to_string();
         if self.title.is_empty() || self.title.chars().count() > 80 {
-            return Err("AGENT_ROUTINE_INVALID: o título deve ter de 1 a 80 caracteres.".to_string());
+            return Err(crate::i18n::t("agents.errors.routineTitleLength"));
         }
         if self.prompt.is_empty() {
-            return Err("AGENT_ROUTINE_INVALID: a instrução da rotina não pode ser vazia.".to_string());
+            return Err(crate::i18n::t("agents.errors.routinePromptEmpty"));
         }
         if self.prompt.chars().count() > AGENT_ROUTINE_MAX_PROMPT_CHARS {
-            return Err(format!(
-                "AGENT_ROUTINE_INVALID: a instrução passa de {AGENT_ROUTINE_MAX_PROMPT_CHARS} caracteres."
+            return Err(crate::i18n::t_args(
+                "agents.errors.routinePromptTooLong",
+                &[("limit", &AGENT_ROUTINE_MAX_PROMPT_CHARS.to_string())],
             ));
         }
         self.trigger_kind = match self.trigger_kind.trim().to_ascii_lowercase().as_str() {
@@ -238,7 +239,7 @@ impl AgentRoutineInput {
                 .clamp(AGENT_ROUTINE_MIN_INTERVAL_MINUTES, AGENT_ROUTINE_MAX_INTERVAL_MINUTES);
         } else {
             if self.hour > 23 || self.minute > 59 {
-                return Err("AGENT_ROUTINE_INVALID: horário inválido.".to_string());
+                return Err(crate::i18n::t("agents.errors.routineInvalidTime"));
             }
             self.interval_minutes = 0;
         }
@@ -320,21 +321,26 @@ pub fn upgrade_agent_export_v1(value: &mut serde_json::Value) -> Result<(), Stri
         .as_object_mut()
         .ok_or_else(|| "AGENT_IMPORT_INVALID: o documento precisa ser um objeto JSON.".to_string())?;
     if object.get("kind").and_then(|value| value.as_str()) != Some("zylara-agent") {
-        return Err("AGENT_IMPORT_INVALID: o arquivo não é um agente do Zylara.".to_string());
+        return Err(crate::i18n::t("agents.errors.importNotAgent"));
     }
     if object.get("version").and_then(|value| value.as_u64()) != Some(1) {
-        return Err("AGENT_IMPORT_INVALID: versão de documento não suportada.".to_string());
+        return Err(crate::i18n::t("agents.errors.importVersion"));
     }
     let agent = object
         .get_mut("agent")
         .and_then(|value| value.as_object_mut())
-        .ok_or_else(|| "AGENT_IMPORT_INVALID: o documento não tem um agente.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("agents.errors.importMissingAgent"))?;
     let emoji = agent
         .remove("emoji")
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_else(|| "🤖".to_string());
     let avatar = serde_json::to_value(AgentAvatar::emoji(emoji))
-        .map_err(|error| format!("AGENT_IMPORT_INVALID: avatar inválido: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.errors.importAvatar",
+                &[("error", &error.to_string())],
+            )
+        })?;
     agent.insert("avatar".to_string(), avatar);
     object.insert(
         "version".to_string(),
@@ -382,14 +388,14 @@ impl AgentExportDocument {
 
     pub fn normalize(mut self) -> Result<Self, String> {
         if self.version != AGENT_EXPORT_VERSION {
-            return Err(format!(
-                "AGENT_IMPORT_INVALID: versão de documento não suportada ({})",
-                self.version
+            return Err(crate::i18n::t_args(
+                "agents.errors.importVersionWithVersion",
+                &[("version", &self.version.to_string())],
             ));
         }
         if self.kind != "zylara-agent" {
             return Err(
-                "AGENT_IMPORT_INVALID: o arquivo não é um agente do Zylara.".to_string(),
+                crate::i18n::t("agents.errors.importNotAgent").to_string(),
             );
         }
         self.agent = normalize_input(self.agent)?;
@@ -425,13 +431,13 @@ pub struct AgentRevision {
 }
 
 const REVISABLE_FIELDS: &[(&str, &str)] = &[
-    ("name", "Nome"),
-    ("role", "Papel"),
-    ("description", "Descrição"),
-    ("department", "Departamento"),
-    ("instructions", "Instruções"),
-    ("starters", "Sugestões"),
-    ("memoryEnabled", "Memória"),
+    ("name", "agents.fields.name"),
+    ("role", "agents.fields.role"),
+    ("description", "agents.fields.description"),
+    ("department", "agents.fields.department"),
+    ("instructions", "agents.fields.instructions"),
+    ("starters", "agents.fields.starters"),
+    ("memoryEnabled", "agents.fields.memory"),
 ];
 
 /// Field-level diff of two normalized agent inputs. Only the fields the
@@ -443,13 +449,13 @@ pub fn agent_changes(
     let before = serde_json::to_value(before)?;
     let after = serde_json::to_value(after)?;
     let mut changes = Vec::new();
-    for (field, label) in REVISABLE_FIELDS {
+    for (field, label_key) in REVISABLE_FIELDS {
         let previous = before.get(field).cloned().unwrap_or(serde_json::Value::Null);
         let next = after.get(field).cloned().unwrap_or(serde_json::Value::Null);
         if previous != next {
             changes.push(AgentChange {
                 field: (*field).to_string(),
-                label: (*label).to_string(),
+                label: crate::i18n::t(label_key),
                 before: previous,
                 after: next,
             });
@@ -466,7 +472,7 @@ pub fn apply_agent_revision(
     partial: &serde_json::Value,
 ) -> Result<AgentInput, String> {
     let Some(object) = partial.as_object() else {
-        return Err("AGENT_REVISION_INVALID: a revisão precisa ser um objeto JSON.".to_string());
+        return Err(crate::i18n::t("agents.errors.revisionNotObject"));
     };
     if let Some(value) = object.get("name").and_then(|value| value.as_str()) {
         updated.name = value.to_string();
@@ -608,10 +614,10 @@ impl AgentTaskInput {
             .map(|id| id.trim().to_string())
             .filter(|id| !id.is_empty());
         if self.to_agent_id.is_empty() {
-            return Err("AGENT_TASK_INVALID: informe o agente destino.".to_string());
+            return Err(crate::i18n::t("agents.errors.taskTargetRequired").to_string());
         }
         if self.title.is_empty() || self.title.chars().count() > 120 {
-            return Err("AGENT_TASK_INVALID: o título deve ter de 1 a 120 caracteres.".to_string());
+            return Err(crate::i18n::t("agents.errors.taskTitleLength"));
         }
         if self.brief.is_empty() || self.brief.chars().count() > 16_000 {
             return Err(
@@ -873,10 +879,10 @@ impl AgentChannelInput {
         }
         self.member_ids = members;
         if self.member_ids.is_empty() {
-            return Err("AGENT_CHANNEL_INVALID: adicione pelo menos um agente ao canal.".to_string());
+            return Err(crate::i18n::t("agents.errors.channelNeedsAgent").to_string());
         }
         if self.member_ids.len() > 6 {
-            return Err("AGENT_CHANNEL_INVALID: um canal aceita no máximo 6 agentes.".to_string());
+            return Err(crate::i18n::t("agents.errors.channelMaxAgents"));
         }
         self.leader_agent_id = self
             .leader_agent_id
@@ -885,7 +891,7 @@ impl AgentChannelInput {
         if let Some(leader) = self.leader_agent_id.as_deref() {
             if !self.member_ids.iter().any(|id| id == leader) {
                 return Err(
-                    "AGENT_CHANNEL_INVALID: o líder precisa ser um membro do canal.".to_string(),
+                    crate::i18n::t("agents.errors.channelLeaderNotMember"),
                 );
             }
         }
@@ -946,11 +952,12 @@ impl AgentMemoryInput {
         }
         .to_string();
         if self.content.is_empty() {
-            return Err("AGENT_MEMORY_INVALID: a memória não pode ser vazia.".to_string());
+            return Err(crate::i18n::t("agents.errors.memoryEmpty"));
         }
         if self.content.chars().count() > AGENT_MEMORY_MAX_CHARS {
-            return Err(format!(
-                "AGENT_MEMORY_INVALID: a memória passa de {AGENT_MEMORY_MAX_CHARS} caracteres."
+            return Err(crate::i18n::t_args(
+                "agents.errors.memoryTooLong",
+                &[("limit", &AGENT_MEMORY_MAX_CHARS.to_string())],
             ));
         }
         self.source_conversation_id = self
@@ -1204,11 +1211,15 @@ fn clean_list(
     for value in values {
         let value = value.trim();
         if value.is_empty() {
-            return Err(format!("AGENT_VALIDATION: {label} contém um item vazio."));
+            return Err(crate::i18n::t_args(
+                "agents.errors.listItemEmpty",
+                &[("label", label)],
+            ));
         }
         if value.chars().count() > 128 {
-            return Err(format!(
-                "AGENT_VALIDATION: um item de {label} passa de 128 caracteres."
+            return Err(crate::i18n::t_args(
+                "agents.errors.listItemTooLong",
+                &[("label", label)],
             ));
         }
         if !result.iter().any(|existing: &String| existing == value) {
@@ -1216,8 +1227,9 @@ fn clean_list(
         }
     }
     if result.len() > 64 {
-        return Err(format!(
-            "AGENT_VALIDATION: {label} aceita no máximo 64 itens."
+        return Err(crate::i18n::t_args(
+            "agents.errors.listMaxItems",
+            &[("label", label)],
         ));
     }
     Ok(Some(result))
@@ -1253,7 +1265,7 @@ pub fn normalize_input(mut input: AgentInput) -> Result<AgentInput, String> {
         }
         _ => {
             return Err(
-                "AGENT_FALLBACK_INVALID: informe provedor e modelo de reserva juntos."
+                crate::i18n::t("agents.errors.fallbackPairRequired")
                     .to_string(),
             );
         }
@@ -1277,29 +1289,29 @@ pub fn normalize_input(mut input: AgentInput) -> Result<AgentInput, String> {
     input.computer_environment = normalize_computer_environment(&input.computer_environment);
 
     if input.name.is_empty() || input.name.chars().count() > 40 {
-        return Err("AGENT_VALIDATION: o nome deve ter de 1 a 40 caracteres.".to_string());
+        return Err(crate::i18n::t("agents.errors.nameLength"));
     }
     if input.role.is_empty() || input.role.chars().count() > 80 {
-        return Err("AGENT_VALIDATION: o papel deve ter de 1 a 80 caracteres.".to_string());
+        return Err(crate::i18n::t("agents.errors.roleLength"));
     }
     if input.description.chars().count() > 500 {
-        return Err("AGENT_VALIDATION: a descrição passa de 500 caracteres.".to_string());
+        return Err(crate::i18n::t("agents.errors.descriptionTooLong"));
     }
     if input.department.is_empty() {
-        input.department = "Geral".to_string();
+        input.department = crate::i18n::t("common.defaultDepartment");
     }
     if input.department.chars().count() > 40 {
-        return Err("AGENT_VALIDATION: o departamento passa de 40 caracteres.".to_string());
+        return Err(crate::i18n::t("agents.errors.departmentLength"));
     }
     if input.instructions.len() > 32 * 1024 {
-        return Err("AGENT_PROMPT_TOO_LARGE: as instruções passam de 32 KiB.".to_string());
+        return Err(crate::i18n::t("agents.errors.instructionsTooLarge"));
     }
     if input.provider_id.is_empty() || input.model_id.is_empty() {
-        return Err("AGENT_MODEL_INVALID: selecione um provedor e um modelo.".to_string());
+        return Err(crate::i18n::t("agents.errors.modelRequired"));
     }
 
     if input.starters.len() > 3 {
-        return Err("AGENT_VALIDATION: use no máximo 3 sugestões de início.".to_string());
+        return Err(crate::i18n::t("agents.errors.tooManyStarters"));
     }
     let mut starters = Vec::with_capacity(input.starters.len());
     for starter in input.starters {
@@ -1309,7 +1321,7 @@ pub fn normalize_input(mut input: AgentInput) -> Result<AgentInput, String> {
         }
         if starter.chars().count() > 120 {
             return Err(
-                "AGENT_VALIDATION: cada sugestão de início aceita até 120 caracteres."
+                crate::i18n::t("agents.errors.starterTooLong")
                     .to_string(),
             );
         }
@@ -1451,11 +1463,12 @@ pub fn render_shared_memory_context(memories: &[AgentSharedMemory]) -> String {
             .replace('\u{0}', "")
             .replace("</contexto-da-sessao", "&lt;/contexto-da-sessao")
             .replace('\n', " ");
+        let removed_label = crate::i18n::t("agents.audit.agentRemoved");
         let source = memory
             .source_agent_name
             .as_deref()
             .or(memory.source_agent_id.as_deref())
-            .unwrap_or("agente removido");
+            .unwrap_or(&removed_label);
         let line = format!(
             "- [{}]{} {} (source: {})\n",
             memory.kind,

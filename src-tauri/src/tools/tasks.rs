@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 
 use crate::agents::AgentTaskInput;
 use crate::db::Db;
+use crate::i18n;
 use crate::providers::ToolDefinition;
 use crate::tools::{json_str, ToolOutcome};
 
@@ -200,10 +201,16 @@ fn ok_task(db: &Db, task_id: &str) -> ToolOutcome {
     match db.get_agent_task(task_id) {
         Ok(Some(task)) => ToolOutcome {
             content: serde_json::to_string_pretty(&task).unwrap_or_else(|_| "{}".to_string()),
-            summary: Some(format!("Tarefa · {}", task.status)),
+            summary: Some(i18n::t_args(
+                "tools.tasks.taskStatusSummary",
+                &[("status", task.status.as_str())],
+            )),
             ..Default::default()
         },
-        Ok(None) => ToolOutcome::error(format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe")),
+        Ok(None) => ToolOutcome::error(format!(
+            "AGENT_TASK_NOT_FOUND: {}",
+            i18n::t_args("tools.tasks.taskNotFound", &[("taskId", task_id)])
+        )),
         Err(error) => ToolOutcome::error(format!("{error:#}")),
     }
 }
@@ -217,12 +224,16 @@ fn owner_check(
         .get_agent_task(task_id)
         .map_err(|error| ToolOutcome::error(format!("{error:#}")))?
         .ok_or_else(|| {
-            ToolOutcome::error(format!("AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"))
+            ToolOutcome::error(format!(
+                "AGENT_TASK_NOT_FOUND: {}",
+                i18n::t_args("tools.tasks.taskNotFound", &[("taskId", task_id)])
+            ))
         })?;
     if task.owner_agent_id != agent_id {
-        return Err(ToolOutcome::error(
-            "AGENT_TASK_FORBIDDEN: só o agente dono pode alterar esta tarefa",
-        ));
+        return Err(ToolOutcome::error(format!(
+            "AGENT_TASK_FORBIDDEN: {}",
+            i18n::t("tools.tasks.taskForbiddenOwner")
+        )));
     }
     Ok(task)
 }
@@ -265,12 +276,22 @@ pub fn run_with_hooks(
 ) -> ToolOutcome {
     let agent = match db.get_agent(agent_id) {
         Ok(Some(agent)) => agent,
-        Ok(None) => return ToolOutcome::error("AGENT_NOT_FOUND: agente não existe"),
+        Ok(None) => {
+            return ToolOutcome::error(format!(
+                "AGENT_NOT_FOUND: {}",
+                i18n::t("tools.tasks.agentNotFound")
+            ));
+        }
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
     let conversation = match db.get_conversation(conversation_id) {
         Ok(Some(conversation)) => conversation,
-        Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: conversa não encontrada"),
+        Ok(None) => {
+            return ToolOutcome::error(format!(
+                "AGENT_TASK_INVALID: {}",
+                i18n::t("tools.tasks.conversationNotFound")
+            ));
+        }
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
     let channel_leader = conversation
@@ -284,23 +305,25 @@ pub fn run_with_hooks(
     match tool {
         "delegate_task" => {
             if !can_delegate {
-                return ToolOutcome::error(
-                    "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_CAPABILITY_DENIED: {}",
+                    i18n::t("tools.tasks.capabilityDeniedDelegation")
+                ));
             }
             let Some(to_agent) = json_str(args, "toAgentId") else {
-                return ToolOutcome::error("o argumento `toAgentId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.toAgentIdRequired"));
             };
             if to_agent == agent_id {
-                return ToolOutcome::error(
-                    "AGENT_TASK_INVALID: o destino não pode ser o próprio agente",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_TASK_INVALID: {}",
+                    i18n::t("tools.tasks.taskSelfTarget")
+                ));
             }
             let Some(title) = json_str(args, "title") else {
-                return ToolOutcome::error("o argumento `title` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.titleRequired"));
             };
             let Some(brief) = json_str(args, "brief") else {
-                return ToolOutcome::error("o argumento `brief` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.briefRequired"));
             };
             let inherited_channel = conversation.channel_id.clone().or_else(|| {
                 conversation
@@ -342,7 +365,10 @@ pub fn run_with_hooks(
                     ToolOutcome {
                         content: serde_json::to_string_pretty(&task)
                             .unwrap_or_else(|_| "{}".to_string()),
-                        summary: Some(format!("Delegada para {}", task.owner_agent_id)),
+                        summary: Some(i18n::t_args(
+                            "tools.tasks.delegatedSummary",
+                            &[("agent", task.owner_agent_id.as_str())],
+                        )),
                         ..Default::default()
                     }
                 }
@@ -361,7 +387,11 @@ pub fn run_with_hooks(
                 Ok(tasks) => ToolOutcome {
                     content: serde_json::to_string_pretty(&tasks)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    summary: Some(format!("{} tarefa(s)", tasks.len())),
+                    summary: Some(i18n::t_count(
+                        "tools.tasks.tasksSummary",
+                        tasks.len(),
+                        &[("count", &tasks.len().to_string())],
+                    )),
                     ..Default::default()
                 },
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
@@ -369,13 +399,13 @@ pub fn run_with_hooks(
         }
         "task_get" => {
             let Some(task_id) = json_str(args, "taskId") else {
-                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
             };
             match db.get_agent_task(&task_id) {
                 Ok(Some(task)) => {
                     if !task_visible(&task, agent_id, &conversation) {
                         return ToolOutcome::error(
-                            "AGENT_TASK_FORBIDDEN: esta tarefa não pertence ao seu escopo",
+                            format!("AGENT_TASK_FORBIDDEN: {}", i18n::t("tools.tasks.taskForbiddenScope")),
                         );
                     }
                     match db.list_agent_task_events(&task_id) {
@@ -385,55 +415,64 @@ pub fn run_with_hooks(
                                 "events": events,
                             }))
                             .unwrap_or_else(|_| "{}".to_string()),
-                            summary: Some(format!("Tarefa · {}", task.status)),
+                            summary: Some(i18n::t_args(
+                                "tools.tasks.taskStatusSummary",
+                                &[("status", task.status.as_str())],
+                            )),
                             ..Default::default()
                         },
                         Err(error) => ToolOutcome::error(format!("{error:#}")),
                     }
                 }
                 Ok(None) => ToolOutcome::error(format!(
-                    "AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"
+                    "AGENT_TASK_NOT_FOUND: {}",
+                    i18n::t_args("tools.tasks.taskNotFound", &[("taskId", task_id.as_str())])
                 )),
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
         "task_cancel" => {
             let Some(task_id) = json_str(args, "taskId") else {
-                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
             };
             let task = match db.get_agent_task(&task_id) {
                 Ok(Some(task)) => task,
                 Ok(None) => {
                     return ToolOutcome::error(format!(
-                        "AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"
+                        "AGENT_TASK_NOT_FOUND: {}",
+                        i18n::t_args("tools.tasks.taskNotFound", &[("taskId", task_id.as_str())])
                     ));
                 }
                 Err(error) => return ToolOutcome::error(format!("{error:#}")),
             };
             if !task_visible(&task, agent_id, &conversation) {
                 return ToolOutcome::error(
-                    "AGENT_TASK_FORBIDDEN: esta tarefa não pertence ao seu escopo",
+                    format!("AGENT_TASK_FORBIDDEN: {}", i18n::t("tools.tasks.taskForbiddenScope")),
                 );
             }
             if task.owner_agent_id != agent_id
                 && task.created_by_agent_id.as_deref() != Some(agent_id)
             {
-                return ToolOutcome::error(
-                    "AGENT_TASK_FORBIDDEN: só o dono ou quem criou a tarefa pode cancelá-la",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_TASK_FORBIDDEN: {}",
+                    i18n::t("tools.tasks.taskForbiddenCancel")
+                ));
             }
             if matches!(task.status.as_str(), "done" | "cancelled" | "failed" | "declined") {
-                return ToolOutcome::error(
-                    "AGENT_TASK_INVALID: a tarefa já está encerrada e não pode ser cancelada",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_TASK_INVALID: {}",
+                    i18n::t("tools.tasks.taskAlreadyFinished")
+                ));
             }
             let reason = json_str(args, "reason")
                 .map(|reason| reason.trim().chars().take(500).collect::<String>())
                 .filter(|reason| !reason.is_empty());
             let result = reason
                 .as_deref()
-                .map(|reason| format!("Cancelada pelo agente: {reason}"))
-                .unwrap_or_else(|| "Cancelada pelo agente".to_string());
+                .map(|reason| {
+                    i18n::t_args("tools.tasks.cancelledWithReason", &[("reason", reason)])
+                })
+                .unwrap_or_else(|| i18n::t("tools.tasks.cancelledNoReason"));
             if let (Some(hooks), Some(conversation_id)) = (hooks, task.conversation_id.as_deref()) {
                 hooks.cancel_conversation(conversation_id);
             }
@@ -454,7 +493,7 @@ pub fn run_with_hooks(
                     ToolOutcome {
                         content: serde_json::to_string_pretty(&task)
                             .unwrap_or_else(|_| "{}".to_string()),
-                        summary: Some("Tarefa cancelada".to_string()),
+                        summary: Some(i18n::t("tools.tasks.cancelledSummary")),
                         ..Default::default()
                     }
                 }
@@ -463,7 +502,7 @@ pub fn run_with_hooks(
         }
         "accept_task" => {
             let Some(task_id) = json_str(args, "taskId") else {
-                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
             };
             let task = match owner_check(db, &task_id, agent_id) {
                 Ok(task) => task,
@@ -489,13 +528,14 @@ pub fn run_with_hooks(
         }
         "decline_task" => {
             let Some(task_id) = json_str(args, "taskId") else {
-                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
             };
             let task = match owner_check(db, &task_id, agent_id) {
                 Ok(task) => task,
                 Err(outcome) => return outcome,
             };
-            let reason = json_str(args, "reason").unwrap_or_else(|| "sem motivo".to_string());
+            let reason =
+                json_str(args, "reason").unwrap_or_else(|| i18n::t("tools.tasks.declineNoReason"));
             match db.transition_agent_task(
                 &task_id,
                 Some(task.version),
@@ -516,22 +556,26 @@ pub fn run_with_hooks(
         }
         "handoff_task" => {
             if !delegation {
-                return ToolOutcome::error(
-                    "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_CAPABILITY_DENIED: {}",
+                    i18n::t("tools.tasks.capabilityDeniedDelegation")
+                ));
             }
             let Some(task_id) = json_str(args, "taskId") else {
-                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
             };
             if let Err(outcome) = owner_check(db, &task_id, agent_id) {
                 return outcome;
             }
             let Some(to_agent) = json_str(args, "toAgentId") else {
-                return ToolOutcome::error("o argumento `toAgentId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.toAgentIdRequired"));
             };
             let summary = json_str(args, "summary").unwrap_or_default();
             let next_steps = json_str(args, "nextSteps").unwrap_or_default();
-            let combined = format!("{summary}\n\nPróximos passos: {next_steps}");
+            let combined = i18n::t_args(
+                "tools.tasks.handoffCombined",
+                &[("summary", &summary), ("nextSteps", &next_steps)],
+            );
             match db.handoff_agent_task(&task_id, agent_id, &to_agent, "agent", &combined, now) {
                 Ok(_) => {
                     notify_task(db, &task_id, hooks);
@@ -542,22 +586,20 @@ pub fn run_with_hooks(
         }
         "update_task" => {
             let Some(task_id) = json_str(args, "taskId") else {
-                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
             };
             let task = match owner_check(db, &task_id, agent_id) {
                 Ok(task) => task,
                 Err(outcome) => return outcome,
             };
             let Some(status) = json_str(args, "status") else {
-                return ToolOutcome::error("o argumento `status` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.statusRequired"));
             };
             if !matches!(
                 status.as_str(),
                 "running" | "waiting_input" | "waiting_approval" | "review"
             ) {
-                return ToolOutcome::error(
-                    "status inválido: use running, waiting_input, waiting_approval ou review",
-                );
+                return ToolOutcome::error(i18n::t("tools.tasks.invalidStatus"));
             }
             let progress = json_str(args, "progress").unwrap_or_default();
             match db.transition_agent_task(
@@ -580,17 +622,17 @@ pub fn run_with_hooks(
         }
         "finish_task" => {
             let Some(task_id) = json_str(args, "taskId") else {
-                return ToolOutcome::error("o argumento `taskId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
             };
             let task = match owner_check(db, &task_id, agent_id) {
                 Ok(task) => task,
                 Err(outcome) => return outcome,
             };
             let Some(result) = json_str(args, "result") else {
-                return ToolOutcome::error("o argumento `result` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.resultRequired"));
             };
             if result.trim().is_empty() {
-                return ToolOutcome::error("o resultado não pode ser vazio");
+                return ToolOutcome::error(i18n::t("tools.tasks.emptyResult"));
             }
             let artifacts: Vec<String> = args
                 .get("artifactIds")
@@ -608,7 +650,11 @@ pub fn run_with_hooks(
                     Ok(Some(stored)) => stored,
                     Ok(None) => {
                         return ToolOutcome::error(format!(
-                            "AGENT_TASK_INVALID: artefato `{artifact_id}` não existe"
+                            "AGENT_TASK_INVALID: {}",
+                            i18n::t_args(
+                                "tools.tasks.artifactNotFound",
+                                &[("artifact", artifact_id.as_str())],
+                            )
                         ));
                     }
                     Err(error) => return ToolOutcome::error(format!("{error:#}")),
@@ -619,7 +665,11 @@ pub fn run_with_hooks(
                 let _ = stored;
                 if !belongs {
                     return ToolOutcome::error(format!(
-                        "ARTIFACT_NOT_IN_TASK: artefato `{artifact_id}` não pertence a esta tarefa"
+                        "ARTIFACT_NOT_IN_TASK: {}",
+                        i18n::t_args(
+                            "tools.tasks.artifactNotInTask",
+                            &[("artifact", artifact_id.as_str())],
+                        )
                     ));
                 }
             }
@@ -643,38 +693,47 @@ pub fn run_with_hooks(
         }
         "send_message" => {
             if !delegation {
-                return ToolOutcome::error(
-                    "AGENT_CAPABILITY_DENIED: a delegação não está habilitada para este agente",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_CAPABILITY_DENIED: {}",
+                    i18n::t("tools.tasks.capabilityDeniedDelegation")
+                ));
             }
             let Some(channel_id) = json_str(args, "channelId") else {
-                return ToolOutcome::error("o argumento `channelId` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.channelIdRequired"));
             };
             let Some(content) = json_str(args, "content") else {
-                return ToolOutcome::error("o argumento `content` é obrigatório");
+                return ToolOutcome::error(i18n::t("tools.tasks.contentRequired"));
             };
             if content.trim().is_empty() {
-                return ToolOutcome::error("a mensagem não pode ser vazia");
+                return ToolOutcome::error(i18n::t("tools.tasks.emptyMessage"));
             }
             if content.chars().count() > 16_000 {
-                return ToolOutcome::error(
-                    "AGENT_CHANNEL_INVALID: a mensagem passa de 16.000 caracteres",
-                );
+                return ToolOutcome::error(format!(
+                    "AGENT_CHANNEL_INVALID: {}",
+                    i18n::t("tools.tasks.channelMessageTooLong")
+                ));
             }
             match db.get_agent_channel(&channel_id) {
                 Ok(Some(channel)) => {
                     if channel.kind == "dm" {
-                        return ToolOutcome::error(
-                            "AGENT_CHANNEL_DM_READONLY: use `agent_message` para conversas diretas",
-                        );
+                        return ToolOutcome::error(format!(
+                            "AGENT_CHANNEL_DM_READONLY: {}",
+                            i18n::t("tools.tasks.channelDmReadonly")
+                        ));
                     }
                     if !channel.member_ids.iter().any(|id| id == agent_id) {
-                        return ToolOutcome::error(
-                            "AGENT_TASK_FORBIDDEN: este agente não participa do canal",
-                        );
+                        return ToolOutcome::error(format!(
+                            "AGENT_TASK_FORBIDDEN: {}",
+                            i18n::t("tools.tasks.channelNotMember")
+                        ));
                     }
                 }
-                Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: canal não encontrado"),
+                Ok(None) => {
+                    return ToolOutcome::error(format!(
+                        "AGENT_TASK_INVALID: {}",
+                        i18n::t("tools.tasks.channelNotFound")
+                    ));
+                }
                 Err(error) => return ToolOutcome::error(format!("{error:#}")),
             }
             match db.append_agent_channel_message(
@@ -692,14 +751,17 @@ pub fn run_with_hooks(
                     ToolOutcome {
                         content: serde_json::to_string_pretty(&message)
                             .unwrap_or_else(|_| "{}".to_string()),
-                        summary: Some("Mensagem publicada".to_string()),
+                        summary: Some(i18n::t("tools.tasks.messagePublished")),
                         ..Default::default()
                     }
                 }
                 Err(error) => ToolOutcome::error(format!("{error:#}")),
             }
         }
-        other => ToolOutcome::error(format!("ferramenta de tarefa desconhecida: {other}")),
+        other => ToolOutcome::error(i18n::t_args(
+            "tools.tasks.unknownTool",
+            &[("tool", other)],
+        )),
     }
 }
 
@@ -713,11 +775,16 @@ pub async fn wait_for_task(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ToolOutcome {
     let Some(task_id) = json_str(args, "taskId") else {
-        return ToolOutcome::error("o argumento `taskId` é obrigatório");
+        return ToolOutcome::error(i18n::t("tools.tasks.taskIdRequired"));
     };
     let conversation = match db.get_conversation(conversation_id) {
         Ok(Some(conversation)) => conversation,
-        Ok(None) => return ToolOutcome::error("AGENT_TASK_INVALID: conversa não encontrada"),
+        Ok(None) => {
+            return ToolOutcome::error(format!(
+                "AGENT_TASK_INVALID: {}",
+                i18n::t("tools.tasks.conversationNotFound")
+            ));
+        }
         Err(error) => return ToolOutcome::error(format!("{error:#}")),
     };
     let timeout_seconds = args
@@ -732,14 +799,15 @@ pub async fn wait_for_task(
             Ok(Some(task)) => task,
             Ok(None) => {
                 return ToolOutcome::error(format!(
-                    "AGENT_TASK_NOT_FOUND: tarefa `{task_id}` não existe"
+                    "AGENT_TASK_NOT_FOUND: {}",
+                    i18n::t_args("tools.tasks.taskNotFound", &[("taskId", task_id.as_str())])
                 ));
             }
             Err(error) => return ToolOutcome::error(format!("{error:#}")),
         };
         if !task_visible(&task, agent_id, &conversation) {
             return ToolOutcome::error(
-                "AGENT_TASK_FORBIDDEN: esta tarefa não pertence ao seu escopo",
+                format!("AGENT_TASK_FORBIDDEN: {}", i18n::t("tools.tasks.taskForbiddenScope")),
             );
         }
         let stable = matches!(
@@ -762,10 +830,14 @@ pub async fn wait_for_task(
                     "waitedMs": started.elapsed().as_millis() as u64,
                 }))
                 .unwrap_or_else(|_| "{}".to_string()),
-                summary: Some(format!(
-                    "Tarefa · {}{status}",
-                    if timed_out { "timeout · " } else { "" }
-                )),
+                summary: Some(if timed_out {
+                    i18n::t_args(
+                        "tools.tasks.waitTimedOutSummary",
+                        &[("status", status.as_str())],
+                    )
+                } else {
+                    i18n::t_args("tools.tasks.taskStatusSummary", &[("status", status.as_str())])
+                }),
                 ..Default::default()
             };
         }
@@ -773,7 +845,10 @@ pub async fn wait_for_task(
         let sleep_for = remaining.min(std::time::Duration::from_millis(500));
         tokio::select! {
             _ = cancel.cancelled() => {
-                return ToolOutcome::error("AGENT_TASK_CANCELLED: espera interrompida");
+                return ToolOutcome::error(format!(
+                    "AGENT_TASK_CANCELLED: {}",
+                    i18n::t("tools.tasks.waitCancelled")
+                ));
             }
             _ = tokio::time::sleep(sleep_for) => {}
         }

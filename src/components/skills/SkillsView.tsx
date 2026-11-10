@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { AlertTriangle, ArrowLeft, BookOpen, Eye, FolderOpen, Lock, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -6,7 +7,7 @@ import type { SkillSummary } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useAppStore, useUiStore } from '@/lib/store';
 import { Badge, Button, IconButton, Spinner, Switch } from '@/components/ui';
-import { groupSkillsBySource, type SkillSourceMeta } from './sources';
+import { groupSkillsBySource, localizedSkillMeta, type SkillSourceMeta } from './sources';
 import { SkillPreviewDialog } from './SkillPreviewDialog';
 
 type SkillsState =
@@ -43,6 +44,7 @@ function SkillGroup({
   onCancelDelete,
   onConfirmDelete,
 }: GroupProps) {
+  const { t } = useTranslation('library');
   if (!skills.length) return null;
   const GroupIcon = meta.icon;
 
@@ -58,14 +60,13 @@ function SkillGroup({
           {meta.external ? (
             <Badge tone="outline">
               <Lock aria-hidden className="size-2.5" />
-              Somente leitura
+              {t('library:skills.view.readOnly')}
             </Badge>
           ) : null}
         </div>
         {meta.external ? (
           <p className="text-[11px] leading-relaxed text-foreground-subtle">
-            Repositório de outro agente: desative para o agente ignorar; o Zylara não altera estes
-            arquivos.
+            {t('library:skills.view.externalDescription')}
           </p>
         ) : null}
       </div>
@@ -73,6 +74,7 @@ function SkillGroup({
         {skills.map((skill) => {
           const busy = busySkill === skill.name;
           const askingDelete = confirming === skill.name;
+          const display = localizedSkillMeta(skill);
           return (
             <li
               key={`${skill.source}-${skill.name}`}
@@ -87,10 +89,12 @@ function SkillGroup({
                       skill.enabled ? 'text-foreground' : 'text-foreground-muted',
                     )}
                   >
-                    {skill.name}
+                    {display.name}
                   </span>
                   <Badge tone={meta.tone}>{meta.label}</Badge>
-                  {!skill.enabled ? <Badge tone="muted">Desativada</Badge> : null}
+                  {!skill.enabled ? (
+                    <Badge tone="muted">{t('library:skills.view.disabledBadge')}</Badge>
+                  ) : null}
                 </div>
                 <p
                   className={cn(
@@ -98,7 +102,7 @@ function SkillGroup({
                     skill.enabled ? 'text-foreground-muted' : 'text-foreground-subtle',
                   )}
                 >
-                  {skill.description}
+                  {display.description}
                 </p>
               </div>
 
@@ -106,12 +110,16 @@ function SkillGroup({
                 {askingDelete ? (
                   <div
                     role="group"
-                    aria-label={`Confirmar exclusão de ${skill.name}`}
+                    aria-label={t('library:skills.view.deleteConfirmAria', {
+                      name: skill.name,
+                    })}
                     className="flex items-center gap-1.5"
                   >
-                    <span className="text-[11px] font-medium text-danger">Excluir?</span>
+                    <span className="text-[11px] font-medium text-danger">
+                      {t('library:skills.view.deleteQuestion')}
+                    </span>
                     <Button size="sm" variant="ghost" disabled={busy} onClick={onCancelDelete}>
-                      Cancelar
+                      {t('common:actions.cancel')}
                     </Button>
                     <Button
                       size="sm"
@@ -119,7 +127,7 @@ function SkillGroup({
                       loading={busy}
                       onClick={() => onConfirmDelete(skill)}
                     >
-                      Excluir
+                      {t('common:actions.delete')}
                     </Button>
                   </div>
                 ) : (
@@ -128,10 +136,10 @@ function SkillGroup({
                       checked={skill.enabled}
                       disabled={busy}
                       onCheckedChange={(checked) => onToggle(skill, checked)}
-                      aria-label={`Ativar skill ${skill.name}`}
+                      aria-label={t('library:skills.view.enableAria', { name: skill.name })}
                     />
                     <IconButton
-                      label={`Visualizar skill ${skill.name}`}
+                      label={t('library:skills.view.previewAria', { name: skill.name })}
                       size="sm"
                       disabled={busy}
                       onClick={() => onPreview(skill)}
@@ -140,7 +148,7 @@ function SkillGroup({
                     </IconButton>
                     {skill.deletable ? (
                       <IconButton
-                        label={`Excluir skill ${skill.name}`}
+                        label={t('library:skills.view.deleteAria', { name: skill.name })}
                         size="sm"
                         disabled={busy}
                         className="hover:text-danger"
@@ -177,7 +185,8 @@ export interface SkillsViewProps {
  * deletion for user skills. The chat stays mounted behind it, so "Voltar ao
  * chat" restores the conversation untouched.
  */
-export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewProps = {}) {
+export function SkillsView({ onBack, backLabel }: SkillsViewProps = {}) {
+  const { t } = useTranslation('library');
   const reloadSettings = useAppStore((state) => state.reloadSettings);
   const setActiveView = useUiStore((state) => state.setActiveView);
   const handleBack = onBack ?? (() => setActiveView('chat'));
@@ -225,7 +234,7 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
       await reloadSettings();
       applySkills(skills);
     } catch (error) {
-      toast.error('Não foi possível atualizar a skill', { description: describeError(error) });
+      toast.error(t('library:skills.view.updateError'), { description: describeError(error) });
     } finally {
       setBusySkill(null);
     }
@@ -238,9 +247,9 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
       await reloadSettings();
       applySkills(skills);
       setConfirming(null);
-      toast.success('Skill excluída', { description: skill.name });
+      toast.success(t('library:skills.view.deleted'), { description: skill.name });
     } catch (error) {
-      toast.error('Não foi possível excluir a skill', { description: describeError(error) });
+      toast.error(t('library:skills.view.deleteError'), { description: describeError(error) });
     } finally {
       setBusySkill(null);
     }
@@ -251,7 +260,7 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
     try {
       await api.openSkillsDir();
     } catch (error) {
-      toast.error('Não foi possível abrir a pasta de skills', { description: describeError(error) });
+      toast.error(t('library:skills.view.openFolderError'), { description: describeError(error) });
     } finally {
       setOpeningFolder(false);
     }
@@ -265,7 +274,7 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
     <section
       ref={viewRef}
       tabIndex={-1}
-      aria-label="Gerenciamento de skills"
+      aria-label={t('library:skills.view.aria')}
       className="flex h-full min-h-0 flex-col overflow-hidden bg-background outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
     >
       <header className="shrink-0 border-b border-border bg-surface">
@@ -277,7 +286,7 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
               leftIcon={<ArrowLeft className="size-4" />}
               onClick={() => handleBack()}
             >
-              {backLabel}
+              {backLabel ?? t('library:skills.view.back')}
             </Button>
             <div className="ml-auto flex items-center gap-2">
               <Button
@@ -287,17 +296,16 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
                 leftIcon={<FolderOpen className="size-3.5" />}
                 onClick={() => void openSkillsFolder()}
               >
-                Abrir pasta de skills
+                {t('library:skills.view.openFolder')}
               </Button>
             </div>
           </div>
           <div>
             <h1 className="text-[19px] font-semibold leading-6 tracking-tight text-foreground">
-              Skills
+              {t('library:skills.view.title')}
             </h1>
             <p className="mt-0.5 text-[13px] leading-relaxed text-foreground-muted">
-              Instruções e scripts que o agente pode consultar durante a conversa. Ative, desative
-              ou remova skills do usuário. Skills externas de outros agentes são somente leitura.
+              {t('library:skills.view.description')}
             </p>
           </div>
         </div>
@@ -307,8 +315,12 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
         <div className="mx-auto w-full max-w-3xl px-6 py-6">
           {state.status === 'loading' ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-2">
-              <Spinner size="md" className="text-accent" label="Carregando skills" />
-              <span className="text-xs text-foreground-muted">Carregando skills…</span>
+              <Spinner
+                size="md"
+                className="text-accent"
+                label={t('library:skills.view.loadingLabel')}
+              />
+              <span className="text-xs text-foreground-muted">{t('library:skills.view.loading')}</span>
             </div>
           ) : null}
 
@@ -316,13 +328,13 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 text-center">
               <AlertTriangle aria-hidden className="size-5 text-danger" />
               <p className="text-[13px] font-medium text-foreground">
-                Não foi possível carregar as skills
+                {t('library:skills.view.loadErrorTitle')}
               </p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
                 {state.message}
               </p>
               <Button size="sm" variant="secondary" onClick={() => setAttempt((value) => value + 1)}>
-                Tentar novamente
+                {t('library:skills.view.retry')}
               </Button>
             </div>
           ) : null}
@@ -330,11 +342,16 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
           {state.status === 'ready' && !skills.length ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-2 px-6 text-center">
               <BookOpen aria-hidden className="size-5 text-foreground-subtle" />
-              <p className="text-[13px] font-medium text-foreground">Nenhuma skill encontrada</p>
+              <p className="text-[13px] font-medium text-foreground">
+                {t('library:skills.view.emptyTitle')}
+              </p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
-                Adicione uma pasta com um arquivo <code className="font-mono">SKILL.md</code> na
-                pasta de skills do Zylara (botão “Abrir pasta de skills”) e tente novamente. As
-                skills de outros agentes são detectadas automaticamente.
+                <Trans
+                  ns="library"
+                  i18nKey="skills.view.emptyDescription"
+                  values={{ file: 'SKILL.md' }}
+                  components={{ code: <code className="font-mono" /> }}
+                />
               </p>
             </div>
           ) : null}
@@ -346,7 +363,7 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
                   role="note"
                   className="rounded-lg border border-border bg-surface px-3 py-2 text-[11px] leading-relaxed text-foreground-muted"
                 >
-                  Skills desativadas não são usadas pelo agente.
+                  {t('library:skills.view.disabledNote')}
                 </p>
               ) : null}
 
@@ -369,10 +386,12 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
               <p className="mt-1 flex items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-[11px] leading-relaxed text-foreground-muted">
                 <BookOpen aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground-subtle" />
                 <span>
-                  Para criar uma skill, adicione{' '}
-                  <code className="font-mono text-foreground">skills/&lt;nome&gt;/SKILL.md</code> na
-                  pasta de skills. Skills embutidas e externas não podem ser excluídas — desative-as
-                  se não quiser usá-las.
+                  <Trans
+                    ns="library"
+                    i18nKey="skills.view.createNote"
+                    values={{ path: 'skills/<nome>/SKILL.md' }}
+                    components={{ code: <code className="font-mono text-foreground" /> }}
+                  />
                 </span>
               </p>
             </div>

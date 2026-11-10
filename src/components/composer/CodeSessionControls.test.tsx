@@ -23,7 +23,14 @@ vi.mock('sonner', () => ({
 
 // Imported after the mocks above.
 import { toast } from 'sonner';
-import { AUTONOMOUS_MODE_WARNING, AUTONOMOUS_MODE_WARNING_TITLE } from '@/lib/permissionModes';
+import { i18n } from '@/lib/i18n';
+import {
+  AUTONOMOUS_MODE_WARNING_KEY,
+  AUTONOMOUS_MODE_WARNING_TITLE_KEY,
+} from '@/lib/permissionModes';
+
+const AUTONOMOUS_MODE_WARNING = i18n.t('code:permissions.autonomousWarning');
+const AUTONOMOUS_MODE_WARNING_TITLE = i18n.t('code:permissions.autonomousWarningTitle');
 import { emptyCodeSession, useChatStore, useCodeStore, useUiStore, type CodeSessionUi } from '@/lib/store';
 import { CodeSessionControls } from './CodeSessionControls';
 

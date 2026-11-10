@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
+import { t } from '../i18n';
 import { api } from '../api';
 import type {
   Agent,
@@ -383,7 +384,7 @@ function patchAgentRoute(
 ): Promise<Agent> {
   const next = agentRouteQueue.then(() => {
     const agent = useAgentStore.getState().agentsById[agentId];
-    if (!agent) throw new Error('o agente não existe mais');
+    if (!agent) throw new Error(t('chat:errors.agentMissing'));
     return useAgentStore.getState().update(agentId, {
       ...inputFromAgent(agent),
       ...patch,
@@ -394,19 +395,23 @@ function patchAgentRoute(
   return next;
 }
 
-/** Copy shared by every surface that blocks model switching. */
-export const MODEL_LOCKED_TITLE = 'Modelo bloqueado nesta conversa';
-export const MODEL_LOCKED_DESCRIPTION =
-  'O modelo não pode ser alterado depois de iniciar a conversa. Ajuste o modo de pensamento pelo botão ✦.';
-export const MODEL_STREAMING_LOCKED_TITLE = 'Aguarde a resposta atual terminar';
-export const MODEL_STREAMING_LOCKED_DESCRIPTION =
-  'A troca de modelo fica disponível quando a resposta atual terminar.';
+/**
+ * Copy keys shared by every surface that blocks model switching. The text is
+ * resolved by `modelLockCopy` at call time so it follows the active language.
+ */
+export const MODEL_LOCKED_TITLE = 'chat:modelLock.locked.title';
+export const MODEL_LOCKED_DESCRIPTION = 'chat:modelLock.locked.description';
+export const MODEL_STREAMING_LOCKED_TITLE = 'chat:modelLock.streaming.title';
+export const MODEL_STREAMING_LOCKED_DESCRIPTION = 'chat:modelLock.streaming.description';
 
 /** Title/description for a lock reason, shared by the pill, dialog and palette. */
 export function modelLockCopy(reason: ModelLockReason): { title: string; description: string } {
   return reason === 'streaming'
-    ? { title: MODEL_STREAMING_LOCKED_TITLE, description: MODEL_STREAMING_LOCKED_DESCRIPTION }
-    : { title: MODEL_LOCKED_TITLE, description: MODEL_LOCKED_DESCRIPTION };
+    ? {
+        title: t(MODEL_STREAMING_LOCKED_TITLE),
+        description: t(MODEL_STREAMING_LOCKED_DESCRIPTION),
+      }
+    : { title: t(MODEL_LOCKED_TITLE), description: t(MODEL_LOCKED_DESCRIPTION) };
 }
 
 /**
@@ -849,13 +854,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
         if (background) {
           const title =
             event.type === 'approval_requested'
-              ? 'Aprovação necessária'
-              : 'O agente fez uma pergunta';
-          const body = conversation?.title ?? 'Thread de agente';
+              ? t('chat:toasts.approvalNeeded')
+              : t('chat:toasts.agentQuestion');
+          const body = conversation?.title ?? t('chat:toasts.agentThreadFallback');
           toast.info(title, {
             description: body,
             action: {
-              label: 'Abrir',
+              label: t('common:actions.open'),
               onClick: () => void get().openConversation(context.conversationId),
             },
           });
@@ -1030,11 +1035,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
               const agentName = finishedConversation.agentId
                 ? useAgentStore.getState().agentsById[finishedConversation.agentId]?.name
                 : null;
-              const title = `${agentName ?? 'Agente'} concluiu a resposta`;
+              const title = t('chat:toasts.agentFinished', {
+                agent: agentName ?? t('chat:toasts.agentFallback'),
+              });
               toast.success(title, {
                 description: finishedConversation.title,
                 action: {
-                  label: 'Abrir',
+                  label: t('common:actions.open'),
                   onClick: () => void get().openConversation(finishedConversation.id),
                 },
               });
@@ -1112,7 +1119,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
           if (!preemptions.has(context.conversationId)) {
             void useCodeStore.getState().refresh(context.conversationId);
           }
-          toast.error('Falha na resposta', { description: event.hint ?? event.message });
+          toast.error(t('chat:toasts.responseFailed'), {
+            description: event.hint ?? event.message,
+          });
           if (event.code === 'TURN_BUSY' && queuedItem) {
             useMessageQueueStore.getState().enqueueFront(queuedItem);
             useMessageQueueStore.getState().pause(context.conversationId, true);
@@ -1300,7 +1309,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         if (get().activeId === context.conversationId) {
           set({ error: result.error });
         }
-        toast.error('A resposta terminou com erro', { description: result.error });
+        toast.error(t('chat:toasts.responseError'), { description: result.error });
       }
       void refreshList();
       // Authoritative reconciliation: even if an `artifact_created` event was
@@ -1326,8 +1335,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         setStream(context.conversationId, null);
         useMessageQueueStore.getState().enqueueFront(context.queueItem);
         useMessageQueueStore.getState().pause(context.conversationId, true);
-        toast.info('Thread ocupada', {
-          description: 'A mensagem voltou para a fila; retome quando o turno atual terminar.',
+        toast.info(t('chat:toasts.threadBusy'), {
+          description: t('chat:toasts.threadBusyHint'),
         });
         return;
       }
@@ -1341,7 +1350,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         removeMessage(context.conversationId, context.assistantId);
         setStream(context.conversationId, null);
         if (get().activeId === context.conversationId) set({ error: message });
-        toast.error('Não foi possível iniciar a rodada do objetivo', { description: message });
+        toast.error(t('chat:toasts.goalRoundFailed'), { description: message });
         void useCodeStore.getState().refresh(context.conversationId);
         return;
       }
@@ -1352,7 +1361,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       );
       setStream(context.conversationId, null);
       if (get().activeId === context.conversationId) set({ error: message });
-      toast.error('Não foi possível concluir a mensagem', { description: message });
+      toast.error(t('chat:toasts.messageFailed'), { description: message });
       void syncArtifacts(context.conversationId);
     } finally {
       clearTimeout(flushHandle);
@@ -1375,7 +1384,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
     const layout = currentLayout();
     const agentId = layout === 'agent' ? useUiStore.getState().activeAgentId : null;
     if (layout === 'agent' && !agentId) {
-      throw new Error('Selecione um agente antes de enviar a mensagem.');
+      throw new Error(t('chat:errors.agentRequiredBeforeSend'));
     }
     const conversation = agentId
       ? await api.createConversation(
@@ -1535,7 +1544,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       : undefined;
     if (item.agentId && (!agent || agent.archivedAt !== null)) {
       useMessageQueueStore.getState().pause(conversationId, true);
-      toast.error('A fila está pausada: restaure o agente para continuar');
+      toast.error(t('chat:toasts.queuePaused'));
       return false;
     }
     const conversation = get().conversations.find(
@@ -1633,7 +1642,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         preemptions.delete(conversationId);
         if (!idle) {
           useMessageQueueStore.getState().pause(conversationId, true);
-          toast.error('Não foi possível interromper a resposta atual');
+          toast.error(t('chat:toasts.interruptFailed'));
           return;
         }
         if (startQueueItem(conversationId, preempt.item)) {
@@ -1870,7 +1879,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const layout = mode ?? currentLayout();
       const agentId = layout === 'agent' ? options?.agentId : undefined;
       if (layout === 'agent' && !agentId) {
-        toast.info('Selecione um agente para iniciar a conversa');
+        toast.info(t('chat:toasts.selectAgentToStart'));
         return null;
       }
       // Only the page state of the layout that started the conversation is
@@ -1891,14 +1900,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
       try {
         const conversation = agentId
           ? await api.createConversation(
-              'Nova conversa',
+              t('common:conversation.defaultTitle'),
               selection.providerId,
               selection.modelId,
               layout,
               agentId,
             )
           : await api.createConversation(
-              'Nova conversa',
+              t('common:conversation.defaultTitle'),
               selection.providerId,
               selection.modelId,
               layout,
@@ -1916,7 +1925,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         useUiStore.getState().closeArtifactPanel();
         return conversation.id;
       } catch (error) {
-        toast.error('Não foi possível criar a conversa', { description: String(error) });
+        toast.error(t('chat:toasts.createConversationFailed'), { description: String(error) });
         return null;
       }
     },
@@ -1965,7 +1974,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           useUiStore.getState().closeArtifactPanel();
         }
       } catch (error) {
-        toast.error('Não foi possível excluir', { description: String(error) });
+        toast.error(t('chat:toasts.deleteFailed'), { description: String(error) });
       }
     },
 
@@ -1978,7 +1987,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       try {
         await api.renameConversation(id, trimmed);
       } catch (error) {
-        toast.error('Não foi possível renomear', { description: String(error) });
+        toast.error(t('chat:toasts.renameFailed'), { description: String(error) });
       }
     },
 
@@ -1986,7 +1995,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const conversation = get().conversations.find((c) => c.id === id);
       if (!conversation) return;
       if (conversation.isMain) {
-        toast.info('A conversa principal permanece fixada.');
+        toast.info(t('chat:toasts.mainConversationPinned'));
         return;
       }
       const pinned = !conversation.pinned;
@@ -1997,7 +2006,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         await api.setConversationPinned(id, pinned);
         await refreshList();
       } catch (error) {
-        toast.error('Não foi possível fixar', { description: String(error) });
+        toast.error(t('chat:toasts.pinFailed'), { description: String(error) });
       }
     },
 
@@ -2018,7 +2027,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         await runReorder(() => api.reorderConversations(ids));
       } catch (error) {
         set({ conversations: previous });
-        toast.error('Não foi possível reordenar as conversas', { description: String(error) });
+        toast.error(t('chat:toasts.reorderFailed'), { description: String(error) });
         void get().refreshConversations();
       }
     },
@@ -2039,7 +2048,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (layout === 'agent') {
         const agent = activeAgentForState(state);
         if (!agent) {
-          toast.info('Selecione um agente para trocar o modelo');
+          toast.info(t('chat:toasts.selectAgentForModel'));
           return false;
         }
         try {
@@ -2076,12 +2085,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
           }
           const name =
             modelForRoute(selection.providerId, selection.modelId)?.name ?? selection.modelId;
-          toast.success('Modelo do agente atualizado', {
-            description: `As próximas respostas usarão ${name}.`,
+          toast.success(t('chat:toasts.agentModelUpdated'), {
+            description: t('chat:toasts.nextResponsesModel', { model: name }),
           });
           return true;
         } catch (error) {
-          toast.error('Não foi possível alterar o modelo', {
+          toast.error(t('chat:toasts.changeModelFailed'), {
             description: String(error instanceof Error ? error.message : error).replace(
               /^MODEL_LOCKED:\s*/,
               '',
@@ -2128,8 +2137,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
           ),
         }));
         const name = modelForRoute(updated.providerId, updated.modelId)?.name ?? updated.modelId;
-        toast.success('Modelo da sessão alterado', {
-          description: `As próximas respostas usarão ${name}.`,
+        toast.success(t('chat:toasts.sessionModelChanged'), {
+          description: t('chat:toasts.nextResponsesModel', { model: name }),
         });
         return true;
       } catch (error) {
@@ -2140,7 +2149,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           /^MODEL_LOCKED:\s*/,
           '',
         );
-        toast.error('Não foi possível alterar o modelo', { description });
+        toast.error(t('chat:toasts.changeModelFailed'), { description });
         return false;
       }
     },
@@ -2156,7 +2165,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         return;
       }
       void patchAgentRoute(agent.id, { reasoning }).catch((error) => {
-        toast.error('Não foi possível alterar o modo de pensamento', {
+        toast.error(t('chat:toasts.changeReasoningFailed'), {
           description: String(error instanceof Error ? error.message : error),
         });
       });
@@ -2168,7 +2177,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         const imported = await api.importAttachments(paths);
         set((state) => ({ pendingAttachments: [...state.pendingAttachments, ...imported] }));
       } catch (error) {
-        toast.error('Falha ao importar anexo', { description: String(error) });
+        toast.error(t('chat:toasts.attachImportFailed'), { description: String(error) });
       }
     },
 
@@ -2178,7 +2187,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         if (!imported.length) return;
         set((state) => ({ pendingAttachments: [...state.pendingAttachments, ...imported] }));
       } catch (error) {
-        toast.error('Não foi possível colar o anexo', { description: String(error) });
+        toast.error(t('chat:toasts.pasteAttachmentFailed'), { description: String(error) });
       }
     },
 
@@ -2208,7 +2217,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (item.agentId) {
         const agent = useAgentStore.getState().agentsById[item.agentId];
         if (!agent || agent.archivedAt !== null) {
-          toast.error('A fila está pausada: restaure o agente para continuar');
+          toast.error(t('chat:toasts.queuePaused'));
           return false;
         }
       }
@@ -2217,7 +2226,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         // No local stream: the backend may still own a turn this renderer lost
         // (reload/second window). Wait for it before starting the item.
         if (!(await waitForIdleTurn(conversationId))) {
-          toast.info('Aguarde a resposta atual terminar');
+          toast.info(t('chat:toasts.waitForResponse'));
           return false;
         }
         if (!startQueueItem(conversationId, item)) return false;
@@ -2266,7 +2275,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (activeStream) {
         const conversationId = state.activeId;
         if (!conversationId) {
-          toast.info('Aguarde a resposta atual terminar');
+          toast.info(t('chat:toasts.waitForResponse'));
           return false;
         }
         const ui = useUiStore.getState();
@@ -2282,8 +2291,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         const queueLimit =
           useAppStore.getState().settings.maxQueueLengthPerThread ?? 20;
         if (useMessageQueueStore.getState().count(conversationId) >= queueLimit) {
-          toast.error('Fila cheia', {
-            description: `Esta thread já tem ${queueLimit} mensagens na fila. Aguarde ou limpe a fila.`,
+          toast.error(t('chat:toasts.queueFull'), {
+            description: t('chat:toasts.queueFullHint', { count: queueLimit }),
           });
           return false;
         }
@@ -2318,10 +2327,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
         useMessageQueueStore.getState().enqueue(item);
         set({ pendingAttachments: [] });
         if (!options?.sendNow) {
-          toast.info('Mensagem na fila', {
-            description: 'Ela será enviada quando a resposta atual terminar.',
+          toast.info(t('chat:toasts.messageQueued'), {
+            description: t('chat:toasts.messageQueuedHint'),
             action: {
-              label: 'Enviar agora',
+              label: t('chat:queue.sendNow'),
               onClick: () => void get().sendQueuedNow(conversationId, item.id),
             },
           });
@@ -2357,20 +2366,23 @@ export const useChatStore = create<ChatState>()((set, get) => {
         const auth = app.auth?.find((entry) => entry.providerId === selection.providerId);
         const ready = Boolean(key?.hasKey) || auth?.state === 'signed-in';
         if (!ready) {
-          toast.error('Conecte uma credencial para enviar', {
+          toast.error(t('chat:toasts.connectCredential'), {
             description:
               activeProvider.auth === 'oauth'
-                ? 'Entre com o ChatGPT (Configurações → Provedores) ou adicione uma API key.'
-                : 'Adicione a API key deste provedor em Configurações → Provedores.',
+                ? t('chat:toasts.connectCredentialOauth')
+                : t('chat:toasts.connectCredentialApiKey'),
           });
           return false;
         }
       }
       let conversationId: string;
       try {
-        conversationId = await ensureConversation(deriveTitle(trimmed || attachments[0]?.name || 'Nova conversa'), selection);
+        conversationId = await ensureConversation(
+          deriveTitle(trimmed || attachments[0]?.name || t('common:conversation.defaultTitle')),
+          selection,
+        );
       } catch (error) {
-        toast.error('Não foi possível criar a conversa', { description: String(error) });
+        toast.error(t('chat:toasts.createConversationFailed'), { description: String(error) });
         return false;
       }
 
@@ -2394,8 +2406,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const lastUser = [...messages].reverse().find((m) => m.role === 'user');
       if (!lastAssistant || !lastUser) return;
       if (lastUser.origin === 'goal_round') {
-        toast.info('Rodada do objetivo não pode ser regenerada', {
-          description: 'Use "Nova rodada" no objetivo para continuar o trabalho.',
+        toast.info(t('chat:toasts.goalRoundNotRegenerable'), {
+          description: t('chat:toasts.goalRoundNotRegenerableHint'),
         });
         return;
       }
@@ -2408,7 +2420,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       try {
         await api.truncateConversation(conversationId, lastAssistant.id);
       } catch (error) {
-        toast.error('Não foi possível regenerar', { description: String(error) });
+        toast.error(t('chat:toasts.regenerateFailed'), { description: String(error) });
         return;
       }
       removeMessage(conversationId, lastAssistant.id);
@@ -2485,7 +2497,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       try {
         await api.truncateConversation(conversationId, messageId);
       } catch (error) {
-        toast.error('Não foi possível editar', { description: String(error) });
+        toast.error(t('chat:toasts.editFailed'), { description: String(error) });
         return;
       }
       set((s) => ({
@@ -2595,11 +2607,11 @@ export const useChatStore = create<ChatState>()((set, get) => {
         const auth = app.auth?.find((entry) => entry.providerId === selection.providerId);
         const ready = Boolean(key?.hasKey) || auth?.state === 'signed-in';
         if (!ready) {
-          toast.error('Conecte uma credencial para continuar o objetivo', {
+          toast.error(t('chat:toasts.connectCredentialGoal'), {
             description:
               activeProvider.auth === 'oauth'
-                ? 'Entre com o ChatGPT (Configurações → Provedores) ou adicione uma API key.'
-                : 'Adicione a API key deste provedor em Configurações → Provedores.',
+                ? t('chat:toasts.connectCredentialOauth')
+                : t('chat:toasts.connectCredentialApiKey'),
           });
           return false;
         }

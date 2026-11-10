@@ -1,0 +1,81 @@
+{
+  "actions": {
+    "group": "Acciones sugeridas",
+    "copied": "Copiado al portapapeles",
+    "errors": {
+      "prepareSuggestion": "No se pudo preparar la sugerencia.",
+      "copy": "No se pudo copiar al portapapeles.",
+      "empty": "Esta acción no tiene contenido para ejecutar.",
+      "run": "No se pudo ejecutar la acción."
+    }
+  },
+  "block": {
+    "title": "UI generativa",
+    "parseError": "No se pudo interpretar el bloque de UI generativa.",
+    "diagnosticsAria": "Diagnósticos de la UI generativa"
+  },
+  "renderer": {
+    "depthExceeded": "Se superó el nivel de anidamiento en esta UI.",
+    "unsupportedComponent": "El componente \"{{type}}\" no es compatible.",
+    "emptyTabs": "Pestañas sin paneles.",
+    "defaultTab": "Pestaña {{index}}"
+  },
+  "choices": {
+    "group": "Opciones",
+    "defaultPrefix": "Selección:"
+  },
+  "reveal": {
+    "defaultTitle": "Detalles"
+  },
+  "stat": {
+    "defaultLabel": "Métrica"
+  },
+  "progress": {
+    "defaultLabel": "Progreso"
+  },
+  "timeline": {
+    "defaultTitle": "Paso {{index}}"
+  },
+  "image": {
+    "defaultAlt": "Imagen",
+    "loadError": "No se pudo cargar la imagen.",
+    "unavailable": "Imagen no disponible."
+  },
+  "table": {
+    "empty": "La tabla no tiene datos."
+  },
+  "chart": {
+    "invalid": "Gráfico no válido.",
+    "titleFallback": "Gráfico",
+    "parseError": "No se pudieron interpretar los datos del gráfico.",
+    "noData": "No hay datos para mostrar.",
+    "invalidValues": "Valores no válidos para el gráfico.",
+    "total": "total",
+    "title_one": "Gráfico de {{count}} elemento",
+    "title_other": "Gráfico de {{count}} elementos"
+  },
+  "source": {
+    "openAria": "Abrir {{label}} en una pestaña nueva"
+  },
+  "status": {
+    "done": "Completado",
+    "active": "En curso",
+    "pending": "Pendiente",
+    "disabled": "Desactivado",
+    "error": "Error"
+  },
+  "code": {
+    "copy": "Copiar código",
+    "copied": "Copiado",
+    "copiedTooltip": "¡Copiado!"
+  },
+  "html": {
+    "title": "Vista previa HTML",
+    "sandboxHint": "El contenido se ejecuta aislado, sin acceso a la aplicación"
+  },
+  "mermaid": {
+    "title": "Diagrama Mermaid",
+    "renderError": "No se pudo renderizar el diagrama: {{error}}",
+    "rendering": "Renderizando diagrama…"
+  }
+}

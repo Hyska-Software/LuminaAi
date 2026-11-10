@@ -1,5 +1,7 @@
 import { useState, type SyntheticEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Clock, Music } from 'lucide-react';
+import { t } from '@/lib/i18n';
 import { cn, formatBytes } from '@/lib/utils';
 import { Badge } from '@/components/ui';
 import { BinaryPreview } from './BinaryPreview';
@@ -54,8 +56,10 @@ const AUDIO_FORMAT_BY_MIME: Record<string, string> = {
   'audio/amr': 'AMR',
 };
 
-export const LARGE_MEDIA_DETAIL =
-  'Arquivo grande demais para reprodução inline; use Abrir/Salvar.';
+/** Detail shown when the media is too large for inline playback. */
+export function largeMediaDetail(): string {
+  return t('artifacts:audio.largeDetail');
+}
 
 export function mediaExtension(name?: string | null): string | null {
   if (!name) return null;
@@ -114,6 +118,7 @@ function audioDataUrl(mimeType: string, payload: string): string {
  * without a payload and fall back to the binary card.
  */
 export function AudioPreview({ content, className }: ArtifactViewProps) {
+  const { t: translate } = useTranslation('artifacts');
   const { artifact, dataBase64, content: text } = content;
   const [duration, setDuration] = useState<number | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -128,7 +133,7 @@ export function AudioPreview({ content, className }: ArtifactViewProps) {
           : null;
 
   if (!inlinePayload) {
-    return <BinaryPreview content={content} className={className} detail={LARGE_MEDIA_DETAIL} />;
+    return <BinaryPreview content={content} className={className} detail={largeMediaDetail()} />;
   }
   if (mediaError) {
     return <BinaryPreview content={content} className={className} detail={mediaError} />;
@@ -140,7 +145,7 @@ export function AudioPreview({ content, className }: ArtifactViewProps) {
     artifact.mimeType,
     artifact.name,
     { byExt: AUDIO_FORMAT_BY_EXTENSION, byMime: AUDIO_FORMAT_BY_MIME },
-    'ÁUDIO',
+    translate('artifacts:audio.formatFallback'),
   );
   const durationLabel = mediaDurationLabel(duration);
 
@@ -155,12 +160,12 @@ export function AudioPreview({ content, className }: ArtifactViewProps) {
         <Badge tone="accent" size="sm">
           {format}
         </Badge>
-        <span className="tabular-nums" title="Tamanho do arquivo">
+        <span className="tabular-nums" title={translate('artifacts:audio.fileSizeTitle')}>
           {formatBytes(artifact.size)}
         </span>
-        <span className="inline-flex items-center gap-1 tabular-nums" title="Duração do áudio">
+        <span className="inline-flex items-center gap-1 tabular-nums" title={translate('artifacts:audio.durationTitle')}>
           <Clock aria-hidden className="size-3.5 text-foreground-subtle" strokeWidth={1.8} />
-          {durationLabel ?? 'Duração —'}
+          {durationLabel ?? translate('artifacts:audio.durationUnknown')}
         </span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-surface p-6">
@@ -168,15 +173,15 @@ export function AudioPreview({ content, className }: ArtifactViewProps) {
           controls
           preload="metadata"
           src={src}
-          aria-label={`Reprodutor de áudio de ${artifact.name}`}
+          aria-label={translate('artifacts:audio.playerAria', { name: artifact.name })}
           onLoadedMetadata={handleLoadedMetadata}
           onError={() =>
-            setMediaError('Não foi possível reproduzir o áudio; use Abrir/Salvar.')
+            setMediaError(translate('artifacts:audio.playError'))
           }
           className="w-full max-w-md"
         />
         <p className="max-w-sm text-center text-[11px] leading-relaxed text-foreground-subtle">
-          Reprodução local no player nativo.
+          {translate('artifacts:audio.localPlayback')}
         </p>
       </div>
     </div>

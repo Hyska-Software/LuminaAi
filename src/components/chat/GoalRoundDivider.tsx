@@ -7,6 +7,7 @@
  * uma bolha, sem editar/regenerar. Enquanto a rodada roda, o divisor ganha um
  * spinner; depois, mostra o horário relativo em que começou.
  */
+import { useTranslation } from 'react-i18next';
 import { Target } from 'lucide-react';
 
 import { Spinner } from '@/components/ui';
@@ -26,10 +27,11 @@ export function GoalRoundDivider({
   streaming = false,
   className,
 }: GoalRoundDividerProps) {
+  const { t } = useTranslation('chat');
   const when = relativeTime(createdAt);
   const label = streaming
-    ? 'Continuação do objetivo — rodada em andamento'
-    : `Continuação do objetivo — ${when}`;
+    ? t('goalRound.label')
+    : t('goalRound.labelWithTime', { when });
 
   return (
     <div
@@ -40,7 +42,7 @@ export function GoalRoundDivider({
       <span aria-hidden className="h-px min-w-4 flex-1 bg-border" />
       <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-foreground-muted">
         <Target aria-hidden className="size-3.5 shrink-0 text-accent" strokeWidth={1.75} />
-        <span className="truncate">Continuação do objetivo</span>
+        <span className="truncate">{t('goalRound.text')}</span>
         <span aria-hidden className="shrink-0 text-foreground-subtle">
           ·
         </span>

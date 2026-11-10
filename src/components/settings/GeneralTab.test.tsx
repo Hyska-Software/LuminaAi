@@ -16,8 +16,12 @@ vi.mock('@/lib/api', () => ({
 // Imported after the mock above.
 import { GeneralTab } from '@/components/settings/GeneralTab';
 import { useAppStore, useUiStore } from '@/lib/store';
+import { i18n, setLanguage } from '@/lib/i18n';
 
-afterEach(() => cleanup());
+afterEach(async () => {
+  cleanup();
+  await setLanguage('pt-BR', { persist: false });
+});
 
 function settings(overrides: Partial<Settings> = {}): Settings {
   return {
@@ -145,5 +149,27 @@ describe('GeneralTab — layouts visíveis', () => {
     expect(
       (screen.getByRole('switch', { name: 'Layout Code' }) as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+});
+
+
+describe('GeneralTab — interface language', () => {
+  it('offers the three languages and persists the chosen locale', async () => {
+    render(<GeneralTab />);
+
+    const select = screen.getByRole('combobox', {
+      name: 'Idioma da interface',
+    }) as HTMLSelectElement;
+    expect([...select.options].map((option) => option.value)).toEqual(['en', 'pt-BR', 'es']);
+
+    fireEvent.change(select, { target: { value: 'es' } });
+
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ locale: 'es' }),
+      );
+    });
+    expect(i18n.language).toBe('es');
+    expect(document.documentElement.lang).toBe('es');
   });
 });

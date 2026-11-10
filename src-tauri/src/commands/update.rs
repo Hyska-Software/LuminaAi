@@ -51,7 +51,7 @@ pub async fn check_for_update(
         }
     }
     if !state.begin_check() {
-        return Err("Já existe uma verificação de atualizações em andamento.".to_string());
+        return Err(crate::i18n::t("update.errors.checkInProgress"));
     }
 
     let result = async {
@@ -93,13 +93,13 @@ pub async fn download_update(
 ) -> Result<DownloadResult, String> {
     let info = state
         .cached_for(&version)
-        .ok_or_else(|| "Atualização não encontrada. Verifique novamente.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("update.errors.updateNotFoundRetry"))?;
     let asset = info
         .asset
         .clone()
-        .ok_or_else(|| "Esta versão não tem instalador para a sua plataforma.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("update.errors.noInstallerForPlatform"))?;
     if !state.begin_download() {
-        return Err("Já existe um download em andamento.".to_string());
+        return Err(crate::i18n::t("update.errors.downloadInProgress"));
     }
 
     let result = download::run(
@@ -129,11 +129,11 @@ pub fn install_update(
 ) -> Result<(), String> {
     let info = state
         .cached_for(&version)
-        .ok_or_else(|| "Atualização não encontrada. Verifique novamente.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("update.errors.updateNotFoundRetry"))?;
     let asset = info
         .asset
         .clone()
-        .ok_or_else(|| "Esta versão não tem instalador para a sua plataforma.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("update.errors.noInstallerForPlatform"))?;
     install::install(&app, &state, &version, &asset).map_err(to_error)
 }
 
@@ -145,9 +145,9 @@ pub fn reveal_update(
 ) -> Result<(), String> {
     let info = state
         .cached_for(&version)
-        .ok_or_else(|| "Atualização não encontrada.".to_string())?;
+        .ok_or_else(|| crate::i18n::t("update.errors.updateNotFound"))?;
     let Some(asset) = info.asset else {
-        return Err("Nenhum arquivo baixado para esta versão.".to_string());
+        return Err(crate::i18n::t("update.errors.noDownloadedFile"));
     };
     install::reveal(&app, &state, &version, &asset).map_err(to_error)
 }

@@ -23,6 +23,7 @@ mod domain;
 mod events;
 mod harness;
 mod http;
+mod i18n;
 #[cfg(windows)]
 mod installer;
 mod jobs;

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CircleAlert,
   Folder,
@@ -7,6 +8,7 @@ import {
   X,
 } from 'lucide-react';
 import { Input, Spinner } from '@/components/ui';
+import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { WorkspaceFileEntry } from '@/lib/types';
 import { FileIcon } from './FileIcon';
@@ -41,16 +43,28 @@ export interface FileTreeProps {
   className?: string;
 }
 
-const GIT_BADGES: Record<string, { label: string; className: string }> = {
-  M: { label: 'Modificado', className: 'text-warning' },
-  A: { label: 'Adicionado', className: 'text-success' },
-  D: { label: 'Removido', className: 'text-danger' },
-  R: { label: 'Renomeado', className: 'text-accent' },
-  C: { label: 'Copiado', className: 'text-accent' },
-  U: { label: 'Com conflito', className: 'text-danger' },
-  '?': { label: 'Não rastreado', className: 'text-foreground-subtle' },
-  '!': { label: 'Ignorado', className: 'text-foreground-subtle' },
-};
+function gitBadge(status: string): { label: string; className: string } | null {
+  switch (status) {
+    case 'M':
+      return { label: t('code:tree.badge.modified'), className: 'text-warning' };
+    case 'A':
+      return { label: t('code:tree.badge.added'), className: 'text-success' };
+    case 'D':
+      return { label: t('code:tree.badge.deleted'), className: 'text-danger' };
+    case 'R':
+      return { label: t('code:tree.badge.renamed'), className: 'text-accent' };
+    case 'C':
+      return { label: t('code:tree.badge.copied'), className: 'text-accent' };
+    case 'U':
+      return { label: t('code:tree.badge.conflicted'), className: 'text-danger' };
+    case '?':
+      return { label: t('code:tree.badge.untracked'), className: 'text-foreground-subtle' };
+    case '!':
+      return { label: t('code:tree.badge.ignored'), className: 'text-foreground-subtle' };
+    default:
+      return null;
+  }
+}
 
 /** Recursively flattens the tree into rows; handles nested `children` and flat depth lists. */
 function flatten(
@@ -99,6 +113,7 @@ export function FileTree({
   loadingPaths,
   className,
 }: FileTreeProps) {
+  const { t } = useTranslation('code');
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
@@ -247,22 +262,22 @@ export function FileTree({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Filtrar arquivos…"
-            aria-label="Filtrar arquivos"
+            placeholder={t('code:tree.filterPlaceholder')}
+            aria-label={t('code:tree.filterAria')}
             className="h-8 pl-7 pr-7 text-[12px]"
           />
           {query ? (
             <button
               type="button"
               onClick={() => setQuery('')}
-              aria-label="Limpar filtro"
+              aria-label={t('code:tree.clearFilter')}
               className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-foreground-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <X aria-hidden className="size-3.5" strokeWidth={2} />
             </button>
           ) : null}
         </div>
-        {loading ? <Spinner size="xs" label="Carregando arquivos" /> : null}
+        {loading ? <Spinner size="xs" label={t('code:tree.loading')} /> : null}
       </div>
 
       {error ? (
@@ -270,11 +285,11 @@ export function FileTree({
           <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
             <CircleAlert aria-hidden className="size-4" strokeWidth={1.75} />
           </span>
-          <p className="text-[12.5px] font-medium text-foreground">Não foi possível ler a pasta</p>
+          <p className="text-[12.5px] font-medium text-foreground">{t('code:tree.errorTitle')}</p>
           <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">{error}</p>
         </div>
       ) : loading && entries.length === 0 ? (
-        <div role="status" aria-label="Carregando a árvore" className="flex-1 space-y-1.5 p-2">
+        <div role="status" aria-label={t('code:tree.loadingTree')} className="flex-1 space-y-1.5 p-2">
           {SKELETON_ROWS.map((row) => (
             <div
               key={row}
@@ -287,18 +302,18 @@ export function FileTree({
         <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-6 py-8 text-center">
           <Folder aria-hidden className="size-5 text-foreground-subtle" strokeWidth={1.75} />
           <p className="text-[12.5px] font-medium text-foreground">
-            {normalizedQuery ? 'Nenhum arquivo corresponde à busca' : 'Nenhum arquivo para mostrar'}
+            {normalizedQuery ? t('code:tree.emptySearchTitle') : t('code:tree.emptyTitle')}
           </p>
           <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">
             {normalizedQuery
-              ? 'Refine a busca ou limpe o filtro para ver a árvore.'
-              : 'A árvore do workspace aparece aqui quando a pasta estiver disponível.'}
+              ? t('code:tree.emptySearchDescription')
+              : t('code:tree.emptyDescription')}
           </p>
         </div>
       ) : (
         <div
           role="tree"
-          aria-label="Árvore de arquivos do workspace"
+          aria-label={t('code:tree.aria')}
           aria-busy={loading || undefined}
           onKeyDown={handleKeyDown}
           className="min-h-0 flex-1 overflow-y-auto py-1"
@@ -308,7 +323,7 @@ export function FileTree({
             const expanded = entry.isDir && !!entry.children?.length && !collapsed.has(entry.path);
             const hasChildren = !!entry.children?.length;
             const isSelected = !entry.isDir && selected === entry.path;
-            const badge = entry.gitStatus ? GIT_BADGES[entry.gitStatus] : undefined;
+            const badge = entry.gitStatus ? gitBadge(entry.gitStatus) : null;
             return (
               <div
                 key={entry.path}
@@ -336,7 +351,7 @@ export function FileTree({
                 {entry.isDir ? (
                   loadingPaths?.has(entry.path) ? (
                     <span className="flex size-3.5 shrink-0 items-center justify-center">
-                      <Spinner size="xs" label={`Carregando ${entry.name}`} />
+                      <Spinner size="xs" label={t('code:tree.loadingDir', { name: entry.name })} />
                     </span>
                   ) : (
                     <span
@@ -366,8 +381,8 @@ export function FileTree({
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 {badge ? (
                   <span
-                    aria-label={`Estado no Git: ${badge.label}`}
-                    title={`Estado no Git: ${badge.label}`}
+                    aria-label={t('code:tree.gitStatus', { status: badge.label })}
+                    title={t('code:tree.gitStatus', { status: badge.label })}
                     className={cn('shrink-0 font-mono text-[11px] font-semibold', badge.className)}
                   >
                     {entry.gitStatus}
@@ -384,7 +399,7 @@ export function FileTree({
           role="status"
           className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] tabular-nums text-foreground-subtle"
         >
-          Mostrando {visibleFileCount} de {total} arquivos — refine a busca
+          {t('code:tree.count', { visible: visibleFileCount, total })}
         </div>
       ) : null}
     </div>

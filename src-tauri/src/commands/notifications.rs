@@ -11,7 +11,7 @@ pub fn notify_desktop(app: AppHandle, title: String, body: String) -> Result<boo
     let title = title.trim();
     let body = body.trim();
     if title.is_empty() {
-        return Err("NOTIFICATION_INVALID: título vazio".to_string());
+        return Err(crate::i18n::t("notifications.errors.emptyTitle"));
     }
     app.notification()
         .builder()

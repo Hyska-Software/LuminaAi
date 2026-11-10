@@ -219,14 +219,24 @@ pub struct HarnessDeps {
 /// Actionable copy for planned limits. The renderer knows the fixed
 /// `https://chatgpt.com/settings/usage` target when the active provider is the
 /// ChatGPT plan; the hint itself stays a plain sentence.
-const PLAN_USAGE_HINT: &str =
-    "Limite de uso atingido — pode ser do seu plano ou deste app. Use \"Gerenciar uso\".";
+fn plan_usage_hint() -> String {
+    crate::i18n::t("harness.hints.planUsage")
+}
 /// Actionable copy after a double 401 with an OAuth bearer.
-const REAUTH_HINT: &str = "Entre novamente com o ChatGPT para renovar sua sessão.";
+fn reauth_hint() -> String {
+    crate::i18n::t("harness.hints.reauth")
+}
 /// Actionable copy after a 401 on an API-key provider.
-const API_KEY_HINT: &str = "Verifique a API key do provedor nas configurações.";
+fn api_key_hint() -> String {
+    crate::i18n::t("harness.hints.apiKey")
+}
 /// Actionable copy for a plan-ineligible account/workspace.
-const PLAN_NOT_ELIGIBLE_HINT: &str = "Esta conta/workspace não tem acesso ao plano ChatGPT.";
+fn plan_not_eligible_hint() -> String {
+    crate::i18n::t("harness.hints.planNotEligible")
+}
+fn connect_account_hint() -> String {
+    crate::i18n::t("harness.hints.connectAccount")
+}
 
 /// Resolves the turn model: test `model_source` → managed `AppState` (account
 /// list merged with the catalog) → bundled catalog.
@@ -357,32 +367,35 @@ fn missing_credential_error(
         oauth_error.and_then(|error| error.downcast_ref::<crate::oauth::AuthError>())
     {
         let hint = if auth.reauth_required {
-            REAUTH_HINT
+            reauth_hint()
         } else if provider.supports_oauth() {
-            "Conecte sua conta ChatGPT ou configure uma API key nas configurações."
+            connect_account_hint()
         } else {
-            API_KEY_HINT
+            api_key_hint()
         };
         return CredentialError {
             code: auth.code,
             message: auth.message.clone(),
-            hint: Some(hint.to_string()),
+            hint: Some(hint),
         };
     }
     let message = match oauth_error {
-        Some(error) => format!(
-            "Não foi possível obter uma credencial para {}: {error:#}",
-            provider.name
+        Some(error) => crate::i18n::t_args(
+            "harness.errors.credentialLookup",
+            &[("provider", &provider.name), ("error", &format!("{error:#}"))],
         ),
-        None => format!("Nenhuma credencial configurada para {}.", provider.name),
+        None => crate::i18n::t_args(
+            "harness.errors.noCredential",
+            &[("provider", &provider.name)],
+        ),
     };
     CredentialError {
         code: "missing_credentials",
         message,
         hint: Some(if provider.supports_oauth() {
-            "Conecte sua conta ChatGPT ou configure uma API key nas configurações.".to_string()
+            connect_account_hint()
         } else {
-            API_KEY_HINT.to_string()
+            api_key_hint()
         }),
     }
 }
@@ -403,16 +416,16 @@ async fn refresh_credential(
     let app = deps
         .app
         .as_ref()
-        .ok_or_else(|| anyhow!("AppHandle ausente para renovar a sessão OAuth"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("harness.errors.missingAppHandle")))?;
     let state = app
         .try_state::<crate::state::AppState>()
-        .ok_or_else(|| anyhow!("AppState ausente para renovar a sessão OAuth"))?;
+        .ok_or_else(|| anyhow!(crate::i18n::t("harness.errors.missingOAuthState")))?;
     let token = state.force_refresh(app, &provider.id).await?;
     let token = token.trim();
     if token.is_empty() {
-        return Err(anyhow!(
-            "a renovação da sessão OAuth devolveu um token vazio"
-        ));
+        return Err(anyhow!(crate::i18n::t(
+            "harness.errors.emptyRefreshToken"
+        )));
     }
     Ok(Credential::Bearer(token.to_string()))
 }
@@ -427,9 +440,9 @@ fn auth_required_failure(error: &anyhow::Error, credential: &Credential) -> Turn
         message,
         code: Some("auth_required".to_string()),
         hint: Some(if credential.is_bearer() {
-            REAUTH_HINT.to_string()
+            reauth_hint()
         } else {
-            API_KEY_HINT.to_string()
+            api_key_hint()
         }),
     }
 }
@@ -472,31 +485,28 @@ impl TurnFailure {
         let neutral = error.code();
         let code = error.provider_code().or(neutral).map(str::to_string);
         let hint = if error.is_plan_limit() {
-            Some(PLAN_USAGE_HINT.to_string())
+            Some(plan_usage_hint())
         } else {
             // The hint is chosen from the neutral classification: the raw code
             // is `subscription_sharing_*` on the OpenAI path.
             match neutral {
-                Some("rate_limited") => Some(
-                    "O provedor limitou a taxa de requisições; tente novamente em instantes."
-                        .to_string(),
-                ),
+                Some("rate_limited") => Some(crate::i18n::t("harness.hints.rateLimited")),
                 Some("auth_required") => Some(if credential.is_bearer() {
-                    REAUTH_HINT.to_string()
+                    reauth_hint()
                 } else {
-                    API_KEY_HINT.to_string()
+                    api_key_hint()
                 }),
-                Some("plan_not_eligible") => Some(PLAN_NOT_ELIGIBLE_HINT.to_string()),
+                Some("plan_not_eligible") => Some(plan_not_eligible_hint()),
                 Some("unsupported_capability") => Some(match error.param() {
-                    Some(param) => format!(
-                        "A API do plano ChatGPT (preview) recusou `{param}`; ajuste a requisição."
+                    Some(param) => crate::i18n::t_args(
+                        "harness.hints.unsupportedCapability",
+                        &[("param", param)],
                     ),
-                    None => "A API do plano ChatGPT (preview) recusou um campo/ferramenta; ajuste a requisição.".to_string(),
+                    None => crate::i18n::t("harness.hints.unsupportedCapabilityGeneric"),
                 }),
-                Some("route_not_supported") => Some(
-                    "A rota usada não é suportada por esta conta; use o endpoint do catálogo."
-                        .to_string(),
-                ),
+                Some("route_not_supported") => Some(crate::i18n::t(
+                    "harness.hints.routeNotSupported",
+                )),
                 _ => None,
             }
         };
@@ -1119,6 +1129,7 @@ fn code_prompt_snapshot(
         settings.shell_enabled,
         options.delegation_depth,
         options.system_prompt_override.as_deref(),
+        &settings.locale,
         tool_definitions,
     );
     let base_key = cache::snapshot::snapshot_key(
@@ -1163,6 +1174,7 @@ fn code_prompt_snapshot(
         tool_prompts,
         std::env::consts::OS,
         &session_date,
+        &settings.locale,
     );
     // Agent persona on top of the coding profile: identity, instructions and
     // the optional memory guidance. It never grants permissions.
@@ -2009,7 +2021,9 @@ pub async fn run_turn(
             let app = deps
                 .app
                 .as_ref()
-                .ok_or_else(|| anyhow!("AppHandle ausente para resolver o diretório de dados"))?;
+                .ok_or_else(|| {
+                    anyhow!(crate::i18n::t("harness.errors.missingAppHandleDataDir"))
+                })?;
             crate::config::data_dir(app)?
         }
     };
@@ -2324,6 +2338,7 @@ pub async fn run_turn(
                 &code_tool_prompts_list,
                 std::env::consts::OS,
                 &session_date,
+                &settings.locale,
             ),
         },
         _ => match chat_snapshot.as_ref() {
@@ -4885,10 +4900,20 @@ pub(crate) fn should_auto_title(title: &str) -> bool {
     if title.is_empty() {
         return true;
     }
-    matches!(
-        title.to_lowercase().as_str(),
+    let normalized = title.to_lowercase();
+    if matches!(
+        normalized.as_str(),
         "nova conversa" | "novo chat" | "new chat" | "untitled" | "sem título" | "sem titulo"
-    )
+    ) {
+        return true;
+    }
+    // Every supported language's default title is a placeholder too, so a
+    // conversation created in en/es is auto-titled exactly like the pt-BR one.
+    crate::i18n::supported_languages().any(|language| {
+        crate::i18n::translate_for(language, "common.defaultConversationTitle", &[])
+            .to_lowercase()
+            == normalized
+    })
 }
 
 /// Decide o auto-title relendo o título **vivo** da conversa: a tool `goal`
@@ -10288,6 +10313,7 @@ mod agent_loop_tests {
             settings.shell_enabled,
             options.delegation_depth,
             options.system_prompt_override.as_deref(),
+            &settings.locale,
             tools,
         );
         cache::snapshot::snapshot_key(

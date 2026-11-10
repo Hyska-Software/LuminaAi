@@ -1,4 +1,5 @@
 import { useId, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MessageCircleQuestion } from 'lucide-react';
 import { Badge, Button, Textarea } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -42,6 +43,7 @@ export interface AskUserCardProps {
  * bloqueia a UI — o turno é que fica aguardando a resposta do host.
  */
 export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserCardProps) {
+  const { t } = useTranslation('agents');
   const baseId = useId();
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   const [freeText, setFreeText] = useState<Record<string, string>>({});
@@ -84,14 +86,14 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
 
   return (
     <form
-      aria-label="Pergunta do agente"
+      aria-label={t('askUser.aria')}
       onSubmit={submit}
       className={cn('flex flex-col gap-3 rounded-xl border border-border bg-surface p-3', className)}
     >
       <header className="flex items-center gap-2">
         <MessageCircleQuestion aria-hidden className="size-4 shrink-0 text-accent" />
         <h3 className="min-w-0 flex-1 text-[13px] font-medium text-foreground">
-          {questions.length === 1 ? 'Pergunta do agente' : `${questions.length} perguntas do agente`}
+          {t('askUser.title', { count: questions.length })}
         </h3>
       </header>
 
@@ -131,7 +133,9 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-center gap-1.5">
                         <span className="text-foreground">{option.label}</span>
-                        {option.recommended ? <Badge variant="accent">Recomendada</Badge> : null}
+                        {option.recommended ? (
+                          <Badge variant="accent">{t('askUser.recommended')}</Badge>
+                        ) : null}
                       </span>
                       {option.description ? (
                         <span className="mt-0.5 block text-[11px] leading-snug text-foreground-muted">
@@ -147,13 +151,13 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
             {allowFreeText ? (
               <div className="flex flex-col gap-1">
                 <label htmlFor={freeId} className="text-[11px] text-foreground-muted">
-                  Outra resposta (opcional)
+                  {t('askUser.freeTextLabel')}
                 </label>
                 <Textarea
                   id={freeId}
                   rows={2}
                   value={freeText[question.id] ?? ''}
-                  placeholder="Descreva outra opção"
+                  placeholder={t('askUser.freeTextPlaceholder')}
                   onChange={(event) =>
                     setFreeText((current) => ({ ...current, [question.id]: event.target.value }))
                   }
@@ -166,10 +170,10 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button type="button" size="sm" variant="ghost" onClick={onSkip}>
-          Ignorar e continuar
+          {t('askUser.skip')}
         </Button>
         <Button type="submit" size="sm" variant="primary" disabled={!answered}>
-          Enviar resposta
+          {t('askUser.submit')}
         </Button>
       </div>
     </form>

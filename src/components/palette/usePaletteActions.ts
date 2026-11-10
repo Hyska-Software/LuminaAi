@@ -35,10 +35,12 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { requestCacheDiagnostics } from '@/components/agent/cacheDiagnosticsRequest';
 import { api } from '@/lib/api';
 import { conversationCitations } from '@/lib/citations';
+import { t } from '@/lib/i18n';
 import { SETTINGS_TABS } from '@/lib/settingsTabs';
 import { SETTINGS_TAB_ICONS } from '@/components/settings/tabIcons';
 import {
@@ -56,16 +58,26 @@ import type { PaletteAction } from '@/lib/palette/types';
 import { copyText, modKey, truncate } from '@/lib/utils';
 
 /** Copy shared by the settings tab commands (DESIGN §9). */
-const SETTINGS_TAB_DESCRIPTIONS: Record<SettingsTabId, string> = {
-  general: 'Tema, idioma e tamanho do texto',
-  providers: 'Chaves de API e status dos provedores',
-  model: 'Modelo e modo de pensamento padrão',
-  instructions: 'Instruções do sistema',
-  tools: 'Busca web, criação de arquivos, execução e passos',
-  agents: 'Concorrência, orçamento, notificações e computer use',
-  data: 'Pasta de dados, exportação e limpeza',
-  about: 'Versão e informações do aplicativo',
-};
+function settingsTabDescription(id: SettingsTabId): string {
+  switch (id) {
+    case 'general':
+      return t('palette:settingsTabDescriptions.general');
+    case 'providers':
+      return t('palette:settingsTabDescriptions.providers');
+    case 'model':
+      return t('palette:settingsTabDescriptions.model');
+    case 'instructions':
+      return t('palette:settingsTabDescriptions.instructions');
+    case 'tools':
+      return t('palette:settingsTabDescriptions.tools');
+    case 'agents':
+      return t('palette:settingsTabDescriptions.agents');
+    case 'data':
+      return t('palette:settingsTabDescriptions.data');
+    case 'about':
+      return t('palette:settingsTabDescriptions.about');
+  }
+}
 
 function lastAssistantMessage(messages: readonly ChatMessage[]): ChatMessage | undefined {
   return [...messages].reverse().find((message) => message.role === 'assistant' && message.content.trim());
@@ -79,25 +91,25 @@ function currentActiveMessages(): ChatMessage[] {
 async function copyLastAnswer(): Promise<void> {
   const last = lastAssistantMessage(currentActiveMessages());
   if (!last) {
-    toast.info('Nenhuma resposta para copiar ainda');
+    toast.info(t('palette:toasts.noAnswer'));
     return;
   }
   const ok = await copyText(last.content);
-  if (ok) toast.success('Resposta copiada');
-  else toast.error('Não foi possível copiar');
+  if (ok) toast.success(t('palette:toasts.answerCopied'));
+  else toast.error(t('palette:toasts.copyFailed'));
 }
 
 async function exportActiveConversation(format: 'markdown' | 'json'): Promise<void> {
   const conversationId = useChatStore.getState().activeId;
   if (!conversationId) {
-    toast.info('Nenhuma conversa aberta');
+    toast.info(t('palette:toasts.noConversation'));
     return;
   }
   try {
     const path = await api.exportConversation(conversationId, format);
-    if (path) toast.success('Conversa exportada', { description: path });
+    if (path) toast.success(t('palette:toasts.exported'), { description: path });
   } catch (error) {
-    toast.error('Não foi possível exportar', { description: String(error) });
+    toast.error(t('palette:toasts.exportFailed'), { description: String(error) });
   }
 }
 
@@ -113,12 +125,16 @@ function toggleTheme(): void {
 
 function toggleSetting(
   key: 'webSearchEnabled' | 'fileCreationEnabled' | 'codeExecutionEnabled',
-  label: string,
+  toolLabel: string,
 ): void {
   const app = useAppStore.getState();
   const next = !app.settings[key];
   void app.saveSettings({ [key]: next });
-  toast.success(`${label} ${next ? 'ativada' : 'desativada'}`);
+  toast.success(
+    next
+      ? t('palette:toasts.toolEnabled', { tool: toolLabel })
+      : t('palette:toasts.toolDisabled', { tool: toolLabel }),
+  );
 }
 
 function focusComposer(): void {
@@ -148,7 +164,7 @@ function openSkills(): void {
 function openArtifacts(): void {
   const ui = useUiStore.getState();
   if (!ui.artifacts.length) {
-    toast.info('Nenhum artefato nesta conversa');
+    toast.info(t('palette:toasts.noArtifacts'));
     return;
   }
   ui.openArtifactList();
@@ -174,7 +190,7 @@ function importFilesToLibrary(): void {
 function openSources(): void {
   const count = conversationCitations(currentActiveMessages()).length;
   if (count === 0) {
-    toast.info('Nenhuma fonte nesta conversa');
+    toast.info(t('palette:toasts.noSources'));
     return;
   }
   useUiStore.getState().openSourcesPanel();
@@ -182,13 +198,13 @@ function openSources(): void {
 
 function openDataDir(): void {
   void api.openDataDir().catch((error: unknown) => {
-    toast.error('Não foi possível abrir a pasta de dados', { description: String(error) });
+    toast.error(t('palette:toasts.openDataDirFailed'), { description: String(error) });
   });
 }
 
 function openSkillsDir(): void {
   void api.openSkillsDir().catch((error: unknown) => {
-    toast.error('Não foi possível abrir a pasta de skills', { description: String(error) });
+    toast.error(t('palette:toasts.openSkillsDirFailed'), { description: String(error) });
   });
 }
 
@@ -199,10 +215,10 @@ function refreshCatalog(): void {
     .then(() => {
       const error = useAppStore.getState().error;
       if (error) {
-        toast.error('Não foi possível atualizar o catálogo', { description: error });
+        toast.error(t('palette:toasts.catalogFailed'), { description: error });
         return;
       }
-      toast.success('Catálogo de modelos atualizado');
+      toast.success(t('palette:toasts.catalogUpdated'));
     });
 }
 
@@ -211,9 +227,14 @@ function togglePinnedConversation(): void {
   const conversation = chat.conversations.find((entry) => entry.id === chat.activeId);
   if (!conversation) return;
   void chat.togglePinned(conversation.id);
-  toast.success(conversation.pinned ? 'Conversa desafixada' : 'Conversa fixada', {
-    description: truncate(conversation.title, 60),
-  });
+  toast.success(
+    conversation.pinned
+      ? t('palette:toasts.conversationUnpinned')
+      : t('palette:toasts.conversationPinned'),
+    {
+      description: truncate(conversation.title, 60),
+    },
+  );
 }
 
 function switchModel(reason: ModelLockReason | null): void {
@@ -231,6 +252,8 @@ function switchModel(reason: ModelLockReason | null): void {
  * attachments, theme/tool changes, conversation switch).
  */
 export function usePaletteActions(): PaletteAction[] {
+  const { t: tPalette } = useTranslation('palette');
+  const { t: tSettings } = useTranslation('settings');
   const conversations = useChatStore((state) => state.conversations);
   const activeId = useChatStore((state) => state.activeId);
   const messages = useChatStore((state) =>
@@ -267,24 +290,24 @@ export function usePaletteActions(): PaletteAction[] {
     group: 'conversas',
     label:
       layoutMode === 'code'
-        ? 'Nova sessão'
+        ? tPalette('actions.newConversation.codeLabel')
         : layoutMode === 'agent'
-          ? 'Nova conversa com agente'
-          : 'Novo chat',
+          ? tPalette('actions.newConversation.agentLabel')
+          : tPalette('actions.newConversation.chatLabel'),
     description:
       layoutMode === 'code'
-        ? 'Comece uma nova sessão no layout Code'
+        ? tPalette('actions.newConversation.codeDescription')
         : layoutMode === 'agent'
-          ? 'Comece uma conversa com o agente selecionado'
-          : 'Comece uma conversa em branco',
+          ? tPalette('actions.newConversation.agentDescription')
+          : tPalette('actions.newConversation.chatDescription'),
     icon: MessageSquarePlus,
     shortcut: `${modKey}+N`,
     keywords:
       layoutMode === 'code'
-        ? 'nova sessao sessão code criar'
+        ? tPalette('actions.newConversation.codeKeywords')
         : layoutMode === 'agent'
-          ? 'nova conversa agente criar'
-          : 'nova conversa criar blank',
+          ? tPalette('actions.newConversation.agentKeywords')
+          : tPalette('actions.newConversation.chatKeywords'),
     run: () => {
       if (layoutMode === 'code') {
         void useChatStore.getState().startNewConversation('code');
@@ -306,28 +329,30 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'fixar-conversa',
       group: 'conversas',
-      label: activeConversation.pinned ? 'Desafixar conversa' : 'Fixar conversa',
+      label: activeConversation.pinned
+        ? tPalette('actions.pinConversation.unpinLabel')
+        : tPalette('actions.pinConversation.pinLabel'),
       description: truncate(activeConversation.title, 72),
       icon: activeConversation.pinned ? PinOff : Pin,
-      keywords: 'pin fixar topo',
+      keywords: tPalette('actions.pinConversation.keywords'),
       run: togglePinnedConversation,
     });
     actions.push({
       id: 'exportar-markdown',
       group: 'conversas',
-      label: 'Exportar conversa (Markdown)',
-      description: 'Salvar a conversa atual em Markdown',
+      label: tPalette('actions.exportMarkdown.label'),
+      description: tPalette('actions.exportMarkdown.description'),
       icon: Download,
-      keywords: 'salvar markdown arquivo',
+      keywords: tPalette('actions.exportMarkdown.keywords'),
       run: () => void exportActiveConversation('markdown'),
     });
     actions.push({
       id: 'exportar-json',
       group: 'conversas',
-      label: 'Exportar conversa (JSON)',
-      description: 'Salvar a conversa em formato estruturado',
+      label: tPalette('actions.exportJson.label'),
+      description: tPalette('actions.exportJson.description'),
       icon: Braces,
-      keywords: 'salvar json dados backup',
+      keywords: tPalette('actions.exportJson.keywords'),
       run: () => void exportActiveConversation('json'),
     });
   }
@@ -336,10 +361,10 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'copiar-ultima-resposta',
       group: 'conversas',
-      label: 'Copiar última resposta',
-      description: 'Copia o texto da resposta mais recente',
+      label: tPalette('actions.copyLastAnswer.label'),
+      description: tPalette('actions.copyLastAnswer.description'),
       icon: Copy,
-      keywords: 'copiar clipboard área de transferência',
+      keywords: tPalette('actions.copyLastAnswer.keywords'),
       run: () => void copyLastAnswer(),
     });
   }
@@ -348,16 +373,20 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'limpar-anexos',
       group: 'conversas',
-      label: 'Limpar anexos',
+      label: tPalette('actions.clearAttachments.label'),
       description:
         pendingAttachments.length === 1
-          ? 'Remover 1 anexo pendente do composer'
-          : `Remover ${pendingAttachments.length} anexos pendentes do composer`,
+          ? tPalette('actions.clearAttachments.descriptionOne', {
+              count: pendingAttachments.length,
+            })
+          : tPalette('actions.clearAttachments.descriptionOther', {
+              count: pendingAttachments.length,
+            }),
       icon: Trash2,
-      keywords: 'arquivos remover composer',
+      keywords: tPalette('actions.clearAttachments.keywords'),
       run: () => {
         useChatStore.getState().clearAttachments();
-        toast.success('Anexos removidos');
+        toast.success(t('palette:toasts.attachmentsRemoved'));
       },
     });
   }
@@ -366,20 +395,20 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'parar-resposta',
       group: 'conversas',
-      label: 'Parar resposta',
-      description: 'Interrompe a resposta em andamento',
+      label: tPalette('actions.stopResponse.label'),
+      description: tPalette('actions.stopResponse.description'),
       icon: Square,
-      keywords: 'cancelar stop interromper',
+      keywords: tPalette('actions.stopResponse.keywords'),
       run: () => void useChatStore.getState().stop(),
     });
   } else if (lastAssistant && lastUser) {
     actions.push({
       id: 'regenerar-resposta',
       group: 'conversas',
-      label: 'Regenerar resposta',
-      description: 'Gera novamente a última resposta',
+      label: tPalette('actions.regenerateResponse.label'),
+      description: tPalette('actions.regenerateResponse.description'),
       icon: RotateCcw,
-      keywords: 'tentar de novo refazer',
+      keywords: tPalette('actions.regenerateResponse.keywords'),
       run: () => void useChatStore.getState().regenerate(),
     });
   }
@@ -391,13 +420,19 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: layoutMode === 'chat' ? 'modo-code' : 'modo-chat',
       group: 'navegacao',
-      label: layoutMode === 'chat' ? 'Ir para o modo Code' : 'Ir para o modo Chat',
+      label:
+        layoutMode === 'chat'
+          ? tPalette('actions.modeCode.label')
+          : tPalette('actions.modeChat.label'),
       description:
         layoutMode === 'chat'
-          ? 'Abrir o workspace de código (sessões e alterações)'
-          : 'Voltar ao layout de conversa com o assistente',
+          ? tPalette('actions.modeCode.description')
+          : tPalette('actions.modeChat.description'),
       icon: layoutMode === 'chat' ? Code : MessageSquare,
-      keywords: 'layout modo code chat conversa workspace agente',
+      keywords:
+        layoutMode === 'chat'
+          ? tPalette('actions.modeCode.keywords')
+          : tPalette('actions.modeChat.keywords'),
       run: () => useUiStore.getState().setLayoutMode(alternateLayout),
     });
   }
@@ -406,30 +441,30 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'modo-agentes',
       group: 'navegacao',
-      label: 'Ir para o modo Agentes',
-      description: 'Abrir a equipe de agentes e as personas',
+      label: tPalette('actions.modeAgents.label'),
+      description: tPalette('actions.modeAgents.description'),
       icon: Bot,
-      keywords: 'layout modo agentes equipe personas',
+      keywords: tPalette('actions.modeAgents.keywords'),
       run: () => useUiStore.getState().setLayoutMode('agent'),
     });
   } else {
     actions.push({
       id: 'novo-agente',
       group: 'navegacao',
-      label: 'Novo agente',
-      description: 'Criar uma persona com identidade, modelo e instruções',
+      label: tPalette('actions.newAgent.label'),
+      description: tPalette('actions.newAgent.description'),
       icon: Bot,
-      keywords: 'agente novo criar persona',
+      keywords: tPalette('actions.newAgent.keywords'),
       run: () => openAgentEditor({ mode: 'create' }),
     });
     if (activeAgentId) {
       actions.push({
         id: 'editar-agente',
         group: 'navegacao',
-        label: 'Editar agente',
-        description: 'Abrir as configurações do agente selecionado',
+        label: tPalette('actions.editAgent.label'),
+        description: tPalette('actions.editAgent.description'),
         icon: Bot,
-        keywords: 'agente editar instruções modelo',
+        keywords: tPalette('actions.editAgent.keywords'),
         run: () => openAgentEditor({ mode: 'edit', agentId: activeAgentId }),
       });
     }
@@ -438,11 +473,11 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'focar-composer',
     group: 'navegacao',
-    label: 'Focar campo de mensagem',
-    description: 'Leva o cursor para o composer',
+    label: tPalette('actions.focusComposer.label'),
+    description: tPalette('actions.focusComposer.description'),
     icon: TextCursorInput,
     shortcut: `${modKey}+J`,
-    keywords: 'input escrever mensagem',
+    keywords: tPalette('actions.focusComposer.keywords'),
     run: focusComposer,
   });
 
@@ -452,21 +487,21 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'diagnostico-cache',
       group: 'navegacao',
-      label: 'Diagnóstico de cache',
-      description: 'Amostras por request, quebras de prefixo e usage bruto da conversa ativa',
+      label: tPalette('actions.cacheDiagnostics.label'),
+      description: tPalette('actions.cacheDiagnostics.description'),
       icon: Activity,
-      keywords: 'cache diagnóstico prompt tokens hit amostras usage provedor prefixo quebra',
+      keywords: tPalette('actions.cacheDiagnostics.keywords'),
       run: requestCacheDiagnostics,
     });
   }
   actions.push({
     id: 'alternar-sidebar',
     group: 'navegacao',
-    label: 'Alternar barra lateral',
-    description: 'Mostrar ou ocultar o histórico',
+    label: tPalette('actions.toggleSidebar.label'),
+    description: tPalette('actions.toggleSidebar.description'),
     icon: PanelLeft,
     shortcut: `${modKey}+B`,
-    keywords: 'sidebar histórico lateral',
+    keywords: tPalette('actions.toggleSidebar.keywords'),
     run: () => useUiStore.getState().toggleSidebar(),
   });
 
@@ -477,41 +512,45 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'abrir-artefatos',
       group: 'navegacao',
-      label: 'Abrir painel de artefatos',
+      label: tPalette('actions.openArtifacts.label'),
       description: artifacts.length
-        ? `${artifacts.length} ${artifacts.length === 1 ? 'artefato' : 'artefatos'} nesta conversa`
-        : 'Nenhum artefato nesta conversa',
+        ? artifacts.length === 1
+          ? tPalette('actions.openArtifacts.descriptionOne', { count: artifacts.length })
+          : tPalette('actions.openArtifacts.descriptionOther', { count: artifacts.length })
+        : tPalette('actions.openArtifacts.descriptionEmpty'),
       icon: FileText,
-      keywords: 'arquivos canvas prévia preview',
+      keywords: tPalette('actions.openArtifacts.keywords'),
       run: openArtifacts,
     });
     actions.push({
       id: 'abrir-fontes',
       group: 'navegacao',
-      label: 'Abrir painel de fontes',
+      label: tPalette('actions.openSources.label'),
       description: citations.length
-        ? `${citations.length} ${citations.length === 1 ? 'fonte' : 'fontes'} nesta conversa`
-        : 'Nenhuma fonte nesta conversa',
+        ? citations.length === 1
+          ? tPalette('actions.openSources.descriptionOne', { count: citations.length })
+          : tPalette('actions.openSources.descriptionOther', { count: citations.length })
+        : tPalette('actions.openSources.descriptionEmpty'),
       icon: Globe,
-      keywords: 'citações links referências web',
+      keywords: tPalette('actions.openSources.keywords'),
       run: openSources,
     });
     actions.push({
       id: 'abrir-biblioteca',
       group: 'navegacao',
-      label: 'Abrir biblioteca',
-      description: 'Todos os arquivos das conversas e os enviados por você',
+      label: tPalette('actions.openLibrary.label'),
+      description: tPalette('actions.openLibrary.description'),
       icon: Library,
-      keywords: 'biblioteca library arquivos favoritos upload enviados documentos',
+      keywords: tPalette('actions.openLibrary.keywords'),
       run: openLibrary,
     });
     actions.push({
       id: 'enviar-arquivos-biblioteca',
       group: 'navegacao',
-      label: 'Enviar arquivos para a biblioteca',
-      description: 'Importar arquivos do computador para usar no chat',
+      label: tPalette('actions.importLibrary.label'),
+      description: tPalette('actions.importLibrary.description'),
       icon: Upload,
-      keywords: 'upload importar enviar arquivos biblioteca library anexar',
+      keywords: tPalette('actions.importLibrary.keywords'),
       run: importFilesToLibrary,
     });
   }
@@ -520,19 +559,19 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'gerenciar-skills',
       group: 'navegacao',
-      label: 'Gerenciar skills',
-      description: 'Ativar, desativar e excluir skills do agente',
+      label: tPalette('actions.manageSkills.label'),
+      description: tPalette('actions.manageSkills.description'),
       icon: Sparkles,
-      keywords: 'skills habilidades agente',
+      keywords: tPalette('actions.manageSkills.keywords'),
       run: openSkills,
     });
     actions.push({
       id: 'abrir-pasta-skills',
       group: 'navegacao',
-      label: 'Abrir pasta de skills',
-      description: 'Abrir a pasta de skills do usuário',
+      label: tPalette('actions.openSkillsFolder.label'),
+      description: tPalette('actions.openSkillsFolder.description'),
       icon: FolderOpen,
-      keywords: 'skills pasta arquivos',
+      keywords: tPalette('actions.openSkillsFolder.keywords'),
       run: openSkillsDir,
     });
   }
@@ -542,10 +581,10 @@ export function usePaletteActions(): PaletteAction[] {
       actions.push({
         id: 'voltar-a-sessao',
         group: 'navegacao',
-        label: 'Voltar à sessão',
-        description: 'Sair da gestão de skills e voltar ao agente',
+        label: tPalette('actions.backToSession.label'),
+        description: tPalette('actions.backToSession.description'),
         icon: ArrowLeft,
-        keywords: 'sessão agente voltar code',
+        keywords: tPalette('actions.backToSession.keywords'),
         run: () => useUiStore.getState().setCodeView('session'),
       });
     }
@@ -553,10 +592,13 @@ export function usePaletteActions(): PaletteAction[] {
     actions.push({
       id: 'voltar-ao-chat',
       group: 'navegacao',
-      label: 'Voltar ao chat',
-      description: activeView === 'library' ? 'Sair da biblioteca' : 'Sair da gestão de skills',
+      label: tPalette('actions.backToChat.label'),
+      description:
+        activeView === 'library'
+          ? tPalette('actions.backToChat.descriptionLibrary')
+          : tPalette('actions.backToChat.descriptionSkills'),
       icon: ArrowLeft,
-      keywords: 'chat conversa voltar',
+      keywords: tPalette('actions.backToChat.keywords'),
       run: () => useUiStore.getState().setActiveView('chat'),
     });
   }
@@ -564,10 +606,12 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'trocar-modelo',
     group: 'navegacao',
-    label: lockCopy ? lockCopy.title : 'Trocar modelo',
-    description: lockCopy ? lockCopy.description : 'Escolher modelo e modo de pensamento',
+    label: lockCopy ? lockCopy.title : tPalette('actions.switchModel.label'),
+    description: lockCopy
+      ? lockCopy.description
+      : tPalette('actions.switchModel.description'),
     icon: lockCopy ? Lock : Sparkles,
-    keywords: 'modelo raciocínio pensamento provider',
+    keywords: tPalette('actions.switchModel.keywords'),
     run: () => switchModel(lockReason),
   });
 
@@ -575,57 +619,66 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'busca-web',
     group: 'ferramentas',
-    label: settings.webSearchEnabled ? 'Desativar busca web' : 'Ativar busca web',
+    label: settings.webSearchEnabled
+      ? tPalette('actions.webSearch.disableLabel')
+      : tPalette('actions.webSearch.enableLabel'),
     description: settings.webSearchEnabled
-      ? 'Ferramenta ativa no próximo turno'
-      : 'Ferramenta desligada no composer',
+      ? tPalette('actions.webSearch.enabledDescription')
+      : tPalette('actions.webSearch.disabledDescription'),
     icon: Globe,
-    keywords: 'web search internet pesquisa',
+    keywords: tPalette('actions.webSearch.keywords'),
     checked: settings.webSearchEnabled,
-    run: () => toggleSetting('webSearchEnabled', 'Busca web'),
+    run: () => toggleSetting('webSearchEnabled', t('palette:tools.webSearch')),
   });
   actions.push({
     id: 'criar-arquivos',
     group: 'ferramentas',
-    label: settings.fileCreationEnabled ? 'Desativar criação de arquivos' : 'Ativar criação de arquivos',
+    label: settings.fileCreationEnabled
+      ? tPalette('actions.fileCreation.disableLabel')
+      : tPalette('actions.fileCreation.enableLabel'),
     description: settings.fileCreationEnabled
-      ? 'Ferramenta ativa no próximo turno'
-      : 'Ferramenta desligada no composer',
+      ? tPalette('actions.fileCreation.enabledDescription')
+      : tPalette('actions.fileCreation.disabledDescription'),
     icon: FilePlus,
-    keywords: 'arquivos criar documentos artifacts',
+    keywords: tPalette('actions.fileCreation.keywords'),
     checked: settings.fileCreationEnabled,
-    run: () => toggleSetting('fileCreationEnabled', 'Criação de arquivos'),
+    run: () => toggleSetting('fileCreationEnabled', t('palette:tools.fileCreation')),
   });
   actions.push({
     id: 'executar-codigo',
     group: 'ferramentas',
-    label: settings.codeExecutionEnabled ? 'Desativar execução de código' : 'Ativar execução de código',
+    label: settings.codeExecutionEnabled
+      ? tPalette('actions.codeExecution.disableLabel')
+      : tPalette('actions.codeExecution.enableLabel'),
     description: settings.codeExecutionEnabled
-      ? 'run_code ativo no próximo turno'
-      : 'run_code desligado nas configurações',
+      ? tPalette('actions.codeExecution.enabledDescription')
+      : tPalette('actions.codeExecution.disabledDescription'),
     icon: Terminal,
-    keywords: 'código python node scripts run_code',
+    keywords: tPalette('actions.codeExecution.keywords'),
     checked: settings.codeExecutionEnabled,
-    run: () => toggleSetting('codeExecutionEnabled', 'Execução de código'),
+    run: () => toggleSetting('codeExecutionEnabled', t('palette:tools.codeExecution')),
   });
 
   /* -------- Aparência -------- */
   actions.push({
     id: 'alternar-tema',
     group: 'aparencia',
-    label: 'Alternar tema',
-    description: `Tema atual: ${dark ? 'escuro' : 'claro'} — alterna para ${dark ? 'claro' : 'escuro'}`,
+    label: tPalette('actions.toggleTheme.label'),
+    description: tPalette('actions.toggleTheme.description', {
+      theme: t(dark ? 'palette:themes.dark' : 'palette:themes.light'),
+      next: t(dark ? 'palette:themes.light' : 'palette:themes.dark'),
+    }),
     icon: SunMoon,
-    keywords: 'dark light escuro claro aparência',
+    keywords: tPalette('actions.toggleTheme.keywords'),
     run: toggleTheme,
   });
   actions.push({
     id: 'tema-sistema',
     group: 'aparencia',
-    label: 'Seguir tema do sistema',
-    description: 'Usa a preferência de aparência do sistema operacional',
+    label: tPalette('actions.systemTheme.label'),
+    description: tPalette('actions.systemTheme.description'),
     icon: Monitor,
-    keywords: 'sistema automático auto aparência',
+    keywords: tPalette('actions.systemTheme.keywords'),
     checked: theme === 'system',
     run: () => setTheme('system'),
   });
@@ -634,21 +687,21 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'abrir-configuracoes',
     group: 'configuracoes',
-    label: 'Abrir configurações',
-    description: 'Tema, provedores, modelo padrão e ferramentas',
+    label: tPalette('actions.openSettings.label'),
+    description: tPalette('actions.openSettings.description'),
     icon: Settings,
     shortcut: `${modKey}+,`,
-    keywords: 'preferências ajustes settings',
+    keywords: tPalette('actions.openSettings.keywords'),
     run: () => useUiStore.getState().openSettings(),
   });
   for (const tab of SETTINGS_TABS) {
     actions.push({
       id: `config-${tab.id}`,
       group: 'configuracoes',
-      label: `Configurações › ${tab.label}`,
-      description: SETTINGS_TAB_DESCRIPTIONS[tab.id],
+      label: tSettings('dialog.openTab', { tab: tSettings(tab.labelKey) }),
+      description: settingsTabDescription(tab.id),
       icon: SETTINGS_TAB_ICONS[tab.id],
-      keywords: `configuracoes ajustes ${tab.label.toLowerCase()}`,
+      keywords: `${tPalette('actions.openSettings.keywords')} ${tSettings(tab.labelKey)}`,
       run: () => useUiStore.getState().openSettings(tab.id),
     });
   }
@@ -657,19 +710,19 @@ export function usePaletteActions(): PaletteAction[] {
   actions.push({
     id: 'abrir-pasta-dados',
     group: 'sistema',
-    label: 'Abrir pasta de dados',
-    description: 'Banco, anexos e artefatos do Zylara',
+    label: tPalette('actions.openDataFolder.label'),
+    description: tPalette('actions.openDataFolder.description'),
     icon: FolderOpen,
-    keywords: 'dados database arquivos pasta',
+    keywords: tPalette('actions.openDataFolder.keywords'),
     run: openDataDir,
   });
   actions.push({
     id: 'recarregar-catalogo',
     group: 'sistema',
-    label: 'Recarregar catálogo de modelos',
-    description: 'Buscar a lista atualizada de modelos disponíveis',
+    label: tPalette('actions.refreshCatalog.label'),
+    description: tPalette('actions.refreshCatalog.description'),
     icon: RefreshCw,
-    keywords: 'modelos catálogo atualizar refresh',
+    keywords: tPalette('actions.refreshCatalog.keywords'),
     run: refreshCatalog,
   });
 

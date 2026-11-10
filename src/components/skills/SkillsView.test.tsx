@@ -126,10 +126,10 @@ function skillSwitch(name: string): HTMLButtonElement {
   return screen.getByRole('switch', { name: `Ativar skill ${name}` }) as HTMLButtonElement;
 }
 
+/** Row of a skill: the list item that owns its enable switch (raw name identity). */
 function rowFor(name: string): HTMLElement | undefined {
-  return screen
-    .getAllByRole('listitem')
-    .find((item) => item.textContent?.includes(name));
+  const toggle = screen.queryByRole('switch', { name: `Ativar skill ${name}` });
+  return toggle?.closest('li') ?? undefined;
 }
 
 function renderView() {
@@ -416,7 +416,7 @@ describe('SkillsView — prévia em Markdown', () => {
     renderView();
     fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    const dialog = await screen.findByRole('dialog', { name: 'Documentos Word' });
     expect(within(dialog).getByText('Carregando conteúdo da skill…')).toBeTruthy();
     expect(within(dialog).queryByRole('radiogroup')).toBeNull();
   });
@@ -425,7 +425,7 @@ describe('SkillsView — prévia em Markdown', () => {
     renderView();
     fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    const dialog = await screen.findByRole('dialog', { name: 'Documentos Word' });
     expect(mocks.getSkillContent).toHaveBeenCalledWith('office-docx');
 
     expect(
@@ -438,9 +438,7 @@ describe('SkillsView — prévia em Markdown', () => {
     ).toBeTruthy();
     // Cabeçalho: origem, descrição e alternância Documento | Código.
     expect(within(dialog).getByText('Embutida')).toBeTruthy();
-    expect(
-      within(dialog).getByText('Criar documentos Word (.docx) com script Python stdlib.'),
-    ).toBeTruthy();
+    expect(within(dialog).getByText('Cria documentos Word (.docx).')).toBeTruthy();
     expect(
       within(dialog).getByRole('radiogroup', { name: 'Modo de visualização da skill' }),
     ).toBeTruthy();
@@ -479,7 +477,7 @@ describe('SkillsView — prévia em Markdown', () => {
     renderView();
     fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    const dialog = await screen.findByRole('dialog', { name: 'Documentos Word' });
     expect(
       await within(dialog).findByRole('heading', { level: 1, name: 'Office DOCX' }),
     ).toBeTruthy();
@@ -502,7 +500,7 @@ describe('SkillsView — prévia em Markdown', () => {
     renderView();
     fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    const dialog = await screen.findByRole('dialog', { name: 'Documentos Word' });
     expect(await within(dialog).findByText('Esta skill não tem instruções.')).toBeTruthy();
     expect(within(dialog).queryByRole('radiogroup')).toBeNull();
   });
@@ -511,7 +509,7 @@ describe('SkillsView — prévia em Markdown', () => {
     renderView();
     fireEvent.click(await screen.findByRole('button', { name: 'Visualizar skill office-docx' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'office-docx' });
+    const dialog = await screen.findByRole('dialog', { name: 'Documentos Word' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Fechar' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

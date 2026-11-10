@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Search, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 export interface ModelSearchFieldProps {
@@ -36,7 +37,7 @@ export const ModelSearchField = React.forwardRef<HTMLInputElement, ModelSearchFi
       controls,
       activeDescendant,
       expanded,
-      placeholder = 'Buscar modelos…',
+      placeholder,
       autoFocus = false,
       role = 'combobox',
       hint,
@@ -46,6 +47,7 @@ export const ModelSearchField = React.forwardRef<HTMLInputElement, ModelSearchFi
     },
     ref,
   ) {
+    const { t } = useTranslation('models');
     return (
       <div className={cn('relative flex items-center', className)}>
         <Search
@@ -58,7 +60,7 @@ export const ModelSearchField = React.forwardRef<HTMLInputElement, ModelSearchFi
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder={placeholder}
+          placeholder={placeholder ?? t('search.placeholder')}
           aria-label={ariaLabel}
           role={role}
           aria-expanded={expanded}
@@ -81,7 +83,7 @@ export const ModelSearchField = React.forwardRef<HTMLInputElement, ModelSearchFi
         {value ? (
           <button
             type="button"
-            aria-label="Limpar busca"
+            aria-label={t('search.clear')}
             onClick={() => {
               onChange('');
               onClear?.();

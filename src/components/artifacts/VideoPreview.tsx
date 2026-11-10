@@ -1,9 +1,10 @@
 import { useState, type SyntheticEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Clock, Film } from 'lucide-react';
 import { cn, formatBytes } from '@/lib/utils';
 import { Badge } from '@/components/ui';
 import { BinaryPreview } from './BinaryPreview';
-import { LARGE_MEDIA_DETAIL, mediaDurationLabel, mediaExtension, mediaFormatLabel } from './AudioPreview';
+import { largeMediaDetail, mediaDurationLabel, mediaExtension, mediaFormatLabel } from './AudioPreview';
 import type { ArtifactViewProps } from './previewSupport';
 
 const VIDEO_MIME_BY_EXTENSION: Record<string, string> = {
@@ -60,6 +61,7 @@ function videoDataUrl(mimeType: string, payload: string): string {
  * the inline cap (no payload) or a media error falls back to the binary card.
  */
 export function VideoPreview({ content, className }: ArtifactViewProps) {
+  const { t } = useTranslation('artifacts');
   const { artifact, dataBase64, content: text } = content;
   const [duration, setDuration] = useState<number | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export function VideoPreview({ content, className }: ArtifactViewProps) {
           : null;
 
   if (!inlinePayload) {
-    return <BinaryPreview content={content} className={className} detail={LARGE_MEDIA_DETAIL} />;
+    return <BinaryPreview content={content} className={className} detail={largeMediaDetail()} />;
   }
   if (mediaError) {
     return <BinaryPreview content={content} className={className} detail={mediaError} />;
@@ -86,7 +88,7 @@ export function VideoPreview({ content, className }: ArtifactViewProps) {
     artifact.mimeType,
     artifact.name,
     { byExt: VIDEO_FORMAT_BY_EXTENSION, byMime: VIDEO_FORMAT_BY_MIME },
-    'VÍDEO',
+    t('artifacts:video.formatFallback'),
   );
   const durationLabel = mediaDurationLabel(duration);
 
@@ -101,12 +103,12 @@ export function VideoPreview({ content, className }: ArtifactViewProps) {
         <Badge tone="warning" size="sm">
           {format}
         </Badge>
-        <span className="tabular-nums" title="Tamanho do arquivo">
+        <span className="tabular-nums" title={t('artifacts:video.fileSizeTitle')}>
           {formatBytes(artifact.size)}
         </span>
-        <span className="inline-flex items-center gap-1 tabular-nums" title="Duração do vídeo">
+        <span className="inline-flex items-center gap-1 tabular-nums" title={t('artifacts:video.durationTitle')}>
           <Clock aria-hidden className="size-3.5 text-foreground-subtle" strokeWidth={1.8} />
-          {durationLabel ?? 'Duração —'}
+          {durationLabel ?? t('artifacts:video.durationUnknown')}
         </span>
       </div>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-surface p-3">
@@ -115,10 +117,10 @@ export function VideoPreview({ content, className }: ArtifactViewProps) {
           playsInline
           preload="metadata"
           src={src}
-          aria-label={`Reprodutor de vídeo de ${artifact.name}`}
+          aria-label={t('artifacts:video.playerAria', { name: artifact.name })}
           onLoadedMetadata={handleLoadedMetadata}
           onError={() =>
-            setMediaError('Não foi possível reproduzir o vídeo; use Abrir/Salvar.')
+            setMediaError(t('artifacts:video.playError'))
           }
           className="max-h-full max-w-full rounded-lg border border-border bg-surface shadow-sm"
         />

@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { sanitizeSvg } from '@/lib/genui/sanitize';
 import { CodeBlock } from './CodeBlock';
@@ -16,6 +17,7 @@ let renderCounter = 0;
  * `securityLevel: 'strict'` and then sanitized before injection.
  */
 export function MermaidBlock({ code, className }: MermaidBlockProps) {
+  const { t } = useTranslation('genui');
   const dark = useIsDark();
   const reactId = useId();
   const [svg, setSvg] = useState<string | null>(null);
@@ -61,9 +63,9 @@ export function MermaidBlock({ code, className }: MermaidBlockProps) {
   if (error) {
     return (
       <div className={cn('my-3 flex flex-col gap-2', className)}>
-        <CodeBlock code={code} language="mermaid" title="Diagrama Mermaid" maxHeight={340} />
+        <CodeBlock code={code} language="mermaid" title={t('mermaid.title')} maxHeight={340} />
         <p className="text-[11px] leading-relaxed text-foreground-subtle">
-          Não foi possível renderizar o diagrama: {error}
+          {t('mermaid.renderError', { error })}
         </p>
       </div>
     );
@@ -78,9 +80,9 @@ export function MermaidBlock({ code, className }: MermaidBlockProps) {
           className,
         )}
         aria-busy
-        aria-label="Renderizando diagrama"
+        aria-label={t('mermaid.rendering')}
       >
-        <span className="text-[11px] text-foreground-subtle">Renderizando diagrama…</span>
+        <span className="text-[11px] text-foreground-subtle">{t('mermaid.rendering')}</span>
       </div>
     );
   }
@@ -88,7 +90,7 @@ export function MermaidBlock({ code, className }: MermaidBlockProps) {
   return (
     <div
       role="img"
-      aria-label="Diagrama Mermaid"
+      aria-label={t('mermaid.title')}
       className={cn(
         'my-3 overflow-x-auto rounded-xl border border-border bg-surface px-4 py-3',
         '[&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-w-full [&_svg]:font-sans',

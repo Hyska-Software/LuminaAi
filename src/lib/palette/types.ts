@@ -8,6 +8,7 @@
  * disappearing (the v1 bug: a hardcoded `GROUP_ORDER` filtered unknown groups).
  */
 import type { LucideIcon } from 'lucide-react';
+import { t } from '../i18n';
 import type { Conversation } from '../types';
 
 /** Sections of the palette, in canonical display order. */
@@ -21,16 +22,17 @@ export type PaletteGroupId =
 
 export interface PaletteGroupDefinition {
   id: PaletteGroupId;
-  label: string;
+  /** Translation key of the section label (resolved at render time). */
+  labelKey: string;
 }
 
 export const PALETTE_GROUPS: readonly PaletteGroupDefinition[] = [
-  { id: 'conversas', label: 'Conversas' },
-  { id: 'navegacao', label: 'Navegação' },
-  { id: 'ferramentas', label: 'Ferramentas' },
-  { id: 'aparencia', label: 'Aparência' },
-  { id: 'configuracoes', label: 'Configurações' },
-  { id: 'sistema', label: 'Sistema' },
+  { id: 'conversas', labelKey: 'palette:groups.conversas' },
+  { id: 'navegacao', labelKey: 'palette:groups.navegacao' },
+  { id: 'ferramentas', labelKey: 'palette:groups.ferramentas' },
+  { id: 'aparencia', labelKey: 'palette:groups.aparencia' },
+  { id: 'configuracoes', labelKey: 'palette:groups.configuracoes' },
+  { id: 'sistema', labelKey: 'palette:groups.sistema' },
 ];
 
 /** Canonical group order (used for tie-breaking and for the empty-query list). */
@@ -39,7 +41,22 @@ export const PALETTE_GROUP_ORDER: readonly PaletteGroupId[] = PALETTE_GROUPS.map
 );
 
 export function paletteGroupLabel(id: PaletteGroupId): string {
-  return PALETTE_GROUPS.find((group) => group.id === id)?.label ?? id;
+  switch (id) {
+    case 'conversas':
+      return t('palette:groups.conversas');
+    case 'navegacao':
+      return t('palette:groups.navegacao');
+    case 'ferramentas':
+      return t('palette:groups.ferramentas');
+    case 'aparencia':
+      return t('palette:groups.aparencia');
+    case 'configuracoes':
+      return t('palette:groups.configuracoes');
+    case 'sistema':
+      return t('palette:groups.sistema');
+    default:
+      return id;
+  }
 }
 
 /** Query scope selected by a leading prefix: `>` commands, `#` conversations. */
@@ -99,9 +116,3 @@ export interface PaletteSection {
   /** Backend search failed and only the local title/preview matches are shown. */
   fallback?: boolean;
 }
-
-export const PALETTE_SECTION_LABELS = {
-  suggestions: 'Sugestões',
-  conversations: 'Conversas encontradas',
-  recentConversations: 'Conversas recentes',
-} as const;

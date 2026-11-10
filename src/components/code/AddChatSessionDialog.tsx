@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MessageSquare, MessageSquarePlus, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -46,6 +47,7 @@ function matchesQuery(conversation: Conversation, needles: string[]): boolean {
  * dialog and opens the very same conversation in Code.
  */
 export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSessionDialogProps) {
+  const { t } = useTranslation('code');
   const conversations = useChatStore((state) => state.conversations);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -80,8 +82,8 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
     setBusyId(null);
     if (!ok) {
       // The store is intentionally toast-free: the caller owns the feedback.
-      setError('Não foi possível adicionar a sessão ao Code. Tente novamente.');
-      toast.error('Não foi possível adicionar a sessão ao Code');
+      setError(t('addChat.error'));
+      toast.error(t('addChat.errorToast'));
       return;
     }
     onOpenChange(false);
@@ -101,11 +103,8 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
     >
       <DialogContent size="md" className="gap-0">
         <DialogHeader className="gap-1.5 pr-12">
-          <DialogTitle>Adicionar sessão do Chat</DialogTitle>
-          <DialogDescription>
-            Escolha uma conversa do Chat para trabalhar nela também no Code. Ela continua disponível
-            nos dois layouts.
-          </DialogDescription>
+          <DialogTitle>{t('addChat.title')}</DialogTitle>
+          <DialogDescription>{t('addChat.description')}</DialogDescription>
         </DialogHeader>
 
         <div className="px-6 pb-3">
@@ -117,8 +116,8 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar sessão do Chat…"
-              aria-label="Buscar sessão do Chat"
+              placeholder={t('addChat.searchPlaceholder')}
+              aria-label={t('addChat.searchAria')}
               autoFocus
               spellCheck={false}
               autoComplete="off"
@@ -129,7 +128,7 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
 
         <div
           role="region"
-          aria-label="Sessões do Chat disponíveis"
+          aria-label={t('addChat.listAria')}
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-3"
         >
           {available.length === 0 ? (
@@ -137,19 +136,19 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
               <span className="flex size-10 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
                 <MessageSquarePlus aria-hidden className="size-5" strokeWidth={1.75} />
               </span>
-              <p className="text-[13px] font-medium text-foreground">Nenhuma sessão do Chat disponível</p>
+              <p className="text-[13px] font-medium text-foreground">{t('addChat.empty.title')}</p>
               <p className="max-w-sm text-[12px] leading-relaxed text-foreground-muted">
-                Todas as conversas do Chat já estão no Code, ou você ainda não tem conversas no Chat.
+                {t('addChat.empty.description')}
               </p>
             </div>
           ) : results.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-10 text-center">
-              <p className="text-[13px] font-medium text-foreground">Nenhuma sessão encontrada</p>
+              <p className="text-[13px] font-medium text-foreground">{t('addChat.noResults.title')}</p>
               <p className="max-w-sm text-[12px] leading-relaxed text-foreground-muted">
-                Nenhuma conversa do Chat corresponde a “{query.trim()}”.
+                {t('addChat.noResults.description', { query: query.trim() })}
               </p>
               <Button variant="secondary" size="sm" onClick={() => setQuery('')}>
-                Limpar busca
+                {t('addChat.clearSearch')}
               </Button>
             </div>
           ) : (
@@ -160,7 +159,7 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
                   <div key={conversation.id} role="listitem">
                     <button
                       type="button"
-                      aria-label={`Adicionar ${conversation.title} ao Code`}
+                      aria-label={t('addChat.addAria', { title: conversation.title })}
                       aria-busy={busy || undefined}
                       disabled={busyId !== null}
                       onClick={() => void handleAdd(conversation)}
@@ -188,7 +187,7 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
                         {relativeTime(conversation.updatedAt)}
                       </span>
                       {busy ? (
-                        <Spinner size="xs" label="Adicionando sessão" className="text-foreground-muted" />
+                        <Spinner size="xs" label={t('addChat.adding')} className="text-foreground-muted" />
                       ) : (
                         <Plus aria-hidden className="size-4 shrink-0 text-foreground-subtle" />
                       )}
@@ -211,10 +210,10 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
 
         <DialogFooter className="justify-between">
           <span className="text-[11px] tabular-nums text-foreground-subtle">
-            {available.length === 1 ? '1 sessão disponível' : `${available.length} sessões disponíveis`}
+            {t('addChat.count', { count: available.length })}
           </span>
           <Button variant="ghost" size="sm" disabled={busyId !== null} onClick={() => onOpenChange(false)}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
         </DialogFooter>
       </DialogContent>

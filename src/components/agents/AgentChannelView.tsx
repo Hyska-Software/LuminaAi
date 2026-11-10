@@ -7,6 +7,8 @@ import {
   useState,
   type ClipboardEvent as ReactClipboardEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   ArrowDown,
   ArrowLeft,
@@ -26,7 +28,7 @@ import { AgentAvatar } from './AgentAvatar';
 import { AgentAvatarStack } from './AgentAvatarStack';
 import { AgentTaskBoardDialog } from './AgentTaskBoardDialog';
 import { AgentPanelButton, AgentPanelOpener } from './AgentPanelToggle';
-import { TASK_STATUS_META, TASK_TERMINAL_STATUSES } from './agentTaskStatus';
+import { TASK_TERMINAL_STATUSES, taskStatusMeta } from './agentTaskStatus';
 import { Markdown } from '@/components/chat/Markdown';
 import { AttachmentChips } from '@/components/composer/AttachmentChips';
 import {
@@ -39,6 +41,7 @@ import { useReduceMotion } from '@/components/layout/hooks';
 import { IconButton, Spinner } from '@/components/ui';
 import { api } from '@/lib/api';
 import { agentAvatarForEmoji, DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
+import { localeLowerCase } from '@/lib/i18n/format';
 import { useAgentStore, useAppStore, useUiStore } from '@/lib/store';
 import type {
   AgentAvatar as AgentAvatarSpec,
@@ -55,19 +58,28 @@ const BOTTOM_THRESHOLD = 96;
 /** The textarea grows up to ten lines before scrolling (same as the chat composer). */
 const MAX_LINES = 10;
 
+type Translate = TFunction<'agents'>;
+
 function messageAuthor(
   message: AgentChannelMessage,
   names: Map<string, { name: string; avatar: AgentAvatarSpec }>,
+  t: Translate,
 ): { name: string; avatar: AgentAvatarSpec } {
-  if (message.role === 'user') return { name: 'Você', avatar: agentAvatarForEmoji('🧑') };
+  if (message.role === 'user') return { name: t('channel.you'), avatar: agentAvatarForEmoji('🧑') };
   if (message.agentId) {
-    return names.get(message.agentId) ?? { name: 'Agente', avatar: DEFAULT_AGENT_AVATAR };
+    return (
+      names.get(message.agentId) ?? {
+        name: t('channel.unknownAgent'),
+        avatar: DEFAULT_AGENT_AVATAR,
+      }
+    );
   }
-  return { name: 'Sistema', avatar: agentAvatarForEmoji('⚙️') };
+  return { name: t('channel.system'), avatar: agentAvatarForEmoji('⚙️') };
 }
 
 /** Copy action shown on hover, mirroring the chat message footer. */
 function MessageCopyButton({ content, label }: { content: string; label: string }) {
+  const { t } = useTranslation('agents');
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | null>(null);
 
@@ -81,7 +93,7 @@ function MessageCopyButton({ content, label }: { content: string; label: string 
   const copy = async () => {
     const ok = await copyText(content);
     if (!ok) {
-      toast.error('Não foi possível copiar');
+      toast.error(t('channel.copyError'));
       return;
     }
     setCopied(true);
@@ -91,7 +103,7 @@ function MessageCopyButton({ content, label }: { content: string; label: string 
 
   return (
     <IconButton
-      label={copied ? 'Mensagem copiada' : label}
+      label={copied ? t('channel.copied') : label}
       size="sm"
       variant="ghost"
       className="size-8"
@@ -120,6 +132,7 @@ export function AgentChannelView({
   onBack: () => void;
   onEdit: (channel: AgentChannel) => void;
 }) {
+  const { t } = useTranslation('agents');
   const agents = useAgentStore((state) => state.agentsById);
   const sendKey = useAppStore((state) => state.settings.sendKey);
   const [channel, setChannel] = useState<AgentChannel | null>(null);
@@ -168,13 +181,14 @@ export function AgentChannelView({
   }, [agents]);
   const members = useMemo(
     () =>
-      (channel?.memberIds ?? [])
-        .map((id) => ({
-          id,
-          ...(names.get(id) ?? { name: 'Agente', avatar: DEFAULT_AGENT_AVATAR }),
-        }))
-        .filter((member) => member.name !== 'Agente'),
-    [channel?.memberIds, names],
+      (channel?.memberIds ?? []).map((id) => ({
+        id,
+        ...(names.get(id) ?? {
+          name: t('channel.unknownAgent'),
+          avatar: DEFAULT_AGENT_AVATAR,
+        }),
+      })),
+    [channel?.memberIds, names, t],
   );
   const activeTasks = useMemo(
     () =>
@@ -187,7 +201,7 @@ export function AgentChannelView({
   const mentionCandidates = mentionMatch
     ? members
         .filter((member) =>
-          member.name.toLocaleLowerCase('pt-BR').includes(mentionMatch[1].toLocaleLowerCase('pt-BR')),
+          localeLowerCase(member.name).includes(localeLowerCase(mentionMatch[1])),
         )
         .slice(0, 6)
     : [];
@@ -238,9 +252,9 @@ export function AgentChannelView({
         setAttachments((current) => [...current, ...imported]);
       }
     } catch (error) {
-      toast.error('Falha ao importar anexo', { description: String(error) });
+      toast.error(t('channel.importError'), { description: String(error) });
     }
-  }, []);
+  }, [t]);
 
   const importClipboard = useCallback(async () => {
     try {
@@ -249,9 +263,9 @@ export function AgentChannelView({
         setAttachments((current) => [...current, ...imported]);
       }
     } catch (error) {
-      toast.error('Não foi possível colar o anexo', { description: String(error) });
+      toast.error(t('channel.pasteError'), { description: String(error) });
     }
-  }, []);
+  }, [t]);
 
   const handleAttach = async () => {
     if (attaching) return;
@@ -259,7 +273,7 @@ export function AgentChannelView({
     try {
       await importPaths(await pickAttachmentPaths());
     } catch (error) {
-      toast.error('Não foi possível anexar', { description: String(error) });
+      toast.error(t('channel.attachError'), { description: String(error) });
     } finally {
       setAttaching(false);
     }
@@ -324,18 +338,18 @@ export function AgentChannelView({
         setMessages(history);
         setTasks(channelTasks);
         if (!found) {
-          toast.info('Este canal não existe mais');
+          toast.info(t('channel.gone'));
           setActiveChannelId(null);
         }
       } catch (error) {
         if (request === requestId.current && !silent) {
-          toast.error('Não foi possível abrir o canal', { description: String(error) });
+          toast.error(t('channel.openError'), { description: String(error) });
         }
       } finally {
         if (request === requestId.current) setLoading(false);
       }
     },
-    [channelId, setActiveChannelId],
+    [channelId, setActiveChannelId, t],
   );
 
   useEffect(() => {
@@ -406,7 +420,7 @@ export function AgentChannelView({
       setMessages(result.messages);
       setErrors(result.errors);
       if (result.errors.length > 0) {
-        toast.warning('Alguns agentes não responderam', {
+        toast.warning(t('channel.someFailed'), {
           description: result.errors[0],
         });
       }
@@ -416,7 +430,7 @@ export function AgentChannelView({
       attachmentsRef.current = pendingAttachments;
       setAttachments(pendingAttachments);
       void load(true);
-      toast.error('Não foi possível publicar no canal', { description: String(error) });
+      toast.error(t('channel.postError'), { description: String(error) });
     } finally {
       setSending(false);
       requestAnimationFrame(() => {
@@ -430,7 +444,7 @@ export function AgentChannelView({
     return (
       <div className="relative flex h-full items-center justify-center text-[13px] text-foreground-muted">
         <Loader2 className="mr-2 size-4 animate-spin" />
-        Carregando canal…
+        {t('channel.loading')}
         <AgentPanelOpener />
       </div>
     );
@@ -438,7 +452,7 @@ export function AgentChannelView({
   if (!channel) {
     return (
       <div className="relative flex h-full items-center justify-center px-6 text-center text-[13px] text-foreground-muted">
-        Canal indisponível.
+        {t('channel.unavailable')}
         <AgentPanelOpener />
       </div>
     );
@@ -452,7 +466,7 @@ export function AgentChannelView({
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/70 px-3">
-        <IconButton label="Voltar para a equipe" size="sm" variant="ghost" onClick={onBack}>
+        <IconButton label={t('channel.back')} size="sm" variant="ghost" onClick={onBack}>
           <ArrowLeft className="size-4" />
         </IconButton>
         {members.length > 0 ? (
@@ -471,11 +485,13 @@ export function AgentChannelView({
             <p className="truncate text-[13px] font-medium text-foreground">{channel.name}</p>
             {leader ? (
               <span
-                title={`Líder: ${leader.name}`}
+                title={t('channel.leaderTitle', { name: leader.name })}
                 className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent"
               >
                 <Crown aria-hidden className="size-3" />
-                <span className="max-w-[7rem] truncate">Líder · {leader.name}</span>
+                <span className="max-w-[7rem] truncate">
+                  {t('channel.leaderBadge', { name: leader.name })}
+                </span>
               </span>
             ) : null}
           </div>
@@ -486,14 +502,17 @@ export function AgentChannelView({
             <Users className="size-3 shrink-0" />
             <span className="truncate">
               {members.length > 0
-                ? `${members.length} ${members.length === 1 ? 'agente' : 'agentes'} · ${memberNames}`
-                : 'Nenhum participante'}
+                ? t('channel.membersSummary', {
+                    count: members.length,
+                    names: memberNames,
+                  })
+                : t('channel.noMembers')}
             </span>
           </p>
         </div>
         <AgentPanelButton />
         <IconButton
-          label="Tarefas do canal"
+          label={t('channel.tasks')}
           size="sm"
           variant="ghost"
           onClick={() => setTaskBoardOpen(true)}
@@ -502,7 +521,7 @@ export function AgentChannelView({
         </IconButton>
         {isDm ? null : (
           <IconButton
-            label="Editar canal"
+            label={t('channel.edit')}
             size="sm"
             variant="ghost"
             onClick={() => onEdit(channel)}
@@ -524,15 +543,14 @@ export function AgentChannelView({
                 {isDm ? '@' : '#'}
               </span>
               <p className="text-[15px] font-medium text-foreground">
-                Nenhuma mensagem em {isDm ? '' : '#'}
-                {channel.name}
+                {t('channel.emptyTitle', { name: channel.name, prefix: isDm ? '' : '#' })}
               </p>
               <p className="mt-1 text-[13px] leading-relaxed text-foreground-muted">
                 {isDm
-                  ? 'As respostas geradas pelo inbox aparecem aqui.'
+                  ? t('channel.emptyDm')
                   : leader
-                    ? `${leader.name} responde primeiro e pode delegar tarefas aos demais membros.`
-                    : 'Publique uma mensagem e os agentes do canal respondem em ordem. Use @nome para direcionar a mensagem.'}
+                    ? t('channel.emptyLeader', { name: leader.name })
+                    : t('channel.empty')}
               </p>
             </div>
           </div>
@@ -546,7 +564,7 @@ export function AgentChannelView({
               className="flex flex-col"
             >
               {messages.map((message, index) => {
-                const author = messageAuthor(message, names);
+                const author = messageAuthor(message, names, t);
                 const previous = messages[index - 1];
                 const groupStart = !previous || previous.role !== message.role;
                 const spacing = groupStart ? 'mt-7' : 'mt-3';
@@ -581,7 +599,7 @@ export function AgentChannelView({
                       ) : null}
                       {message.content ? (
                         <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/message:opacity-100">
-                          <MessageCopyButton content={message.content} label="Copiar mensagem" />
+                          <MessageCopyButton content={message.content} label={t('channel.copyMessage')} />
                         </div>
                       ) : null}
                     </div>
@@ -604,7 +622,7 @@ export function AgentChannelView({
                       </p>
                       <Markdown content={message.content} />
                       <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/message:opacity-100">
-                        <MessageCopyButton content={message.content} label="Copiar resposta" />
+                        <MessageCopyButton content={message.content} label={t('channel.copyReply')} />
                       </div>
                     </div>
                   </div>
@@ -617,8 +635,8 @@ export function AgentChannelView({
                     <Spinner size="xs" />
                     <span>
                       {leader
-                        ? `${leader.name} está respondendo…`
-                        : 'Os agentes do canal estão respondendo…'}
+                        ? t('channel.leaderResponding', { name: leader.name })
+                        : t('channel.agentsResponding')}
                     </span>
                   </div>
                 </div>
@@ -639,20 +657,20 @@ export function AgentChannelView({
               <div className="flex items-center gap-2 border-b border-accent/20 px-2.5 py-1.5">
                 <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
                 <span className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-wider text-foreground-muted">
-                  Tarefas em andamento
+                  {t('channel.activeTasks')}
                 </span>
                 <button
                   type="button"
                   onClick={() => setTaskBoardOpen(true)}
                   className="shrink-0 text-[10px] font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
-                  Ver quadro
+                  {t('channel.viewBoard')}
                 </button>
               </div>
               <div className="p-1">
                 {activeTasks.slice(0, 3).map((task) => {
                   const owner = names.get(task.ownerAgentId);
-                  const meta = TASK_STATUS_META[task.status];
+                  const meta = taskStatusMeta(task.status);
                   return (
                     <button
                       key={task.id}
@@ -665,7 +683,7 @@ export function AgentChannelView({
                         {task.title}
                       </span>
                       <span className={cn('shrink-0 text-[10px] font-medium', meta.tone)}>
-                        {meta.label}
+                        {t(meta.labelKey as never)}
                       </span>
                     </button>
                   );
@@ -676,7 +694,7 @@ export function AgentChannelView({
                     onClick={() => setTaskBoardOpen(true)}
                     className="w-full rounded-lg px-1.5 py-1 text-left text-[10px] text-foreground-subtle hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
-                    +{activeTasks.length - 3} tarefa{activeTasks.length - 3 === 1 ? '' : 's'}
+                    {t('channel.moreTasks', { count: activeTasks.length - 3 })}
                   </button>
                 ) : null}
               </div>
@@ -696,8 +714,7 @@ export function AgentChannelView({
           ) : null}
           {isDm ? (
             <p className="rounded-xl border border-border bg-surface-raised/60 px-3 py-2 text-center text-[11px] text-foreground-muted">
-              Conversa direta entre agentes. As respostas são geradas pelo inbox e aparecem aqui;
-              o composer do usuário fica desativado.
+              {t('channel.dmNotice')}
             </p>
           ) : (
             <>
@@ -715,7 +732,7 @@ export function AgentChannelView({
                     <div
                       role="listbox"
                       id="channel-mention-listbox"
-                      aria-label="Membros do canal"
+                      aria-label={t('channel.membersAria')}
                       className="mb-2 grid max-h-56 gap-0.5 overflow-y-auto rounded-xl border border-border bg-surface p-1"
                     >
                       {mentionCandidates.map((member, index) => (
@@ -725,7 +742,7 @@ export function AgentChannelView({
                           role="option"
                           id={`channel-mention-${member.id}`}
                           aria-selected={index === activeMentionIndex}
-                          aria-label={`Mencionar ${member.name}`}
+                          aria-label={t('channel.mentionAria', { name: member.name })}
                           className={cn(
                             'flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px]',
                             index === activeMentionIndex
@@ -756,8 +773,11 @@ export function AgentChannelView({
                     value={draft}
                     rows={1}
                     maxLength={16000}
-                    placeholder={`Mensagem para ${isDm ? '' : '#'}${channel.name}…`}
-                    aria-label={`Mensagem para o canal ${channel.name}`}
+                    placeholder={t('channel.messagePlaceholder', {
+                      name: channel.name,
+                      prefix: isDm ? '' : '#',
+                    })}
+                    aria-label={t('channel.messageAria', { name: channel.name })}
                     aria-autocomplete="list"
                     aria-expanded={
                       mentionOpen && mentionCandidates.length > 0 ? true : undefined
@@ -829,7 +849,7 @@ export function AgentChannelView({
                 </div>
                 <div className="flex items-center gap-1 px-2 pb-2 pt-1">
                   <IconButton
-                    label="Anexar arquivos"
+                    label={t('channel.attach')}
                     size="sm"
                     variant="ghost"
                     loading={attaching}
@@ -842,7 +862,7 @@ export function AgentChannelView({
                       <button
                         type="button"
                         disabled
-                        aria-label="Publicando no canal"
+                        aria-label={t('channel.posting')}
                         className="flex size-8 shrink-0 cursor-not-allowed items-center justify-center rounded-full bg-surface-active text-foreground-subtle"
                       >
                         <Loader2 className="size-4 animate-spin" />
@@ -852,7 +872,7 @@ export function AgentChannelView({
                         type="button"
                         onClick={() => void send()}
                         disabled={!canPost}
-                        aria-label="Publicar no canal"
+                        aria-label={t('channel.post')}
                         className={cn(
                           'flex size-8 shrink-0 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
@@ -869,7 +889,7 @@ export function AgentChannelView({
                 </div>
               </div>
               <p className="mt-1.5 text-center text-[11px] leading-relaxed text-foreground-subtle">
-                Zylara pode cometer erros. Verifique informações importantes.
+                {t('channel.disclaimer')}
               </p>
             </>
           )}
@@ -881,7 +901,7 @@ export function AgentChannelView({
           <button
             type="button"
             onClick={() => scrollToBottom(reduceMotion ? 'auto' : 'smooth')}
-            aria-label="Ir para o fim do canal"
+            aria-label={t('channel.jumpToEnd')}
             className={cn(
               'pointer-events-auto flex size-9 items-center justify-center rounded-full border border-border',
               'bg-surface-raised text-foreground-muted shadow-md',
@@ -898,7 +918,7 @@ export function AgentChannelView({
         open={taskBoardOpen}
         onOpenChange={setTaskBoardOpen}
         channelId={channelId}
-        title={`Tarefas de #${channel.name}`}
+        title={t('channel.tasksTitle', { name: channel.name })}
       />
     </div>
   );

@@ -1,24 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowDown, Bot } from 'lucide-react';
 
 import { MessageList } from '@/components/chat/MessageList';
 import { Spinner } from '@/components/ui';
+import { subagentTypeLabel } from '@/components/agents/agentUtils';
 import { api } from '@/lib/api';
 import { useChatStore, type CodeSubagentTab, type StreamingState } from '@/lib/store';
 import type { ChatMessage, ConversationDetail, UsageInfo } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
-const SUBAGENT_LABELS: Record<string, string> = {
-  explore: 'exploração',
-  review: 'revisão',
-  general: 'geral',
-};
-
-const STATUS_LABELS = {
-  running: 'em execução',
-  done: 'concluído',
-  error: 'falhou',
-  cancelled: 'cancelado',
+const STATUS_LABEL_KEY = {
+  running: 'subagent.status.running',
+  done: 'subagent.status.done',
+  error: 'subagent.status.error',
+  cancelled: 'subagent.status.cancelled',
 } as const;
 
 export interface SubagentChatViewProps {
@@ -89,6 +85,7 @@ function lastUsage(detail: ConversationDetail | null): UsageInfo | null {
  * Chat tab (same Markdown/Thinking/tool rows) without Composer or chat actions.
  */
 export function SubagentChatView({ target, className }: SubagentChatViewProps) {
+  const { t } = useTranslation('agents');
   const live = useLive(target);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,7 +156,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
   const providerId = live?.providerId ?? target.providerId ?? detail?.conversation.providerId;
   const modelId = live?.modelId ?? target.modelId ?? detail?.conversation.modelId;
   const effort = live?.effort ?? target.effort;
-  const type = SUBAGENT_LABELS[live?.subagentType ?? target.subagentType] ?? live?.subagentType ?? target.subagentType;
+  const type = subagentTypeLabel(live?.subagentType ?? target.subagentType);
   const description = live?.description ?? target.description ?? detail?.conversation.title ?? '';
   const unavailable = !live && !detail && !loading && !error;
 
@@ -192,7 +189,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
               <h2 className="truncate text-[13px] font-semibold text-foreground">
-                Subagente · {type}
+                {t('subagent.header', { type })}
               </h2>
               <span
                 className={cn(
@@ -206,10 +203,10 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
                         : 'bg-success-soft text-success',
                 )}
               >
-                {STATUS_LABELS[status]}
+                {t(STATUS_LABEL_KEY[status])}
               </span>
               <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-foreground-subtle">
-                Somente leitura
+                {t('subagent.readOnly')}
               </span>
             </div>
             <p className="truncate text-[11.5px] text-foreground-muted">{description}</p>
@@ -217,7 +214,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
           {status === 'running' ? <Spinner size="xs" /> : null}
           <span className="hidden shrink-0 text-[11px] text-foreground-subtle tabular-nums sm:inline">
             {modelId ? `${providerId}/${modelId}` : null}
-            {effort ? ` · esforço ${effort}` : ''}
+            {effort ? t('subagent.effort', { effort }) : ''}
             {totalTokens != null ? ` · ${totalTokens} tokens` : ''}
             {duration != null ? ` · ${(duration / 1000).toFixed(1)} s` : ''}
           </span>
@@ -232,7 +229,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
         <div className="mx-auto w-full max-w-3xl px-6 pb-10 pt-6">
           {loading && !live ? (
             <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-foreground-muted">
-              <Spinner size="xs" /> Carregando transcript…
+              <Spinner size="xs" /> {t('subagent.loadingTranscript')}
             </div>
           ) : error && !live ? (
             <p role="alert" className="rounded-lg border border-border bg-surface p-3 text-[12px] text-danger">
@@ -240,11 +237,11 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
             </p>
           ) : unavailable ? (
             <p className="py-12 text-center text-[12px] text-foreground-muted">
-              Transcript deste subagente não está disponível.
+              {t('subagent.transcriptUnavailable')}
             </p>
           ) : messages.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-foreground-muted">
-              <Spinner size="xs" /> O subagente está iniciando…
+              <Spinner size="xs" /> {t('subagent.starting')}
             </div>
           ) : (
             <MessageList messages={messages} streaming={streaming} readOnly />
@@ -253,7 +250,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
       </div>
 
       <div className="shrink-0 border-t border-border px-5 py-2.5 text-center text-[10.5px] text-foreground-subtle">
-        Transcript somente leitura · o input e as ações de conversa não estão disponíveis
+        {t('subagent.footer')}
       </div>
 
       {showJump ? (
@@ -261,7 +258,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
           <button
             type="button"
             onClick={scrollToBottom}
-            aria-label="Ir para o fim do transcript"
+            aria-label={t('subagent.jumpToEnd')}
             className="pointer-events-auto flex size-9 items-center justify-center rounded-full border border-border bg-surface-raised text-foreground-muted shadow-md transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <ArrowDown className="size-4" />

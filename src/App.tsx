@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Toaster, toast } from 'sonner';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
@@ -14,6 +15,7 @@ import { SourcesPanel } from '@/components/chat/SourcesPanel';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
 import { useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { t } from '@/lib/i18n';
 import { api } from '@/lib/api';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
 import { resolveHotkey, type HotkeyCommand } from '@/lib/hotkeys';
@@ -117,6 +119,7 @@ function runHotkey(command: HotkeyCommand, event: KeyboardEvent): void {
 }
 
 export default function App() {
+  const { t: translate } = useTranslation('common');
   const ready = useAppStore((state) => state.ready);
   const initializing = useAppStore((state) => state.initializing);
   const error = useAppStore((state) => state.error);
@@ -199,11 +202,11 @@ export default function App() {
       if (disposed) return;
       const run = event.payload;
       if (run.status === 'ok') {
-        toast.success(`Rotina concluída: ${run.title}`, {
-          description: 'O resultado está na conversa principal do agente.',
+        toast.success(t('common:shell.app.routineDone', { title: run.title }), {
+          description: t('common:shell.app.routineDoneDescription'),
         });
       } else if (run.status === 'error' || run.status === 'blocked') {
-        toast.error(`Rotina falhou: ${run.title}`, {
+        toast.error(t('common:shell.app.routineFailed', { title: run.title }), {
           description: run.error ?? undefined,
         });
       }
@@ -291,17 +294,17 @@ export default function App() {
         if (focused) return;
         const title =
           status === 'done'
-            ? 'Tarefa concluída'
+            ? t('common:shell.app.taskDone')
             : status === 'failed' || status === 'declined'
-              ? 'Tarefa falhou'
+              ? t('common:shell.app.taskFailed')
               : status === 'handoff_pending'
-                ? 'Tarefa aguardando aceite'
-                : 'Tarefa precisa de você';
+                ? t('common:shell.app.taskHandoff')
+                : t('common:shell.app.taskNeedsYou');
         toast.info(title, {
           description: event.payload.title,
           action: conversationId
             ? {
-                label: 'Abrir',
+                label: t('common:actions.open'),
                 onClick: () => {
                   useUiStore.getState().setLayoutMode('agent');
                   if (agentId) useUiStore.getState().setActiveAgentId(agentId);
@@ -414,7 +417,7 @@ export default function App() {
 
   useEffect(() => {
     if (!error) return;
-    toast.error('Algo deu errado', { description: error });
+    toast.error(t('common:shell.app.errorTitle'), { description: error });
     useAppStore.getState().setError(null);
   }, [error]);
 
@@ -523,7 +526,11 @@ export default function App() {
             ) : undefined
           }
           sidebarLabel={
-            layoutMode === 'code' ? 'Sessões' : layoutMode === 'agent' ? 'Agentes' : 'Conversas'
+            layoutMode === 'code'
+              ? translate('shell.labels.sessions')
+              : layoutMode === 'agent'
+                ? translate('shell.labels.agents')
+                : translate('shell.labels.conversations')
           }
           rightPanel={
             layoutMode === 'code' ? (

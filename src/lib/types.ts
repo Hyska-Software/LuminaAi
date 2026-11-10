@@ -4,6 +4,7 @@
  * Every interface here mirrors a struct in `src-tauri/src/domain.rs` (and the
  * catalog in `data/catalog.json`). Keep both sides in sync.
  */
+import type { AppLocale } from './i18n/languages';
 
 /* ------------------------------------------------------------------ */
 /* Catalog                                                             */
@@ -524,6 +525,9 @@ export type ToolPresentation =
   | ({ kind: 'goal' } & GoalView)
   | { kind: 'job'; job: JobView }
   | { kind: 'answers'; answers: AskUserAnswer[]; skipped: boolean }
+  /** Structured result counts so the renderer never parses translated prose. */
+  | { kind: 'search'; total: number }
+  | { kind: 'artifact_list'; returned: number; total: number }
   | {
       kind: 'subagent';
       description: string;
@@ -1818,7 +1822,7 @@ export interface CacheSettings {
 
 export interface Settings {
   theme: ThemeMode;
-  locale: 'pt-BR' | 'en';
+  locale: AppLocale;
   defaultProvider: string;
   defaultModel: string;
   reasoningDefault: 'auto' | 'off' | 'low' | 'medium' | 'high' | 'max';

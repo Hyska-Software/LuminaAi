@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
@@ -30,7 +31,7 @@ import { api } from '@/lib/api';
 import { DEFAULT_AGENT_AVATAR } from '@/lib/agentAvatar';
 import { DEFAULT_AGENT_CAPABILITIES } from '@/lib/agentDefaults';
 import { reasoningForModel } from '@/lib/modelMenu';
-import { AUTONOMOUS_MODE_WARNING } from '@/lib/permissionModes';
+import { AUTONOMOUS_MODE_WARNING_KEY } from '@/lib/permissionModes';
 import { selectAgent, useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
 import type {
   AgentAvatar as AgentAvatarSpec,
@@ -47,69 +48,68 @@ import { cn } from '@/lib/utils';
 
 /** Stable catalog of tools an agent can be limited to. Kept in sync with the
  * Chat and Code registries; names not present remain globally gated. */
-const TOOL_OPTIONS: Array<{ name: string; label: string; group: string }> = [
-  { name: 'web_search', label: 'Busca web', group: 'Pesquisa' },
-  { name: 'fetch_url', label: 'Ler página web', group: 'Pesquisa' },
-  { name: 'create_file', label: 'Criar arquivos', group: 'Arquivos' },
-  { name: 'run_code', label: 'Executar código', group: 'Arquivos' },
-  { name: 'read_file', label: 'Ler arquivo', group: 'Workspace' },
-  { name: 'list_dir', label: 'Listar pasta', group: 'Workspace' },
-  { name: 'search_files', label: 'Buscar arquivos', group: 'Workspace' },
-  { name: 'search_text', label: 'Buscar texto', group: 'Workspace' },
-  { name: 'read_tool_output', label: 'Ler saída de ferramenta', group: 'Workspace' },
-  { name: 'write_file', label: 'Escrever arquivo', group: 'Workspace' },
-  { name: 'edit_file', label: 'Editar arquivo', group: 'Workspace' },
-  { name: 'run_command', label: 'Executar comando', group: 'Workspace' },
-  { name: 'job_list', label: 'Listar jobs', group: 'Jobs' },
-  { name: 'job_output', label: 'Saída de job', group: 'Jobs' },
-  { name: 'job_kill', label: 'Encerrar job', group: 'Jobs' },
-  { name: 'git_status', label: 'Git status', group: 'Git' },
-  { name: 'git_diff', label: 'Git diff', group: 'Git' },
-  { name: 'git_log', label: 'Git log', group: 'Git' },
-  { name: 'todo_write', label: 'Tarefas', group: 'Sessão' },
-  { name: 'submit_plan', label: 'Enviar plano', group: 'Sessão' },
-  { name: 'ask_user', label: 'Perguntar ao usuário', group: 'Sessão' },
-  { name: 'goal', label: 'Objetivo', group: 'Sessão' },
-  { name: 'run_checks', label: 'Verificações do projeto', group: 'Sessão' },
-  { name: 'task', label: 'Subagente', group: 'Sessão' },
-  { name: 'list_skills', label: 'Listar skills', group: 'Skills' },
-  { name: 'read_skill', label: 'Ler skill', group: 'Skills' },
-  { name: 'skill_save', label: 'Salvar skill', group: 'Skills' },
-  { name: 'list_artifacts', label: 'Listar artefatos', group: 'Biblioteca' },
-  { name: 'read_artifact', label: 'Ler artefato', group: 'Biblioteca' },
-  { name: 'validate_ui', label: 'Validar interface', group: 'Interface' },
-  { name: 'memory', label: 'Memória durável', group: 'Memória' },
-  { name: 'delegate_task', label: 'Delegar tarefa', group: 'Delegação' },
-  { name: 'task_list', label: 'Listar tarefas', group: 'Delegação' },
-  { name: 'task_get', label: 'Ler tarefa', group: 'Delegação' },
-  { name: 'task_wait', label: 'Aguardar tarefa', group: 'Delegação' },
-  { name: 'task_cancel', label: 'Cancelar tarefa', group: 'Delegação' },
-  { name: 'accept_task', label: 'Aceitar tarefa', group: 'Delegação' },
-  { name: 'decline_task', label: 'Recusar tarefa', group: 'Delegação' },
-  { name: 'handoff_task', label: 'Transferir tarefa', group: 'Delegação' },
-  { name: 'update_task', label: 'Atualizar tarefa', group: 'Delegação' },
-  { name: 'finish_task', label: 'Concluir tarefa', group: 'Delegação' },
-  { name: 'send_message', label: 'Mensagem no canal', group: 'Delegação' },
-  { name: 'agent_directory', label: 'Diretório de agentes', group: 'Agentes' },
-  { name: 'agent_usage', label: 'Uso do agente', group: 'Agentes' },
-  { name: 'agent_inbox', label: 'Inbox direto', group: 'Agentes' },
-  { name: 'agent_message', label: 'Mensagem direta', group: 'Agentes' },
-  { name: 'create_agent', label: 'Criar agente', group: 'Agentes' },
-  { name: 'routine_list', label: 'Listar rotinas', group: 'Automação' },
-  { name: 'routine_create', label: 'Criar rotina', group: 'Automação' },
-  { name: 'routine_update', label: 'Editar rotina', group: 'Automação' },
-  { name: 'routine_delete', label: 'Excluir rotina', group: 'Automação' },
-  { name: 'computer_screenshot', label: 'Screenshot', group: 'Computador' },
-  { name: 'computer_windows', label: 'Listar janelas', group: 'Computador' },
-  { name: 'computer_ui_tree', label: 'Árvore de acessibilidade', group: 'Computador' },
-  { name: 'computer_click', label: 'Clique', group: 'Computador' },
-  { name: 'computer_type', label: 'Digitar', group: 'Computador' },
-  { name: 'computer_key', label: 'Tecla', group: 'Computador' },
-  { name: 'computer_focus', label: 'Focar janela', group: 'Computador' },
-  { name: 'browser_open', label: 'Abrir navegador', group: 'Computador' },
+const TOOL_OPTIONS: Array<{ name: string; labelKey: string; groupKey: string }> = [
+  { name: 'web_search', labelKey: 'editor.tools.web_search', groupKey: 'editor.toolGroups.pesquisa' },
+  { name: 'fetch_url', labelKey: 'editor.tools.fetch_url', groupKey: 'editor.toolGroups.pesquisa' },
+  { name: 'create_file', labelKey: 'editor.tools.create_file', groupKey: 'editor.toolGroups.arquivos' },
+  { name: 'run_code', labelKey: 'editor.tools.run_code', groupKey: 'editor.toolGroups.arquivos' },
+  { name: 'read_file', labelKey: 'editor.tools.read_file', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'list_dir', labelKey: 'editor.tools.list_dir', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'search_files', labelKey: 'editor.tools.search_files', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'search_text', labelKey: 'editor.tools.search_text', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'read_tool_output', labelKey: 'editor.tools.read_tool_output', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'write_file', labelKey: 'editor.tools.write_file', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'edit_file', labelKey: 'editor.tools.edit_file', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'run_command', labelKey: 'editor.tools.run_command', groupKey: 'editor.toolGroups.workspace' },
+  { name: 'job_list', labelKey: 'editor.tools.job_list', groupKey: 'editor.toolGroups.jobs' },
+  { name: 'job_output', labelKey: 'editor.tools.job_output', groupKey: 'editor.toolGroups.jobs' },
+  { name: 'job_kill', labelKey: 'editor.tools.job_kill', groupKey: 'editor.toolGroups.jobs' },
+  { name: 'git_status', labelKey: 'editor.tools.git_status', groupKey: 'editor.toolGroups.git' },
+  { name: 'git_diff', labelKey: 'editor.tools.git_diff', groupKey: 'editor.toolGroups.git' },
+  { name: 'git_log', labelKey: 'editor.tools.git_log', groupKey: 'editor.toolGroups.git' },
+  { name: 'todo_write', labelKey: 'editor.tools.todo_write', groupKey: 'editor.toolGroups.sessao' },
+  { name: 'submit_plan', labelKey: 'editor.tools.submit_plan', groupKey: 'editor.toolGroups.sessao' },
+  { name: 'ask_user', labelKey: 'editor.tools.ask_user', groupKey: 'editor.toolGroups.sessao' },
+  { name: 'goal', labelKey: 'editor.tools.goal', groupKey: 'editor.toolGroups.sessao' },
+  { name: 'run_checks', labelKey: 'editor.tools.run_checks', groupKey: 'editor.toolGroups.sessao' },
+  { name: 'task', labelKey: 'editor.tools.task', groupKey: 'editor.toolGroups.sessao' },
+  { name: 'list_skills', labelKey: 'editor.tools.list_skills', groupKey: 'editor.toolGroups.skills' },
+  { name: 'read_skill', labelKey: 'editor.tools.read_skill', groupKey: 'editor.toolGroups.skills' },
+  { name: 'skill_save', labelKey: 'editor.tools.skill_save', groupKey: 'editor.toolGroups.skills' },
+  { name: 'list_artifacts', labelKey: 'editor.tools.list_artifacts', groupKey: 'editor.toolGroups.biblioteca' },
+  { name: 'read_artifact', labelKey: 'editor.tools.read_artifact', groupKey: 'editor.toolGroups.biblioteca' },
+  { name: 'validate_ui', labelKey: 'editor.tools.validate_ui', groupKey: 'editor.toolGroups.interface' },
+  { name: 'memory', labelKey: 'editor.tools.memory', groupKey: 'editor.toolGroups.memoria' },
+  { name: 'delegate_task', labelKey: 'editor.tools.delegate_task', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'task_list', labelKey: 'editor.tools.task_list', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'task_get', labelKey: 'editor.tools.task_get', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'task_wait', labelKey: 'editor.tools.task_wait', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'task_cancel', labelKey: 'editor.tools.task_cancel', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'accept_task', labelKey: 'editor.tools.accept_task', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'decline_task', labelKey: 'editor.tools.decline_task', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'handoff_task', labelKey: 'editor.tools.handoff_task', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'update_task', labelKey: 'editor.tools.update_task', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'finish_task', labelKey: 'editor.tools.finish_task', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'send_message', labelKey: 'editor.tools.send_message', groupKey: 'editor.toolGroups.delegacao' },
+  { name: 'agent_directory', labelKey: 'editor.tools.agent_directory', groupKey: 'editor.toolGroups.agentes' },
+  { name: 'agent_usage', labelKey: 'editor.tools.agent_usage', groupKey: 'editor.toolGroups.agentes' },
+  { name: 'agent_inbox', labelKey: 'editor.tools.agent_inbox', groupKey: 'editor.toolGroups.agentes' },
+  { name: 'agent_message', labelKey: 'editor.tools.agent_message', groupKey: 'editor.toolGroups.agentes' },
+  { name: 'create_agent', labelKey: 'editor.tools.create_agent', groupKey: 'editor.toolGroups.agentes' },
+  { name: 'routine_list', labelKey: 'editor.tools.routine_list', groupKey: 'editor.toolGroups.automacao' },
+  { name: 'routine_create', labelKey: 'editor.tools.routine_create', groupKey: 'editor.toolGroups.automacao' },
+  { name: 'routine_update', labelKey: 'editor.tools.routine_update', groupKey: 'editor.toolGroups.automacao' },
+  { name: 'routine_delete', labelKey: 'editor.tools.routine_delete', groupKey: 'editor.toolGroups.automacao' },
+  { name: 'computer_screenshot', labelKey: 'editor.tools.computer_screenshot', groupKey: 'editor.toolGroups.computador' },
+  { name: 'computer_windows', labelKey: 'editor.tools.computer_windows', groupKey: 'editor.toolGroups.computador' },
+  { name: 'computer_ui_tree', labelKey: 'editor.tools.computer_ui_tree', groupKey: 'editor.toolGroups.computador' },
+  { name: 'computer_click', labelKey: 'editor.tools.computer_click', groupKey: 'editor.toolGroups.computador' },
+  { name: 'computer_type', labelKey: 'editor.tools.computer_type', groupKey: 'editor.toolGroups.computador' },
+  { name: 'computer_key', labelKey: 'editor.tools.computer_key', groupKey: 'editor.toolGroups.computador' },
+  { name: 'computer_focus', labelKey: 'editor.tools.computer_focus', groupKey: 'editor.toolGroups.computador' },
+  { name: 'browser_open', labelKey: 'editor.tools.browser_open', groupKey: 'editor.toolGroups.computador' },
 ];
 
-const TOOL_GROUPS = [...new Set(TOOL_OPTIONS.map((tool) => tool.group))];
 
 interface FormState {
   name: string;
@@ -135,10 +135,10 @@ interface FormState {
 function emptyForm(providerId: string, modelId: string): FormState {
   return {
     name: '',
-    role: 'Assistente',
+    role: '',
     description: '',
     avatar: DEFAULT_AGENT_AVATAR,
-    department: 'Geral',
+    department: '',
     providerId,
     modelId,
     fallbackProviderId: '',
@@ -163,6 +163,8 @@ function toggleList(values: string[] | null, name: string): string[] {
 }
 
 export function AgentEditorDialog() {
+  const { t } = useTranslation('agents');
+  const { t: tc } = useTranslation('code');
   const editor = useUiStore((state) => state.agentEditor);
   const close = useUiStore((state) => state.closeAgentEditor);
   const setActiveAgentId = useUiStore((state) => state.setActiveAgentId);
@@ -250,7 +252,11 @@ export function AgentEditorDialog() {
         computerEnvironment: draft.computerEnvironment ?? 'auto',
       });
     } else {
-      setForm(emptyForm(fallbackProvider?.id ?? '', fallbackProvider?.defaultModelId ?? ''));
+      setForm({
+        ...emptyForm(fallbackProvider?.id ?? '', fallbackProvider?.defaultModelId ?? ''),
+        role: t('editor.roleDefault'),
+        department: t('departments.general'),
+      });
     }
     // `agent?.updatedAt` refreshes the form after the store receives the save.
   }, [editor?.mode, editor?.mode === 'edit' ? editor.agentId : null, agent?.updatedAt]);
@@ -337,17 +343,17 @@ export function AgentEditorDialog() {
   const submit = async () => {
     if (submitting) return;
     if (!form.name.trim()) {
-      setError('Dê um nome ao agente.');
+      setError(t('editor.validation.name'));
       setTab('identity');
       return;
     }
     if (!form.role.trim()) {
-      setError('Informe o papel do agente.');
+      setError(t('editor.validation.role'));
       setTab('identity');
       return;
     }
     if (!form.providerId || !form.modelId) {
-      setError('Selecione um modelo.');
+      setError(t('editor.validation.model'));
       setTab('model');
       return;
     }
@@ -356,7 +362,7 @@ export function AgentEditorDialog() {
       role: form.role.trim(),
       description: form.description.trim(),
       avatar: form.avatar,
-      department: form.department.trim() || 'Geral',
+      department: form.department.trim() || t('departments.general'),
       providerId: form.providerId,
       modelId: form.modelId,
       fallbackProviderId: form.fallbackProviderId.trim() || null,
@@ -381,12 +387,12 @@ export function AgentEditorDialog() {
       if (editor?.mode === 'edit') {
         const updated = await updateAgent(editor.agentId, input);
         await useChatStore.getState().refreshConversations();
-        toast.success('Agente atualizado', { description: updated.name });
+        toast.success(t('editor.updated'), { description: updated.name });
       } else {
         const created = await createAgent(input);
         await useChatStore.getState().refreshConversations();
         setActiveAgentId(created.id);
-        toast.success('Agente criado', { description: created.name });
+        toast.success(t('editor.created'), { description: created.name });
       }
       close();
     } catch (caught) {
@@ -400,22 +406,21 @@ export function AgentEditorDialog() {
     <Dialog open={editor !== null} onOpenChange={onOpenChange}>
       <DialogContent className="h-[720px] max-w-3xl">
         <DialogHeader className="pb-4 pr-12">
-          <DialogTitle>{editor?.mode === 'edit' ? 'Editar agente' : 'Criar agente'}</DialogTitle>
+          <DialogTitle>{editor?.mode === 'edit' ? t('editor.titleEdit') : t('editor.titleCreate')}</DialogTitle>
           <DialogDescription>
-            Identidade, comportamento, modelo e limites. As instruções não concedem permissões ao
-            agente.
+            {t('editor.description')}
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
           <div className="shrink-0 px-6">
             <TabsList className="w-full justify-start overflow-x-auto scrollbar-none">
-              <TabsTrigger value="identity">Identidade</TabsTrigger>
-              <TabsTrigger value="avatar">Avatar</TabsTrigger>
-              <TabsTrigger value="model">Modelo</TabsTrigger>
-              <TabsTrigger value="behavior">Comportamento</TabsTrigger>
-              <TabsTrigger value="capabilities">Capacidades</TabsTrigger>
-              <TabsTrigger value="memory">Memória</TabsTrigger>
+              <TabsTrigger value="identity">{t('editor.tabs.identity')}</TabsTrigger>
+              <TabsTrigger value="avatar">{t('editor.tabs.avatar')}</TabsTrigger>
+              <TabsTrigger value="model">{t('editor.tabs.model')}</TabsTrigger>
+              <TabsTrigger value="behavior">{t('editor.tabs.behavior')}</TabsTrigger>
+              <TabsTrigger value="capabilities">{t('editor.tabs.capabilities')}</TabsTrigger>
+              <TabsTrigger value="memory">{t('editor.tabs.memory')}</TabsTrigger>
             </TabsList>
           </div>
 
@@ -427,57 +432,57 @@ export function AgentEditorDialog() {
               <div className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3">
                 <AgentAvatar avatar={form.avatar} size="md" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[12px] font-medium text-foreground">Avatar</p>
+                  <p className="text-[12px] font-medium text-foreground">{t('editor.avatar.title')}</p>
                   <p className="text-[11px] text-foreground-subtle">
-                    Mascote, cor, expressão ou imagem.
+                    {t('editor.avatar.hint')}
                   </p>
                 </div>
                 <Button size="sm" variant="secondary" onClick={() => setTab('avatar')}>
-                  Personalizar
+                  {t('editor.avatar.customize')}
                 </Button>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="agent-name">Nome</Label>
+                <Label htmlFor="agent-name">{t('editor.name')}</Label>
                 <Input
                   id="agent-name"
                   value={form.name}
                   maxLength={40}
-                  placeholder="Ex.: Irineu"
+                  placeholder={t('editor.namePlaceholder')}
                   onChange={(event) => set('name', event.target.value)}
                 />
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label htmlFor="agent-role">Papel</Label>
+                  <Label htmlFor="agent-role">{t('editor.role')}</Label>
                   <Input
                     id="agent-role"
                     value={form.role}
                     maxLength={80}
-                    placeholder="Engenheiro Fullstack"
+                    placeholder={t('editor.rolePlaceholder')}
                     onChange={(event) => set('role', event.target.value)}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="agent-department">Departamento</Label>
+                  <Label htmlFor="agent-department">{t('editor.department')}</Label>
                   <Input
                     id="agent-department"
                     value={form.department}
                     maxLength={40}
-                    placeholder="Geral"
+                    placeholder={t('editor.departmentPlaceholder')}
                     onChange={(event) => set('department', event.target.value)}
                   />
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="agent-description">Descrição</Label>
+                <Label htmlFor="agent-description">{t('editor.descriptionField')}</Label>
                 <Input
                   id="agent-description"
                   value={form.description}
                   maxLength={500}
-                  placeholder="Uma frase sobre o que este agente faz."
+                  placeholder={t('editor.descriptionPlaceholder')}
                   onChange={(event) => set('description', event.target.value)}
                 />
               </div>
@@ -485,8 +490,7 @@ export function AgentEditorDialog() {
               <div className="rounded-xl border border-border bg-surface/50 p-4">
                 <div className="flex items-center gap-2 text-[12px] text-foreground-muted">
                   <Bot className="size-4 text-accent" />
-                  Cada conversa com este agente fica isolada na barra lateral e usa o modelo
-                  definido abaixo.
+                  {t('editor.identityNote')}
                 </div>
               </div>
             </TabsContent>
@@ -502,7 +506,7 @@ export function AgentEditorDialog() {
               <div className="space-y-4 rounded-xl border border-border bg-surface/50 p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="agent-provider">Provedor</Label>
+                    <Label htmlFor="agent-provider">{t('editor.provider')}</Label>
                     <NativeSelect
                       id="agent-provider"
                       value={form.providerId}
@@ -527,7 +531,7 @@ export function AgentEditorDialog() {
                     </NativeSelect>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="agent-model">Modelo</Label>
+                    <Label htmlFor="agent-model">{t('editor.model')}</Label>
                     <NativeSelect
                       id="agent-model"
                       value={form.modelId}
@@ -545,7 +549,7 @@ export function AgentEditorDialog() {
                       {provider &&
                       form.modelId &&
                       !provider.models.some((entry) => entry.id === form.modelId) ? (
-                        <option value={form.modelId}>{form.modelId} (indisponível)</option>
+                        <option value={form.modelId}>{t('editor.modelUnavailable', { model: form.modelId })}</option>
                       ) : null}
                       {(provider?.models ?? []).map((entry) => (
                         <option key={entry.id} value={entry.id}>
@@ -564,15 +568,14 @@ export function AgentEditorDialog() {
 
               <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
                 <div>
-                  <p className="text-[12px] font-medium text-foreground">Modelo de reserva</p>
+                  <p className="text-[12px] font-medium text-foreground">{t('editor.fallback.title')}</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-subtle">
-                    Se o provedor/modelo principal não estiver disponível ou não tiver
-                    credencial, o turno começa no modelo de reserva. A conversa continua a mesma.
+                    {t('editor.fallback.description')}
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="agent-fallback-provider">Provedor de reserva</Label>
+                    <Label htmlFor="agent-fallback-provider">{t('editor.fallback.provider')}</Label>
                     <NativeSelect
                       id="agent-fallback-provider"
                       value={form.fallbackProviderId}
@@ -589,7 +592,7 @@ export function AgentEditorDialog() {
                         }));
                       }}
                     >
-                      <option value="">Nenhum</option>
+                      <option value="">{t('editor.fallback.none')}</option>
                       {providers.map((entry) => (
                         <option key={entry.id} value={entry.id}>
                           {entry.name}
@@ -598,7 +601,7 @@ export function AgentEditorDialog() {
                     </NativeSelect>
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="agent-fallback-model">Modelo de reserva</Label>
+                    <Label htmlFor="agent-fallback-model">{t('editor.fallback.model')}</Label>
                     <NativeSelect
                       id="agent-fallback-model"
                       value={form.fallbackModelId}
@@ -617,37 +620,35 @@ export function AgentEditorDialog() {
               </div>
 
               <p className="text-[11px] leading-relaxed text-foreground-subtle">
-                O modelo do agente fica congelado por conversa: as respostas antigas mantêm o
-                modelo que as produziu. Trocar o provedor aqui vale para as próximas conversas.
+                {t('editor.modelNote')}
               </p>
             </TabsContent>
 
             <TabsContent value="behavior" className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="agent-instructions">Instruções do agente</Label>
+                <Label htmlFor="agent-instructions">{t('editor.instructions')}</Label>
                 <Textarea
                   id="agent-instructions"
                   value={form.instructions}
                   rows={9}
                   maxLength={32 * 1024}
                   className="min-h-52 resize-y"
-                  placeholder="Como este agente fala, o que prioriza e como trabalha."
+                  placeholder={t('editor.instructionsPlaceholder')}
                   onChange={(event) => set('instructions', event.target.value)}
                 />
                 <p className="text-[11px] text-foreground-subtle">
-                  As alterações valem a partir da próxima resposta. O prompt base de segurança
-                  continua acima destas instruções.
+                  {t('editor.instructionsNote')}
                 </p>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="agent-starters">Sugestões para começar</Label>
+                <Label htmlFor="agent-starters">{t('editor.starters')}</Label>
                 <Textarea
                   id="agent-starters"
                   value={form.starters}
                   rows={3}
                   className="min-h-20 resize-y"
-                  placeholder={'Uma sugestão por linha (até 3)'}
+                  placeholder={t('editor.startersPlaceholder')}
                   onChange={(event) => set('starters', event.target.value)}
                 />
               </div>
@@ -657,104 +658,104 @@ export function AgentEditorDialog() {
               <div className="space-y-2 rounded-xl border border-border bg-surface/50 p-4">
                 <p className="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
                   <Sparkles className="size-3.5 text-accent" />
-                  Ações básicas
+                  {t('editor.basicActions')}
                 </p>
                 <Switch
                   checked={form.capabilities.webSearch}
                   onCheckedChange={(checked) => setCapability('webSearch', checked)}
-                  label="Busca web"
-                  description="Permite pesquisar na web e citar fontes."
+                  label={t('editor.capabilities.webSearch.label')}
+                  description={t('editor.capabilities.webSearch.description')}
                 />
                 <Switch
                   checked={form.capabilities.fileAccess}
                   onCheckedChange={(checked) => setCapability('fileAccess', checked)}
-                  label="Acesso a arquivos"
-                  description="Permite ler/escrever no workspace (quando houver) e criar artefatos."
+                  label={t('editor.capabilities.fileAccess.label')}
+                  description={t('editor.capabilities.fileAccess.description')}
                 />
                 <Switch
                   checked={form.capabilities.codeExecution}
                   onCheckedChange={(checked) => setCapability('codeExecution', checked)}
-                  label="Executar código"
-                  description="Usa o sandbox de código do app (quando habilitado nas configurações)."
+                  label={t('editor.capabilities.codeExecution.label')}
+                  description={t('editor.capabilities.codeExecution.description')}
                 />
                 <Switch
                   checked={form.capabilities.delegation ?? false}
                   onCheckedChange={(checked) => setCapability('delegation', checked)}
-                  label="Delegar tarefas"
-                  description="Permite criar e transferir tarefas para outros agentes e postar no canal. Concluir uma tarefa atribuída já é permitido a qualquer agente."
+                  label={t('editor.capabilities.delegation.label')}
+                  description={t('editor.capabilities.delegation.description')}
                 />
                 <Switch
                   checked={form.capabilities.automation ?? false}
                   onCheckedChange={(checked) => setCapability('automation', checked)}
-                  label="Automações"
-                  description="Permite ao agente listar, criar, editar e excluir as próprias rotinas agendadas."
+                  label={t('editor.capabilities.automation.label')}
+                  description={t('editor.capabilities.automation.description')}
                 />
                 <Switch
                   checked={form.capabilities.sharedMemory ?? false}
                   onCheckedChange={(checked) => setCapability('sharedMemory', checked)}
-                  label="Memória compartilhada"
-                  description="Permite ler e gravar memórias visíveis a todos os agentes com esta capability."
+                  label={t('editor.capabilities.sharedMemory.label')}
+                  description={t('editor.capabilities.sharedMemory.description')}
                 />
                 <Switch
                   checked={form.capabilities.skillsWrite ?? false}
                   onCheckedChange={(checked) => setCapability('skillsWrite', checked)}
-                  label="Escrever skills"
-                  description="Permite salvar SKILL.md em <app-data>/skills, com histórico de versões."
+                  label={t('editor.capabilities.skillsWrite.label')}
+                  description={t('editor.capabilities.skillsWrite.description')}
                 />
                 <Switch
                   checked={form.capabilities.createAgents ?? false}
                   onCheckedChange={(checked) => setCapability('createAgents', checked)}
-                  label="Criar agentes"
-                  description="Permite criar novos agentes persistentes com perfil, instruções, modelo e capabilities."
+                  label={t('editor.capabilities.createAgents.label')}
+                  description={t('editor.capabilities.createAgents.description')}
                 />
                 <Switch
                   checked={form.capabilities.computerUse ?? false}
                   onCheckedChange={(checked) => setCapability('computerUse', checked)}
-                  label="Computer use"
-                  description="Screenshot, clique e teclado no computador, sempre com aprovação por ação."
+                  label={t('editor.capabilities.computerUse.label')}
+                  description={t('editor.capabilities.computerUse.description')}
                 />
                 <Switch
                   checked={form.capabilities.screenCapture ?? false}
                   onCheckedChange={(checked) => setCapability('screenCapture', checked)}
-                  label="Captura de tela"
-                  description="Somente leitura da tela; não permite clicar nem digitar."
+                  label={t('editor.capabilities.screenCapture.label')}
+                  description={t('editor.capabilities.screenCapture.description')}
                 />
                 <Switch
                   checked={form.capabilities.browserUse ?? false}
                   onCheckedChange={(checked) => setCapability('browserUse', checked)}
-                  label="Browser controlado"
-                  description="Navegação e interação via CDP em um navegador isolado."
+                  label={t('editor.capabilities.browserUse.label')}
+                  description={t('editor.capabilities.browserUse.description')}
                 />
                 <Switch
                   checked={form.capabilities.dockerExecution ?? false}
                   onCheckedChange={(checked) => setCapability('dockerExecution', checked)}
-                  label="Override de Docker"
-                  description="Permite escolher um perfil de execução Docker específico para este agente."
+                  label={t('editor.capabilities.dockerExecution.label')}
+                  description={t('editor.capabilities.dockerExecution.description')}
                 />
               </div>
 
               <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
                 <div>
-                  <p className="text-[12px] font-medium text-foreground">Workspace e permissões</p>
+                  <p className="text-[12px] font-medium text-foreground">{t('editor.workspace.title')}</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-subtle">
-                    Escolha uma pasta para o agente ou deixe o aplicativo criar uma pasta interna
-                    separada para cada conversa. As permissões continuam aplicáveis.
+                    {t('editor.workspace.description')}
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="agent-workspace">Pasta de trabalho</Label>
+                    <Label htmlFor="agent-workspace">{t('editor.workspace.folder')}</Label>
                     <NativeSelect
                       id="agent-workspace"
                       value={form.workspaceId}
                       disabled={workspacesLoading}
                       onChange={(event) => set('workspaceId', event.target.value)}
                     >
-                      <option value="">Pasta interna do aplicativo</option>
+                      <option value="">{t('editor.workspace.internal')}</option>
                       {workspaces.map((workspace) => (
                         <option key={workspace.id} value={workspace.id}>
-                          {workspace.name}
-                          {workspace.trusted ? '' : ' (não confiável)'}
+                          {workspace.trusted
+                            ? workspace.name
+                            : t('editor.workspace.untrusted', { name: workspace.name })}
                         </option>
                       ))}
                     </NativeSelect>
@@ -764,7 +765,7 @@ export function AgentEditorDialog() {
                     }} />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="agent-permission">Permissões</Label>
+                    <Label htmlFor="agent-permission">{t('editor.permissionsLabel')}</Label>
                     <NativeSelect
                       id="agent-permission"
                       value={form.permissionMode}
@@ -772,15 +773,15 @@ export function AgentEditorDialog() {
                         set('permissionMode', event.target.value as PermissionMode)
                       }
                     >
-                      <option value="read_only">Leitura</option>
-                      <option value="review">Revisar cada edição</option>
-                      <option value="edit">Editar</option>
-                      <option value="autonomous">Autônomo</option>
+                      <option value="read_only">{t('editor.permissions.readOnly')}</option>
+                      <option value="review">{t('editor.permissions.review')}</option>
+                      <option value="edit">{t('editor.permissions.edit')}</option>
+                      <option value="autonomous">{t('editor.permissions.autonomous')}</option>
                     </NativeSelect>
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="agent-docker-image">Imagem Docker do agente (opcional)</Label>
+                  <Label htmlFor="agent-docker-image">{t('editor.dockerImage')}</Label>
                   <Input
                     id="agent-docker-image"
                     value={form.dockerImage}
@@ -790,12 +791,11 @@ export function AgentEditorDialog() {
                     onChange={(event) => set('dockerImage', event.target.value)}
                   />
                   <p className="text-[11px] text-foreground-subtle">
-                    Requer “Override de Docker” nas capacidades. Sem imagem, usa a configuração
-                    global ({globalDockerImage}).
+                    {t('editor.dockerImageNote', { image: globalDockerImage })}
                   </p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="agent-computer-environment">Ambiente de computador</Label>
+                  <Label htmlFor="agent-computer-environment">{t('editor.environmentLabel')}</Label>
                   <NativeSelect
                     id="agent-computer-environment"
                     value={form.computerEnvironment}
@@ -803,52 +803,51 @@ export function AgentEditorDialog() {
                       set('computerEnvironment', event.target.value as ComputerEnvironment)
                     }
                   >
-                    <option value="auto">Automático</option>
-                    <option value="private_desktop">Desktop privado (Docker)</option>
-                    <option value="this_computer">Este computador</option>
-                    <option value="browser">Navegador</option>
-                    <option value="off">Desligado</option>
+                    <option value="auto">{t('editor.environment.auto')}</option>
+                    <option value="private_desktop">{t('editor.environment.privateDesktop')}</option>
+                    <option value="this_computer">{t('editor.environment.thisComputer')}</option>
+                    <option value="browser">{t('editor.environment.browser')}</option>
+                    <option value="off">{t('editor.environment.off')}</option>
                   </NativeSelect>
                   <p className="text-[11px] text-foreground-subtle">
-                    O painel do agente também altera esta opção. “Desktop na nuvem” fica para uma
-                    versão futura.
+                    {t('editor.environmentNote')}
                   </p>
                 </div>
                 {form.workspaceId && workspaces.find((workspace) => workspace.id === form.workspaceId)?.trusted === false ? (
                   <p className="text-[11px] text-warning">
-                    Confie nesta pasta no layout Code antes de usá-la no agente.
+                    {t('editor.trustFolderWarning')}
                   </p>
                 ) : null}
                 {!form.workspaceId ? (
                   <p className="text-[11px] text-foreground-subtle">
-                    Uma pasta interna será usada automaticamente se nenhuma for selecionada.
+                    {t('editor.internalFolderNote')}
                   </p>
                 ) : null}
               </div>
 
               <CapabilityList
-                title="Ferramentas"
-                description="Quando desligado, o agente herda todas as ferramentas disponíveis. Ao limitar, apenas as marcadas entram no catálogo do turno."
+                title={t('editor.capabilities.tools.title')}
+                description={t('editor.capabilities.tools.description')}
                 inherit={form.capabilities.tools === null}
                 onInherit={(inherit) =>
                   setCapability('tools', inherit ? null : TOOL_OPTIONS.map((tool) => tool.name))
                 }
                 items={TOOL_OPTIONS.map((tool) => ({
                   value: tool.name,
-                  label: tool.label,
-                  hint: tool.group,
+                  label: t(tool.labelKey as never),
+                  hint: t(tool.groupKey as never),
                 }))}
                 selected={form.capabilities.tools ?? []}
                 onToggle={(name) =>
                   setCapability('tools', toggleList(form.capabilities.tools, name))
                 }
                 loading={false}
-                empty="Nenhuma ferramenta catalogada."
+                empty={t('editor.capabilities.tools.empty')}
               />
 
               <CapabilityList
-                title="Skills"
-                description="Quando desligado, o agente herda todas as skills ativas do app. Ao limitar, apenas as marcadas ficam visíveis no prompt e nas ferramentas."
+                title={t('editor.capabilities.skills.title')}
+                description={t('editor.capabilities.skills.description')}
                 inherit={form.capabilities.skills === null}
                 onInherit={(inherit) =>
                   setCapability('skills', inherit ? null : skills.map((skill) => skill.name))
@@ -856,19 +855,19 @@ export function AgentEditorDialog() {
                 items={skills.map((skill) => ({
                   value: skill.name,
                   label: skill.name,
-                  hint: `${skill.source}${skill.enabled === false ? ' · desativada globalmente' : ''}`,
+                  hint: `${skill.source}${skill.enabled === false ? t('editor.capabilities.skills.disabledGlobally') : ''}`,
                 }))}
                 selected={form.capabilities.skills ?? []}
                 onToggle={(name) =>
                   setCapability('skills', toggleList(form.capabilities.skills, name))
                 }
                 loading={skillsLoading}
-                empty="Nenhuma skill instalada."
+                empty={t('editor.capabilities.skills.empty')}
               />
 
               <CapabilityList
-                title="Servidores MCP"
-                description="Quando desligado, o agente herda todos os servidores MCP habilitados. Ao limitar, apenas os marcados ficam disponíveis (no perfil de código)."
+                title={t('editor.capabilities.mcp.title')}
+                description={t('editor.capabilities.mcp.description')}
                 inherit={form.capabilities.mcpServers === null}
                 onInherit={(inherit) =>
                   setCapability(
@@ -879,14 +878,14 @@ export function AgentEditorDialog() {
                 items={mcpServers.map((server) => ({
                   value: server.name,
                   label: server.name,
-                  hint: server.enabled === false ? 'desativado' : 'MCP',
+                  hint: server.enabled === false ? t('editor.capabilities.mcp.disabled') : 'MCP',
                 }))}
                 selected={form.capabilities.mcpServers ?? []}
                 onToggle={(name) =>
                   setCapability('mcpServers', toggleList(form.capabilities.mcpServers, name))
                 }
                 loading={mcpLoading}
-                empty="Nenhum servidor MCP configurado."
+                empty={t('editor.capabilities.mcp.empty')}
               />
             </TabsContent>
 
@@ -894,8 +893,8 @@ export function AgentEditorDialog() {
               <Switch
                 checked={form.memoryEnabled}
                 onCheckedChange={(checked) => set('memoryEnabled', checked)}
-                label="Memória durável"
-                description="Guarda fatos, preferências e procedimentos entre todas as conversas deste agente."
+                label={t('editor.memory.label')}
+                description={t('editor.memory.description')}
               />
               <AgentMemoryPanel
                 agentId={editor?.mode === 'edit' ? editor.agentId : null}
@@ -922,18 +921,18 @@ export function AgentEditorDialog() {
               role="status"
               className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[12px] leading-relaxed text-warning"
             >
-              {AUTONOMOUS_MODE_WARNING}
+              {tc(AUTONOMOUS_MODE_WARNING_KEY)}
             </p>
           </div>
         ) : null}
 
         <DialogFooter>
           <Button variant="ghost" onClick={close} disabled={saving || submitting}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <Button variant="primary" onClick={() => void submit()} disabled={saving || submitting}>
             {saving || submitting ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
-            Salvar agente
+            {t('editor.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -962,6 +961,7 @@ function CapabilityList({
   loading: boolean;
   empty: string;
 }) {
+  const { t } = useTranslation('agents');
   return (
     <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
       <Switch
@@ -971,9 +971,9 @@ function CapabilityList({
         description={description}
       />
       {inherit ? (
-        <p className="text-[11px] text-foreground-subtle">Herdando todas as opções disponíveis.</p>
+        <p className="text-[11px] text-foreground-subtle">{t('editor.inheritAll')}</p>
       ) : loading ? (
-        <p className="text-[11px] text-foreground-muted">Carregando…</p>
+        <p className="text-[11px] text-foreground-muted">{t('editor.loading')}</p>
       ) : items.length === 0 ? (
         <p className="text-[11px] text-foreground-subtle">{empty}</p>
       ) : (
@@ -1002,7 +1002,7 @@ function CapabilityList({
       )}
       {!inherit && items.length > 0 && selected.length === 0 ? (
         <p className="text-[11px] text-warning">
-          Nenhum item marcado: o agente ficará sem acesso a {title.toLowerCase()}.
+          {t('editor.noneSelected', { scope: title.toLowerCase() })}
         </p>
       ) : null}
     </div>

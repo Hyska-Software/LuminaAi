@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { GENUI_LIMITS, propString, type GenUIComponent, type GenUISpec } from '@/lib/genui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
@@ -43,8 +44,9 @@ function renderChildren(node: GenUIComponent, depth: number) {
 }
 
 function GenUINode({ node, depth }: RenderNodeProps) {
+  const { t } = useTranslation('genui');
   if (depth > GENUI_LIMITS.depth) {
-    return <GenUIFallback message="Nível de aninhamento excedido nesta UI." />;
+    return <GenUIFallback message={t('renderer.depthExceeded')} />;
   }
 
   const children = renderChildren(node, depth);
@@ -106,15 +108,16 @@ function GenUINode({ node, depth }: RenderNodeProps) {
     default:
       // O parser já rejeita tipos fora da whitelist; este ramo é só uma rede de
       // segurança para specs construídos fora do parseGenUI.
-      return <GenUIFallback message={`Componente "${String(node.type)}" não suportado.`} />;
+      return <GenUIFallback message={t('renderer.unsupportedComponent', { type: String(node.type) })} />;
   }
 }
 
 /** `tabs` maps each child component into a panel; the tab label comes from `props.label`. */
 function GenUITabs({ node, depth }: { node: GenUIComponent; depth: number }) {
+  const { t } = useTranslation('genui');
   const baseId = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const panels = node.children ?? [];
-  if (!panels.length) return <GenUIFallback message="Abas sem painéis." />;
+  if (!panels.length) return <GenUIFallback message={t('renderer.emptyTabs')} />;
 
   return (
     <Tabs defaultValue={`${baseId}-0`} className="w-full">
@@ -122,7 +125,7 @@ function GenUITabs({ node, depth }: { node: GenUIComponent; depth: number }) {
       <TabsList className="mb-3 h-auto max-w-full flex-wrap p-0.5">
         {panels.map((panel, index) => (
           <TabsTrigger key={index} value={`${baseId}-${index}`} variant="pill">
-            {propString(panel.props, 'label', propString(panel.props, 'title', `Aba ${index + 1}`))}
+            {propString(panel.props, 'label', propString(panel.props, 'title', t('renderer.defaultTab', { index: index + 1 })))}
           </TabsTrigger>
         ))}
       </TabsList>

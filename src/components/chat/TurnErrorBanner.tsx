@@ -11,6 +11,7 @@
  * expose remaining usage.
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ExternalLink, KeyRound, ShieldAlert, TriangleAlert, X } from 'lucide-react';
 import { Button, IconButton } from '@/components/ui';
 import { openExternalUrl } from './external';
@@ -28,7 +29,7 @@ import {
 export interface TurnErrorBannerProps {
   /** `TurnEvent::Error.code` (raw `subscription_sharing_*` or neutral app code). */
   code?: string | null;
-  /** Actionable hint sent by the backend (plain pt-BR sentence). */
+  /** Actionable hint sent by the backend (body copy addressed to the user). */
   hint?: string | null;
   /** Whether the active provider is signed in with ChatGPT plan usage. */
   planProvider?: boolean;
@@ -45,6 +46,7 @@ export function TurnErrorBanner({
   usageUrl,
   onOpenProviders,
 }: TurnErrorBannerProps) {
+  const { t } = useTranslation('chat');
   const kind = turnErrorKind(code, { planProvider });
   const signature = `${kind ?? ''}|${code ?? ''}|${hint ?? ''}`;
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -54,14 +56,13 @@ export function TurnErrorBanner({
   const isPlanLimit = kind === 'plan-limit';
   const isPlanNotEligible = kind === 'plan-not-eligible';
   const Icon = isPlanLimit ? TriangleAlert : isPlanNotEligible ? ShieldAlert : KeyRound;
-  const title = isPlanLimit
-    ? PLAN_LIMIT_TITLE
-    : isPlanNotEligible
-      ? PLAN_NOT_ELIGIBLE_TITLE
-      : AUTH_REQUIRED_TITLE;
+  const title = t(
+    isPlanLimit ? PLAN_LIMIT_TITLE : isPlanNotEligible ? PLAN_NOT_ELIGIBLE_TITLE : AUTH_REQUIRED_TITLE,
+  );
   const body = isPlanLimit
     ? planLimitDescription(hint)
-    : hint?.trim() || (isPlanNotEligible ? PLAN_NOT_ELIGIBLE_BODY : AUTH_REQUIRED_BODY);
+    : hint?.trim() ||
+      t(isPlanNotEligible ? PLAN_NOT_ELIGIBLE_BODY : AUTH_REQUIRED_BODY);
   const target = usageUrl?.trim() || CHATGPT_USAGE_URL;
 
   return (
@@ -82,15 +83,15 @@ export function TurnErrorBanner({
             leftIcon={<ExternalLink className="size-4" strokeWidth={1.75} />}
             onClick={() => void openExternalUrl(target)}
           >
-            Gerenciar uso
+            {t('turnError.planLimit.manageUsage')}
           </Button>
         ) : (
           <Button variant="secondary" size="sm" onClick={onOpenProviders}>
-            Abrir Provedores
+            {t('turnError.openProviders')}
           </Button>
         )}
         <IconButton
-          label="Dispensar aviso"
+          label={t('turnError.dismiss')}
           size="sm"
           variant="ghost"
           onClick={() => setDismissed(signature)}

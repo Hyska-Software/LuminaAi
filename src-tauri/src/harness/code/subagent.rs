@@ -161,7 +161,7 @@ impl SubagentRunner for RunnerImpl {
     ) -> BoxFuture<'static, anyhow::Result<SubagentOutcome>> {
         if !can_delegate(self.depth) {
             return Box::pin(async move {
-                anyhow::bail!("DELEGATION_DEPTH: subagentes não podem delegar de novo")
+                anyhow::bail!(crate::i18n::t("code.subagents.depthExceeded"))
             });
         }
         let deps = self.deps.clone();
@@ -320,12 +320,17 @@ fn resolve_route(
         .catalog
         .provider(&provider_id)
         .cloned()
-        .ok_or_else(|| anyhow::anyhow!("SUBAGENT_MODEL_INVALID: provedor desconhecido: {provider_id}"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(crate::i18n::t_args(
+                "code.subagents.providerUnknown",
+                &[("provider_id", &provider_id)],
+            ))
+        })?;
     let model = harness::resolve_model(deps, &provider, &model_id).ok_or_else(|| {
-        anyhow::anyhow!(
-            "SUBAGENT_MODEL_INVALID: modelo `{model_id}` indisponível no provedor `{}`",
-            provider.id
-        )
+        anyhow::anyhow!(crate::i18n::t_args(
+            "code.subagents.modelUnavailable",
+            &[("model_id", &model_id), ("provider_id", &provider.id)],
+        ))
     })?;
     Ok((provider.id, model.id.clone(), model))
 }
@@ -349,10 +354,10 @@ fn reasoning_selection(
         }));
     }
     if !model.reasoning {
-        anyhow::bail!(
-            "SUBAGENT_REASONING_UNSUPPORTED: o modelo `{}` não aceita reasoning",
-            model.id
-        );
+        anyhow::bail!(crate::i18n::t_args(
+            "code.subagents.reasoningUnsupported",
+            &[("model_id", &model.id)],
+        ));
     }
     let allowed: Vec<&str> = model
         .reasoning_options
@@ -366,11 +371,14 @@ fn reasoning_selection(
             .iter()
             .any(|candidate| candidate.eq_ignore_ascii_case(&value))
     {
-        anyhow::bail!(
-            "SUBAGENT_REASONING_INVALID: effort `{value}` inválido para `{}` (use {})",
-            model.id,
-            allowed.join(", ")
-        );
+        anyhow::bail!(crate::i18n::t_args(
+            "code.subagents.reasoningInvalid",
+            &[
+                ("value", &value),
+                ("model_id", &model.id),
+                ("allowed", &allowed.join(", ")),
+            ],
+        ));
     }
     Ok(Some(ReasoningSelection {
         mode: ReasoningMode::Effort,
@@ -442,7 +450,10 @@ async fn run_child(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_ascii_lowercase);
-    let title = format!("Subagente: {}", truncate(request.description.trim(), 48));
+    let title = crate::i18n::t_args(
+        "code.subagents.title",
+        &[("description", &truncate(request.description.trim(), 48))],
+    );
     let child = db.create_subagent_conversation(
         &title,
         &provider_id,
@@ -552,7 +563,7 @@ async fn run_child(
                 duration_ms,
                 None,
             );
-            anyhow::bail!("SUBAGENT_CANCELLED: subagente cancelado")
+            anyhow::bail!(crate::i18n::t("code.subagents.cancelled"))
         }
         MessageStatus::Error => {
             emit_finished(
@@ -562,9 +573,9 @@ async fn run_child(
                 "error",
                 result.usage.clone(),
                 duration_ms,
-                Some("o subagente terminou com erro".to_string()),
+                Some(crate::i18n::t("code.subagents.endedWithError")),
             );
-            anyhow::bail!("subagente terminou com erro")
+            anyhow::bail!(crate::i18n::t("code.subagents.endedWithError"))
         }
         MessageStatus::Streaming => {
             emit_finished(
@@ -574,9 +585,9 @@ async fn run_child(
                 "error",
                 result.usage.clone(),
                 duration_ms,
-                Some("o subagente terminou incompleto".to_string()),
+                Some(crate::i18n::t("code.subagents.endedIncomplete")),
             );
-            anyhow::bail!("subagente terminou incompleto")
+            anyhow::bail!(crate::i18n::t("code.subagents.endedIncomplete"))
         }
     }
     let text = result.assistant_message.content.trim().to_string();
@@ -588,9 +599,9 @@ async fn run_child(
             "error",
             result.usage.clone(),
             duration_ms,
-            Some("o subagente terminou sem resposta útil".to_string()),
+            Some(crate::i18n::t("code.subagents.endedWithoutAnswer")),
         );
-        anyhow::bail!("o subagente terminou sem resposta útil");
+        anyhow::bail!(crate::i18n::t("code.subagents.endedWithoutAnswer"));
     }
     let steps = u32::try_from(result.assistant_message.trace.len()).unwrap_or(u32::MAX);
     let usage = result.usage;

@@ -9,9 +9,10 @@
 //! - `harness::code::{observed, session}` (read-before-write e projeções),
 //! - `policy` (matriz de permissões + aprovação interativa).
 //!
-//! Regras de ouro: pt-BR nas mensagens, códigos estáveis (`FS_*`, `POLICY_*`,
-//! `APPROVAL_*`…), nunca `panic`/`unwrap` em dado do usuário, todo resultado
-//! grande vai para spill com caminho de recuperação (`read_tool_output`).
+//! Regras de ouro: mensagens do app via `crate::i18n` (en/pt-BR/es), códigos
+//! estáveis (`FS_*`, `POLICY_*`, `APPROVAL_*`…), nunca `panic`/`unwrap` em dado
+//! do usuário, todo resultado grande vai para spill com caminho de recuperação
+//! (`read_tool_output`).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -87,7 +88,7 @@ async fn ask_user(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let Some(registry) = ctx.questions.clone() else {
         return err(
             "ASK_USER_UNAVAILABLE",
-            "nenhum canal de perguntas está montado nesta composição",
+            crate::i18n::t("tools.exec.askUser.unavailable"),
         );
     };
     let request = match crate::harness::code::questions::normalize_questions(
@@ -111,9 +112,12 @@ async fn ask_user(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     ToolOutcome {
         content,
         summary: Some(if response.skipped {
-            "Pergunta pulada pelo usuário".to_string()
+            crate::i18n::t("tools.exec.askUser.skipped")
         } else {
-            format!("Respondeu {} pergunta(s)", response.answers.len())
+            crate::i18n::t_args(
+                "tools.exec.askUser.answered",
+                &[("count", &response.answers.len().to_string())],
+            )
         }),
         presentation: Some(serde_json::json!({
             "kind": "answers",
@@ -143,8 +147,14 @@ fn validate_ui(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 fn arg_str(args: &Value, key: &str) -> Result<String, ToolOutcome> {
     match args.get(key).and_then(Value::as_str) {
         Some(value) if !value.trim().is_empty() => Ok(value.trim().to_string()),
-        Some(_) => Err(err("TOOL_INVALID_ARGS", format!("`{key}` não pode ser vazio"))),
-        None => Err(err("TOOL_INVALID_ARGS", format!("`{key}` é obrigatório"))),
+        Some(_) => Err(err(
+            "TOOL_INVALID_ARGS",
+            crate::i18n::t_args("tools.exec.args.cannotBeEmpty", &[("key", key)]),
+        )),
+        None => Err(err(
+            "TOOL_INVALID_ARGS",
+            crate::i18n::t_args("tools.exec.args.required", &[("key", key)]),
+        )),
     }
 }
 
@@ -185,7 +195,7 @@ fn workspace_handle(ctx: &ToolCtx) -> Result<&crate::tools::registry::WorkspaceH
     ctx.workspace.as_ref().ok_or_else(|| {
         err(
             "FS_NO_WORKSPACE",
-            "esta sessão não tem workspace aberto; abra uma pasta antes de usar ferramentas de arquivo",
+            crate::i18n::t("tools.exec.workspace.none"),
         )
     })
 }
@@ -200,7 +210,7 @@ fn writable_root(ctx: &ToolCtx) -> Result<PathBuf, ToolOutcome> {
     if !workspace.trusted {
         return Err(err(
             "FS_UNTRUSTED_WORKSPACE",
-            "o workspace não foi confirmado como confiável; confie na pasta para liberar escritas",
+            crate::i18n::t("tools.exec.workspace.untrusted"),
         ));
     }
     Ok(workspace.root.clone())
@@ -222,7 +232,7 @@ fn resolve_path(ctx: &ToolCtx, requested: &str, access: safe_path::Access) -> Re
         {
             return err(
                 error.code,
-                "para editar arquivos fora da pasta do agente, selecione uma pasta de projeto",
+                crate::i18n::t("tools.exec.workspace.internalEdit"),
             );
         }
         err(error.code, error.message)
@@ -322,7 +332,10 @@ fn spill_text(ctx: &ToolCtx, text: &str) -> (String, Option<(String, PathBuf)>) 
         // Sem spill disponível: nunca perder o resultado, devolve truncado.
         let head: String = text.chars().take(SPILL_HEAD_CHARS).collect();
         return (
-            format!("{head}\n…[saída completa indisponível: falha ao gravar spill]\n"),
+            format!(
+                "{head}\n{}\n",
+                crate::i18n::t("tools.exec.spill.unavailable")
+            ),
             None,
         );
     }
@@ -332,7 +345,8 @@ fn spill_text(ctx: &ToolCtx, text: &str) -> (String, Option<(String, PathBuf)>) 
         text.chars().skip(skip).collect()
     };
     let inline = format!(
-        "{head}\n…[saída completa: spill {id} · use read_tool_output(id=\"{id}\")]\n{tail}"
+        "{head}\n{}\n{tail}",
+        crate::i18n::t_args("tools.exec.spill.complete", &[("id", &id)])
     );
     (inline, Some((id, path)))
 }
@@ -344,18 +358,24 @@ fn read_spill(ctx: &ToolCtx, id: &str) -> Result<String, ToolOutcome> {
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || character == '-');
     if !valid {
-        return Err(err("SPILL_NOT_FOUND", format!("id de spill inválido: {id}")));
+        return Err(err(
+            "SPILL_NOT_FOUND",
+            crate::i18n::t_args("tools.exec.spill.invalidId", &[("id", id)]),
+        ));
     }
     let path = spill_dir(ctx).join(format!("{id}.txt"));
     match std::fs::read_to_string(&path) {
         Ok(text) => Ok(text),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Err(err(
             "SPILL_NOT_FOUND",
-            format!("a saída `{id}` não existe mais (retenção de spill expirou?)"),
+            crate::i18n::t_args("tools.exec.spill.gone", &[("id", id)]),
         )),
         Err(error) => Err(err(
             "SPILL_NOT_FOUND",
-            format!("não foi possível ler a saída `{id}`: {error}"),
+            crate::i18n::t_args(
+                "tools.exec.spill.readFailed",
+                &[("id", id), ("error", &error.to_string())],
+            ),
         )),
     }
 }
@@ -400,27 +420,27 @@ fn approval_options() -> Vec<ApprovalOption> {
     vec![
         ApprovalOption {
             id: "allow".into(),
-            label: "Permitir uma vez".into(),
+            label: crate::i18n::t("approvals.allowOnce"),
             scope: None,
         },
         ApprovalOption {
             id: "deny".into(),
-            label: "Negar".into(),
+            label: crate::i18n::t("approvals.deny"),
             scope: None,
         },
         ApprovalOption {
             id: "allow_session".into(),
-            label: "Sempre permitir nesta sessão".into(),
+            label: crate::i18n::t("approvals.alwaysSession"),
             scope: Some(ApprovalScope::Session),
         },
         ApprovalOption {
             id: "allow_workspace".into(),
-            label: "Sempre permitir neste workspace".into(),
+            label: crate::i18n::t("approvals.alwaysWorkspace"),
             scope: Some(ApprovalScope::Workspace),
         },
         ApprovalOption {
             id: "allow_global".into(),
-            label: "Sempre permitir (global)".into(),
+            label: crate::i18n::t("approvals.alwaysGlobal"),
             scope: Some(ApprovalScope::Global),
         },
     ]
@@ -436,11 +456,14 @@ pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
     let Some(manager) = ctx.mcp.clone() else {
         return err(
             "MCP_UNAVAILABLE",
-            "nenhum servidor MCP está configurado (crie `<app-data>/mcp.json`)",
+            crate::i18n::t("tools.exec.mcp.unavailable"),
         );
     };
     let Some((server, tool)) = crate::mcp::parse_wire_name(wire) else {
-        return err("MCP_INVALID", format!("nome de tool MCP inválido: `{wire}`"));
+        return err(
+            "MCP_INVALID",
+            crate::i18n::t_args("tools.exec.mcp.invalidName", &[("wire", wire)]),
+        );
     };
     let display = format!("{server} · {tool}");
 
@@ -448,7 +471,7 @@ pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
         Some(crate::domain::ApprovalDecision::Denied) => {
             return err(
                 "APPROVAL_DENIED",
-                format!("uma regra do usuário nega `{wire}`; ajuste a abordagem"),
+                crate::i18n::t_args("tools.exec.mcp.ruleDenied", &[("wire", wire)]),
             )
         }
         Some(crate::domain::ApprovalDecision::Approved) => {}
@@ -457,13 +480,17 @@ pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
             if ctx.approval.is_none() {
                 return err(
                     "APPROVAL_UNAVAILABLE",
-                    "tools MCP exigem aprovação; não há canal disponível — falhando fechado",
+                    crate::i18n::t("tools.exec.mcp.approvalRequired"),
                 );
             }
             let detail = ApprovalDetail::Other {
-                text: format!(
-                    "Servidor MCP: {server}\nFerramenta: {tool}\nArgumentos:\n{}",
-                    truncate_json(&args, 1_200)
+                text: crate::i18n::t_args(
+                    "tools.exec.approvals.mcpDetail",
+                    &[
+                        ("server", server),
+                        ("tool", tool),
+                        ("args", &truncate_json(&args, 1_200)),
+                    ],
                 ),
             };
             let request = ApprovalRequest {
@@ -471,19 +498,19 @@ pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
                 conversation_id: ctx.conversation_id.clone(),
                 tool_call_id: ctx.tool_call_id.clone(),
                 tool: wire.to_string(),
-                title: "Chamar ferramenta MCP".to_string(),
+                title: crate::i18n::t("tools.exec.approvals.callMcp"),
                 detail,
                 risk: RiskClass::Network,
                 preview: None,
                 options: vec![
                     crate::domain::ApprovalOption {
                         id: "allow".into(),
-                        label: "Permitir uma vez".into(),
+                        label: crate::i18n::t("approvals.allowOnce"),
                         scope: None,
                     },
                     crate::domain::ApprovalOption {
                         id: "deny".into(),
-                        label: "Negar".into(),
+                        label: crate::i18n::t("approvals.deny"),
                         scope: None,
                     },
                 ],
@@ -514,26 +541,34 @@ pub async fn run_mcp(ctx: &ToolCtx, wire: &str, args: Value) -> ToolOutcome {
                 return match outcome.decision {
                     crate::domain::ApprovalDecision::Denied => err(
                         "APPROVAL_DENIED",
-                        format!("a chamada MCP foi negada pelo usuário{feedback}; ajuste a abordagem"),
+                        crate::i18n::t_args(
+                            "tools.exec.mcp.denied",
+                            &[("feedback", &feedback)],
+                        ),
                     ),
                     crate::domain::ApprovalDecision::Cancelled => {
-                        err("APPROVAL_CANCELLED", "a aprovação foi cancelada")
+                        err("APPROVAL_CANCELLED", crate::i18n::t("tools.exec.approval.cancelled"))
                     }
-                    _ => err("APPROVAL_EXPIRED", "a aprovação expirou; pergunte de novo"),
+                    _ => err(
+                        "APPROVAL_EXPIRED",
+                        crate::i18n::t("tools.exec.approval.expired"),
+                    ),
                 };
             }
         }
     }
 
     let result = tokio::select! {
-        _ = ctx.cancel.cancelled() => return err("MCP_CANCELLED", "o turno foi cancelado"),
+        _ = ctx.cancel.cancelled() => {
+            return err("MCP_CANCELLED", crate::i18n::t("tools.exec.turn.cancelled"))
+        }
         result = tokio::time::timeout(
             std::time::Duration::from_secs(120),
             manager.call(wire, args),
         ) => match result {
             Ok(Ok(value)) => value,
             Ok(Err(error)) => return err("MCP_FAILED", error),
-            Err(_) => return err("MCP_TIMEOUT", "a tool MCP excedeu 120 s"),
+            Err(_) => return err("MCP_TIMEOUT", crate::i18n::t("tools.exec.mcp.timeout")),
         },
     };
     let content = mcp_result_text(&result);
@@ -608,7 +643,7 @@ pub(crate) async fn policy_check(
     mutating: bool,
     target: Option<&str>,
     secret: bool,
-    destructive_reason: Option<&'static str>,
+    destructive_reason: Option<String>,
     detail: ApprovalDetail,
     title: &str,
 ) -> Result<(), ToolOutcome> {
@@ -616,7 +651,7 @@ pub(crate) async fn policy_check(
         if mutating {
             return Err(err(
                 "FS_NO_WORKSPACE",
-                "não há workspace aberto para autorizar esta operação",
+                crate::i18n::t("tools.exec.policy.noWorkspace"),
             ));
         }
         return Ok(());
@@ -628,7 +663,7 @@ pub(crate) async fn policy_check(
         target,
         inside_workspace: true,
         secret,
-        destructive_reason,
+        destructive_reason: destructive_reason.as_deref(),
     };
     // Estado **vivo** da sessão (B-02/D6): o modo Plano e o modo de permissão
     // podem mudar no meio do turno (aprovação do plano, chip, `/permissoes`).
@@ -666,7 +701,10 @@ pub(crate) async fn policy_check(
             if ctx.approval.is_none() {
                 return Err(err(
                     "APPROVAL_UNAVAILABLE",
-                    format!("{reason} — mas não há canal de aprovação disponível; falhando fechado"),
+                    crate::i18n::t_args(
+                        "tools.exec.policy.approvalUnavailable",
+                        &[("reason", &reason)],
+                    ),
                 ));
             }
             let request = ApprovalRequest {
@@ -682,12 +720,12 @@ pub(crate) async fn policy_check(
                     vec![
                         ApprovalOption {
                             id: "allow".into(),
-                            label: "Permitir uma vez".into(),
+                            label: crate::i18n::t("approvals.allowOnce"),
                             scope: None,
                         },
                         ApprovalOption {
                             id: "deny".into(),
-                            label: "Negar".into(),
+                            label: crate::i18n::t("approvals.deny"),
                             scope: None,
                         },
                     ]
@@ -730,15 +768,18 @@ pub(crate) async fn policy_check(
             match outcome.decision {
                 crate::domain::ApprovalDecision::Denied => Err(err(
                     "APPROVAL_DENIED",
-                    format!("a ação foi negada pelo usuário{feedback}; ajuste a abordagem"),
+                    crate::i18n::t_args(
+                        "tools.exec.policy.denied",
+                        &[("feedback", &feedback)],
+                    ),
                 )),
                 crate::domain::ApprovalDecision::Cancelled => Err(err(
                     "APPROVAL_CANCELLED",
-                    "a aprovação foi cancelada (turno interrompido)",
+                    crate::i18n::t("tools.exec.policy.cancelled"),
                 )),
                 _ => Err(err(
                     "APPROVAL_TIMEOUT",
-                    "o usuário não respondeu a tempo; falhando fechado",
+                    crate::i18n::t("tools.exec.policy.timeout"),
                 )),
             }
         }
@@ -822,7 +863,7 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             true,
             None,
             ApprovalDetail::Secret { path: relative.clone() },
-            "Ler arquivo de segredo?",
+            &crate::i18n::t("tools.exec.approvals.readSecret"),
         )
         .await
         {
@@ -831,26 +872,45 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     }
     let metadata = match std::fs::metadata(&path) {
         Ok(metadata) => metadata,
-        Err(error) => return err("FS_NOT_FOUND", format!("não foi possível ler '{relative}': {error}")),
+        Err(error) => {
+            return err(
+                "FS_NOT_FOUND",
+                crate::i18n::t_args(
+                    "tools.exec.fs.readFailed",
+                    &[("relative", &relative), ("error", &error.to_string())],
+                ),
+            )
+        }
     };
     if metadata.len() > MAX_READ_BYTES {
         return err(
             "FS_TOO_LARGE",
-            format!(
-                "'{relative}' tem {} bytes (máximo {}); use `search_text` com `path` neste arquivo ou um comando de leitura (`Get-Content -TotalCount`/`head`) para inspecionar partes",
-                metadata.len(),
-                MAX_READ_BYTES
+            crate::i18n::t_args(
+                "tools.exec.fs.tooLargeRead",
+                &[
+                    ("relative", &relative),
+                    ("size", &metadata.len().to_string()),
+                    ("max", &MAX_READ_BYTES.to_string()),
+                ],
             ),
         );
     }
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
-        Err(error) => return err("FS_NOT_FOUND", format!("não foi possível ler '{relative}': {error}")),
+        Err(error) => {
+            return err(
+                "FS_NOT_FOUND",
+                crate::i18n::t_args(
+                    "tools.exec.fs.readFailed",
+                    &[("relative", &relative), ("error", &error.to_string())],
+                ),
+            )
+        }
     };
     if looks_binary(&bytes) {
         return err(
             "FS_BINARY",
-            format!("cannot read \"{relative}\": binary file; use list_dir ou outra ferramenta"),
+            crate::i18n::t_args("tools.exec.fs.binaryRead", &[("relative", &relative)]),
         );
     }
     let (text, encoding) = decode_text(&bytes);
@@ -864,7 +924,14 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if total > 0 && offset > total {
         return err(
             "TOOL_INVALID_ARGS",
-            format!("offset {offset} fora do intervalo de '{relative}' ({total} linhas)"),
+            crate::i18n::t_args(
+                "tools.exec.read.offsetOutOfRange",
+                &[
+                    ("offset", &offset.to_string()),
+                    ("relative", &relative),
+                    ("total", &total.to_string()),
+                ],
+            ),
         );
     }
     let limit = opt_u32(args, "limit").unwrap_or(800).clamp(1, 2_000) as usize;
@@ -872,7 +939,7 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let end = (start + limit).min(total);
     let mut body = String::new();
     if total == 0 {
-        body.push_str("(arquivo vazio)");
+        body.push_str(&crate::i18n::t("tools.exec.read.emptyFile"));
     } else {
         for (index, line) in lines[start..end].iter().enumerate() {
             let number = start + index + 1;
@@ -886,9 +953,15 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     }
     let next_offset = end + 1;
     let footer = if end >= total {
-        format!("(fim do arquivo · {total} linhas)")
+        crate::i18n::t_args("tools.exec.read.end", &[("total", &total.to_string())])
     } else {
-        format!("(próximo: offset={next_offset}; {total} linhas no total)")
+        crate::i18n::t_args(
+            "tools.exec.read.next",
+            &[
+                ("offset", &next_offset.to_string()),
+                ("total", &total.to_string()),
+            ],
+        )
     };
     let size_kb = metadata.len() as f64 / 1024.0;
     let content = format!(
@@ -896,10 +969,18 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         if total == 0 { 0 } else { start + 1 },
         end
     );
+    let first_line = if total == 0 { 0 } else { start + 1 };
     finish(
         ctx,
         content,
-        Some(format!("Ler {relative}:{}-{}", if total == 0 { 0 } else { start + 1 }, end)),
+        Some(crate::i18n::t_args(
+            "tools.exec.read.summary",
+            &[
+                ("relative", &relative),
+                ("start", &first_line.to_string()),
+                ("end", &end.to_string()),
+            ],
+        )),
         Some(json!({ "kind": "output", "path": relative, "lines": end.saturating_sub(start) })),
     )
 }
@@ -952,12 +1033,27 @@ async fn list_dir(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     entries.truncate(limit);
 
     let mut content = String::new();
-    content.push_str(&format!(
-        "{} ({} entradas{})\n",
-        if requested == "." { ".".to_string() } else { requested.clone() },
-        total,
-        if total > limit { format!(", mostrando {limit}") } else { String::new() }
-    ));
+    let display_path = if requested == "." {
+        ".".to_string()
+    } else {
+        requested.clone()
+    };
+    let header = if total > limit {
+        crate::i18n::t_args(
+            "tools.exec.list.headerTruncated",
+            &[
+                ("path", &display_path),
+                ("count", &total.to_string()),
+                ("limit", &limit.to_string()),
+            ],
+        )
+    } else {
+        crate::i18n::t_args(
+            "tools.exec.list.header",
+            &[("path", &display_path), ("count", &total.to_string())],
+        )
+    };
+    content.push_str(&format!("{header}\n"));
     for (relative, is_dir) in &entries {
         let depth_marker = relative.matches('/').count();
         content.push_str(&"  ".repeat(depth_marker));
@@ -968,17 +1064,23 @@ async fn list_dir(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         content.push('\n');
     }
     if total > limit {
-        content.push_str(&format!(
-            "… {total} entradas no total; mostre um subdiretório para ver o restante\n"
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.list.moreTotal",
+            &[("total", &total.to_string())],
         ));
+        content.push('\n');
     }
     if entries.is_empty() {
-        content.push_str("(diretório vazio ou sem entradas visíveis)\n");
+        content.push_str(&crate::i18n::t("tools.exec.list.empty"));
+        content.push('\n');
     }
     finish(
         ctx,
         content,
-        Some(format!("Listar {} · {total} entradas", requested)),
+        Some(crate::i18n::t_args(
+            "tools.exec.list.summary",
+            &[("path", &requested), ("count", &total.to_string())],
+        )),
         Some(json!({ "kind": "output", "entries": total })),
     )
 }
@@ -1004,7 +1106,12 @@ async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let glob = match globset::Glob::new(&pattern) {
         Ok(glob) => glob.compile_matcher(),
-        Err(error) => return err("TOOL_INVALID_ARGS", format!("glob inválido: {error}")),
+        Err(error) => {
+            return err(
+                "TOOL_INVALID_ARGS",
+                crate::i18n::t_args("tools.exec.search.invalidGlob", &[("error", &error.to_string())]),
+            )
+        }
     };
     let requested = opt_str(args, "path").unwrap_or_else(|| ".".to_string());
     let root = match resolve_search_root(ctx, &requested) {
@@ -1051,23 +1158,39 @@ async fn search_files(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     matches.truncate(cap);
     let mut content = String::new();
     if matches.is_empty() {
-        content.push_str(&format!(
-            "Nenhum arquivo casou com `{pattern}` em {requested}. Tente um glob mais amplo (ex.: `**/*`) ou use search_text para buscar conteúdo.\n"
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.searchFiles.none",
+            &[("pattern", &pattern), ("path", &requested)],
         ));
+        content.push('\n');
     } else {
-        content.push_str(&format!("{total} arquivo(s) casando com `{pattern}`:\n"));
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.searchFiles.header",
+            &[("count", &total.to_string()), ("pattern", &pattern)],
+        ));
+        content.push('\n');
         for relative in &matches {
             content.push_str(relative);
             content.push('\n');
         }
         if total > cap {
-            content.push_str(&format!("… mostra {cap} de {total}; refine o padrão\n"));
+            content.push_str(&crate::i18n::t_args(
+                "tools.exec.searchFiles.truncated",
+                &[
+                    ("shown", &cap.to_string()),
+                    ("total", &total.to_string()),
+                ],
+            ));
+            content.push('\n');
         }
     }
     finish(
         ctx,
         content,
-        Some(format!("Buscar arquivos · {total} resultado(s)")),
+        Some(crate::i18n::t_args(
+            "tools.exec.searchFiles.summary",
+            &[("count", &total.to_string())],
+        )),
         Some(json!({ "kind": "output", "results": total })),
     )
 }
@@ -1092,7 +1215,15 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         .build()
     {
         Ok(matcher) => matcher,
-        Err(error) => return err("TOOL_INVALID_ARGS", format!("regex inválida: {error}")),
+        Err(error) => {
+            return err(
+                "TOOL_INVALID_ARGS",
+                crate::i18n::t_args(
+                    "tools.exec.searchText.invalidRegex",
+                    &[("error", &error.to_string())],
+                ),
+            )
+        }
     };
     let glob = opt_str(args, "glob").and_then(|value| match globset::Glob::new(&value) {
         Ok(glob) => Some(glob.compile_matcher()),
@@ -1115,7 +1246,7 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                     true,
                     None,
                     ApprovalDetail::Secret { path: relative.clone() },
-                    "Ler arquivo de segredo?",
+                    &crate::i18n::t("tools.exec.approvals.readSecret"),
                 )
                 .await
                 {
@@ -1197,23 +1328,30 @@ async fn search_text(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 
     let mut content = String::new();
     if total_matches == 0 {
-        content.push_str(&format!(
-            "Nenhuma ocorrência de `{query}` em {requested}. Confira maiúsculas/acentos ou tente `is_regex`.\n"
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.searchText.none",
+            &[("query", &query), ("path", &requested)],
         ));
+        content.push('\n');
     } else {
         for block in &blocks {
             content.push_str(block);
         }
         if total_matches >= cap {
-            content.push_str(&format!(
-                "… resultado truncado em {cap} ocorrências; refine a busca (glob/path) para ver mais\n"
+            content.push_str(&crate::i18n::t_args(
+                "tools.exec.searchText.truncated",
+                &[("cap", &cap.to_string())],
             ));
+            content.push('\n');
         }
     }
     finish(
         ctx,
         content,
-        Some(format!("Buscar texto · {total_matches} ocorrência(s)")),
+        Some(crate::i18n::t_args(
+            "tools.exec.searchText.summary",
+            &[("count", &total_matches.to_string())],
+        )),
         Some(json!({ "kind": "output", "matches": total_matches })),
     )
 }
@@ -1233,25 +1371,45 @@ async fn read_tool_output(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if offset >= total && total > 0 {
         return err(
             "TOOL_INVALID_ARGS",
-            format!("offset {offset} fora do intervalo (spill tem {total} caracteres)"),
+            crate::i18n::t_args(
+                "tools.exec.readOutput.offsetOutOfRange",
+                &[
+                    ("offset", &offset.to_string()),
+                    ("total", &total.to_string()),
+                ],
+            ),
         );
     }
     let limit = opt_u32(args, "limit").unwrap_or(4_000).clamp(1, 20_000) as usize;
     let end = (offset + limit).min(total);
     let page: String = chars[offset..end].iter().collect();
-    let content = format!(
-        "{page}\n(spill {id}: caracteres {}-{end} de {total}{})",
-        offset,
-        if end < total {
-            format!("; próximo: offset={end}")
-        } else {
-            "; fim da saída".to_string()
-        }
+    let suffix = if end < total {
+        crate::i18n::t_args("tools.exec.readOutput.next", &[("offset", &end.to_string())])
+    } else {
+        crate::i18n::t("tools.exec.readOutput.end")
+    };
+    let meta = crate::i18n::t_args(
+        "tools.exec.readOutput.page",
+        &[
+            ("id", &id),
+            ("start", &offset.to_string()),
+            ("end", &end.to_string()),
+            ("total", &total.to_string()),
+            ("suffix", &suffix),
+        ],
     );
+    let content = format!("{page}\n{meta}");
     finish(
         ctx,
         content,
-        Some(format!("Ler saída {id}:{offset}-{end}")),
+        Some(crate::i18n::t_args(
+            "tools.exec.readOutput.summary",
+            &[
+                ("id", &id),
+                ("start", &offset.to_string()),
+                ("end", &end.to_string()),
+            ],
+        )),
         Some(json!({ "kind": "output", "lines": 0 })),
     )
 }
@@ -1267,7 +1425,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let file_name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "arquivo".to_string());
+        .unwrap_or_else(|| "file".to_string());
     let temp = path.with_file_name(format!(
         ".{file_name}.zylara-{}.tmp",
         uuid::Uuid::new_v4().simple()
@@ -1290,15 +1448,11 @@ fn ensure_observed(ctx: &ToolCtx, path: &Path, relative: &str, current: &[u8]) -
         ObservationState::Fresh => Ok(()),
         ObservationState::Missing => Err(err(
             "FS_NOT_OBSERVED",
-            format!(
-                "cannot modify \"{relative}\": file has not been read — read the file, then retry"
-            ),
+            crate::i18n::t_args("tools.exec.observe.missing", &[("relative", relative)]),
         )),
         ObservationState::Stale => Err(err(
             "FS_STALE_VERSION",
-            format!(
-                "cannot modify \"{relative}\": o arquivo mudou desde a leitura — re-read the file, then retry"
-            ),
+            crate::i18n::t_args("tools.exec.observe.stale", &[("relative", relative)]),
         )),
     }
 }
@@ -1343,7 +1497,13 @@ fn commit_mutation(
     if after.len() > MAX_WRITE_BYTES {
         return Err(err(
             "FS_TOO_LARGE",
-            format!("conteúdo de '{relative}' excede o limite de {} bytes", MAX_WRITE_BYTES),
+            crate::i18n::t_args(
+                "tools.exec.fs.contentTooLarge",
+                &[
+                    ("relative", relative),
+                    ("max", &MAX_WRITE_BYTES.to_string()),
+                ],
+            ),
         ));
     }
     let store = journal::ObjectStore::new(ctx.data_dir.join("checkpoints").join("objects"));
@@ -1354,7 +1514,10 @@ fn commit_mutation(
     if let Err(error) = atomic_write(path, after) {
         return Err(err(
             "FS_WRITE_FAILED",
-            format!("não foi possível gravar '{relative}': {error}"),
+            crate::i18n::t_args(
+                "tools.exec.fs.writeFailed",
+                &[("relative", relative), ("error", &error.to_string())],
+            ),
         ));
     }
     let after_hash = observed_hash(after);
@@ -1376,7 +1539,10 @@ fn commit_mutation(
     .with_hashes(before_hash.as_deref(), Some(after_hash.as_str()))
     .with_line_counts(added, removed);
     ctx.db.append_file_journal(&entry).map_err(|error| {
-        err("JOURNAL_FAILED", format!("não foi possível registrar a alteração: {error}"))
+        err(
+            "JOURNAL_FAILED",
+            crate::i18n::t_args("tools.exec.fs.journalFailed", &[("error", &error.to_string())]),
+        )
     })?;
     if let Some(observed) = &ctx.observed {
         observed.record(path, after);
@@ -1392,9 +1558,22 @@ fn commit_mutation(
     });
 
     let header = match kind {
-        FileChangeKind::Created => format!("Created file {relative} (+{added})"),
-        FileChangeKind::Deleted => format!("Deleted file {relative} (−{removed})"),
-        _ => format!("Updated file {relative} (+{added} −{removed})"),
+        FileChangeKind::Created => crate::i18n::t_args(
+            "tools.exec.file.created",
+            &[("path", relative), ("added", &added.to_string())],
+        ),
+        FileChangeKind::Deleted => crate::i18n::t_args(
+            "tools.exec.file.deleted",
+            &[("path", relative), ("removed", &removed.to_string())],
+        ),
+        _ => crate::i18n::t_args(
+            "tools.exec.file.updated",
+            &[
+                ("path", relative),
+                ("added", &added.to_string()),
+                ("removed", &removed.to_string()),
+            ],
+        ),
     };
     let content = if diff_short.is_empty() {
         header
@@ -1489,11 +1668,18 @@ async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -
                 let ok = output.exit_code == Some(0);
                 let combined = format!("{}{}", output.stdout, output.stderr);
                 let snippet: String = combined.trim().chars().take(600).collect();
-                notes.push(format!(
-                    "- `{}` → {} {}",
-                    command,
-                    if ok { "ok" } else { "falhou" },
-                    snippet
+                let status = if ok {
+                    crate::i18n::t("tools.exec.hooks.ok")
+                } else {
+                    crate::i18n::t("tools.exec.hooks.failed")
+                };
+                notes.push(crate::i18n::t_args(
+                    "tools.exec.hooks.note",
+                    &[
+                        ("command", &command),
+                        ("status", &status),
+                        ("snippet", &snippet),
+                    ],
                 ));
                 audit_append(
                     ctx,
@@ -1506,19 +1692,21 @@ async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -
                     }),
                 );
                 if !ok {
-                    notes.push(
-                        "  (a edição foi mantida; corrija o hook ou o arquivo antes de seguir)"
-                            .to_string(),
-                    );
+                    notes.push(crate::i18n::t("tools.exec.hooks.editKept"));
                 }
             }
-            Err(error) => notes.push(format!("- `{command}` → erro: {error}")),
+            Err(error) => notes.push(crate::i18n::t_args(
+                "tools.exec.hooks.errorNote",
+                &[("command", &command), ("error", &error.to_string())],
+            )),
         }
     }
     if notes.is_empty() {
         return body;
     }
-    body.push_str("\n\nHooks do projeto (`.zylara/hooks.json` · postWrite):\n");
+    body.push_str("\n\n");
+    body.push_str(&crate::i18n::t("tools.exec.hooks.header"));
+    body.push('\n');
     for note in notes {
         body.push_str(&note);
         body.push('\n');
@@ -1533,12 +1721,20 @@ async fn write_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let content = match args.get("content").and_then(Value::as_str) {
         Some(value) => value.to_string(),
-        None => return err("TOOL_INVALID_ARGS", "`content` é obrigatório"),
+        None => {
+            return err(
+                "TOOL_INVALID_ARGS",
+                crate::i18n::t("tools.exec.args.contentRequired"),
+            )
+        }
     };
     if content.len() > MAX_WRITE_BYTES {
         return err(
             "FS_TOO_LARGE",
-            format!("conteúdo excede o limite de {} bytes", MAX_WRITE_BYTES),
+            crate::i18n::t_args(
+                "tools.exec.write.contentTooLarge",
+                &[("max", &MAX_WRITE_BYTES.to_string())],
+            ),
         );
     }
     if let Err(outcome) = writable_root(ctx) {
@@ -1564,7 +1760,7 @@ async fn write_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         is_secret_path(&relative),
         None,
         write_detail(&relative),
-        "Escrever arquivo?",
+        &crate::i18n::t("tools.exec.approvals.writeFile"),
     )
     .await
     {
@@ -1583,7 +1779,10 @@ async fn write_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             finish(
                 ctx,
                 content,
-                Some(format!("Escrever {relative}")),
+                Some(crate::i18n::t_args(
+                    "tools.exec.write.summary",
+                    &[("path", &relative)],
+                )),
                 Some(presentation),
             )
         },
@@ -1598,14 +1797,27 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let old_string = match args.get("old_string").and_then(Value::as_str) {
         Some(value) if !value.is_empty() => value.to_string(),
-        _ => return err("TOOL_INVALID_ARGS", "`old_string` é obrigatório e não pode ser vazio"),
+        _ => {
+            return err(
+                "TOOL_INVALID_ARGS",
+                crate::i18n::t("tools.exec.args.oldStringRequired"),
+            )
+        }
     };
     let new_string = match args.get("new_string").and_then(Value::as_str) {
         Some(value) => value.to_string(),
-        None => return err("TOOL_INVALID_ARGS", "`new_string` é obrigatório (use \"\" para remover)"),
+        None => {
+            return err(
+                "TOOL_INVALID_ARGS",
+                crate::i18n::t("tools.exec.args.newStringRequired"),
+            )
+        }
     };
     if old_string == new_string {
-        return err("TOOL_INVALID_ARGS", "`old_string` e `new_string` são iguais");
+        return err(
+            "TOOL_INVALID_ARGS",
+            crate::i18n::t("tools.exec.args.sameStrings"),
+        );
     }
     let replace_all = opt_bool(args, "replace_all").unwrap_or(false);
     if let Err(outcome) = writable_root(ctx) {
@@ -1626,7 +1838,7 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         is_secret_path(&relative),
         None,
         write_detail(&relative),
-        "Editar arquivo?",
+        &crate::i18n::t("tools.exec.approvals.editFile"),
     )
     .await
     {
@@ -1635,32 +1847,55 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let before = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return err("FS_NOT_FOUND", format!("arquivo não encontrado: {relative}"))
+            return err(
+                "FS_NOT_FOUND",
+                crate::i18n::t_args("tools.exec.fs.notFound", &[("relative", &relative)]),
+            )
         }
-        Err(error) => return err("FS_NOT_FOUND", format!("não foi possível ler '{relative}': {error}")),
+        Err(error) => {
+            return err(
+                "FS_NOT_FOUND",
+                crate::i18n::t_args(
+                    "tools.exec.fs.readFailed",
+                    &[("relative", &relative), ("error", &error.to_string())],
+                ),
+            )
+        }
     };
     if looks_binary(&before) {
-        return err("FS_BINARY", format!("cannot modify \"{relative}\": binary file"));
+        return err(
+            "FS_BINARY",
+            crate::i18n::t_args("tools.exec.fs.modifyBinary", &[("relative", &relative)]),
+        );
     }
     if let Err(outcome) = ensure_observed(ctx, &path, &relative, &before) {
         return outcome;
     }
     let text = match String::from_utf8(before.clone()) {
         Ok(text) => text,
-        Err(_) => return err("FS_BINARY", format!("cannot modify \"{relative}\": arquivo não é UTF-8")),
+        Err(_) => {
+            return err(
+                "FS_BINARY",
+                crate::i18n::t_args("tools.exec.fs.modifyNotUtf8", &[("relative", &relative)]),
+            )
+        }
     };
     let occurrences = text.matches(old_string.as_str()).count();
     if occurrences == 0 {
         return err(
             "FS_NOT_FOUND",
-            format!("trecho não encontrado em '{relative}'; releia o arquivo e copie o trecho exato"),
+            crate::i18n::t_args("tools.exec.edit.notFound", &[("relative", &relative)]),
         );
     }
     if occurrences > 1 && !replace_all {
         return err(
             "TOOL_INVALID_ARGS",
-            format!(
-                "o trecho aparece {occurrences} vezes em '{relative}'; inclua mais contexto ou use replace_all"
+            crate::i18n::t_args(
+                "tools.exec.edit.multiple",
+                &[
+                    ("count", &occurrences.to_string()),
+                    ("relative", &relative),
+                ],
             ),
         );
     }
@@ -1676,7 +1911,10 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             finish(
                 ctx,
                 content,
-                Some(format!("Editar {relative}")),
+                Some(crate::i18n::t_args(
+                    "tools.exec.edit.summary",
+                    &[("path", &relative)],
+                )),
                 Some(presentation),
             )
         },
@@ -1749,11 +1987,14 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let Some(runner) = ctx.subagent.clone() else {
         return err(
             "SUBAGENT_UNAVAILABLE",
-            "nenhum runner de subagentes está montado nesta composição",
+            crate::i18n::t("tools.exec.subagent.unavailable"),
         );
     };
     if ctx.workspace.is_none() {
-        return err("FS_NO_WORKSPACE", "abra um workspace para delegar exploração");
+        return err(
+            "FS_NO_WORKSPACE",
+            crate::i18n::t("tools.exec.subagent.noWorkspace"),
+        );
     }
     let description = match arg_str(args, "description") {
         Ok(value) => value,
@@ -1770,9 +2011,7 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             None => {
                 return err(
                     "SUBAGENT_INVALID_TYPE",
-                    format!(
-                        "subagent_type inválido: `{value}` (use explore, review ou general)"
-                    ),
+                    crate::i18n::t_args("tools.exec.subagent.invalidType", &[("value", &value)]),
                 )
             }
         },
@@ -1780,8 +2019,9 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if !ctx.try_consume_subagent_budget() {
         return err(
             "SUBAGENT_LIMIT",
-            format!(
-                "limite de {MAX_DELEGATIONS_PER_TURN} delegações por turno atingido"
+            crate::i18n::t_args(
+                "tools.exec.subagent.limit",
+                &[("max", &MAX_DELEGATIONS_PER_TURN.to_string())],
             ),
         );
     }
@@ -1790,7 +2030,7 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Err(_) => {
             return err(
                 "SUBAGENT_UNAVAILABLE",
-                "o limite de subagentes concorrentes não está disponível",
+                crate::i18n::t("tools.exec.subagent.slotsUnavailable"),
             )
         }
     };
@@ -1821,7 +2061,7 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 duration_ms: 0,
                 error: None,
             });
-            return err("SUBAGENT_CANCELLED", "o turno foi cancelado");
+            return err("SUBAGENT_CANCELLED", crate::i18n::t("tools.exec.turn.cancelled"));
         }
         result = tokio::time::timeout(
             Duration::from_secs(SUBAGENT_TIMEOUT_SECS),
@@ -1838,7 +2078,7 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                         duration_ms: 0,
                         error: None,
                     });
-                    return err("SUBAGENT_CANCELLED", "o turno foi cancelado");
+                    return err("SUBAGENT_CANCELLED", crate::i18n::t("tools.exec.turn.cancelled"));
                 }
                 return subagent_failure(error);
             }
@@ -1855,16 +2095,16 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                     status: "error".to_string(),
                     usage: None,
                     duration_ms: 0,
-                    error: Some(format!(
-                        "o subagente excedeu {} minutos",
-                        SUBAGENT_TIMEOUT_SECS / 60
+                    error: Some(crate::i18n::t_args(
+                        "tools.exec.subagent.timeout",
+                        &[("minutes", &(SUBAGENT_TIMEOUT_SECS / 60).to_string())],
                     )),
                 });
                 return err(
                     "SUBAGENT_TIMEOUT",
-                    format!(
-                        "o subagente excedeu {} minutos",
-                        SUBAGENT_TIMEOUT_SECS / 60
+                    crate::i18n::t_args(
+                        "tools.exec.subagent.timeout",
+                        &[("minutes", &(SUBAGENT_TIMEOUT_SECS / 60).to_string())],
                     ),
                 );
             }
@@ -1876,18 +2116,20 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let effort = outcome.effort;
     let text = outcome.text;
     let short: String = description.chars().take(60).collect();
-    let summary = format!(
-        "Subagente {}: {} · {} passos · {} ms",
-        kind.as_str(),
-        short,
-        outcome.steps,
-        outcome.duration_ms
+    let summary = crate::i18n::t_args(
+        "tools.exec.subagent.summary",
+        &[
+            ("kind", kind.as_str()),
+            ("description", &short),
+            ("steps", &outcome.steps.to_string()),
+            ("duration", &outcome.duration_ms.to_string()),
+        ],
     );
     let (inline, _spill) = spill_text(
         ctx,
-        &format!(
-            "Subagente ({}) concluiu:\n\n{text}",
-            kind.as_str()
+        &crate::i18n::t_args(
+            "tools.exec.subagent.content",
+            &[("kind", kind.as_str()), ("text", &text)],
         ),
     );
     let mut presentation = serde_json::json!({
@@ -1925,7 +2167,7 @@ async fn run_checks(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if profile.checks.is_empty() {
         return err(
             "NO_CHECKS",
-            "o projeto não tem verificações detectadas (test/lint/build); use `run_command` com o comando certo",
+            crate::i18n::t("tools.exec.checks.none"),
         );
     }
     let requested = opt_str(args, "check");
@@ -1945,7 +2187,13 @@ async fn run_checks(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             .collect();
         return err(
             "CHECK_NOT_FOUND",
-            format!("verificação desconhecida: `{}` — disponíveis: {}", requested.unwrap_or_default(), available.join(", ")),
+            crate::i18n::t_args(
+                "tools.exec.checks.unknown",
+                &[
+                    ("requested", &requested.unwrap_or_default()),
+                    ("available", &available.join(", ")),
+                ],
+            ),
         );
     };
     let timeout = args
@@ -1955,7 +2203,10 @@ async fn run_checks(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         .clamp(1_000, 600_000);
     let command_args = json!({
         "command": check.command,
-        "description": format!("Rodar {}", check.label),
+        "description": crate::i18n::t_args(
+            "tools.exec.checks.run",
+            &[("label", &check.label)],
+        ),
         "timeout_ms": timeout,
     });
     let mut outcome = run_command(ctx, &command_args).await;
@@ -1966,7 +2217,10 @@ async fn run_checks(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             outcome.content = format!("{head}{}", outcome.content);
         }
         if outcome.summary.is_none() {
-            outcome.summary = Some(format!("Verificação: {label}"));
+            outcome.summary = Some(crate::i18n::t_args(
+                "tools.exec.checks.summary",
+                &[("label", &label)],
+            ));
         }
     }
     outcome
@@ -1976,7 +2230,8 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(value) => value,
         Err(outcome) => return outcome,
     };
-    let description = opt_str(args, "description").unwrap_or_else(|| "executar comando".to_string());
+    let description = opt_str(args, "description")
+        .unwrap_or_else(|| crate::i18n::t("tools.exec.run.defaultDescription"));
     let root = match writable_root(ctx) {
         Ok(root) => root,
         Err(outcome) => return outcome,
@@ -2012,7 +2267,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         false,
         destructive,
         detail,
-        "Executar comando?",
+        &crate::i18n::t("tools.exec.approvals.runCommand"),
     )
     .await
     {
@@ -2056,7 +2311,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         if background {
             return err(
                 "JOB_UNAVAILABLE",
-                "o registro de jobs não está disponível nesta composição; rode em foreground",
+                crate::i18n::t("tools.exec.jobs.unavailableForeground"),
             );
         }
         return run_command_direct(ctx, request, description, command).await;
@@ -2065,7 +2320,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         if background {
             return err(
                 "JOB_UNAVAILABLE",
-                "não há canal de eventos para publicar os jobs; rode em foreground",
+                crate::i18n::t("tools.exec.jobs.noEmitter"),
             );
         }
         return run_command_direct(ctx, request, description, command).await;
@@ -2078,11 +2333,17 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if background {
         return finish(
             ctx,
-            format!(
-                "started background job {}\n{command}\nUse job_output(job_id=\"{}\", cursor=0) para acompanhar ou job_kill para encerrar.\n",
-                view.id, view.id
+            crate::i18n::t_args(
+                "tools.exec.background.started",
+                &[
+                    ("job_id", &view.id),
+                    ("command", &command),
+                ],
             ),
-            Some(format!("Job {} · {}", view.id, description)),
+            Some(crate::i18n::t_args(
+                "tools.exec.jobs.summaryWithDescription",
+                &[("job_id", &view.id), ("description", &description)],
+            )),
             Some(json!({ "kind": "job", "job": view })),
         );
     }
@@ -2135,7 +2396,11 @@ fn command_result(ctx: &ToolCtx, output: String, settled: crate::domain::JobView
     if !output.is_empty() && !output.ends_with('\n') {
         content.push('\n');
     }
-    content.push_str(&format!("(duração: {} ms)\n", settled.duration_ms));
+    content.push_str(&crate::i18n::t_args(
+        "tools.exec.command.duration",
+        &[("ms", &settled.duration_ms.to_string())],
+    ));
+    content.push('\n');
     finish(
         ctx,
         content,
@@ -2156,10 +2421,17 @@ fn promoted_to_job(
         .map(|(_, _, view)| view)
         .ok();
     let mut outcome = ToolOutcome {
-        content: format!(
-            "[still running after {timeout_ms} ms; moved to background job {job_id}]\nUse job_output(job_id=\"{job_id}\", cursor=0) para acompanhar a saída ou job_kill para encerrar.\n"
+        content: crate::i18n::t_args(
+            "tools.exec.background.stillRunning",
+            &[
+                ("timeout_ms", &timeout_ms.to_string()),
+                ("job_id", job_id),
+            ],
         ),
-        summary: Some(format!("Job {job_id} · {description}")),
+        summary: Some(crate::i18n::t_args(
+            "tools.exec.jobs.summaryWithDescription",
+            &[("job_id", job_id), ("description", &description)],
+        )),
         ..Default::default()
     };
     if let Some(view) = view {
@@ -2218,15 +2490,22 @@ async fn run_command_direct(
         }
     }
     if output.timed_out {
-        content.push_str("[timed out after the configured limit]\n");
+        content.push_str(&crate::i18n::t("tools.exec.command.timedOut"));
+        content.push('\n');
     }
     if output.cancelled {
-        content.push_str("[stopped by user]\n");
+        content.push_str(&crate::i18n::t("tools.exec.command.stopped"));
+        content.push('\n');
     }
     if output.truncated {
-        content.push_str("[truncated: saída excedeu o limite; cauda preservada]\n");
+        content.push_str(&crate::i18n::t("tools.exec.command.truncated"));
+        content.push('\n');
     }
-    content.push_str(&format!("(duração: {} ms)\n", output.duration_ms));
+    content.push_str(&crate::i18n::t_args(
+        "tools.exec.command.duration",
+        &[("ms", &output.duration_ms.to_string())],
+    ));
+    content.push('\n');
     let _ = command;
     finish(
         ctx,
@@ -2244,21 +2523,23 @@ fn jobs_registry(ctx: &ToolCtx) -> Result<Arc<crate::jobs::JobRegistry>, ToolOut
     ctx.jobs.clone().ok_or_else(|| {
         err(
             "JOB_UNAVAILABLE",
-            "o registro de jobs não está disponível nesta composição",
+            crate::i18n::t("tools.exec.jobs.unavailable"),
         )
     })
 }
 
 fn job_line(view: &crate::domain::JobView) -> String {
     let status = match view.status {
-        crate::domain::JobStatus::Running => "running",
-        crate::domain::JobStatus::Done => "done",
-        crate::domain::JobStatus::Failed => "failed",
-        crate::domain::JobStatus::Killed => "killed",
+        crate::domain::JobStatus::Running => crate::i18n::t("tools.exec.jobs.status.running"),
+        crate::domain::JobStatus::Done => crate::i18n::t("tools.exec.jobs.status.done"),
+        crate::domain::JobStatus::Failed => crate::i18n::t("tools.exec.jobs.status.failed"),
+        crate::domain::JobStatus::Killed => crate::i18n::t("tools.exec.jobs.status.killed"),
     };
     let exit = view
         .exit_code
-        .map(|code| format!(" exit={code}"))
+        .map(|code| {
+            crate::i18n::t_args("tools.exec.jobs.exitCode", &[("code", &code.to_string())])
+        })
         .unwrap_or_default();
     format!(
         "{} · {status}{exit} · {} ms · {}\n",
@@ -2274,21 +2555,33 @@ async fn job_list(ctx: &ToolCtx, _args: &Value) -> ToolOutcome {
     let views = jobs.list(&ctx.conversation_id);
     let mut content = String::new();
     if views.is_empty() {
-        content.push_str("(nenhum job em background nesta sessão)\n");
+        content.push_str(&crate::i18n::t("tools.exec.jobs.empty"));
+        content.push('\n');
     } else {
-        content.push_str(&format!("{} job(s) nesta sessão:\n", views.len()));
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.jobs.count",
+            &[("count", &views.len().to_string())],
+        ));
+        content.push('\n');
         for view in &views {
             content.push_str(&job_line(view));
             if let Some(preview) = view.output_preview.as_deref() {
                 let snippet: String = preview.chars().take(160).collect();
-                content.push_str(&format!("  saída: {snippet}\n"));
+                content.push_str(&crate::i18n::t_args(
+                    "tools.exec.jobs.output",
+                    &[("snippet", &snippet)],
+                ));
+                content.push('\n');
             }
         }
     }
     finish(
         ctx,
         content,
-        Some(format!("Jobs · {} job(s)", views.len())),
+        Some(crate::i18n::t_args(
+            "tools.exec.jobs.summary",
+            &[("count", &views.len().to_string())],
+        )),
         Some(json!({ "kind": "jobs", "count": views.len() })),
     )
 }
@@ -2319,18 +2612,30 @@ async fn job_output(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let status = job_line(&view);
     let mut content = format!("[status: {}]\n", status.trim_end());
     if output.is_empty() {
-        content.push_str("(sem saída nova desde o cursor)\n");
+        content.push_str(&crate::i18n::t("tools.exec.jobs.noNewOutput"));
+        content.push('\n');
     } else {
         content.push_str(&output);
         if !output.ends_with('\n') {
             content.push('\n');
         }
     }
-    content.push_str(&format!("(next_cursor: {next_cursor})\n"));
+    content.push_str(&crate::i18n::t_args(
+        "tools.exec.jobs.nextCursor",
+        &[("cursor", &next_cursor.to_string())],
+    ));
+    content.push('\n');
     finish(
         ctx,
         content,
-        Some(format!("Job {} · cursor {cursor} → {next_cursor}", view.id)),
+        Some(crate::i18n::t_args(
+            "tools.exec.jobs.cursorSummary",
+            &[
+                ("id", &view.id),
+                ("from", &cursor.to_string()),
+                ("to", &next_cursor.to_string()),
+            ],
+        )),
         Some(json!({ "kind": "job", "job": view })),
     )
 }
@@ -2344,7 +2649,8 @@ async fn job_kill(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Ok(value) => value,
         Err(outcome) => return outcome,
     };
-    let reason = opt_str(args, "reason").unwrap_or_else(|| "encerrado pelo agente".to_string());
+    let reason = opt_str(args, "reason")
+        .unwrap_or_else(|| crate::i18n::t("tools.exec.approvals.endedByAgent"));
     if let Err(outcome) = policy_check(
         ctx,
         "job_kill",
@@ -2354,9 +2660,12 @@ async fn job_kill(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         false,
         None,
         ApprovalDetail::Other {
-            text: format!("encerrar {job_id}: {reason}"),
+            text: crate::i18n::t_args(
+                "tools.exec.approvals.killJobDetail",
+                &[("job_id", &job_id), ("reason", &reason)],
+            ),
         },
-        "Encerrar job em background?",
+        &crate::i18n::t("tools.exec.approvals.killJob"),
     )
     .await
     {
@@ -2380,11 +2689,17 @@ async fn job_kill(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         });
     finish(
         ctx,
-        format!(
-            "Job {job_id} encerrado (status {}).\n",
-            job_line(&view).trim_end()
+        crate::i18n::t_args(
+            "tools.exec.jobs.killed",
+            &[
+                ("job_id", &job_id),
+                ("status", job_line(&view).trim_end()),
+            ],
         ),
-        Some(format!("Encerrar job {job_id}")),
+        Some(crate::i18n::t_args(
+            "tools.exec.jobs.killSummary",
+            &[("job_id", &job_id)],
+        )),
         Some(json!({ "kind": "job", "job": view })),
     )
 }
@@ -2393,15 +2708,15 @@ async fn job_kill(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
 /* Git somente leitura                                                 */
 /* ------------------------------------------------------------------ */
 
-fn status_code_label(code: &str) -> &'static str {
+fn status_code_label(code: &str) -> String {
     match code {
-        "M" => "modificado",
-        "A" => "adicionado",
-        "D" => "removido",
-        "R" => "renomeado",
-        "C" => "copiado",
-        "U" => "conflito",
-        _ => "alterado",
+        "M" => crate::i18n::t("tools.exec.git.status.modified"),
+        "A" => crate::i18n::t("tools.exec.git.status.added"),
+        "D" => crate::i18n::t("tools.exec.git.status.deleted"),
+        "R" => crate::i18n::t("tools.exec.git.status.renamed"),
+        "C" => crate::i18n::t("tools.exec.git.status.copied"),
+        "U" => crate::i18n::t("tools.exec.git.status.conflict"),
+        _ => crate::i18n::t("tools.exec.git.status.changed"),
     }
 }
 
@@ -2412,39 +2727,69 @@ async fn git_status(ctx: &ToolCtx, _args: &Value) -> ToolOutcome {
     };
     let status = git::detect(&root).await;
     if !status.is_repo {
-        return err("GIT_NOT_A_REPO", "o workspace não é um repositório git");
+        return err("GIT_NOT_A_REPO", crate::i18n::t("tools.exec.git.notRepo"));
     }
     let mut content = String::new();
-    content.push_str(&format!(
-        "branch {} (ahead {}, behind {})\n",
-        status.branch.as_deref().unwrap_or("(detached)"),
-        status.ahead,
-        status.behind
+    content.push_str(&crate::i18n::t_args(
+        "tools.exec.git.branch",
+        &[
+            (
+                "branch",
+                status.branch.as_deref().unwrap_or("(detached)"),
+            ),
+            ("ahead", &status.ahead.to_string()),
+            ("behind", &status.behind.to_string()),
+        ],
     ));
+    content.push('\n');
     for file in &status.staged {
-        content.push_str(&format!("{}  {} ({})\n", file.status, file.path, status_code_label(&file.status)));
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.git.stagedLine",
+            &[
+                ("status", &file.status),
+                ("path", &file.path),
+                ("label", &status_code_label(&file.status)),
+            ],
+        ));
+        content.push('\n');
     }
     for file in &status.unstaged {
-        content.push_str(&format!(" {} {} ({})\n", file.status, file.path, status_code_label(&file.status)));
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.git.unstagedLine",
+            &[
+                ("status", &file.status),
+                ("path", &file.path),
+                ("label", &status_code_label(&file.status)),
+            ],
+        ));
+        content.push('\n');
     }
     for path in &status.untracked {
         content.push_str(&format!("?? {path}\n"));
     }
     for path in &status.conflicted {
-        content.push_str(&format!("!  {path} (conflito)\n"));
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.git.conflicted",
+            &[("path", path)],
+        ));
+        content.push('\n');
     }
     if status.staged.is_empty()
         && status.unstaged.is_empty()
         && status.untracked.is_empty()
         && status.conflicted.is_empty()
     {
-        content.push_str("(working tree limpo)\n");
+        content.push_str(&crate::i18n::t("tools.exec.git.clean"));
+        content.push('\n');
     }
     let total = status.staged.len() + status.unstaged.len() + status.untracked.len() + status.conflicted.len();
     finish(
         ctx,
         content,
-        Some(format!("git status · {total} alteração(ões)")),
+        Some(crate::i18n::t_args(
+            "tools.exec.git.statusSummary",
+            &[("count", &total.to_string())],
+        )),
         Some(json!({ "kind": "output", "files": total })),
     )
 }
@@ -2461,7 +2806,11 @@ fn redact_secret_diff(diff: &str) -> String {
                 .trim_start_matches("b/");
             skipping = is_secret_path(path);
             if skipping {
-                out.push_str(&format!("[arquivo sensível omitido: {path}]\n"));
+                out.push_str(&crate::i18n::t_args(
+                    "tools.exec.git.secretOmitted",
+                    &[("path", path)],
+                ));
+                out.push('\n');
                 continue;
             }
         }
@@ -2480,7 +2829,7 @@ async fn git_diff(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let status = git::detect(&root).await;
     if !status.is_repo {
-        return err("GIT_NOT_A_REPO", "o workspace não é um repositório git");
+        return err("GIT_NOT_A_REPO", crate::i18n::t("tools.exec.git.notRepo"));
     }
     let mut paths = Vec::new();
     for requested in opt_string_array(args, "paths") {
@@ -2502,7 +2851,9 @@ async fn git_diff(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Err(error) => return err(error.code, error.message),
     };
     let content = if diff.trim().is_empty() {
-        "(sem alterações)\n".to_string()
+        let mut text = crate::i18n::t("tools.exec.git.noChanges");
+        text.push('\n');
+        text
     } else {
         redact_secret_diff(&diff)
     };
@@ -2521,7 +2872,7 @@ async fn git_log(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     let status = git::detect(&root).await;
     if !status.is_repo {
-        return err("GIT_NOT_A_REPO", "o workspace não é um repositório git");
+        return err("GIT_NOT_A_REPO", crate::i18n::t("tools.exec.git.notRepo"));
     }
     let limit = opt_u32(args, "limit").unwrap_or(20).clamp(1, 50);
     let commits = match git::log(&root, limit).await {
@@ -2539,17 +2890,23 @@ async fn git_log(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         ));
     }
     if content.is_empty() {
-        content.push_str("(nenhum commit ainda)\n");
+        content.push_str(&crate::i18n::t("tools.exec.git.noCommits"));
+        content.push('\n');
     }
     if let Some(path) = opt_str(args, "path") {
-        content.push_str(&format!(
-            "(filtro por path ainda não suportado pelo helper de git; mostrando o repositório inteiro — pedido: {path})\n"
+        content.push_str(&crate::i18n::t_args(
+            "tools.exec.git.pathFilter",
+            &[("path", &path)],
         ));
+        content.push('\n');
     }
     finish(
         ctx,
         content,
-        Some(format!("git log · {} commits", commits.len())),
+        Some(crate::i18n::t_args(
+            "tools.exec.git.logSummary",
+            &[("count", &commits.len().to_string())],
+        )),
         Some(json!({ "kind": "output", "commits": commits.len() })),
     )
 }
@@ -2567,22 +2924,22 @@ fn plan_approval_options() -> Vec<ApprovalOption> {
     vec![
         ApprovalOption {
             id: "approve_run".into(),
-            label: "Aprovar e executar".into(),
+            label: crate::i18n::t("tools.exec.approvals.planApproveRun"),
             scope: None,
         },
         ApprovalOption {
             id: "approve_review".into(),
-            label: "Aprovar e revisar cada edição".into(),
+            label: crate::i18n::t("tools.exec.approvals.planApproveReview"),
             scope: None,
         },
         ApprovalOption {
             id: "approve_goal".into(),
-            label: "Executar como Objetivo".into(),
+            label: crate::i18n::t("tools.exec.approvals.planApproveGoal"),
             scope: None,
         },
         ApprovalOption {
             id: "keep_planning".into(),
-            label: "Continuar planejando".into(),
+            label: crate::i18n::t("tools.exec.approvals.planKeepPlanning"),
             scope: None,
         },
     ]
@@ -2595,11 +2952,8 @@ fn plan_approval_options() -> Vec<ApprovalOption> {
 /// plano aprovado e a rodada o carrega integralmente.
 fn goal_input_for_approved_plan() -> CreateGoalInput {
     CreateGoalInput {
-        title: Some("Executar plano aprovado".to_string()),
-        objective: "Executar o plano aprovado nesta sessão até concluí-lo, seguindo \
-                    integralmente as fases, a ordem e os critérios de verificação registrados \
-                    no plano."
-            .to_string(),
+        title: Some(crate::i18n::t("tools.exec.goal.approvedPlanTitle")),
+        objective: crate::i18n::t("tools.exec.goal.approvedPlanObjective"),
         max_rounds: None,
         auto_continue: Some(true),
     }
@@ -2692,9 +3046,7 @@ fn goal_tool(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         "blocked" => goal_blocked(ctx, args),
         other => err(
             "TOOL_INVALID_ARGS",
-            format!(
-                "ação desconhecida `{other}`; use create, edit, progress, complete ou blocked"
-            ),
+            crate::i18n::t_args("tools.exec.goal.unknownAction", &[("action", other)]),
         ),
     }
 }
@@ -2720,15 +3072,24 @@ fn goal_create(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     match goal::create(&ctx.db, &ctx.conversation_id, &input, GoalOrigin::Agent) {
         Ok(view) => {
             let continuity = if view.auto_continue {
-                "continuidade automática ligada — a próxima rodada inicia ao fim deste turno"
+                crate::i18n::t("tools.exec.goal.continuityOn")
             } else {
-                "continuidade automática desligada — o usuário pode armá-la no objetivo"
+                crate::i18n::t("tools.exec.goal.continuityOff")
             };
-            let content = format!(
-                "Objetivo criado: {} (limite de {} rodadas; {}).\n",
-                view.title, view.max_rounds, continuity
+            let content = crate::i18n::t_args(
+                "tools.exec.goal.created",
+                &[
+                    ("title", &view.title),
+                    ("rounds", &view.max_rounds.to_string()),
+                    ("continuity", &continuity),
+                ],
             );
-            finish_goal(ctx, view.clone(), content, format!("Objetivo · {}", view.title))
+            finish_goal(
+                ctx,
+                view.clone(),
+                content,
+                crate::i18n::t_args("tools.exec.goal.summary", &[("title", &view.title)]),
+            )
         }
         Err(error) => goal_error(error),
     }
@@ -2744,7 +3105,7 @@ fn goal_edit(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if title.is_none() && objective.is_none() && max_rounds.is_none() {
         return err(
             "TOOL_INVALID_ARGS",
-            "`edit` exige `title`, `objective` ou `max_rounds`",
+            crate::i18n::t("tools.exec.goal.editRequires"),
         );
     }
     let input = UpdateGoalInput {
@@ -2756,11 +3117,19 @@ fn goal_edit(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     match goal::edit(&ctx.db, &ctx.conversation_id, &input) {
         Ok(view) => {
-            let content = format!(
-                "Objetivo atualizado: {} (limite de {} rodadas).\n",
-                view.title, view.max_rounds
+            let content = crate::i18n::t_args(
+                "tools.exec.goal.updated",
+                &[
+                    ("title", &view.title),
+                    ("rounds", &view.max_rounds.to_string()),
+                ],
             );
-            finish_goal(ctx, view.clone(), content, format!("Objetivo · {}", view.title))
+            finish_goal(
+                ctx,
+                view.clone(),
+                content,
+                crate::i18n::t_args("tools.exec.goal.summary", &[("title", &view.title)]),
+            )
         }
         Err(error) => goal_error(error),
     }
@@ -2773,19 +3142,24 @@ fn goal_progress(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     };
     match goal::note_progress(&ctx.db, &ctx.conversation_id, &note) {
         Ok(view) => {
-            let content = format!(
-                "Progresso registrado (rodada {}/{}). Nota: {}\n",
-                view.rounds,
-                view.max_rounds,
-                truncate_for_tool_output(&note, 300)
+            let content = crate::i18n::t_args(
+                "tools.exec.goal.progress",
+                &[
+                    ("round", &view.rounds.to_string()),
+                    ("max", &view.max_rounds.to_string()),
+                    ("note", &truncate_for_tool_output(&note, 300)),
+                ],
             );
             finish_goal(
                 ctx,
                 view.clone(),
                 content,
-                format!(
-                    "Objetivo · progresso na rodada {}/{}",
-                    view.rounds, view.max_rounds
+                crate::i18n::t_args(
+                    "tools.exec.goal.progressSummary",
+                    &[
+                        ("round", &view.rounds.to_string()),
+                        ("max", &view.max_rounds.to_string()),
+                    ],
                 ),
             )
         }
@@ -2797,15 +3171,21 @@ fn goal_complete(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let summary = opt_str(args, "note");
     match goal::complete(&ctx.db, &ctx.conversation_id, summary.as_deref()) {
         Ok(view) => {
-            let content = format!(
-                "Objetivo concluído: {} ({} rodada(s)).\n",
-                view.title, view.rounds
+            let content = crate::i18n::t_args(
+                "tools.exec.goal.completed",
+                &[
+                    ("title", &view.title),
+                    ("rounds", &view.rounds.to_string()),
+                ],
             );
             finish_goal(
                 ctx,
                 view.clone(),
                 content,
-                format!("Objetivo concluído · {}", view.title),
+                crate::i18n::t_args(
+                    "tools.exec.goal.completedSummary",
+                    &[("title", &view.title)],
+                ),
             )
         }
         Err(error) => goal_error(error),
@@ -2820,22 +3200,30 @@ fn goal_blocked(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     match goal::report_blocker(&ctx.db, &ctx.conversation_id, &note) {
         Ok(report) => {
             let content = if report.blocked {
-                format!(
-                    "Objetivo bloqueado após {} registros do mesmo impedimento. O usuário decide como retomar.\n",
-                    goal::GOAL_BLOCKED_STREAK
+                crate::i18n::t_args(
+                    "tools.exec.goal.blocked",
+                    &[("streak", &goal::GOAL_BLOCKED_STREAK.to_string())],
                 )
             } else {
-                format!(
-                    "Bloqueio registrado ({}/{}); a rodada segue até o fim. Motivo: {}\n",
-                    report.goal.blocker_streak,
-                    goal::GOAL_BLOCKED_STREAK,
-                    truncate_for_tool_output(&note, 300)
+                crate::i18n::t_args(
+                    "tools.exec.goal.blocker",
+                    &[
+                        ("streak", &report.goal.blocker_streak.to_string()),
+                        ("max", &goal::GOAL_BLOCKED_STREAK.to_string()),
+                        ("reason", &truncate_for_tool_output(&note, 300)),
+                    ],
                 )
             };
             let summary = if report.blocked {
-                "Objetivo bloqueado".to_string()
+                crate::i18n::t("tools.exec.goal.blockedSummary")
             } else {
-                format!("Bloqueio {}/{} registrado", report.goal.blocker_streak, goal::GOAL_BLOCKED_STREAK)
+                crate::i18n::t_args(
+                    "tools.exec.goal.blockerSummary",
+                    &[
+                        ("streak", &report.goal.blocker_streak.to_string()),
+                        ("max", &goal::GOAL_BLOCKED_STREAK.to_string()),
+                    ],
+                )
             };
             finish_goal(ctx, report.goal, content, summary)
         }
@@ -2854,14 +3242,20 @@ fn truncate_for_tool_output(text: &str, max: usize) -> String {
 
 async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     let Some(raw) = args.get("todos") else {
-        return err("TOOL_INVALID_ARGS", "`todos` é obrigatório");
+        return err(
+            "TOOL_INVALID_ARGS",
+            crate::i18n::t("tools.exec.todo.required"),
+        );
     };
     let items: Vec<TodoItem> = match serde_json::from_value(raw.clone()) {
         Ok(items) => items,
         Err(error) => {
             return err(
                 "TOOL_INVALID_ARGS",
-                format!("formato inválido de `todos` (content + status): {error}"),
+                crate::i18n::t_args(
+                    "tools.exec.todo.invalid",
+                    &[("error", &error.to_string())],
+                ),
             )
         }
     };
@@ -2871,26 +3265,46 @@ async fn todo_write(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         return err("TOOL_INVALID_ARGS", message);
     }
     if let Err(error) = session::save_todos(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &items) {
-        return err("SESSION_LOG_FAILED", format!("não foi possível salvar as tarefas: {error}"));
+        return err(
+            "SESSION_LOG_FAILED",
+            crate::i18n::t_args(
+                "tools.exec.todo.saveFailed",
+                &[("error", &error.to_string())],
+            ),
+        );
     }
     ctx.emit_event(crate::events::TurnEvent::TodosUpdated { todos: items.clone() });
     let count = |status: crate::domain::TodoStatus| {
         items.iter().filter(|item| item.status == status).count()
     };
     let content = if items.is_empty() {
-        "Lista de tarefas limpa.\n".to_string()
+        crate::i18n::t("tools.exec.todo.cleared")
     } else {
-        format!(
-            "Lista atualizada: {} pendente(s), {} em andamento, {} concluída(s).\n",
-            count(crate::domain::TodoStatus::Pending),
-            count(crate::domain::TodoStatus::InProgress),
-            count(crate::domain::TodoStatus::Completed)
+        crate::i18n::t_args(
+            "tools.exec.todo.list",
+            &[
+                (
+                    "pending",
+                    &count(crate::domain::TodoStatus::Pending).to_string(),
+                ),
+                (
+                    "in_progress",
+                    &count(crate::domain::TodoStatus::InProgress).to_string(),
+                ),
+                (
+                    "completed",
+                    &count(crate::domain::TodoStatus::Completed).to_string(),
+                ),
+            ],
         )
     };
     finish(
         ctx,
         content,
-        Some(format!("Tarefas · {} item(ns)", items.len())),
+        Some(crate::i18n::t_args(
+            "tools.exec.todo.summary",
+            &[("count", &items.len().to_string())],
+        )),
         Some(json!({ "kind": "todos", "items": items })),
     )
 }
@@ -2903,14 +3317,17 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Err(error) => {
             return err(
                 "SESSION_LOG_FAILED",
-                format!("não foi possível ler o modo Plano: {error}"),
+                crate::i18n::t_args(
+                    "tools.exec.plan.readModeFailed",
+                    &[("error", &error.to_string())],
+                ),
             )
         }
     };
     if !plan_mode {
         return err(
             "PLAN_MODE_INACTIVE",
-            "`submit_plan` só vale no modo Plano; entre com /plan antes de propor um plano",
+            crate::i18n::t("tools.exec.plan.inactive"),
         );
     }
     let markdown = match arg_str(args, "plan") {
@@ -2918,23 +3335,27 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Err(outcome) => return outcome,
     };
     if markdown.chars().count() > 20_000 {
-        return err("TOOL_INVALID_ARGS", "o plano excede 20 000 caracteres; resuma");
+        return err(
+            "TOOL_INVALID_ARGS",
+            crate::i18n::t("tools.exec.plan.tooLong"),
+        );
     }
     if markdown.chars().count() < MIN_PLAN_CHARS {
         return err(
             "PLAN_TOO_BRIEF",
-            format!(
-                "o plano tem {} caracteres; detalhe o contexto atual (arquivos/símbolos exatos), \
-                 o escopo, as mudanças por arquivo, os passos com critério de conclusão, os \
-                 testes/comandos, os riscos e os critérios de aceite (mínimo {MIN_PLAN_CHARS})",
-                markdown.chars().count()
+            crate::i18n::t_args(
+                "tools.exec.plan.tooBrief",
+                &[
+                    ("count", &markdown.chars().count().to_string()),
+                    ("min", &MIN_PLAN_CHARS.to_string()),
+                ],
             ),
         );
     }
     if ctx.approval.is_none() {
         return err(
             "APPROVAL_UNAVAILABLE",
-            "não há canal de revisão disponível para o plano; prossiga em prosa ou use /plan off",
+            crate::i18n::t("tools.exec.plan.noChannel"),
         );
     }
 
@@ -2944,13 +3365,16 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     if let Err(error) = session::submit_plan(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &markdown) {
         return err(
             "SESSION_LOG_FAILED",
-            format!("não foi possível salvar o plano para revisão: {error}"),
+            crate::i18n::t_args(
+                "tools.exec.plan.saveDraftFailed",
+                &[("error", &error.to_string())],
+            ),
         );
     }
     let Some(reviewing) = emit_plan_updated(ctx) else {
         return err(
             "SESSION_LOG_FAILED",
-            "o plano foi salvo, mas a projeção da sessão não o encontrou",
+            crate::i18n::t("tools.exec.plan.projectionMissing"),
         );
     };
 
@@ -2960,7 +3384,7 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         conversation_id: ctx.conversation_id.clone(),
         tool_call_id: ctx.tool_call_id.clone(),
         tool: "submit_plan".to_string(),
-        title: "Aprovar plano?".to_string(),
+        title: crate::i18n::t("tools.exec.approvals.approvePlan"),
         detail: ApprovalDetail::Other { text: summary_text },
         risk: RiskClass::Ask,
         preview: Some(markdown.clone()),
@@ -3015,14 +3439,14 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 if ctx.turn_kind != TurnKind::User {
                     return plan_error(
                         "GOAL_REQUIRES_USER_TURN",
-                        "um objetivo só pode ser criado a partir de um turno do usuário",
+                        crate::i18n::t("tools.exec.plan.goalRequiresUser"),
                         Some(&reviewing),
                     );
                 }
                 if ctx.workspace.is_none() {
                     return plan_error(
                         "GOAL_NO_WORKSPACE",
-                        "abra uma pasta de trabalho nesta sessão antes de executar o plano como objetivo",
+                        crate::i18n::t("tools.exec.plan.goalNoWorkspace"),
                         Some(&reviewing),
                     );
                 }
@@ -3054,7 +3478,10 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 }
                 return plan_error(
                     "SESSION_LOG_FAILED",
-                    format!("não foi possível salvar a aprovação do plano: {error}"),
+                    crate::i18n::t_args(
+                        "tools.exec.plan.saveApprovalFailed",
+                        &[("error", &error.to_string())],
+                    ),
                     Some(&reviewing),
                 );
             }
@@ -3067,7 +3494,10 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 {
                     return plan_error(
                         "SESSION_LOG_FAILED",
-                        format!("não foi possível atualizar o modo de permissão: {error}"),
+                        crate::i18n::t_args(
+                            "tools.exec.plan.modeUpdateFailed",
+                            &[("error", &error.to_string())],
+                        ),
                         Some(&reviewing),
                     );
                 }
@@ -3083,35 +3513,26 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             });
             let (content, summary) = if execute_as_goal {
                 (
-                    "Plano aprovado e registrado como objetivo persistente.\n\
-                     O modo de permissão atual foi preservado. Encerre este turno agora, sem \
-                     implementar o plano nem chamar outras ferramentas; a primeira rodada do \
-                     objetivo começará automaticamente e seguirá o plano aprovado.\n"
-                        .to_string(),
-                    "Plano aprovado · objetivo criado",
+                    crate::i18n::t("tools.exec.plan.approvedGoal"),
+                    crate::i18n::t("tools.exec.plan.approvedGoalSummary"),
                 )
             } else {
                 let next_step = match mode {
                     PermissionMode::ReadOnly => {
-                        "Modo Leitura ativo: escritas e comandos seguem bloqueados; peça ao \
-                         usuário para mudar o modo se precisar alterar arquivos."
+                        crate::i18n::t("tools.exec.plan.nextReadOnly")
                     }
-                    PermissionMode::Edit => {
-                        "Modo Editar ativo: você pode alterar os arquivos do workspace."
-                    }
-                    PermissionMode::Review => {
-                        "Modo Revisar ativo: cada escrita será aprovada uma a uma."
-                    }
+                    PermissionMode::Edit => crate::i18n::t("tools.exec.plan.nextEdit"),
+                    PermissionMode::Review => crate::i18n::t("tools.exec.plan.nextReview"),
                     PermissionMode::Autonomous => {
-                        "Modo Autônomo ativo: você pode alterar arquivos e executar comandos \
-                         sem confirmação."
+                        crate::i18n::t("tools.exec.plan.nextAutonomous")
                     }
                 };
                 (
-                    format!(
-                        "Plano aprovado — continue a implementação seguindo o plano.\n{next_step}\n"
+                    crate::i18n::t_args(
+                        "tools.exec.plan.approved",
+                        &[("next", &next_step)],
                     ),
-                    "Plano aprovado",
+                    crate::i18n::t("tools.exec.plan.approvedSummary"),
                 )
             };
             finish(
@@ -3131,7 +3552,7 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                 .feedback
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "sem comentários; ajuste o plano".to_string());
+                .unwrap_or_else(|| crate::i18n::t("tools.exec.plan.defaultFeedback"));
             if let Err(error) = session::plan_feedback(
                 &ctx.db,
                 &ctx.conversation_id,
@@ -3140,17 +3561,21 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             ) {
                 return plan_error(
                     "SESSION_LOG_FAILED",
-                    format!("não foi possível salvar o feedback do plano: {error}"),
+                    crate::i18n::t_args(
+                        "tools.exec.plan.saveFeedbackFailed",
+                        &[("error", &error.to_string())],
+                    ),
                     Some(&reviewing),
                 );
             }
             let planning = emit_plan_updated(ctx);
             finish(
                 ctx,
-                format!(
-                    "Plano não aprovado: {feedback}\nRevise o plano conforme o feedback, cobrindo arquivos/símbolos, passos com critério de conclusão, testes/comandos, riscos e critérios de aceite; reenvie com submit_plan.\n"
+                crate::i18n::t_args(
+                    "tools.exec.plan.denied",
+                    &[("feedback", &feedback)],
                 ),
-                Some("Plano revisado".to_string()),
+                Some(crate::i18n::t("tools.exec.plan.reviewedSummary")),
                 Some(planning.as_ref().map(plan_presentation).unwrap_or_else(|| {
                     json!({
                         "kind": "plan",
@@ -3162,39 +3587,44 @@ async fn submit_plan(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             )
         }
         crate::domain::ApprovalDecision::Cancelled => {
-            let feedback = "a revisão do plano foi cancelada; reenvie o plano".to_string();
+            let feedback = crate::i18n::t("tools.exec.plan.cancelledFeedback");
             if let Err(error) =
                 session::plan_feedback(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &feedback)
             {
                 return plan_error(
                     "SESSION_LOG_FAILED",
-                    format!("não foi possível salvar o feedback do plano: {error}"),
+                    crate::i18n::t_args(
+                        "tools.exec.plan.saveFeedbackFailed",
+                        &[("error", &error.to_string())],
+                    ),
                     Some(&reviewing),
                 );
             }
             let planning = emit_plan_updated(ctx);
             plan_error(
                 "APPROVAL_CANCELLED",
-                "a revisão do plano foi cancelada",
+                crate::i18n::t("tools.exec.plan.cancelled"),
                 planning.as_ref().or(Some(&reviewing)),
             )
         }
         crate::domain::ApprovalDecision::Expired => {
-            let feedback =
-                "a revisão do plano foi encerrada sem decisão; reenvie o plano".to_string();
+            let feedback = crate::i18n::t("tools.exec.plan.expiredFeedback");
             if let Err(error) =
                 session::plan_feedback(&ctx.db, &ctx.conversation_id, &ctx.turn_id, &feedback)
             {
                 return plan_error(
                     "SESSION_LOG_FAILED",
-                    format!("não foi possível salvar o feedback do plano: {error}"),
+                    crate::i18n::t_args(
+                        "tools.exec.plan.saveFeedbackFailed",
+                        &[("error", &error.to_string())],
+                    ),
                     Some(&reviewing),
                 );
             }
             let planning = emit_plan_updated(ctx);
             plan_error(
                 "APPROVAL_TIMEOUT",
-                "a revisão do plano terminou sem decisão; reenvie o plano",
+                crate::i18n::t("tools.exec.plan.expired"),
                 planning.as_ref().or(Some(&reviewing)),
             )
         }
@@ -3609,7 +4039,14 @@ mod tests {
         )
         .await;
         assert!(!outcome.is_error, "{}", outcome.content);
-        assert!(outcome.content.starts_with("Created file src/novo.ts"), "{}", outcome.content);
+        assert!(
+            outcome.content.starts_with(&crate::i18n::t_args(
+                "tools.exec.file.created",
+                &[("path", "src/novo.ts"), ("added", "1")],
+            )),
+            "{}",
+            outcome.content
+        );
         assert_eq!(outcome.presentation.as_ref().expect("presentation")["kind"], "file_change");
         let journal = fixture
             .db
@@ -3637,7 +4074,12 @@ mod tests {
         let _ = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
         let ok = call(&ctx, "write_file", json!({ "path": "a.txt", "content": "novo\n" })).await;
         assert!(!ok.is_error, "{}", ok.content);
-        assert!(ok.content.starts_with("Updated file a.txt"));
+        assert!(ok
+            .content
+            .starts_with(&crate::i18n::t_args(
+                "tools.exec.file.updated",
+                &[("path", "a.txt"), ("added", "1"), ("removed", "1")],
+            )));
     }
 
     #[tokio::test]
@@ -3653,7 +4095,14 @@ mod tests {
         )
         .await;
         assert!(!outcome.is_error, "{}", outcome.content);
-        assert!(outcome.content.starts_with("Updated file a.ts (+1 −1)"), "{}", outcome.content);
+        assert!(
+            outcome.content.starts_with(&crate::i18n::t_args(
+                "tools.exec.file.updated",
+                &[("path", "a.ts"), ("added", "1"), ("removed", "1")],
+            )),
+            "{}",
+            outcome.content
+        );
         assert!(std::fs::read_to_string(fixture.root.join("a.ts")).expect("ler").contains("value = 2"));
 
         fixture.write("b.ts", "x x\n");
@@ -3741,7 +4190,6 @@ mod tests {
         )
         .await;
         assert!(!background.is_error, "{}", background.content);
-        assert!(background.content.contains("started background job"), "{}", background.content);
         assert_eq!(background.presentation.as_ref().expect("presentation")["kind"], "job");
         if let Some(job_id) = background
             .presentation
@@ -5048,7 +5496,7 @@ mod tests {
             return;
         }
         assert!(!started.is_error, "{}", started.content);
-        assert!(started.content.contains("started background job"), "{}", started.content);
+        assert_eq!(started.presentation.as_ref().expect("presentation")["kind"], "job");
         let job_id = started
             .presentation
             .as_ref()
@@ -5057,6 +5505,7 @@ mod tests {
             .and_then(Value::as_str)
             .expect("id do job no presentation")
             .to_string();
+        assert!(started.content.contains(&job_id), "{}", started.content);
 
         // Espera o job assentar (echo termina rápido).
         for _ in 0..200 {
@@ -5107,14 +5556,13 @@ mod tests {
             return;
         }
         assert!(!outcome.is_error, "{}", outcome.content);
-        assert!(outcome.content.contains("still running after"), "{}", outcome.content);
-        assert!(outcome.content.contains("moved to background job"), "{}", outcome.content);
         let presentation = outcome.presentation.as_ref().expect("presentation");
         assert_eq!(presentation["kind"], "job");
         let job_id = presentation["job"]["id"]
             .as_str()
             .expect("id do job")
             .to_string();
+        assert!(outcome.content.contains(&job_id), "{}", outcome.content);
         let _ = fixture.jobs.kill(&job_id);
         let _ = fixture.jobs.wait(&job_id, Duration::from_millis(2_000)).await;
         fixture.jobs.remove(&job_id);

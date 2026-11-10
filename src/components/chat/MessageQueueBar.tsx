@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { ListOrdered, Pause, Play, Trash2, X, Zap } from 'lucide-react';
 
 import { Button, IconButton } from '@/components/ui';
@@ -15,7 +16,7 @@ const EMPTY_QUEUE: MessageQueueItem[] = [];
 /**
  * FIFO above the composer for every layout. The queue is persisted in
  * localStorage and drained when the conversation's turn finishes. While a turn
- * is running, "Enviar agora" interrupts it and sends the chosen message.
+ * is running, "Send now" interrupts it and sends the chosen message.
  */
 export function MessageQueueBar({
   conversationId,
@@ -24,6 +25,7 @@ export function MessageQueueBar({
   conversationId: string;
   className?: string;
 }) {
+  const { t } = useTranslation('chat');
   const items = useMessageQueueStore(
     (state) => state.byConversation[conversationId] ?? EMPTY_QUEUE,
   );
@@ -47,16 +49,17 @@ export function MessageQueueBar({
         'mb-2 rounded-xl border border-border bg-surface-raised/80 px-2.5 py-2',
         className,
       )}
-      aria-label="Fila de mensagens"
+      aria-label={t('queue.aria')}
     >
       <div className="flex items-center gap-2">
         <ListOrdered aria-hidden className="size-3.5 shrink-0 text-accent" />
         <p className="min-w-0 flex-1 text-[11px] font-medium text-foreground-muted">
-          Na fila · {items.length}
-          {paused ? ' · pausada' : ''}
+          {paused
+            ? t('queue.titlePaused', { count: items.length })
+            : t('queue.title', { count: items.length })}
         </p>
         <IconButton
-          label={paused ? 'Retomar fila' : 'Pausar fila'}
+          label={paused ? t('queue.resume') : t('queue.pause')}
           size="sm"
           variant="ghost"
           onClick={() => {
@@ -75,11 +78,11 @@ export function MessageQueueBar({
               else void processQueue(conversationId);
             }}
           >
-            Enviar agora
+            {t('queue.sendNow')}
           </Button>
         ) : null}
         <IconButton
-          label="Limpar fila"
+          label={t('queue.clear')}
           size="sm"
           variant="ghost"
           onClick={() => clear(conversationId)}
@@ -97,10 +100,10 @@ export function MessageQueueBar({
               {index + 1}
             </span>
             <span className="min-w-0 flex-1 truncate text-[11px] text-foreground-muted">
-              {item.content || `${item.attachments.length} anexo(s)`}
+              {item.content || t('queue.attachments', { count: item.attachments.length })}
             </span>
             <IconButton
-              label="Enviar agora"
+              label={t('queue.sendNow')}
               size="sm"
               variant="ghost"
               onClick={() => {
@@ -110,7 +113,7 @@ export function MessageQueueBar({
               <Zap className="size-3" />
             </IconButton>
             <IconButton
-              label="Remover da fila"
+              label={t('queue.remove')}
               size="sm"
               variant="ghost"
               onClick={() => {
@@ -123,7 +126,7 @@ export function MessageQueueBar({
         ))}
         {items.length > 3 ? (
           <li className="pl-6 text-[10px] text-foreground-subtle">
-            +{items.length - 3} mensagem(ns)
+            {t('queue.more', { count: items.length - 3 })}
           </li>
         ) : null}
       </ul>

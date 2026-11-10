@@ -43,8 +43,11 @@ pub(crate) fn definition_of(spec: &ToolSpec) -> ToolDefinition {
 /// pelo executor real sem alterar o call site.
 pub(crate) fn not_wired(name: &str) -> ToolOutcome {
     ToolOutcome {
-        content: format!("Error: tool \"{name}\" not wired yet"),
-        summary: Some(format!("{name} · não implementada")),
+        content: crate::i18n::t_args("tools.code.notWired.content", &[("tool", name)]),
+        summary: Some(crate::i18n::t_args(
+            "tools.code.notWired.summary",
+            &[("tool", name)],
+        )),
         is_error: true,
         ..Default::default()
     }
@@ -58,7 +61,10 @@ mod tests {
     fn not_wired_returns_actionable_error_without_panicking() {
         let outcome = not_wired("read_file");
         assert!(outcome.is_error);
-        assert!(outcome.content.starts_with("Error: tool \"read_file\" not wired yet"));
+        assert_eq!(
+            outcome.content,
+            crate::i18n::t_args("tools.code.notWired.content", &[("tool", "read_file")])
+        );
         assert_eq!(outcome.presentation, None);
     }
 }

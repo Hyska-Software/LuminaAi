@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { compareText } from '@/lib/i18n/format';
+import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
 /** Default rendered-node cap; the preview warns when the document is larger. */
@@ -80,9 +83,7 @@ function buildEntry(
 
   if (value !== null && typeof value === 'object') {
     // Object keys are sorted so the tree is stable regardless of insertion order.
-    const keys = Object.keys(value as Record<string, unknown>).sort((a, b) =>
-      a.localeCompare(b, 'pt-BR'),
-    );
+    const keys = Object.keys(value as Record<string, unknown>).sort(compareText);
     const entry: ContainerEntry = {
       kind: 'object',
       id,
@@ -115,7 +116,10 @@ function buildEntry(
 function primitiveText(value: JsonPrimitive): string {
   if (typeof value === 'string') {
     if (value.length > MAX_STRING_LENGTH) {
-      return `${JSON.stringify(value.slice(0, MAX_STRING_LENGTH))}… (${value.length} caracteres)`;
+      return `${JSON.stringify(value.slice(0, MAX_STRING_LENGTH))}… ${t(
+        'artifacts:json.characters',
+        { count: value.length },
+      )}`;
     }
     return JSON.stringify(value);
   }
@@ -131,8 +135,8 @@ function primitiveClass(value: JsonPrimitive): string {
 }
 
 function countLabel(entry: ContainerEntry): string {
-  if (entry.kind === 'array') return entry.count === 1 ? '1 item' : `${entry.count} itens`;
-  return entry.count === 1 ? '1 chave' : `${entry.count} chaves`;
+  if (entry.kind === 'array') return t('artifacts:json.items', { count: entry.count });
+  return t('artifacts:json.keys', { count: entry.count });
 }
 
 const ROW_CLASS =
@@ -196,7 +200,11 @@ function JsonEntryView({ entry, depth, initialDepth, expandedById, onToggle }: E
         type="button"
         onClick={() => onToggle(entry.id, !isExpanded)}
         aria-expanded={isExpanded}
-        aria-label={`${isExpanded ? 'Recolher' : 'Expandir'} ${labelText}`}
+        aria-label={
+          isExpanded
+            ? t('artifacts:json.collapse', { label: labelText })
+            : t('artifacts:json.expand', { label: labelText })
+        }
         className={cn(
           ROW_CLASS,
           'items-center hover:bg-surface-hover motion-reduce:transition-none',
@@ -244,7 +252,7 @@ export interface JsonTreeProps {
   /** Rendered-node cap; the tree warns when the document is longer. */
   maxNodes?: number;
   className?: string;
-  /** Accessible name of the tree region. */
+  /** Accessible name of the tree region; defaults to the generic label. */
   ariaLabel?: string;
 }
 
@@ -260,12 +268,13 @@ export function JsonTree({
   initialDepth = JSON_TREE_INITIAL_DEPTH,
   maxNodes = JSON_TREE_MAX_NODES,
   className,
-  ariaLabel = 'Árvore JSON',
+  ariaLabel,
 }: JsonTreeProps) {
+  const { t: translate, i18n } = useTranslation('artifacts');
   const { root, truncated } = useMemo(() => {
     const state: BuildState = { remaining: maxNodes, truncated: false, nextId: 0 };
     return { root: buildEntry(value, null, null, 0, state), truncated: state.truncated };
-  }, [value, maxNodes]);
+  }, [value, maxNodes, i18n.language]);
 
   // Stores only the explicit overrides; the default comes from node depth.
   const [expandedById, setExpandedById] = useState<Record<string, boolean>>({});
@@ -278,7 +287,11 @@ export function JsonTree({
     setExpandedById((previous) => ({ ...previous, [id]: expanded }));
 
   return (
-    <div role="group" aria-label={ariaLabel} className={cn('min-w-0', className)}>
+    <div
+      role="group"
+      aria-label={ariaLabel ?? translate('artifacts:json.treeLabel')}
+      className={cn('min-w-0', className)}
+    >
       <JsonEntryView
         entry={root}
         depth={0}
@@ -288,7 +301,7 @@ export function JsonTree({
       />
       {truncated ? (
         <p className="mt-2 text-[11px] text-foreground-subtle">
-          Prévia truncada — JSON muito extenso
+          {translate('artifacts:json.truncated')}
         </p>
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -76,6 +77,7 @@ export function AgentRoutineEditorDialog({
   initialAgentId = null,
   onSaved,
 }: AgentRoutineEditorDialogProps) {
+  const { t } = useTranslation('agents');
   const [agentId, setAgentId] = useState('');
   const [form, setForm] = useState<AgentRoutineInput>(emptyInput);
   const [saving, setSaving] = useState(false);
@@ -108,19 +110,19 @@ export function AgentRoutineEditorDialog({
     const title = form.title.trim();
     const prompt = form.prompt.trim();
     if (!agentId) {
-      setError('Escolha o agente da rotina.');
+      setError(t('routineEditor.errors.agent'));
       return;
     }
     if (!title) {
-      setError('Dê um título à rotina.');
+      setError(t('routineEditor.errors.title'));
       return;
     }
     if (!prompt) {
-      setError('Descreva a instrução da rotina.');
+      setError(t('routineEditor.errors.prompt'));
       return;
     }
     if (form.triggerKind === 'event' && !form.eventKind) {
-      setError('Escolha o tipo de evento.');
+      setError(t('routineEditor.errors.event'));
       return;
     }
     if (
@@ -128,7 +130,7 @@ export function AgentRoutineEditorDialog({
       form.scheduleKind === 'daily' &&
       form.daysOfWeek === 0
     ) {
-      setError('Escolha ao menos um dia.');
+      setError(t('routineEditor.errors.days'));
       return;
     }
 
@@ -139,13 +141,13 @@ export function AgentRoutineEditorDialog({
       const saved = routine
         ? await api.updateAgentRoutine(routine.id, payload)
         : await api.createAgentRoutine(agentId, payload);
-      toast.success(routine ? 'Rotina atualizada' : 'Rotina criada', {
+      toast.success(routine ? t('routineEditor.updated') : t('routineEditor.created'), {
         description: saved.title,
       });
       onSaved(saved);
       onOpenChange(false);
     } catch (caught) {
-      toast.error('Não foi possível salvar a rotina', {
+      toast.error(t('routineEditor.saveError'), {
         description: String(caught),
       });
     } finally {
@@ -160,15 +162,15 @@ export function AgentRoutineEditorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="lg">
         <DialogHeader className="pb-4 pr-12">
-          <DialogTitle>{routine ? 'Editar rotina' : 'Nova rotina'}</DialogTitle>
+          <DialogTitle>{routine ? t('routineEditor.editTitle') : t('routineEditor.newTitle')}</DialogTitle>
           <DialogDescription>
-            Uma instrução que o agente executa sozinho na conversa principal do agente.
+            {t('routineEditor.description')}
           </DialogDescription>
         </DialogHeader>
 
         <AgentDialogBody className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="routine-agent">Agente</Label>
+            <Label htmlFor="routine-agent">{t('routineEditor.agent')}</Label>
             <NativeSelect
               id="routine-agent"
               value={agentId}
@@ -177,7 +179,7 @@ export function AgentRoutineEditorDialog({
             >
               {!routine ? (
                 <option value="" disabled>
-                  Selecione um agente
+                  {t('routineEditor.selectAgent')}
                 </option>
               ) : null}
               {agents.map((agent) => (
@@ -186,8 +188,9 @@ export function AgentRoutineEditorDialog({
                   value={agent.id}
                   disabled={!routine && agent.archivedAt !== null}
                 >
-                  {agent.name}
-                  {agent.archivedAt !== null ? ' (arquivado)' : ''}
+                  {agent.archivedAt !== null
+                    ? t('routineEditor.archivedAgent', { name: agent.name })
+                    : agent.name}
                 </option>
               ))}
               {ownerMissing && routine ? (
@@ -197,13 +200,13 @@ export function AgentRoutineEditorDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="routine-title">Título</Label>
+            <Label htmlFor="routine-title">{t('routineEditor.title')}</Label>
             <Input
               id="routine-title"
               value={form.title}
               maxLength={80}
               autoFocus
-              placeholder="Resumo diário do repositório"
+              placeholder={t('routineEditor.titlePlaceholder')}
               onChange={(event) =>
                 setForm((current) => ({ ...current, title: event.target.value }))
               }
@@ -211,14 +214,14 @@ export function AgentRoutineEditorDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="routine-prompt">Instrução</Label>
+            <Label htmlFor="routine-prompt">{t('routineEditor.prompt')}</Label>
             <Textarea
               id="routine-prompt"
               value={form.prompt}
               rows={4}
               maxLength={8192}
               className="min-h-24 resize-y text-[12px]"
-              placeholder="Liste os testes que passaram a falhar desde a última execução."
+              placeholder={t('routineEditor.promptPlaceholder')}
               onChange={(event) =>
                 setForm((current) => ({ ...current, prompt: event.target.value }))
               }
@@ -227,7 +230,7 @@ export function AgentRoutineEditorDialog({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="routine-trigger">Gatilho</Label>
+              <Label htmlFor="routine-trigger">{t('routineEditor.trigger')}</Label>
               <NativeSelect
                 id="routine-trigger"
                 value={form.triggerKind}
@@ -244,14 +247,14 @@ export function AgentRoutineEditorDialog({
                   }));
                 }}
               >
-                <option value="schedule">Agendada</option>
-                <option value="event">Por evento</option>
+                <option value="schedule">{t('routineEditor.scheduled')}</option>
+                <option value="event">{t('routineEditor.byEvent')}</option>
               </NativeSelect>
             </div>
 
             {form.triggerKind === 'schedule' ? (
               <div className="space-y-1.5">
-                <Label htmlFor="routine-kind">Frequência</Label>
+                <Label htmlFor="routine-kind">{t('routineEditor.frequency')}</Label>
                 <NativeSelect
                   id="routine-kind"
                   value={form.scheduleKind}
@@ -263,13 +266,13 @@ export function AgentRoutineEditorDialog({
                     }))
                   }
                 >
-                  <option value="interval">A cada intervalo</option>
-                  <option value="daily">Todos os dias</option>
+                  <option value="interval">{t('routineEditor.intervalOption')}</option>
+                  <option value="daily">{t('routineEditor.dailyOption')}</option>
                 </NativeSelect>
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label htmlFor="routine-event">Evento</Label>
+                <Label htmlFor="routine-event">{t('routineEditor.event')}</Label>
                 <NativeSelect
                   id="routine-event"
                   value={form.eventKind}
@@ -281,15 +284,15 @@ export function AgentRoutineEditorDialog({
                     }))
                   }
                 >
-                  <option value="channel.message">Mensagem em canal</option>
-                  <option value="task.status">Status de tarefa</option>
+                  <option value="channel.message">{t('routineEditor.eventChannelMessage')}</option>
+                  <option value="task.status">{t('routineEditor.eventTaskStatus')}</option>
                 </NativeSelect>
               </div>
             )}
 
             {form.triggerKind === 'schedule' && form.scheduleKind === 'interval' ? (
               <div className="space-y-1.5">
-                <Label htmlFor="routine-interval">Intervalo (min)</Label>
+                <Label htmlFor="routine-interval">{t('routineEditor.interval')}</Label>
                 <Input
                   id="routine-interval"
                   type="number"
@@ -308,10 +311,10 @@ export function AgentRoutineEditorDialog({
 
             {daily ? (
               <div className="space-y-1.5 sm:col-span-2">
-                <Label>Horário</Label>
+                <Label>{t('routineEditor.time')}</Label>
                 <div className="flex items-center gap-1.5">
                   <Input
-                    aria-label="Hora"
+                    aria-label={t('routineEditor.hourAria')}
                     type="number"
                     min={0}
                     max={23}
@@ -328,7 +331,7 @@ export function AgentRoutineEditorDialog({
                   />
                   <span className="text-foreground-subtle">:</span>
                   <Input
-                    aria-label="Minuto"
+                    aria-label={t('routineEditor.minuteAria')}
                     type="number"
                     min={0}
                     max={59}
@@ -349,7 +352,7 @@ export function AgentRoutineEditorDialog({
 
             {form.triggerKind === 'event' ? (
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="routine-filter">Filtro JSON (opcional)</Label>
+                <Label htmlFor="routine-filter">{t('routineEditor.filter')}</Label>
                 <Input
                   id="routine-filter"
                   value={form.eventFilterJson}
@@ -367,8 +370,8 @@ export function AgentRoutineEditorDialog({
 
           {daily ? (
             <div className="space-y-1.5">
-              <Label>Dias da semana</Label>
-              <div role="group" aria-label="Dias da semana" className="flex flex-wrap gap-1">
+              <Label>{t('routineEditor.weekdays')}</Label>
+              <div role="group" aria-label={t('routineEditor.weekdays')} className="flex flex-wrap gap-1">
                 {ROUTINE_WEEKDAYS.map((day) => {
                   const active = (form.daysOfWeek & day.bit) !== 0;
                   return (
@@ -399,8 +402,8 @@ export function AgentRoutineEditorDialog({
             onCheckedChange={(checked) =>
               setForm((current) => ({ ...current, enabled: checked }))
             }
-            label="Ativa"
-            description="Rotinas desativadas não são executadas pelo agendador."
+            label={t('routineEditor.active')}
+            description={t('routineEditor.activeDescription')}
           />
 
           {error ? (
@@ -410,18 +413,17 @@ export function AgentRoutineEditorDialog({
           ) : null}
 
           <p className="text-[10px] leading-relaxed text-foreground-subtle">
-            O agendador roda enquanto o app estiver aberto. O resultado aparece na conversa
-            principal do agente; não há execução em nuvem.
+            {t('routineEditor.footnote')}
           </p>
         </AgentDialogBody>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancelar
+            {t('common:actions.cancel')}
           </Button>
           <Button variant="primary" disabled={saving} onClick={() => void save()}>
             {saving ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-            {routine ? 'Salvar rotina' : 'Criar rotina'}
+            {routine ? t('routineEditor.save') : t('routineEditor.create')}
           </Button>
         </DialogFooter>
       </DialogContent>

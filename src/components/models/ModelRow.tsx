@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { Check, Star } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { formatContextWindow, formatPrice } from '@/lib/catalog';
 import { modelKey, type ModelListEntry } from '@/lib/modelMenu';
 import { cn } from '@/lib/utils';
@@ -57,6 +58,7 @@ export const ModelRow = React.forwardRef<HTMLDivElement, ModelRowProps>(function
   ref,
 ) {
   const { model } = entry;
+  const { t } = useTranslation('models');
   const compact = variant === 'compact';
   const unavailable = model.status === 'unavailable';
 
@@ -68,7 +70,7 @@ export const ModelRow = React.forwardRef<HTMLDivElement, ModelRowProps>(function
         role="option"
         aria-selected={selected}
         aria-disabled={unavailable || undefined}
-        title={unavailable ? 'Indisponível no gateway — não pode ser usado.' : undefined}
+        title={unavailable ? t('detail.unavailableTitle') : undefined}
         data-active={active || undefined}
         data-selected={selected || undefined}
         onMouseEnter={onActivate}
@@ -107,9 +109,9 @@ export const ModelRow = React.forwardRef<HTMLDivElement, ModelRowProps>(function
                   <Badge
                     tone="outline"
                     className="shrink-0"
-                    title="Modelo listado pela sua conta: capacidades estimadas."
+                    title={t('row.estimatedTitle')}
                   >
-                    Estimado
+                    {t('detail.estimated')}
                   </Badge>
                 ) : null}
               </>
@@ -152,11 +154,13 @@ export const ModelRow = React.forwardRef<HTMLDivElement, ModelRowProps>(function
           tabIndex={-1}
           aria-label={
             entry.favorite
-              ? `Remover ${model.name} dos favoritos`
-              : `Favoritar ${model.name}`
+              ? t('row.favoriteRemove', { name: model.name })
+              : t('row.favoriteAdd', { name: model.name })
           }
           aria-pressed={entry.favorite}
-          title={entry.favorite ? 'Remover dos favoritos' : 'Favoritar'}
+          title={
+            entry.favorite ? t('row.favoriteRemoveShort') : t('row.favoriteAddShort')
+          }
           onClick={(event) => {
             event.stopPropagation();
             onFavoriteToggle();

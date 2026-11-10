@@ -1,0 +1,231 @@
+{
+  "window": {
+    "install": "Zylara Setup",
+    "uninstall": "Desinstalar Zylara"
+  },
+  "loading": {
+    "spinner": "Carregando instalador",
+    "preparing": "Preparando o instalador…"
+  },
+  "screens": {
+    "welcome": "Boas-vindas",
+    "scope": "Escopo",
+    "location": "Destino",
+    "options": "Opções",
+    "progress": "Instalação",
+    "finish": "Concluído",
+    "confirmUninstall": "Remover",
+    "error": "Erro"
+  },
+  "shell": {
+    "close": "Fechar instalador",
+    "steps": "Etapas",
+    "mode": {
+      "install": "Instalador",
+      "uninstall": "Desinstalação"
+    },
+    "local": {
+      "title": "Instalação local",
+      "description": "Seus dados ficam neste computador. Nada é enviado para nós."
+    }
+  },
+  "language": {
+    "label": "Idioma"
+  },
+  "common": {
+    "cancel": "Cancelar",
+    "close": "Fechar",
+    "back": "Voltar",
+    "continue": "Continuar",
+    "openLog": "Abrir log"
+  },
+  "welcome": {
+    "eyebrowUpdate": "Atualização",
+    "eyebrowWelcome": "Bem-vindo",
+    "titleUpdate": "Atualize o Zylara",
+    "titleInstall": "Instale o Zylara",
+    "subtitle": "Chat desktop com agentes, documentos e código.",
+    "versionAvailable": "Versão {{version}} disponível",
+    "version": "Versão {{version}}",
+    "currentInstall": "Instalação atual: {{version}} em {{path}}",
+    "duration": "A instalação leva menos de um minuto.",
+    "badgeUpdate": "Atualizar",
+    "badgeReady": "Pronto",
+    "features": {
+      "models": {
+        "title": "Seus modelos",
+        "description": "OpenCode, OpenAI e Anthropic em um só lugar."
+      },
+      "local": {
+        "title": "Local-first",
+        "description": "Conversas e arquivos ficam no seu computador."
+      },
+      "complete": {
+        "title": "Completo",
+        "description": "Biblioteca, código, terminal e skills inclusos."
+      },
+      "updates": {
+        "title": "Atualização simples",
+        "description": "Execute o novo instalador quando quiser."
+      }
+    },
+    "keepData": "Atualizar mantém suas conversas, arquivos, configurações e chaves de API.",
+    "hint": "Ao continuar, você poderá escolher onde e para quem instalar.",
+    "update": "Atualizar Zylara",
+    "continue": "Continuar"
+  },
+  "scope": {
+    "eyebrow": "Etapa 1 de 3",
+    "title": "Para quem vamos instalar?",
+    "description": "Escolha o escopo. A opção por usuário não pede administrador; a opção para todos deixa o Zylara disponível para qualquer conta deste computador.",
+    "radiogroup": "Escopo da instalação",
+    "user": {
+      "title": "Apenas para mim",
+      "description": "Instala em {{path}}. Não exige permissão de administrador."
+    },
+    "machine": {
+      "title": "Para todos os usuários",
+      "description": "Instala em {{path}}. O Windows pedirá permissão de administrador."
+    },
+    "elevateWarning": "Ao continuar, o instalador vai reabrir com permissões de administrador para criar atalhos e registrar o app para todos.",
+    "conflicting": {
+      "title": "Já existe uma instalação em outro escopo.",
+      "description": "{{scope}} em {{path}} (v{{version}}). Remova essa instalação antes de continuar."
+    },
+    "hint": "Você poderá mudar a pasta na próxima etapa."
+  },
+  "location": {
+    "eyebrow": "Etapa 2 de 3",
+    "title": "Onde instalar?",
+    "description": "A pasta será criada se ainda não existir. O Zylara precisa de uma unidade local para o banco de dados e os checkpoints.",
+    "label": "Pasta de instalação",
+    "browse": "Procurar…",
+    "browseTitle": "Escolha a pasta de instalação",
+    "scope": "Escopo",
+    "required": "Espaço necessário",
+    "free": "{{size}} livres na unidade de destino.",
+    "adminWarning": "A pasta em Program Files exige administrador.",
+    "hint": "Seus dados de conversas ficam separados da pasta do aplicativo."
+  },
+  "options": {
+    "eyebrowUpdate": "Atualização",
+    "eyebrow": "Etapa 3 de 3",
+    "titleUpdate": "Confirme a atualização",
+    "title": "Ajuste os detalhes",
+    "descriptionUpdate": "O Zylara {{version}} será instalado sobre a versão {{existingVersion}}. Seus dados serão preservados.",
+    "description": "Escolha como o Zylara deve aparecer no Windows. Você pode mudar os atalhos depois na pasta de instalação.",
+    "conflicting": {
+      "title": "Existe outra instalação do Zylara.",
+      "description": "{{scope}} em {{path}} (v{{version}}). Remova essa instalação antes de continuar."
+    },
+    "running": {
+      "title": "O Zylara está aberto",
+      "description": "Feche o aplicativo antes de continuar para evitar arquivos bloqueados.",
+      "close": "Fechar agora"
+    },
+    "desktopShortcut": {
+      "title": "Atalho na área de trabalho",
+      "description": "Cria um atalho para abrir o Zylara."
+    },
+    "startMenuShortcut": {
+      "title": "Atalho no Menu Iniciar",
+      "description": "Adiciona o Zylara ao menu Iniciar e à pesquisa do Windows."
+    },
+    "launchAfterInstall": {
+      "title": "Abrir o Zylara ao concluir",
+      "description": "Inicia o aplicativo assim que a instalação terminar."
+    },
+    "destination": "Destino:",
+    "scope": "Escopo:",
+    "hintElevate": "Ao instalar, o Windows pedirá permissão de administrador.",
+    "hintDefault": "A instalação não remove nem altera suas conversas existentes.",
+    "installUpdate": "Atualizar agora",
+    "install": "Instalar Zylara"
+  },
+  "progress": {
+    "eyebrowUninstall": "Removendo",
+    "eyebrow": "Instalando",
+    "titleUninstall": "Removendo o Zylara",
+    "title": "Instalando o Zylara",
+    "description": "Mantenha esta janela aberta. O instalador está aplicando as alterações com segurança.",
+    "preparing": "Preparando…",
+    "progressUninstall": "Progresso da desinstalação",
+    "progress": "Progresso da instalação",
+    "details": "Detalhes da instalação",
+    "noDetails": "Sem detalhes ainda.",
+    "hint": "Você pode cancelar antes de a cópia dos arquivos começar."
+  },
+  "finish": {
+    "titleUninstall": "Zylara removido",
+    "titleLaunched": "Tudo pronto",
+    "titleDone": "Instalação concluída",
+    "descriptionUninstallPurge": "O aplicativo e os dados do usuário foram removidos deste computador.",
+    "descriptionUninstall": "O aplicativo foi removido. Suas conversas, arquivos e configurações foram preservados.",
+    "descriptionLaunched": "O Zylara foi instalado e já está aberto. Bom trabalho!",
+    "descriptionDone": "O Zylara está pronto para usar. Você pode abri-lo agora ou pela área de trabalho.",
+    "openLaunched": "Abrir Zylara",
+    "open": "Abrir Zylara agora",
+    "openFolder": "Abrir pasta"
+  },
+  "uninstall": {
+    "eyebrow": "Desinstalação",
+    "title": "Remover o Zylara?",
+    "description": "O aplicativo será removido deste computador. Você pode escolher se as conversas, arquivos e configurações também devem ser apagados.",
+    "purge": {
+      "label": "Remover também meus dados",
+      "description": "Apaga conversas, anexos, artefatos, configurações e chaves de API salvas neste computador. Esta ação não pode ser desfeita."
+    },
+    "purgeWarning": "As chaves de API serão apagadas. Você precisará configurá-las novamente se reinstalar o Zylara.",
+    "infoConfirm": "Confirme novamente para apagar o aplicativo e todos os dados do usuário atual. Esta ação é definitiva.",
+    "infoNext": "No próximo passo você confirma a remoção dos dados. Seus arquivos ainda estão protegidos até lá.",
+    "infoDefault": "Suas conversas, arquivos e configurações serão mantidos por padrão.",
+    "hint": "A remoção do aplicativo não afeta outras contas deste computador.",
+    "confirm": "Confirmar remoção",
+    "remove": "Remover Zylara"
+  },
+  "errorScreen": {
+    "eyebrow": "Algo deu errado",
+    "titleUninstall": "Não foi possível remover",
+    "title": "Não foi possível instalar",
+    "description": "A operação foi interrompida. Veja os detalhes abaixo e tente novamente.",
+    "problem": "O instalador encontrou um problema",
+    "unknown": "Erro desconhecido.",
+    "technical": "Detalhes técnicos",
+    "logFallback": "Consulte o log completo.",
+    "hint": "O log completo fica na pasta temporária do Windows.",
+    "retry": "Tentar novamente"
+  },
+  "errors": {
+    "generic": "Não foi possível concluir a operação.",
+    "notInstalled": "O Zylara não está instalado para este usuário.",
+    "loadTitle": "Não foi possível abrir o instalador"
+  },
+  "steps": {
+    "install": {
+      "prepare": "Validar destino e permissões",
+      "closeApp": "Fechar o Zylara em execução",
+      "copy": "Copiar arquivos do aplicativo",
+      "shortcuts": "Criar atalhos",
+      "register": "Registrar desinstalação",
+      "launch": "Iniciar o Zylara"
+    },
+    "uninstall": {
+      "prepare": "Validar a instalação",
+      "closeApp": "Fechar o Zylara em execução",
+      "removeFiles": "Remover arquivos do aplicativo",
+      "removeRegistry": "Remover registro e atalhos",
+      "removeData": "Remover dados do usuário",
+      "cleanup": "Finalizar"
+    }
+  },
+  "scopeLabel": {
+    "user": "Apenas para mim",
+    "machine": "Todos os usuários"
+  },
+  "pathError": {
+    "empty": "Escolha uma pasta de instalação.",
+    "absolute": "Use um caminho absoluto em uma unidade local, como C:\\Program Files\\Zylara.",
+    "parent": "O caminho não pode conter \"..\".",
+    "root": "Escolha uma pasta dentro da unidade, não a raiz."
+  }
+}

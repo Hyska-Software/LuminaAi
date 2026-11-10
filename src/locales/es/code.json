@@ -1,0 +1,983 @@
+{
+  "permissions": {
+    "autonomousWarningTitle": "Modo autónomo activado",
+    "autonomousWarning": "El modo autónomo no tiene restricciones de confirmación: los comandos, las ediciones, el acceso a secretos y el control del equipo se ejecutan sin pedir aprobación. El modo Plan, si está activo, sigue pidiendo aprobación del plan."
+  },
+  "cache": {
+    "state": {
+      "cold": {
+        "label": "Frío",
+        "description": "Primera solicitud de la época: todavía no hay un prefijo que reutilizar."
+      },
+      "warming": {
+        "label": "Calentando",
+        "description": "El proveedor todavía está guardando el prefijo en la caché."
+      },
+      "stable": {
+        "label": "Estable",
+        "description": "Las solicitudes en régimen leen el prefijo de la caché."
+      },
+      "degraded": {
+        "label": "Caché caída",
+        "description": "El prefijo persistente cambió y la caché quedó invalidada."
+      },
+      "unsupported": {
+        "label": "No reportado",
+        "description": "El proveedor/la puerta de enlace no reporta caché para este modelo."
+      },
+      "provider_policy": {
+        "label": "Política del proveedor",
+        "description": "El proveedor no reutiliza esta solicitud por su propia regla de caché."
+      }
+    },
+    "break": {
+      "first_request": "Primera solicitud de la época",
+      "system_prompt": "El prompt del sistema cambió",
+      "tool_definitions": "Las definiciones de herramientas cambiaron",
+      "history_rewrite": "El historial se reescribió",
+      "head_trim": "Se recortó el historial antiguo",
+      "compaction": "Contexto compactado",
+      "model_switch": "El modelo o el proveedor cambió",
+      "protocol_fallback": "El protocolo de conexión cambió",
+      "attachments": "Los adjuntos cambiaron",
+      "config_change": "La configuración cambió",
+      "ttl_expired": "La caché expiró (TTL)",
+      "provider_policy": "Regla del proveedor"
+    }
+  },
+  "goal": {
+    "status": {
+      "working": "Trabajando",
+      "automatic": "Automático",
+      "manual": "Manual",
+      "paused": "Pausado",
+      "completed": "Completado",
+      "blocked": "Bloqueado",
+      "fallback": "Objetivo"
+    },
+    "adjective": {
+      "active": "activo",
+      "paused": "pausado",
+      "completed": "completado",
+      "blocked": "bloqueado"
+    },
+    "pause": {
+      "user": "Pausado por ti",
+      "error": "Pausado tras un error",
+      "max_rounds": "Límite de rondas alcanzado",
+      "stalled": "Sin progreso en 3 rondas",
+      "interrupted": "Ronda anterior interrumpida"
+    },
+    "round": "Ronda {{current}} de {{max}}",
+    "continuation": {
+      "no_goal": "Define un objetivo para esta sesión.",
+      "not_code": "El objetivo solo existe en sesiones del layout Code.",
+      "completed": "Objetivo completado.",
+      "blocked": "Objetivo bloqueado.",
+      "paused": "Objetivo pausado.",
+      "not_armed": "Continuidad automática desactivada.",
+      "max_rounds": "Límite de rondas alcanzado.",
+      "plan_mode": "Modo Plan activo: aprueba el plan para continuar.",
+      "pending_approval": "Hay una aprobación o pregunta pendiente.",
+      "busy": "Ya hay un turno en curso en esta sesión.",
+      "no_workspace": "Abre una carpeta para trabajar en el objetivo.",
+      "interrupted": "La última ronda se interrumpió. Reanuda para continuar.",
+      "unknown": "No se pudo continuar: {{reason}}",
+      "fallback": "No se pudo continuar."
+    },
+    "progress": {
+      "rounds": "{{rounds}}/{{max}} rondas",
+      "finished_one": "{{count}} completada",
+      "finished_other": "{{count}} completadas",
+      "duration": "{{seconds}}s"
+    },
+    "outcome": {
+      "done": "Completada",
+      "cancelled": "Cancelada",
+      "error": "Error",
+      "interrupted": "Interrumpida",
+      "running": "En curso"
+    },
+    "dialog": {
+      "title": {
+        "create": "Definir objetivo",
+        "edit": "Editar objetivo"
+      },
+      "description": {
+        "create": "Describe el resultado esperado. El agente trabaja en él por rondas hasta completarlo, bloquearse o alcanzar el límite.",
+        "edit": "Ajusta el resultado esperado, el límite de rondas y la continuidad automática."
+      },
+      "existingBlocking": "Ya existe un objetivo {{status}} en esta sesión. Cierra el actual para crear otro, o edita el que ya existe.",
+      "completedReplaced": "El objetivo completado será reemplazado por el nuevo.",
+      "field": {
+        "title": "Título",
+        "optional": "opcional",
+        "objective": "Objetivo",
+        "maxRounds": "Límite de rondas"
+      },
+      "titlePlaceholder": "Ej.: Corregir el cálculo de intereses",
+      "titleHint": "Sin título, usamos la primera línea del objetivo.",
+      "objectivePlaceholder": "Describe el resultado esperado, con criterios de aceptación…",
+      "objectiveHint": "Solo el objetivo decide cuándo se detiene el agente: completar, bloquearse o superar el límite.",
+      "autoContinue": {
+        "label": "Continuar automáticamente",
+        "locked": "La continuidad se reactiva al reanudar el objetivo.",
+        "description": "El agente continúa solo después de cada turno exitoso."
+      },
+      "maxRoundsHint": "Entre 1 y {{max}}. Predeterminado: {{preset}}.",
+      "warning": "Cada ronda es un turno completo y consume tokens del proveedor. El objetivo se pausa solo ante errores, tras 3 rondas sin progreso o al alcanzar el límite.",
+      "danger": {
+        "heading": "Zona de peligro",
+        "description": "Cerrar elimina el objetivo y detiene las rondas automáticas.",
+        "close": "Cerrar objetivo",
+        "confirmGroup": "Confirmar cierre del objetivo",
+        "confirmDescription": "El historial de rondas se conserva, pero la sesión queda sin objetivo. Esta acción no se puede deshacer.",
+        "confirm": "Confirmar cierre",
+        "back": "Volver"
+      },
+      "action": {
+        "createWithoutStart": "Crear sin empezar",
+        "createAndStart": "Crear y empezar",
+        "editObjective": "Editar objetivo"
+      },
+      "error": {
+        "objectiveRequired": "Describe el objetivo de la sesión.",
+        "objectiveTooLong": "El objetivo debe tener como máximo {{max}} caracteres.",
+        "titleTooLong": "El título debe tener como máximo {{max}} caracteres.",
+        "maxRounds": "Usa un límite entre 1 y {{max}} rondas.",
+        "create": "No se pudo crear el objetivo. Si ya existe un objetivo activo, edítalo en vez de crear otro.",
+        "save": "No se pudo guardar el objetivo. Actualiza la sesión e inténtalo de nuevo.",
+        "delete": "No se pudo cerrar el objetivo. Inténtalo de nuevo."
+      }
+    },
+    "toast": {
+      "created": "Objetivo creado",
+      "createdAuto": "La primera ronda continúa automáticamente al final del turno actual.",
+      "createdManual": "Cuando termine el turno actual, inicia la ronda desde el panel del objetivo.",
+      "roundNotStarted": "Objetivo creado, pero la ronda no se inició",
+      "roundNotStartedDescription": "Verifica que la sesión esté activa en Code y que no haya aprobación ni pregunta pendiente.",
+      "startRoundFailed": "No se pudo iniciar la ronda",
+      "startRoundFailedDescription": "Verifica que la sesión esté activa en Code, sin aprobaciones pendientes ni modo Plan.",
+      "copied": "Objetivo copiado",
+      "copyFailed": "No se pudo copiar el objetivo"
+    },
+    "panel": {
+      "region": "Objetivo de la sesión",
+      "loading": "Cargando objetivo…",
+      "empty": {
+        "title": "Ningún objetivo en esta sesión",
+        "description": "Define un resultado a largo plazo. El agente trabaja en él por rondas y continúa solo hasta completarlo, bloquearse o alcanzar el límite. Usa <strong>/goal</strong> en el compositor y describe la tarea en el mensaje siguiente."
+      },
+      "createWithGoal": "Crear con /goal",
+      "newGoal": "Nuevo objetivo (/goal)",
+      "closeGoal": "Cerrar objetivo",
+      "pausedFallback": "Objetivo pausado.",
+      "blocked": "Objetivo bloqueado — resuelve el impedimento y reanuda.",
+      "objectiveHeading": "Objetivo",
+      "copyObjective": "Copiar objetivo",
+      "objectiveRegion": "Objetivo completo",
+      "noDescription": "Objetivo sin descripción.",
+      "roundsHeading": "Historial de rondas",
+      "roundsLoading": "Cargando rondas…",
+      "roundsError": "No se pudo cargar el historial de rondas.",
+      "roundsEmpty": "Ninguna ronda todavía — las rondas del objetivo aparecen aquí.",
+      "footer": "El estado lo define el backend y refleja lo que está persistido en la sesión. Objetivo {{status}} · revisión {{revision}}.",
+      "summary": {
+        "rounds": "Rondas",
+        "roundsValue": "{{current}} de {{max}}",
+        "totalTime": "Tiempo total",
+        "tokens": "Tokens",
+        "cost": "Costo",
+        "lastActivity": "Última actividad"
+      },
+      "roundLabel": "Ronda {{index}}",
+      "roundFiles_one": "{{count}} archivo",
+      "roundFiles_other": "{{count}} archivos",
+      "roundTokens": "~{{tokens}} tokens",
+      "roundNoSummary": "Sin resumen en esta ronda"
+    }
+  },
+  "calendar": {
+    "months": {
+      "january": "enero",
+      "february": "febrero",
+      "march": "marzo",
+      "april": "abril",
+      "may": "mayo",
+      "june": "junio",
+      "july": "julio",
+      "august": "agosto",
+      "september": "septiembre",
+      "october": "octubre",
+      "november": "noviembre",
+      "december": "diciembre"
+    },
+    "weekdays": {
+      "sunday": "Domingo",
+      "monday": "Lunes",
+      "tuesday": "Martes",
+      "wednesday": "Miércoles",
+      "thursday": "Jueves",
+      "friday": "Viernes",
+      "saturday": "Sábado"
+    },
+    "weekdayShort": {
+      "sunday": "Dom",
+      "monday": "Lun",
+      "tuesday": "Mar",
+      "wednesday": "Mié",
+      "thursday": "Jue",
+      "friday": "Vie",
+      "saturday": "Sáb"
+    },
+    "weekdayHeaders": {
+      "sunday": "DOM",
+      "monday": "LUN",
+      "tuesday": "MAR",
+      "wednesday": "MIÉ",
+      "thursday": "JUE",
+      "friday": "VIE",
+      "saturday": "SÁB"
+    },
+    "monthYear": "{{month}} de {{year}}",
+    "dayLabel": "{{weekday}}, {{day}} de {{month}} de {{year}}",
+    "weekRangeSameMonth": "{{startDay}} – {{endDay}} de {{month}} de {{year}}",
+    "weekRangeTwoMonths": "{{startDay}} de {{startMonth}} – {{endDay}} de {{endMonth}} de {{year}}",
+    "weekRangeTwoYears": "{{startDay}} de {{startMonth}} de {{startYear}} – {{endDay}} de {{endMonth}} de {{endYear}}",
+    "schedule": {
+      "every": "Cada {{amount}}",
+      "eventTask": "Por evento: estado de la tarea",
+      "eventChannel": "Por evento: mensaje en el canal",
+      "daily": "{{days}} a las {{time}}"
+    },
+    "days": {
+      "all": "Todos los días",
+      "weekdays": "Lun a vie",
+      "weekend": "Sáb y dom",
+      "none": "Ningún día"
+    },
+    "next": {
+      "paused": "Pausada",
+      "event": "Esperando evento",
+      "pending": "Pendiente",
+      "in": "en {{duration}}"
+    },
+    "last": {
+      "never": "Nunca ejecutada",
+      "now": "ahora",
+      "ago": "hace {{duration}}"
+    },
+    "status": {
+      "ok": "Completada",
+      "error": "Error",
+      "blocked": "Bloqueada",
+      "running": "En ejecución",
+      "queued": "En cola"
+    }
+  },
+  "git": {
+    "aria": "Acciones de git",
+    "sync": "Sincronizar",
+    "refresh": "Actualizar estado",
+    "fetch": "Buscar (fetch)",
+    "pull": "Traer (pull)",
+    "push": "Enviar (push)",
+    "fetchBusy": "Buscando…",
+    "pullBusy": "Trayendo…",
+    "pushBusy": "Enviando…",
+    "fetchSuccess": "Actualizaciones buscadas",
+    "pullSuccess": "Pull completado",
+    "pushSuccess": "Push completado",
+    "fetchError": "No se pudieron buscar actualizaciones",
+    "pullError": "No se pudo hacer pull",
+    "pushError": "No se pudo hacer push",
+    "connectionHint": "Verifica la conexión y el remoto configurado.",
+    "openWorkspace": "Abre un espacio de trabajo para sincronizar",
+    "notRepo": "No es un repositorio Git",
+    "actionsHint": "Acciones de git (fetch, pull, push)"
+  },
+  "terminal": {
+    "error": {
+      "limit": "Límite de 4 terminales por sesión. Cierra una pestaña para abrir otro.",
+      "noWorkspace": "Abre una carpeta para usar el terminal.",
+      "workspaceMissing": "La carpeta del espacio de trabajo no está disponible en el disco.",
+      "conversationNotFound": "La sesión de este terminal ya no existe.",
+      "conversation": "No se pudo leer la sesión de este terminal.",
+      "spawn": "No se pudo iniciar el shell del sistema.",
+      "read": "El terminal perdió la conexión con el proceso.",
+      "write": "No se pudieron enviar datos al terminal.",
+      "resize": "No se pudo redimensionar el terminal.",
+      "notFound": "Este terminal ya se cerró.",
+      "exited": "El proceso de este terminal ya terminó.",
+      "close": "No se pudo cerrar el proceso del terminal.",
+      "kill": "No se pudo matar el proceso del terminal.",
+      "fallback": "No se pudo completar la operación en el terminal."
+    },
+    "writeError": "Error al escribir en el terminal",
+    "hostLabel": "Terminal interactivo",
+    "title": "Terminal {{index}}",
+    "exitNotice": "[proceso finalizado{{detail}}]",
+    "exitCode": " (código {{code}})",
+    "tabClosed": "{{title}} (cerrado)",
+    "tabsAria": "Terminales abiertos",
+    "tabTitleWithCwd": "{{title}} — {{cwd}}",
+    "closeTabAria": "Cerrar {{title}}",
+    "closeTabTitle": "Cerrar pestaña y terminar el shell",
+    "clear": "Limpiar terminal",
+    "kill": "Matar proceso",
+    "restart": "Reiniciar terminal",
+    "limitHint": "Límite de {{limit}} terminales. Cierra una pestaña para abrir otro.",
+    "newTab": "Nuevo terminal",
+    "empty": {
+      "title": "Ningún terminal abierto",
+      "description": "El terminal se ejecuta en la carpeta del espacio de trabajo. El agente usa sus propios comandos y trabajos."
+    },
+    "open": "Abrir terminal",
+    "connecting": "Conectando al shell…",
+    "noneActive": "Ningún terminal activo",
+    "killing": "Deteniendo…",
+    "running": "Ejecutando · {{cols}}×{{rows}}",
+    "exited": "Finalizado",
+    "exitedCode": "Finalizado ({{code}})"
+  },
+  "trust": {
+    "title": "¿Confiar en esta carpeta?",
+    "description": "El agente podrá leer, editar y ejecutar comandos en:",
+    "body": "Las instrucciones del proyecto (<code>AGENTS.md</code>) y las skills locales se cargarán en el prompt. Puedes cambiar la confianza después en las opciones del espacio de trabajo.",
+    "readOnly": "Abrir en lectura solo permite leer: sin ediciones, sin comandos y sin instrucciones del repositorio.",
+    "openReadOnly": "Abrir en lectura",
+    "confirm": "Confiar"
+  },
+  "welcome": {
+    "suggestion": {
+      "explain": {
+        "title": "Explica el código",
+        "description": "Entiende un fragmento y los riesgos antes de tocarlo.",
+        "prompt": "Explica qué hace el código siguiente y señala los riesgos:\n\n```\n\n```"
+      },
+      "bug": {
+        "title": "Encuentra un bug",
+        "description": "Investiga la causa probable y propone la corrección.",
+        "prompt": "Investiga la causa probable de este error y propone un plan de corrección:\n\n```\n\n```"
+      },
+      "tests": {
+        "title": "Escribe pruebas",
+        "description": "Cubre el camino feliz y los casos límite.",
+        "prompt": "Escribe pruebas para el código siguiente, cubriendo casos límite:\n\n```\n\n```"
+      }
+    },
+    "recents": "Espacios de trabajo recientes",
+    "active": {
+      "title": "Empieza una sesión del agente",
+      "description": "Describe una tarea de código — explicar, corregir, probar o refactorizar — en este espacio de trabajo."
+    },
+    "dirty": "Cambios sin confirmar",
+    "noFolder": {
+      "title": "Empieza con una carpeta",
+      "description": "Abre una carpeta para que el agente lea, edite y ejecute comandos aquí."
+    },
+    "loadingWorkspaces": "Cargando espacios de trabajo",
+    "openFolder": "Abrir carpeta…",
+    "loadError": "No se pudieron cargar los espacios de trabajo: {{error}}",
+    "empty": "Todavía no hay ninguna carpeta abierta. Elige un directorio del equipo para empezar."
+  },
+  "cards": {
+    "goalBlocker": "Esta sesión ya tiene un objetivo {{status}}. Completa o cierra el objetivo actual antes de ejecutar el plan como objetivo.",
+    "keepPlanning": "Continúa planificando.",
+    "announcement": {
+      "plan": "Plan esperando aprobación.",
+      "approval": "Aprobación necesaria.",
+      "question": "El agente hizo una pregunta."
+    },
+    "openEnvironment": "Abrir entorno para ayudar",
+    "assistHint": "Toma el control y devuélvelo en el panel antes de responder."
+  },
+  "addChat": {
+    "title": "Añadir sesión de Chat",
+    "description": "Elige una conversación de Chat para trabajar en ella también en Code. Sigue disponible en ambos layouts.",
+    "searchPlaceholder": "Buscar sesión de Chat…",
+    "searchAria": "Buscar sesión de Chat",
+    "listAria": "Sesiones de Chat disponibles",
+    "empty": {
+      "title": "Ninguna sesión de Chat disponible",
+      "description": "Todas las conversaciones de Chat ya están en Code, o todavía no tienes conversaciones en Chat."
+    },
+    "noResults": {
+      "title": "Ninguna sesión encontrada",
+      "description": "Ninguna conversación de Chat coincide con “{{query}}”."
+    },
+    "clearSearch": "Limpiar búsqueda",
+    "addAria": "Añadir {{title}} a Code",
+    "adding": "Añadiendo sesión",
+    "error": "No se pudo añadir la sesión a Code. Inténtalo de nuevo.",
+    "errorToast": "No se pudo añadir la sesión a Code",
+    "count_zero": "{{count}} sesiones disponibles",
+    "count_one": "{{count}} sesión disponible",
+    "count_other": "{{count}} sesiones disponibles"
+  },
+  "turnSummary": {
+    "region": "Resumen del turno",
+    "files_one": "{{count}} archivo modificado",
+    "files_other": "{{count}} archivos modificados",
+    "changedFilesAria": "Archivos modificados",
+    "openDiff": "Abrir diff de {{path}}",
+    "showLess": "Mostrar menos",
+    "showAll": "Todos los {{count}} archivos"
+  },
+  "codeDiff": {
+    "label": "Diff",
+    "staged": "Diff (preparado)",
+    "loading": "Cargando diff",
+    "reload": "Recargar diff",
+    "error": "No se pudo cargar el diff."
+  },
+  "codeFile": {
+    "readError": "No se pudo leer el archivo."
+  },
+  "plan": {
+    "previewPath": "Plan.md",
+    "tabTitle": "Plan"
+  },
+  "panelData": {
+    "filesError": "No se pudo leer el árbol de archivos.",
+    "gitError": "No se pudo leer el estado de Git.",
+    "commitsError": "No se pudieron leer los commits recientes.",
+    "noWorkspaceDiff": "Abre un espacio de trabajo para ver el diff.",
+    "diffError": "No se pudo cargar el diff."
+  },
+  "workspaces": {
+    "toast": {
+      "reorderError": "No se pudieron reordenar los proyectos",
+      "bindError": "No se pudo vincular la sesión al espacio de trabajo",
+      "pickError": "No se pudo abrir el selector de carpeta",
+      "openError": "No se pudo abrir la carpeta",
+      "trusted": "Carpeta de confianza",
+      "readOnly": "Carpeta abierta en modo lectura",
+      "trustedDescription": "El agente puede leer, editar y ejecutar comandos en este espacio de trabajo.",
+      "readOnlyDescription": "El agente solo puede leer archivos hasta que confíes en la carpeta.",
+      "trustError": "No se pudo actualizar la confianza de la carpeta",
+      "cancelError": "No se pudo cancelar la apertura de la carpeta",
+      "renameError": "No se pudo renombrar el espacio de trabajo",
+      "removeError": "No se pudo eliminar el espacio de trabajo",
+      "refreshError": "No se pudo actualizar el espacio de trabajo"
+    }
+  },
+  "sidebar": {
+    "aria": "Sesiones",
+    "newSession": "Nueva sesión",
+    "close": "Cerrar barra lateral",
+    "openFolder": "Abrir carpeta",
+    "addChat": "Añadir sesión de Chat",
+    "searchAction": "Buscar",
+    "skills": "Skills",
+    "workspacesHeading": "Espacios de trabajo",
+    "searchWorkspaces": "Buscar espacios de trabajo",
+    "filter": "Filtrar espacios de trabajo",
+    "searchAria": "Buscar espacios de trabajo por nombre, ruta o sesión",
+    "searchPlaceholder": "Buscar espacios de trabajo…",
+    "clearSearch": "Limpiar búsqueda",
+    "clearFilters": "Limpiar filtros",
+    "addWorkspace": "Añadir espacio de trabajo",
+    "count": "{{visible}} de {{total}} espacios de trabajo",
+    "loading": "Cargando espacios de trabajo",
+    "loadError": "No se pudieron cargar los espacios de trabajo.",
+    "empty": {
+      "title": "Ningún espacio de trabajo abierto",
+      "description": "Abre una carpeta para que el agente lea, edite y ejecute comandos."
+    },
+    "openFolderCta": "Abrir carpeta…",
+    "noResults": {
+      "title": "Ningún espacio de trabajo encontrado",
+      "description": "Ajusta la búsqueda o los filtros para ver otros espacios de trabajo."
+    },
+    "sessions_one": "{{count}} sesión",
+    "sessions_other": "{{count}} sesiones",
+    "unassigned": "Sin espacio de trabajo",
+    "expandUnassigned": "Expandir sesiones sin espacio de trabajo",
+    "collapseUnassigned": "Contraer sesiones sin espacio de trabajo",
+    "settings": "Configuración",
+    "session": {
+      "sharedAria": "{{title}}, sesión de Chat compartida con Code",
+      "sharedTitle": "Sesión de Chat compartida con Code",
+      "fromChat": "De Chat",
+      "options": "Opciones de {{title}}",
+      "unpin": "Desfijar",
+      "pin": "Fijar",
+      "rename": "Renombrar",
+      "export": "Exportar",
+      "removeFromCode": "Quitar de Code",
+      "delete": "Eliminar"
+    },
+    "workspace": {
+      "optionsAria": "Opciones del espacio de trabajo {{name}}",
+      "optionsTitle": "Opciones del espacio de trabajo",
+      "newSession": "Nueva sesión",
+      "refresh": "Actualizar",
+      "openExplorer": "Abrir en Explorer",
+      "copyPath": "Copiar ruta",
+      "rename": "Renombrar",
+      "remove": "Quitar de Zylara",
+      "expand": "Expandir sesiones de {{name}}",
+      "collapse": "Contraer sesiones de {{name}}",
+      "noSessions": "Espacio de trabajo {{name}} sin sesiones",
+      "dirty": "Cambios sin confirmar",
+      "untrustedTitle": "Carpeta no confiable — el agente está en modo lectura",
+      "readOnlyBadge": "Lectura",
+      "sessionsAria": "Sesiones de {{name}}",
+      "emptySessions": "Todavía no hay sesiones — usa “Nueva sesión” en el menú del espacio de trabajo."
+    },
+    "renameWorkspace": {
+      "title": "Renombrar espacio de trabajo",
+      "description": "El nuevo nombre solo se aplica en Zylara; la carpeta en el disco conserva la misma ruta.",
+      "nameAria": "Nombre del espacio de trabajo"
+    },
+    "removeWorkspace": {
+      "title": "¿Quitar el espacio de trabajo de Zylara?",
+      "description": "La carpeta <path>{{path}}</path> no se eliminará. Las sesiones siguen en el historial, pero dejan de agruparse en este espacio de trabajo.",
+      "remove": "Quitar"
+    },
+    "renameSession": {
+      "title": "Renombrar sesión",
+      "aria": "Renombrar sesión",
+      "placeholder": "Título de la sesión"
+    },
+    "deleteSession": {
+      "title": "Eliminar conversación",
+      "description": "“{{title}}” se eliminará de forma permanente. Esta acción no se puede deshacer.",
+      "descriptionNoTitle": "La conversación se eliminará de forma permanente. Esta acción no se puede deshacer."
+    },
+    "toast": {
+      "exportSuccess": "Conversación exportada",
+      "exportError": "No se pudo exportar",
+      "removeFromCodeError": "No se pudo quitar la sesión de Code",
+      "removeFromCodeSuccess": "Sesión quitada de Code",
+      "removeFromCodeDescription": "Sigue disponible en Chat.",
+      "explorerError": "No se pudo abrir la carpeta en Explorer",
+      "pathCopied": "Ruta copiada",
+      "copyPathError": "No se pudo copiar la ruta"
+    },
+    "filters": {
+      "all": "Todos",
+      "git": "Con git",
+      "noGit": "Sin git",
+      "untrusted": "No confiables",
+      "withSessions": "Con sesiones",
+      "empty": "Sin sesiones"
+    }
+  },
+  "header": {
+    "newSession": "Nueva sesión",
+    "pendingApproval_one": "{{count}} solicitud esperando tu decisión",
+    "pendingApproval_other": "{{count}} solicitudes esperando tu decisión",
+    "pendingApprovalBadge": "Esperando aprobación",
+    "goalBadge": {
+      "running": "Abrir objetivo: ronda {{current}} de {{max}} en curso",
+      "paused": "Abrir objetivo: pausado",
+      "pausedWithReason": "Abrir objetivo: pausado ({{reason}})",
+      "blocked": "Abrir objetivo: bloqueado",
+      "active": "Abrir objetivo: activo, ronda {{current}} de {{max}}",
+      "activeAuto": "Abrir objetivo: activo, ronda {{current}} de {{max}}, continuidad automática",
+      "activeManual": "Abrir objetivo: activo, ronda {{current}} de {{max}}, continuidad manual",
+      "visiblePaused": "Pausado",
+      "visibleBlocked": "Bloqueado"
+    },
+    "workspace": {
+      "none": "Sin espacio de trabajo",
+      "aria": "Espacio de trabajo {{name}}",
+      "ariaDirty": "Espacio de trabajo {{name}}, cambios sin confirmar",
+      "ariaWithBranch": "Espacio de trabajo {{name}}, rama {{branch}}",
+      "ariaWithBranchDirty": "Espacio de trabajo {{name}}, rama {{branch}}, cambios sin confirmar",
+      "ariaNone": "Sin espacio de trabajo — abrir carpeta",
+      "openFolderTitle": "Abrir una carpeta para que el agente trabaje",
+      "dirty": "Cambios sin confirmar",
+      "refresh": "Actualizar",
+      "openExplorer": "Abrir en Explorer",
+      "copyPath": "Copiar ruta",
+      "revokeTrust": "Revocar confianza",
+      "trust": "Confiar en la carpeta",
+      "noneLinked": "Ninguna carpeta vinculada",
+      "openFolder": "Abrir carpeta…",
+      "switch": "Cambiar espacio de trabajo"
+    },
+    "panel": {
+      "show": "Mostrar panel de archivos",
+      "hide": "Ocultar panel de archivos",
+      "widen": "Amplía la ventana para ver el panel de archivos"
+    },
+    "sessionsTablist": "Sesiones abiertas",
+    "closeTab": "Cerrar {{title}}",
+    "subagent": {
+      "explore": "exploración",
+      "review": "revisión",
+      "general": "general",
+      "tabLabel": "Subagente {{description}}"
+    },
+    "fileTab": "Archivo {{path}}",
+    "planTab": {
+      "label": "Plan aprobado de la sesión",
+      "visible": "Plan",
+      "close": "Cerrar plan"
+    },
+    "goalTab": {
+      "label": "Objetivo de la sesión",
+      "visible": "Objetivo",
+      "close": "Cerrar objetivo"
+    },
+    "diffTab": {
+      "label": "Diff de {{path}}",
+      "title": "Diff: {{path}}",
+      "visible": "Diff",
+      "close": "Cerrar diff de {{path}}"
+    },
+    "commitsTab": {
+      "label": "Historial de commits",
+      "visible": "Commits",
+      "close": "Cerrar historial de commits"
+    },
+    "toast": {
+      "bindWorkspaceError": "No se pudo cambiar el espacio de trabajo de la sesión",
+      "pathCopied": "Ruta copiada",
+      "copyPathError": "No se pudo copiar la ruta",
+      "trusted": "Carpeta de confianza",
+      "trustRevoked": "Confianza revocada",
+      "trustedDescription": "El agente puede leer, editar y ejecutar comandos.",
+      "trustRevokedDescription": "El agente vuelve al modo lectura en este espacio de trabajo.",
+      "trustError": "No se pudo actualizar la confianza de la carpeta"
+    }
+  },
+  "panel": {
+    "tabs": {
+      "files": "Archivos",
+      "changes": "Cambios",
+      "terminal": "Terminal"
+    },
+    "aria": "Panel de archivos y cambios",
+    "tablist": "Contenido del panel",
+    "refresh": "Actualizar panel",
+    "refreshTooltip": "Actualizar",
+    "collapse": "Contraer panel",
+    "workspaceNone": "Sin espacio de trabajo",
+    "commitsHistory": "Historial",
+    "commitsHistoryAria": "Ver historial de commits",
+    "empty": {
+      "noWorkspaceTitle": "Ningún espacio de trabajo abierto",
+      "noWorkspaceDescription": "Abre una carpeta en la barra lateral para que el agente lea, edite y ejecute comandos aquí.",
+      "noSessionTitle": "Ninguna sesión activa",
+      "noSessionDescription": "Abre una sesión para usar el terminal en la carpeta del espacio de trabajo."
+    },
+    "toast": {
+      "openFolderError": "No se pudo abrir la carpeta"
+    },
+    "resizer": "Redimensionar panel de archivos"
+  },
+  "tree": {
+    "filterPlaceholder": "Filtrar archivos…",
+    "filterAria": "Filtrar archivos",
+    "clearFilter": "Limpiar filtro",
+    "loading": "Cargando archivos",
+    "loadingTree": "Cargando el árbol",
+    "loadingDir": "Cargando {{name}}",
+    "errorTitle": "No se pudo leer la carpeta",
+    "emptySearchTitle": "Ningún archivo coincide con la búsqueda",
+    "emptySearchDescription": "Refina la búsqueda o limpia el filtro para ver el árbol.",
+    "emptyTitle": "Ningún archivo para mostrar",
+    "emptyDescription": "El árbol del espacio de trabajo aparece aquí cuando la carpeta esté disponible.",
+    "aria": "Árbol de archivos del espacio de trabajo",
+    "gitStatus": "Estado en Git: {{status}}",
+    "count": "Mostrando {{visible}} de {{total}} archivos — refina la búsqueda",
+    "badge": {
+      "modified": "Modificado",
+      "added": "Añadido",
+      "deleted": "Eliminado",
+      "renamed": "Renombrado",
+      "copied": "Copiado",
+      "conflicted": "Con conflicto",
+      "untracked": "Sin seguimiento",
+      "ignored": "Ignorado"
+    }
+  },
+  "diff": {
+    "loading": "Cargando diff",
+    "copied": "Parche copiado",
+    "copy": "Copiar parche",
+    "copyError": "No se pudo copiar el parche",
+    "errorTitle": "No se pudo cargar el diff",
+    "binaryTitle": "Archivo binario",
+    "binaryDescription": "Este archivo no tiene diff de texto. Ábrelo en un editor externo para revisar el cambio.",
+    "emptyTitle": "Sin diferencias para mostrar",
+    "emptyDescription": "El archivo no tiene cambios de texto pendientes.",
+    "groupAria": "Diff de {{path}}",
+    "hunkAria": "Fragmento del diff: {{header}}",
+    "collapseHunk": "Contraer fragmento",
+    "showMore_one": "Ver más ({{count}} línea)",
+    "showMore_other": "Ver más ({{count}} líneas)"
+  },
+  "preview": {
+    "markdown": {
+      "document": "Documento",
+      "code": "Código",
+      "modeAria": "Modo de visualización de Markdown"
+    },
+    "copyError": "No se pudo copiar la ruta",
+    "loading": "Cargando archivo",
+    "errorTitle": "No se pudo abrir el archivo",
+    "noneTitle": "Ningún archivo seleccionado",
+    "noneDescription": "Elige un archivo en la pestaña Archivos para ver la vista previa.",
+    "lineInfo_one": "{{count}} línea · {{size}}",
+    "lineInfo_other": "{{count}} líneas · {{size}}",
+    "omitted": {
+      "title": "Vista previa no disponible",
+      "description": "El archivo ocupa {{size}} — demasiado grande para la vista previa en línea. Ábrelo en un editor externo para verlo."
+    },
+    "unsupported": {
+      "title": "Formato sin vista previa en el visor",
+      "description": "Este formato ({{size}}) no tiene visualización integrada. Ábrelo en un editor externo para inspeccionar el contenido."
+    },
+    "binary": {
+      "title": "Archivo binario",
+      "description": "No hay vista previa de texto para este archivo ({{size}}). Ábrelo en un editor externo para inspeccionar el contenido."
+    },
+    "encoding": "Se detectó el encoding {{encoding}} — el contenido puede verse con caracteres cambiados.",
+    "truncated": "Vista previa truncada: mostrando parte de {{size}}. Abre en un editor externo para ver el archivo completo.",
+    "markdownEmpty": "Markdown vacío.",
+    "markdownRegion": "Vista previa de Markdown",
+    "emptyFile": "Archivo vacío.",
+    "contentAria": "Contenido de {{path}}",
+    "wrapOn": "Ajuste de línea activado",
+    "wrap": "Ajuste de línea",
+    "pathCopied": "Ruta copiada",
+    "copyPath": "Copiar ruta",
+    "reload": "Recargar archivo",
+    "openExternal": "Abrir en editor externo"
+  },
+  "image": {
+    "controls": "Controles de la imagen",
+    "dimensionsTitle": "Dimensiones de la imagen en píxeles",
+    "zoomOut": "Reducir zoom",
+    "zoomIn": "Aumentar zoom",
+    "fit": "Ajustar a la ventana",
+    "actual": "Tamaño real",
+    "failedTitle": "No se pudo decodificar la imagen",
+    "failedDescription": "El navegador no puede mostrar este formato. Usa \"Recargar archivo\" o abre en un editor externo.",
+    "region": "Visualización de la imagen {{path}}"
+  },
+  "pdf": {
+    "errorTitle": "No se pudo renderizar el PDF",
+    "toolbar": "Controles del PDF",
+    "prev": "Página anterior",
+    "next": "Página siguiente",
+    "pageInfo": "Página {{page}} de {{total}}",
+    "loading": "Cargando…",
+    "zoomOut": "Reducir zoom",
+    "zoomIn": "Aumentar zoom",
+    "fitWidth": "Ajustar al ancho",
+    "rendering": "Renderizando página",
+    "region": "Vista previa del PDF {{path}}",
+    "loadingPdf": "Cargando PDF",
+    "loadingPdfText": "Cargando PDF…",
+    "canvasAria": "Página {{page}} de {{total}} del PDF {{path}}",
+    "renderError": "No se pudo renderizar esta página."
+  },
+  "commit": {
+    "section": "Commit",
+    "linesTitle": "Líneas añadidas y eliminadas",
+    "targetAria": "Destino del commit",
+    "target": {
+      "all": "Todo",
+      "staged": "Preparados ({{count}})",
+      "selection": "Selección ({{count}})"
+    },
+    "messageAria": "Mensaje del commit",
+    "messagePlaceholder": "Mensaje del commit…",
+    "suggest": "Sugerir",
+    "suggestAria": "Sugerir mensaje",
+    "suggestTooltip": "Sugerir mensaje con IA",
+    "button": "Commit",
+    "recent": "Commits recientes",
+    "recentWithCount": "Commits recientes ({{count}})",
+    "loading": "Cargando commits",
+    "loadingText": "Cargando commits…",
+    "empty": {
+      "title": "Sin commits todavía",
+      "description": "Los commits del espacio de trabajo aparecen aquí."
+    },
+    "error": {
+      "load": "No se pudieron cargar los commits recientes.",
+      "create": "No se pudo crear el commit"
+    },
+    "reason": {
+      "openWorkspace": "Abre un espacio de trabajo para confirmar",
+      "notRepo": "No es un repositorio Git",
+      "noChanges": "Ningún cambio para confirmar",
+      "noStaged": "Ningún archivo preparado",
+      "noSelection": "Selecciona archivos en la lista",
+      "noMessage": "Escribe el mensaje del commit"
+    },
+    "suggestEmpty": "La sugerencia llegó vacía — escribe el mensaje del commit.",
+    "suggestError": "No se pudo sugerir un mensaje.",
+    "success": "Commit creado",
+    "successWithHash": "Commit creado ({{hash}})",
+    "recentListAria": "Commits recientes"
+  },
+  "changesFilter": {
+    "label": {
+      "lastTurn": "Último turno",
+      "uncommitted": "Sin confirmar",
+      "unstaged": "No preparadas",
+      "staged": "Preparadas",
+      "commit": "Commit {{hash}}",
+      "branch": "Rama {{name}}"
+    },
+    "aria": "Filtrar cambios",
+    "noCommitsInWorkspace": "Ningún commit en el espacio de trabajo",
+    "chooseCommit": "Elegir un commit",
+    "commit": "Commit",
+    "loadingCommits": "Cargando commits…",
+    "noCommit": "Ningún commit",
+    "compareBranch": "Comparar con una rama",
+    "branch": "Rama",
+    "loadingBranches": "Cargando ramas…",
+    "noOtherBranch": "Ninguna otra rama"
+  },
+  "changes": {
+    "groups": {
+      "staged": "Preparados",
+      "unstaged": "No preparados",
+      "untracked": "Nuevos",
+      "session": "De la sesión",
+      "commit": "Commit",
+      "branch": "Rama"
+    },
+    "empty": {
+      "noWorkspace": {
+        "title": "Ningún espacio de trabajo seleccionado",
+        "description": "Abre una carpeta para ver los cambios del código."
+      },
+      "lastTurn": {
+        "title": "Ningún cambio en el último turno",
+        "description": "Las ediciones del agente en el último turno aparecen aquí."
+      },
+      "staged": {
+        "title": "Ningún archivo preparado para commit",
+        "description": "Prepara archivos desde la lista de no preparados."
+      },
+      "unstaged": {
+        "title": "Ningún archivo fuera del stage",
+        "description": "Los cambios que aún no están preparados aparecen aquí."
+      },
+      "commit": {
+        "title": "Ningún archivo en este commit",
+        "description": "El commit seleccionado no modificó archivos."
+      },
+      "branch": {
+        "title": "Ninguna diferencia con {{base}}",
+        "description": "Los cambios desde el ancestro común con esa rama aparecen aquí."
+      },
+      "uncommitted": {
+        "title": "Ningún cambio pendiente",
+        "description": "Las ediciones del agente y los cambios de git aparecen aquí."
+      }
+    },
+    "loadCommitError": "No se pudo cargar el commit.",
+    "compareError": "No se pudo comparar con la rama.",
+    "loadBranchesError": "No se pudieron cargar las ramas.",
+    "noOtherBranchToast": "No hay otra rama para comparar",
+    "loadBranchesToastError": "No se pudieron cargar las ramas",
+    "noWorkspaceDiff": "Abre un espacio de trabajo para ver el diff.",
+    "loadDiffError": "No se pudo cargar el diff.",
+    "stageError": "No se pudo actualizar el stage",
+    "stageSuccess_one": "{{count}} archivo preparado",
+    "stageSuccess_other": "{{count}} archivos preparados",
+    "unstageSuccess_one": "{{count}} archivo quitado del stage",
+    "unstageSuccess_other": "{{count}} archivos quitados del stage",
+    "stageAllError": "No se pudieron preparar los archivos",
+    "unstageAllError": "No se pudieron desmarcar los archivos",
+    "revertSuccess": "Archivo revertido",
+    "revertError": "No se pudo revertir el archivo",
+    "blockedReason": "Resuelve los conflictos de merge antes de confirmar",
+    "back": "Volver a cambios",
+    "diffHeader": "Diff del archivo",
+    "notRepoTitle": "No es un repositorio Git.",
+    "notRepoDescription": "Los cambios de la sesión siguen disponibles; inicializa un repositorio para confirmar.",
+    "conflicts": "Conflictos de merge — resuélvelos antes de confirmar.",
+    "count_one": "{{count}} archivo",
+    "count_other": "{{count}} archivos",
+    "unstageAll": "Desmarcar todo",
+    "stageAll": "Preparar todo",
+    "stageAllConflictTitle": "Resuelve los conflictos de merge antes de preparar todo",
+    "stageAllTitle": "Añade los cambios visibles al stage",
+    "branchButton": "Ver diff de la rama",
+    "origin": "Origen: {{origin}}",
+    "badge": {
+      "both": "agente + git",
+      "session": "agente",
+      "sessionTitle": "sesión",
+      "sessionGitTitle": "sesión + git"
+    },
+    "unstageFile": "Quitar {{path}} del stage",
+    "stageFile": "Preparar {{path}}",
+    "revertFile": "Revertir {{path}}",
+    "revertDialog": {
+      "title": "¿Revertir archivo?",
+      "description": "Los cambios en {{path}} vuelven al estado anterior. Esta acción no se puede deshacer.",
+      "descriptionGeneric": "Los cambios vuelven al estado anterior. Esta acción no se puede deshacer.",
+      "confirm": "Revertir"
+    }
+  },
+  "commits": {
+    "status": {
+      "A": "Añadido",
+      "M": "Modificado",
+      "D": "Eliminado",
+      "R": "Renombrado",
+      "C": "Copiado",
+      "T": "Tipo cambiado"
+    },
+    "loadListError": "No se pudieron cargar los commits.",
+    "loadingList": "Cargando commits",
+    "loadingListText": "Cargando commits…",
+    "errorTitle": "No se pudieron leer los commits",
+    "empty": {
+      "title": "Sin commits todavía",
+      "description": "Los commits de este espacio de trabajo aparecen aquí; haz el primer commit desde la pestaña Cambios."
+    },
+    "listAria": "Commits del espacio de trabajo",
+    "fileAria": "Archivo {{path}}",
+    "binaryBadge": "binario",
+    "binaryDiff": "Archivo binario — sin diff de texto.",
+    "loadDetailError": "No se pudo cargar el commit.",
+    "loadingDetail": "Cargando commit",
+    "loadingDetailText": "Cargando commit…",
+    "detailErrorTitle": "No se pudo abrir el commit",
+    "backToCommits": "Volver a los commits",
+    "detailAria": "Detalles del commit",
+    "copySha": "Copiar commit SHA",
+    "shaCopied": "Commit SHA copiado",
+    "shaCopyError": "No se pudo copiar el SHA",
+    "files_one": "{{count}} archivo",
+    "files_other": "{{count}} archivos",
+    "collapseDiffs": "Contraer diffs",
+    "expandDiffs": "Expandir diffs",
+    "truncated": "Diff demasiado grande: el parche se truncó por el límite de salida.",
+    "noFiles": "Este commit no modificó archivos (merge o commit vacío).",
+    "header": "Historial de commits",
+    "all": "todos"
+  },
+  "store": {
+    "approvalUnavailable": "Esta aprobación ya no está disponible",
+    "refreshing": "Actualizando el estado de la sesión…",
+    "approvalError": "No se pudo responder a la aprobación",
+    "answerError": "No se pudo enviar la respuesta",
+    "permissionError": "No se pudo cambiar el modo de permiso",
+    "planModeError": "No se pudo cambiar el modo Plan",
+    "goalCreateError": "No se pudo crear el objetivo",
+    "goalChanged": "El objetivo cambió en otra acción",
+    "goalUpdateError": "No se pudo actualizar el objetivo",
+    "jobKillError": "No se pudo detener el proceso",
+    "turnReverted": "Turno revertido",
+    "turnRevertError": "No se pudo revertir el turno",
+    "fileReverted": "Archivo revertido: {{path}}",
+    "fileRevertError": "No se pudo revertir el archivo",
+    "compactError": "No se pudo compactar el contexto"
+  }
+}

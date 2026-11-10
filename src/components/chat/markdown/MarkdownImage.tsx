@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ImageOff } from 'lucide-react';
 
 export interface MarkdownImageProps {
@@ -8,7 +9,10 @@ export interface MarkdownImageProps {
 }
 
 function ImageFallback({ description }: { description: string }) {
-  const label = description ? `Imagem indisponível: ${description}` : 'Imagem indisponível';
+  const { t } = useTranslation('chat');
+  const label = description
+    ? t('image.unavailableWithDescription', { description })
+    : t('image.unavailable');
   return (
     <span
       role="img"
@@ -16,7 +20,7 @@ function ImageFallback({ description }: { description: string }) {
       className="my-2 flex w-full max-w-md flex-col items-center gap-1.5 rounded-xl border border-dashed border-border bg-surface px-4 py-6 text-center"
     >
       <ImageOff aria-hidden className="size-5 text-foreground-subtle" />
-      <span className="text-[13px] font-medium text-foreground-muted">Imagem indisponível</span>
+      <span className="text-[13px] font-medium text-foreground-muted">{t('image.unavailable')}</span>
       {description ? <span className="text-[12px] text-foreground-subtle">{description}</span> : null}
     </span>
   );

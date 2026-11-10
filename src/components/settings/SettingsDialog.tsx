@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { useUiStore } from '@/lib/store';
 import { isSettingsTabId, SETTINGS_TABS } from '@/lib/settingsTabs';
 import {
@@ -30,6 +32,8 @@ import { ToolsTab } from './ToolsTab';
  * dialog straight on "Configurações › Ferramentas" (docs/COMMAND_PALETTE.md).
  */
 export function SettingsDialog() {
+  const { t } = useTranslation('settings');
+  const { t: common } = useTranslation('common');
   const open = useUiStore((state) => state.settingsOpen);
   const setOpen = useUiStore((state) => state.setSettingsOpen);
   const tab = useUiStore((state) => state.settingsTab);
@@ -53,25 +57,25 @@ export function SettingsDialog() {
         >
           <div className="flex w-48 shrink-0 flex-col border-r border-border bg-surface">
             <div className="px-4 pb-3 pt-5">
-              <DialogTitle className="text-[15px]">Configurações</DialogTitle>
+              <DialogTitle className="text-[15px]">{t('dialog.title')}</DialogTitle>
               <DialogDescription className="mt-0.5 text-[11px]">
-                Preferências do Zylara
+                {t('dialog.description')}
               </DialogDescription>
             </div>
             <TabsList variant="sidebar" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-              {SETTINGS_TABS.map(({ id, label }) => {
+              {SETTINGS_TABS.map(({ id, labelKey }) => {
                 const Icon = SETTINGS_TAB_ICONS[id];
                 return (
                   <TabsTrigger key={id} value={id} variant="sidebar">
                     <Icon aria-hidden className="size-4" />
-                    {label}
+                    {t(labelKey)}
                   </TabsTrigger>
                 );
               })}
             </TabsList>
             <div className="border-t border-border p-2">
               <Button variant="ghost" size="sm" className="w-full justify-center" onClick={() => setOpen(false)}>
-                Fechar
+                {common('actions.close')}
               </Button>
             </div>
           </div>
@@ -79,9 +83,9 @@ export function SettingsDialog() {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-6 py-3">
               <span className="text-[13px] font-semibold tracking-tight text-foreground">
-                {active.label}
+                {t(active.labelKey)}
               </span>
-              <span className="text-[11px] text-foreground-subtle">Salvamento automático</span>
+              <span className="text-[11px] text-foreground-subtle">{t('dialog.autoSave')}</span>
             </div>
             <div className="min-h-0 flex-1">
               <ScrollArea className="h-full" type="auto">

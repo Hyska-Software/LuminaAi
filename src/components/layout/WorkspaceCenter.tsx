@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { AgentAvatarDialog } from '@/components/agents/AgentAvatarDialog';
 import { AgentWorkspace } from '@/components/agents/AgentWorkspace';
 import { ChatView } from '@/components/chat/ChatView';
@@ -30,6 +31,7 @@ import { cn } from '@/lib/utils';
  * deliberately has no library page (PLAN §3.2/§3.5).
  */
 export function WorkspaceCenter() {
+  const { t } = useTranslation('common');
   const layoutMode = useUiStore((state) => state.layoutMode);
   const codeView = useUiStore((state) => state.codeView);
   const codeDiffTab = useUiStore((state) => state.codeDiffTab);
@@ -101,7 +103,7 @@ export function WorkspaceCenter() {
       <div
         id="code-session-panel"
         role="region"
-        aria-label="Conversa"
+        aria-label={t('shell.workspace.conversationRegion')}
         className={cn('min-h-0 flex-1 flex-col', showChat ? 'flex' : 'hidden')}
       >
         <ChatView welcome={isCode ? <CodeWelcomeScreen /> : undefined} />
@@ -111,7 +113,7 @@ export function WorkspaceCenter() {
         <div
           id="code-subagent-panel"
           role="region"
-          aria-label={`Subagente ${codeSubagentTab.description}`}
+          aria-label={t('shell.workspace.subagentRegion', { description: codeSubagentTab.description })}
           className="flex min-h-0 flex-1 flex-col"
         >
           <SubagentChatView target={codeSubagentTab} />
@@ -122,7 +124,7 @@ export function WorkspaceCenter() {
         <div
           id="code-commits-panel"
           role="region"
-          aria-label="Histórico de commits"
+          aria-label={t('shell.workspace.commitsRegion')}
           className="flex min-h-0 flex-1 flex-col"
         >
           <CodeCommitHistoryView target={codeCommitsTab} onSelect={selectCodeCommit} />
@@ -133,7 +135,7 @@ export function WorkspaceCenter() {
         <div
           id="code-diff-panel"
           role="region"
-          aria-label={`Diff de ${codeDiffTab.path}`}
+          aria-label={t('shell.workspace.diffRegion', { path: codeDiffTab.path })}
           className="flex min-h-0 flex-1 flex-col"
         >
           <CodeDiffView target={codeDiffTab} className="flex min-h-0 flex-1 flex-col" />
@@ -144,7 +146,7 @@ export function WorkspaceCenter() {
         <div
           id="code-file-panel"
           role="region"
-          aria-label={`Arquivo ${codeFileTab.path}`}
+          aria-label={t('shell.workspace.fileRegion', { path: codeFileTab.path })}
           className="flex min-h-0 flex-1 flex-col"
         >
           <CodeFileView target={codeFileTab} className="flex min-h-0 flex-1 flex-col" />
@@ -155,7 +157,7 @@ export function WorkspaceCenter() {
         <div
           id="code-plan-panel"
           role="region"
-          aria-label="Plano aprovado da sessão"
+          aria-label={t('shell.workspace.planRegion')}
           className="flex min-h-0 flex-1 flex-col"
         >
           <CodePlanView tab={codePlanTab} className="flex min-h-0 flex-1 flex-col" />
@@ -170,7 +172,7 @@ export function WorkspaceCenter() {
       {showSkills ? (
         <SkillsView
           onBack={() => (isCode ? setCodeView('session') : setActiveView('chat'))}
-          backLabel={isCode ? 'Voltar à sessão' : 'Voltar ao chat'}
+          backLabel={isCode ? t('shell.workspace.backToSession') : t('shell.workspace.backToChat')}
         />
       ) : null}
 

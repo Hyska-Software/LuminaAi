@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   CalendarClock,
   ChevronRight,
@@ -31,62 +33,63 @@ import { useAgentStore, useChatStore, useUiStore } from '@/lib/store';
 import type { ComputerEnvironment, ComputerPreview } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
+type Translate = TFunction<'agents'>;
+
 const ENVIRONMENTS: Array<{
   id: ComputerEnvironment | 'cloud';
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
   icon: typeof Monitor;
   disabled?: boolean;
-  badge?: string;
+  badgeKey?: string;
 }> = [
   {
     id: 'auto',
-    title: 'Automático',
-    description: 'Escolhe o melhor ambiente disponível.',
+    titleKey: 'screen.environments.auto.title',
+    descriptionKey: 'screen.environments.auto.description',
     icon: Sparkles,
   },
   {
     id: 'private_desktop',
-    title: 'Desktop privado',
-    description: 'Desktop isolado em Docker.',
+    titleKey: 'screen.environments.privateDesktop.title',
+    descriptionKey: 'screen.environments.privateDesktop.description',
     icon: Monitor,
   },
   {
     id: 'this_computer',
-    title: 'Este computador',
-    description: 'Sua tela e seus apps.',
+    titleKey: 'screen.environments.thisComputer.title',
+    descriptionKey: 'screen.environments.thisComputer.description',
     icon: Laptop,
   },
   {
     id: 'browser',
-    title: 'Navegador',
-    description: 'Somente páginas da web.',
+    titleKey: 'screen.environments.browser.title',
+    descriptionKey: 'screen.environments.browser.description',
     icon: Globe2,
   },
   {
     id: 'off',
-    title: 'Desligado',
-    description: 'Sem acesso ao computador.',
+    titleKey: 'screen.environments.off.title',
+    descriptionKey: 'screen.environments.off.description',
     icon: Square,
   },
   {
     id: 'cloud',
-    title: 'Desktop na nuvem',
-    description: 'Disponível em uma versão futura.',
+    titleKey: 'screen.environments.cloud.title',
+    descriptionKey: 'screen.environments.cloud.description',
     icon: Cloud,
     disabled: true,
-    badge: 'Em breve',
+    badgeKey: 'screen.environments.cloud.badge',
   },
 ];
 
-function environmentLabel(value: string): string {
-  return (
-    ENVIRONMENTS.find((entry) => entry.id === value)?.title ??
-    (value === 'auto' ? 'Automático' : value)
-  );
+function environmentTitle(value: string, t: Translate): string {
+  const entry = ENVIRONMENTS.find((candidate) => candidate.id === value);
+  return entry ? t(entry.titleKey as never) : value;
 }
 
 export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
+  const { t } = useTranslation('agents');
   const { agent, conversation } = context;
   const conversationId = conversation?.id ?? null;
   const updateAgent = useAgentStore((state) => state.update);
@@ -213,13 +216,13 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
     const needsBrowser = next === 'browser';
     if (needsComputer && !computerCapable) {
       const confirmed = window.confirm(
-        `Ativar o controle do computador para ${agent.name}? Toda ação de mouse/teclado continua exigindo aprovação.`,
+        t('screen.confirmComputer', { name: agent.name }),
       );
       if (!confirmed) return;
     }
     if (needsBrowser && !agent.capabilities.browserUse) {
       const confirmed = window.confirm(
-        `Permitir que ${agent.name} use um navegador controlado? Downloads e ações de página continuam sujeitos a aprovação.`,
+        t('screen.confirmBrowser', { name: agent.name }),
       );
       if (!confirmed) return;
     }
@@ -238,11 +241,11 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
         input.capabilities = { ...input.capabilities, browserUse: true };
       }
       await updateAgent(agent.id, input);
-      toast.success(`Ambiente: ${environmentLabel(next)}`, {
-        description: 'A mudança vale a partir do próximo turno.',
+      toast.success(t('screen.environmentSaved', { environment: environmentTitle(next, t) }), {
+        description: t('screen.nextTurn'),
       });
     } catch (error) {
-      toast.error('Não foi possível salvar o ambiente', { description: String(error) });
+      toast.error(t('screen.environmentError'), { description: String(error) });
     } finally {
       setEnvironmentBusy(false);
     }
@@ -253,16 +256,16 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
     setControlBusy(true);
     try {
       const target = await api.computerTakeControl(conversationId);
-      toast.info('Você está no controle', {
+      toast.info(t('screen.youControl'), {
         description: target.kind === 'local'
-          ? 'Use o mouse e o teclado diretamente neste computador. O agente está pausado.'
-          : 'Clique no desktop para usar o mouse e o teclado. O agente está pausado.',
+          ? t('screen.takeControlLocal')
+          : t('screen.takeControlRemote'),
       });
       setPreview((current) =>
         current ? { ...current, paused: true, takenOver: true, controlTarget: 'desktop' } : current,
       );
     } catch (error) {
-      toast.error('Não foi possível assumir o controle', { description: String(error) });
+      toast.error(t('screen.takeControlError'), { description: String(error) });
     } finally {
       setControlBusy(false);
     }
@@ -276,9 +279,9 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
       setPreview((current) =>
         current ? { ...current, paused: false, takenOver: false, controlTarget: '' } : current,
       );
-      toast.success('Controle devolvido ao agente');
+      toast.success(t('screen.controlReleased'));
     } catch (error) {
-      toast.error('Não foi possível devolver o controle', { description: String(error) });
+      toast.error(t('screen.releaseError'), { description: String(error) });
     } finally {
       setControlBusy(false);
     }
@@ -291,9 +294,9 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
       await api.stopComputerSession(conversationId);
       setPreviewEnabled(false);
       setPreview(null);
-      toast.success('Sessão do computador encerrada');
+      toast.success(t('screen.sessionStopped'));
     } catch (error) {
-      toast.error('Não foi possível encerrar a sessão', { description: String(error) });
+      toast.error(t('screen.stopError'), { description: String(error) });
     } finally {
       setControlBusy(false);
     }
@@ -302,28 +305,30 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-3">
-        <section aria-label="Visualização do desktop" className="flex flex-col gap-2">
+        <section aria-label={t('screen.desktopAria')} className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-[13px] font-medium text-foreground">
-                Tela de {agent.name}
+                {t('screen.screenOf', { name: agent.name })}
               </p>
               <p className="truncate text-[11px] text-foreground-muted">
-                {environmentLabel(environment)}
+                {environmentTitle(environment, t)}
                 {preview?.backend ? ` · ${preview.backend}` : ''}
                 {preview?.activeWindow ? ` · ${preview.activeWindow}` : ''}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1">
               {preview?.paused || preview?.takenOver ? (
-                <Badge tone="warning">{preview.takenOver ? 'Você está no controle' : 'Pausado'}</Badge>
+                <Badge tone="warning">
+                  {preview.takenOver ? t('screen.youControl') : t('screen.paused')}
+                </Badge>
               ) : null}
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => void loadPreview()}
                 disabled={!previewAvailable || previewLoading}
-                aria-label="Atualizar visualização"
+                aria-label={t('screen.refreshPreview')}
               >
                 {previewLoading ? (
                   <Loader2 className="size-3.5 animate-spin" />
@@ -339,31 +344,31 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
               <div className="flex aspect-video flex-col items-center justify-center gap-2 p-5 text-center">
                 <Monitor className="size-6 text-foreground-subtle" />
                 <p className="text-[12px] text-foreground-muted">
-                  Abra uma conversa com {agent.name} para ver o desktop.
+                  {t('screen.openConversationToSee', { name: agent.name })}
                 </p>
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => void startNewConversation('agent', { agentId: agent.id })}
                 >
-                  Nova conversa
+                  {t('home.newConversation')}
                 </Button>
               </div>
             ) : !computerCapable ? (
               <div className="flex aspect-video flex-col items-center justify-center gap-2 p-5 text-center">
                 <ShieldAlert className="size-6 text-warning" />
                 <p className="text-[12px] text-foreground-muted">
-                  O controle do computador está desligado para este agente.
+                  {t('screen.computerDisabled')}
                 </p>
                 <p className="text-[11px] text-foreground-subtle">
-                  Escolha “Este computador” ou “Desktop privado” abaixo.
+                  {t('screen.computerDisabledHint')}
                 </p>
               </div>
             ) : environment === 'off' || environment === 'browser' ? (
               <div className="flex aspect-video flex-col items-center justify-center gap-2 p-5 text-center">
                 <Monitor className="size-6 text-foreground-subtle" />
                 <p className="text-[12px] text-foreground-muted">
-                  Nenhum desktop ativo no modo {environmentLabel(environment)}.
+                  {t('screen.noDesktopInMode', { mode: environmentTitle(environment, t) })}
                 </p>
               </div>
             ) : previewEnabled && preview?.backend === 'docker' && conversationId ? (
@@ -378,12 +383,19 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
             ) : previewEnabled && preview ? (
               <>
                 <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-foreground-muted">
-                  <span className="min-w-0 flex-1">Este computador · {clock - preview.capturedAt < 3000 ? 'Ao vivo' : 'Imagem desatualizada'}</span>
-                  {localExpanded ? <Button size="sm" variant="secondary" disabled={controlBusy} onClick={() => preview.takenOver ? void releaseControl() : void takeControl()}>{preview.takenOver ? 'Devolver ao agente' : 'Assumir o controle'}</Button> : null}
-                  <Button size="sm" variant="ghost" aria-label={localExpanded ? 'Sair da visualização expandida' : 'Expandir desktop'} onClick={() => setLocalExpanded((value) => !value)}>{localExpanded ? <Minimize2 className="size-4" /> : <Expand className="size-4" />}</Button>
+                  <span className="min-w-0 flex-1">
+                    {t('screen.thisComputerLive', {
+                      state:
+                        clock - preview.capturedAt < 3000
+                          ? t('screen.live')
+                          : t('screen.staleFrame'),
+                    })}
+                  </span>
+                  {localExpanded ? <Button size="sm" variant="secondary" disabled={controlBusy} onClick={() => preview.takenOver ? void releaseControl() : void takeControl()}>{preview.takenOver ? t('screen.giveBack') : t('screen.takeControl')}</Button> : null}
+                  <Button size="sm" variant="ghost" aria-label={localExpanded ? t('screen.exitExpanded') : t('screen.expand')} onClick={() => setLocalExpanded((value) => !value)}>{localExpanded ? <Minimize2 className="size-4" /> : <Expand className="size-4" />}</Button>
                 </div>
-                <img src={preview.dataUrl} alt={`Tela deste computador para ${agent.name}`} className={cn('w-full object-contain', localExpanded ? 'min-h-0 flex-1' : 'aspect-video')} />
-                <p className="px-3 py-1.5 text-[11px] text-foreground-muted">O mouse e o teclado controlam diretamente este computador, fora da visualização.</p>
+                <img src={preview.dataUrl} alt={t('screen.thisComputerAlt', { name: agent.name })} className={cn('w-full object-contain', localExpanded ? 'min-h-0 flex-1' : 'aspect-video')} />
+                <p className="px-3 py-1.5 text-[11px] text-foreground-muted">{t('screen.localControlHint')}</p>
               </>
             ) : previewEnabled && previewLoading ? (
               <div className="flex aspect-video items-center justify-center">
@@ -403,8 +415,8 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
                 <Monitor className="size-6 text-foreground-subtle" />
                 <p className="text-[12px] text-foreground-muted">
                   {previewError
-                    ? 'Não foi possível capturar a tela.'
-                    : 'Visualização pausada.'}
+                    ? t('screen.captureError')
+                    : t('screen.previewPaused')}
                 </p>
                 {previewError ? (
                   <p className="max-w-full break-words text-[10px] text-danger">{previewError}</p>
@@ -419,15 +431,15 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
                     }}
                   >
                     <RefreshCw className="mr-1.5 size-3.5" />
-                    Tentar de novo
+                    {t('common:actions.retry')}
                   </Button>
                   {previewEnabled ? (
                     <Button size="sm" variant="ghost" onClick={() => setPreviewEnabled(false)}>
-                      Pausar
+                      {t('screen.pause')}
                     </Button>
                   ) : (
                     <Button size="sm" variant="ghost" onClick={() => setPreviewEnabled(true)}>
-                      Retomar
+                      {t('screen.resume')}
                     </Button>
                   )}
                 </div>
@@ -442,7 +454,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
               variant={preview?.takenOver ? 'secondary' : 'primary'}
               disabled={controlBusy || dockerSetupError || !previewEnabled || (preview?.paused && preview.controlTarget === 'browser')}
               title={
-                dockerSetupError ? 'Configure a imagem do Docker antes de assumir o controle' : undefined
+                dockerSetupError ? t('screen.dockerImageTitle') : undefined
               }
               onClick={() =>
                 preview?.takenOver ? void releaseControl() : void takeControl()
@@ -456,14 +468,14 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
               ) : (
                 <Pause className="mr-1.5 size-3.5" />
               )}
-              {preview?.takenOver ? 'Devolver ao agente' : 'Assumir o controle'}
+              {preview?.takenOver ? t('screen.giveBack') : t('screen.takeControl')}
             </Button>
             <Button size="sm" variant="secondary" disabled={controlBusy || !previewEnabled} onClick={() => void stopSession()}>
-              <Square className="mr-1.5 size-3.5" /> Encerrar sessão
+              <Square className="mr-1.5 size-3.5" /> {t('screen.endSession')}
             </Button>
             </div>
           ) : null}
-          {preview?.paused && preview.controlTarget === 'browser' ? <p className="text-[11px] text-foreground-muted">Devolva o controle do navegador antes de assumir o desktop.</p> : null}
+          {preview?.paused && preview.controlTarget === 'browser' ? <p className="text-[11px] text-foreground-muted">{t('screen.releaseBrowserFirst')}</p> : null}
         </section>
 
         {conversationId ? <ComputerActivity conversationId={conversationId} /> : null}
@@ -471,12 +483,12 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
         <section aria-labelledby="agent-work-environment" className="flex flex-col gap-2">
           <div>
             <h3 id="agent-work-environment" className="text-[13px] font-medium text-foreground">
-              Trabalha em
+              {t('screen.worksIn')}
             </h3>
             <p className="text-[11px] text-foreground-muted">
-              Escolha onde este agente pode trabalhar. A permissão de cada ação continua separada.
+              {t('screen.worksInHint')}
             </p>
-            {turnActive ? <p className="text-[11px] text-foreground-muted">Aguarde o fim do turno para trocar de ambiente.</p> : null}
+            {turnActive ? <p className="text-[11px] text-foreground-muted">{t('screen.waitTurn')}</p> : null}
             <AgentWorkspaceNotice agent={agent} conversation={conversation} />
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
@@ -508,11 +520,11 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
                   />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
-                      {entry.title}
-                      {entry.badge ? <Badge tone="neutral">{entry.badge}</Badge> : null}
+                      {t(entry.titleKey as never)}
+                      {entry.badgeKey ? <Badge tone="neutral">{t(entry.badgeKey as never)}</Badge> : null}
                     </span>
                     <span className="block text-[10px] leading-relaxed text-foreground-muted">
-                      {entry.description}
+                      {t(entry.descriptionKey as never)}
                     </span>
                   </span>
                 </button>
@@ -529,11 +541,11 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
           >
             <CalendarClock className="size-4 shrink-0 text-accent" />
             <span className="min-w-0 flex-1">
-              <span className="block text-[12px] font-medium text-foreground">Rotinas</span>
+              <span className="block text-[12px] font-medium text-foreground">{t('panel.tabs.routines')}</span>
               <span className="block text-[11px] text-foreground-muted">
                 {routineCount === 0
-                  ? 'Nenhum agendamento ainda'
-                  : `${routineCount} agendamento(s)`}
+                  ? t('screen.noSchedules')
+                  : t('screen.schedules', { count: routineCount })}
               </span>
             </span>
             <ChevronRight className="size-4 shrink-0 text-foreground-subtle" />

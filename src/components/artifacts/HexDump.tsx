@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 /** Bytes shown per line in the hexdump (classic `xxd` layout). */
@@ -98,7 +99,8 @@ export interface HexDumpProps {
  * Monospaced hexdump: offset · 16 hex pairs · `|ASCII|`. Rendered in a
  * horizontally scrollable region so wide dumps never break the panel layout.
  */
-export function HexDump({ base64, bytes, maxBytes, label = 'Hexdump dos primeiros bytes', className }: HexDumpProps) {
+export function HexDump({ base64, bytes, maxBytes, label, className }: HexDumpProps) {
+  const { t } = useTranslation('artifacts');
   const lines = useMemo(() => {
     const data = bytes ?? decodeBase64ToBytes(base64);
     return formatHexDump(data, { maxBytes });
@@ -107,7 +109,7 @@ export function HexDump({ base64, bytes, maxBytes, label = 'Hexdump dos primeiro
   if (!lines.length) {
     return (
       <p className={cn('rounded-lg border border-border bg-surface px-3 py-2 text-[11px] text-foreground-subtle', className)}>
-        Nenhum byte para exibir.
+        {t('artifacts:hexdump.empty')}
       </p>
     );
   }
@@ -115,7 +117,7 @@ export function HexDump({ base64, bytes, maxBytes, label = 'Hexdump dos primeiro
   return (
     <div
       role="region"
-      aria-label={label}
+      aria-label={label ?? t('artifacts:hexdump.defaultLabel')}
       data-testid="hexdump"
       className={cn(
         'overflow-auto rounded-lg border border-border bg-surface p-2 font-mono text-[11px] leading-relaxed',

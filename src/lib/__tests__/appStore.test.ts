@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CatalogView,
   LoginChallenge,
@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
 vi.mock('@/lib/api', () => ({ api: mocks.api }));
 
 import { useAppStore, favoriteKey } from '@/lib/store/appStore';
+import { i18n, setLanguage } from '@/lib/i18n';
 
 const settings: Settings = {
   theme: 'system',
@@ -422,5 +423,37 @@ describe('appStore — API key save', () => {
     await useAppStore.getState().setProviderKey('anthropic', null);
 
     expect(mocks.api.refreshProviderModels).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('appStore — interface language', () => {
+  afterEach(async () => {
+    await setLanguage('pt-BR', { persist: false });
+  });
+
+  it('syncs the renderer language from persisted settings on init', async () => {
+    mocks.api.getSettings.mockResolvedValue({
+      ...settingsView(),
+      settings: { ...settings, locale: 'es' },
+    });
+    await useAppStore.getState().init();
+    expect(i18n.language).toBe('es');
+  });
+
+  it('applies a locale patch and rolls back when the backend rejects it', async () => {
+    mocks.api.saveSettings.mockResolvedValueOnce({
+      ...settingsView(),
+      settings: { ...settings, locale: 'es' },
+    });
+    await useAppStore.getState().saveSettings({ locale: 'es' });
+    expect(useAppStore.getState().settings.locale).toBe('es');
+    expect(i18n.language).toBe('es');
+
+    mocks.api.saveSettings.mockRejectedValueOnce(new Error('save failed'));
+    await useAppStore.getState().saveSettings({ locale: 'en' });
+    expect(useAppStore.getState().settings.locale).toBe('es');
+    expect(i18n.language).toBe('es');
+    expect(useAppStore.getState().error).toContain('save failed');
   });
 });

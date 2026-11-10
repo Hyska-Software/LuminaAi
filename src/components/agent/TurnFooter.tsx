@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ClipboardCopy, FileDiff, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { cn, formatDuration, formatTokens } from '@/lib/utils';
@@ -31,6 +32,7 @@ export function TurnFooter({
   onRevert,
   className,
 }: TurnFooterProps) {
+  const { t } = useTranslation('agents');
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -39,9 +41,11 @@ export function TurnFooter({
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const parts: string[] = [`Trabalhou por ${formatDuration(durationMs)}`];
-  if (tokens != null && Number.isFinite(tokens)) parts.push(`${formatTokens(tokens)} tokens`);
-  if (files != null && files > 0) parts.push(`${files} arquivo${files === 1 ? '' : 's'}`);
+  const parts: string[] = [t('turnFooter.worked', { duration: formatDuration(durationMs) })];
+  if (tokens != null && Number.isFinite(tokens)) {
+    parts.push(t('turnFooter.tokens', { tokens: formatTokens(tokens) }));
+  }
+  if (files != null && files > 0) parts.push(t('turnFooter.files', { count: files }));
   if (added != null || removed != null) {
     parts.push(`+${added ?? 0} −${removed ?? 0}`);
   }
@@ -60,7 +64,7 @@ export function TurnFooter({
   return (
     <div
       role="group"
-      aria-label="Fim do turno"
+      aria-label={t('turnFooter.aria')}
       className={cn(
         'flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border pt-2 text-[12px] text-foreground-muted',
         className,
@@ -69,7 +73,7 @@ export function TurnFooter({
       <span className="min-w-0 break-words">{summary}</span>
 
       <span aria-live="polite" className="sr-only">
-        {copied ? 'Resumo do turno copiado' : ''}
+        {copied ? t('turnFooter.copiedAria') : ''}
       </span>
 
       <div className="ml-auto flex flex-wrap items-center gap-1">
@@ -80,7 +84,7 @@ export function TurnFooter({
             onClick={onOpenChanges}
             leftIcon={<FileDiff className="size-3.5" />}
           >
-            Ver alterações
+            {t('turnFooter.viewChanges')}
           </Button>
         ) : null}
         {onRevert ? (
@@ -90,7 +94,7 @@ export function TurnFooter({
             onClick={onRevert}
             leftIcon={<RotateCcw className="size-3.5" />}
           >
-            Reverter turno
+            {t('turnFooter.revert')}
           </Button>
         ) : null}
         <Button
@@ -99,7 +103,7 @@ export function TurnFooter({
           onClick={copySummary}
           leftIcon={<ClipboardCopy className="size-3.5" />}
         >
-          {copied ? 'Resumo copiado' : 'Copiar resumo'}
+          {copied ? t('turnFooter.copied') : t('turnFooter.copy')}
         </Button>
       </div>
     </div>

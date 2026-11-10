@@ -1,7 +1,9 @@
 /**
- * Settings → Sobre → Atualizações: manual check, automatic-check preference and
+ * Settings → About → Updates: manual check, automatic-check preference and
  * the same download/install actions used by the title-bar popover.
  */
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { Badge, Button, Switch } from '@/components/ui';
 import { UpdateActions, updateCheckedLabel } from '@/components/layout/UpdatePanel';
@@ -10,24 +12,26 @@ import { useAppStore, useUpdateStore } from '@/lib/store';
 import { SettingRow, SettingsSection } from './shared';
 
 function statusLabel(
+  t: TFunction<'settings'>,
   phase: string,
   available: boolean,
   errorScope: string | null,
   lastCheckAt: number | null | undefined,
 ): string {
-  if (phase === 'checking') return 'Verificando atualizações…';
-  if (phase === 'downloading') return 'Baixando atualização…';
-  if (phase === 'verifying') return 'Verificando integridade do download…';
-  if (phase === 'installing') return 'Abrindo instalador…';
-  if (phase === 'error' && errorScope === 'download') return 'Falha ao baixar a atualização';
-  if (available) return 'Atualização disponível';
-  if (phase === 'up-to-date') return 'Você está na versão mais recente';
-  if (phase === 'error') return 'Não foi possível verificar atualizações';
-  if (lastCheckAt) return 'Tudo atualizado';
-  return 'Nenhuma verificação concluída ainda';
+  if (phase === 'checking') return t('update.status.checking');
+  if (phase === 'downloading') return t('update.status.downloading');
+  if (phase === 'verifying') return t('update.status.verifying');
+  if (phase === 'installing') return t('update.status.installing');
+  if (phase === 'error' && errorScope === 'download') return t('update.status.downloadError');
+  if (available) return t('update.status.available');
+  if (phase === 'up-to-date') return t('update.status.upToDate');
+  if (phase === 'error') return t('update.status.checkError');
+  if (lastCheckAt) return t('update.status.idleChecked');
+  return t('update.status.idle');
 }
 
 export function UpdateSection() {
+  const { t } = useTranslation('settings');
   const appInfo = useAppStore((state) => state.appInfo);
   const phase = useUpdateStore((state) => state.phase);
   const info = useUpdateStore((state) => state.info);
@@ -48,48 +52,45 @@ export function UpdateSection() {
 
   const detail = (() => {
     if (errorScope === 'check' && error) {
-      return info
-        ? `${error} Mostrando o último resultado.`
-        : error;
+      return info ? t('update.detail.lastResult', { error }) : error;
     }
     if (available && info) {
-      const where = info.asset ? `para ${info.asset.platformLabel}` : 'sem instalador para esta plataforma';
-      return `${checked ?? 'Verificação recente'} · ${where}.`;
+      const fallbackChecked = checked ?? t('update.detail.recentCheck');
+      return info.asset
+        ? t('update.detail.availableWithAsset', {
+            checked: fallbackChecked,
+            platform: info.asset.platformLabel,
+          })
+        : t('update.detail.availableNoAsset', { checked: fallbackChecked });
     }
     if (checked) return checked;
-    return 'O Zylara consulta o GitHub em busca de versões estáveis. Nada é instalado sem a sua confirmação.';
+    return t('update.detail.idle');
   })();
 
   return (
-    <SettingsSection
-      title="Atualizações"
-      description="Baixa e instala versões publicadas no GitHub. O download é verificado por SHA-256 e a instalação é sempre confirmada por você."
-    >
-      <SettingRow label="Versão atual" description="Versão do Zylara em execução.">
+    <SettingsSection title={t('update.title')} description={t('update.description')}>
+      <SettingRow label={t('update.current.label')} description={t('update.current.description')}>
         <Badge tone="accent" size="md">
           v{appInfo?.version ?? info?.currentVersion ?? '—'}
         </Badge>
       </SettingRow>
 
-      <SettingRow
-        label="Atualizações automáticas"
-        description="Verifica ao abrir e a cada hora enquanto o app estiver aberto. Baixar e instalar continuam sendo decisões suas."
-      >
+      <SettingRow label={t('update.auto.label')} description={t('update.auto.description')}>
         <Switch
           checked={preferences.autoCheck}
           onCheckedChange={(value) => void setAutoCheck(value)}
-          aria-label="Verificar atualizações automaticamente"
+          aria-label={t('update.auto.aria')}
         />
       </SettingRow>
 
-      <SettingRow vertical label="Status" description={detail}>
+      <SettingRow vertical label={t('update.status.label')} description={detail}>
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span
               className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-foreground"
               aria-live="polite"
             >
-              {statusLabel(phase, available, errorScope, preferences.lastCheckAt)}
+              {statusLabel(t, phase, available, errorScope, preferences.lastCheckAt)}
             </span>
             {available && info ? (
               <Badge tone="accent" size="sm">
@@ -98,7 +99,7 @@ export function UpdateSection() {
             ) : null}
             {info?.stale || (errorScope === 'check' && info) ? (
               <Badge tone="warning" size="sm">
-                Sem conexão
+                {t('update.noConnection')}
               </Badge>
             ) : null}
             <Button
@@ -109,7 +110,7 @@ export function UpdateSection() {
               leftIcon={<RefreshCw className="size-3.5" strokeWidth={1.75} />}
               onClick={() => void check({ force: true })}
             >
-              Verificar agora
+              {t('update.checkNow')}
             </Button>
             {available && info ? (
               <Button
@@ -118,12 +119,12 @@ export function UpdateSection() {
                 rightIcon={<ExternalLink className="size-3.5" strokeWidth={1.75} />}
                 onClick={() => void openExternalUrl(info.htmlUrl)}
               >
-                Ver no GitHub
+                {t('update.viewOnGithub')}
               </Button>
             ) : null}
             {available ? (
               <Button size="sm" variant="ghost" onClick={() => void skip()}>
-                Ignorar esta versão
+                {t('update.skip')}
               </Button>
             ) : null}
           </div>
@@ -132,9 +133,9 @@ export function UpdateSection() {
 
           {!available && skipped ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] text-foreground-muted">
-              <span>A versão v{skipped} está ignorada.</span>
+              <span>{t('update.skipped', { version: skipped })}</span>
               <Button size="sm" variant="ghost" onClick={() => void unskip()}>
-                Mostrar novamente
+                {t('update.unskip')}
               </Button>
             </div>
           ) : null}

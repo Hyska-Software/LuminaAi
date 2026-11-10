@@ -8,6 +8,7 @@
 use serde_json::{json, Value};
 
 use crate::agents::AgentMemoryInput;
+use crate::i18n;
 use crate::providers::ToolDefinition;
 
 use super::{json_str, ToolOutcome, ToolRuntime};
@@ -58,10 +59,10 @@ pub fn definition() -> ToolDefinition {
 
 pub fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
     let Some(agent_id) = rt.options.agent_id.as_deref() else {
-        return ToolOutcome::error("a memória durável só existe em conversas de um agente");
+        return ToolOutcome::error(i18n::t("tools.memory.requiresAgentTurn"));
     };
     if !rt.options.agent_memory {
-        return ToolOutcome::error("a memória deste agente está desativada");
+        return ToolOutcome::error(i18n::t("tools.memory.disabled"));
     }
     run_with(&rt.db, agent_id, &rt.conversation_id, args)
 }
@@ -82,7 +83,7 @@ pub fn run_with(
         .trim()
         .to_ascii_lowercase();
     if !matches!(scope.as_str(), "private" | "shared") {
-        return ToolOutcome::error("scope inválido: use private ou shared");
+        return ToolOutcome::error(i18n::t("tools.memory.invalidScope"));
     }
     let shared_allowed = || -> Result<(), ToolOutcome> {
         match db.get_agent(agent_id) {
@@ -91,10 +92,14 @@ pub fn run_with(
             {
                 Ok(())
             }
-            Ok(Some(_)) => Err(ToolOutcome::error(
-                "AGENT_CAPABILITY_DENIED: memória compartilhada não está habilitada para este agente",
-            )),
-            Ok(None) => Err(ToolOutcome::error("AGENT_NOT_FOUND: agente não existe")),
+            Ok(Some(_)) => Err(ToolOutcome::error(format!(
+                "AGENT_CAPABILITY_DENIED: {}",
+                i18n::t("tools.memory.sharedDenied")
+            ))),
+            Ok(None) => Err(ToolOutcome::error(format!(
+                "AGENT_NOT_FOUND: {}",
+                i18n::t("tools.memory.agentNotFound")
+            ))),
             Err(error) => Err(ToolOutcome::error(format!("{error:#}"))),
         }
     };
@@ -108,33 +113,39 @@ pub fn run_with(
                     Ok(memories) => ToolOutcome {
                         content: serde_json::to_string_pretty(&memories)
                             .unwrap_or_else(|_| "[]".to_string()),
-                        summary: Some(format!("{} memória(s) compartilhada(s)", memories.len())),
+                        summary: Some(i18n::t_count(
+                            "tools.memory.sharedSummary",
+                            memories.len(),
+                            &[("count", &memories.len().to_string())],
+                        )),
                         ..Default::default()
                     },
-                    Err(error) => {
-                        ToolOutcome::error(format!("não foi possível ler as memórias: {error:#}"))
-                    }
+                    Err(error) => ToolOutcome::error(i18n::t_args(
+                        "tools.memory.listFailed",
+                        &[("error", &format!("{error:#}"))],
+                    )),
                 };
             }
             match db.list_agent_memories(agent_id) {
                 Ok(memories) => ToolOutcome {
                     content: serde_json::to_string_pretty(&memories)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    summary: Some(if memories.len() == 1 {
-                        "1 memória".to_string()
-                    } else {
-                        format!("{} memórias", memories.len())
-                    }),
+                    summary: Some(i18n::t_count(
+                        "tools.memory.privateSummary",
+                        memories.len(),
+                        &[("count", &memories.len().to_string())],
+                    )),
                     ..Default::default()
                 },
-                Err(error) => {
-                    ToolOutcome::error(format!("não foi possível ler as memórias: {error:#}"))
-                }
+                Err(error) => ToolOutcome::error(i18n::t_args(
+                    "tools.memory.listFailed",
+                    &[("error", &format!("{error:#}"))],
+                )),
             }
         }
         "save" => {
             let Some(content) = json_str(args, "content") else {
-                return ToolOutcome::error("o argumento `content` é obrigatório para salvar");
+                return ToolOutcome::error(i18n::t("tools.memory.contentRequiredSave"));
             };
             let input = AgentMemoryInput {
                 kind: json_str(args, "kind").unwrap_or_else(|| "fact".to_string()),
@@ -159,12 +170,13 @@ pub fn run_with(
                             "kind": memory.kind,
                         }))
                         .unwrap_or_else(|_| "{\"saved\":true}".to_string()),
-                        summary: Some("Memória compartilhada salva".to_string()),
+                        summary: Some(i18n::t("tools.memory.sharedSaved")),
                         ..Default::default()
                     },
-                    Err(error) => {
-                        ToolOutcome::error(format!("não foi possível salvar: {error:#}"))
-                    }
+                    Err(error) => ToolOutcome::error(i18n::t_args(
+                        "tools.memory.saveFailed",
+                        &[("error", &format!("{error:#}"))],
+                    )),
                 };
             }
             match db.create_agent_memory(agent_id, &input) {
@@ -176,18 +188,21 @@ pub fn run_with(
                         "kind": memory.kind,
                     }))
                     .unwrap_or_else(|_| "{\"saved\":true}".to_string()),
-                    summary: Some("Memória salva".to_string()),
+                    summary: Some(i18n::t("tools.memory.saved")),
                     ..Default::default()
                 },
-                Err(error) => ToolOutcome::error(format!("não foi possível salvar: {error:#}")),
+                Err(error) => ToolOutcome::error(i18n::t_args(
+                    "tools.memory.saveFailed",
+                    &[("error", &format!("{error:#}"))],
+                )),
             }
         }
         "update" => {
             let Some(id) = json_str(args, "id") else {
-                return ToolOutcome::error("o argumento `id` é obrigatório para atualizar");
+                return ToolOutcome::error(i18n::t("tools.memory.idRequiredUpdate"));
             };
             let Some(content) = json_str(args, "content") else {
-                return ToolOutcome::error("o argumento `content` é obrigatório para atualizar");
+                return ToolOutcome::error(i18n::t("tools.memory.contentRequiredUpdate"));
             };
             if scope == "shared" {
                 if let Err(outcome) = shared_allowed() {
@@ -198,16 +213,18 @@ pub fn run_with(
                         memory
                     }
                     Ok(Some(_)) => {
-                        return ToolOutcome::error(
-                            "AGENT_MEMORY_FORBIDDEN: a memória foi criada por outro agente",
-                        );
+                        return ToolOutcome::error(format!(
+                            "AGENT_MEMORY_FORBIDDEN: {}",
+                            i18n::t("tools.memory.forbiddenOtherAgent")
+                        ));
                     }
                     Ok(None) => {
-                        return ToolOutcome::error("memória compartilhada não encontrada");
+                        return ToolOutcome::error(i18n::t("tools.memory.sharedNotFound"));
                     }
                     Err(error) => {
-                        return ToolOutcome::error(format!(
-                            "não foi possível ler a memória: {error:#}"
+                        return ToolOutcome::error(i18n::t_args(
+                            "tools.memory.readFailed",
+                            &[("error", &format!("{error:#}"))],
                         ));
                     }
                 };
@@ -233,21 +250,25 @@ pub fn run_with(
                             "kind": memory.kind,
                         }))
                         .unwrap_or_else(|_| "{\"updated\":true}".to_string()),
-                        summary: Some("Memória compartilhada atualizada".to_string()),
+                        summary: Some(i18n::t("tools.memory.sharedUpdated")),
                         ..Default::default()
                     },
-                    Err(error) => {
-                        ToolOutcome::error(format!("não foi possível atualizar: {error:#}"))
-                    }
+                    Err(error) => ToolOutcome::error(i18n::t_args(
+                        "tools.memory.updateFailed",
+                        &[("error", &format!("{error:#}"))],
+                    )),
                 };
             }
             let existing = match db.get_agent_memory(agent_id, id.trim()) {
                 Ok(Some(memory)) => memory,
                 Ok(None) => {
-                    return ToolOutcome::error("memória não encontrada para este agente");
+                    return ToolOutcome::error(i18n::t("tools.memory.notFound"));
                 }
                 Err(error) => {
-                    return ToolOutcome::error(format!("não foi possível ler a memória: {error:#}"));
+                    return ToolOutcome::error(i18n::t_args(
+                        "tools.memory.readFailed",
+                        &[("error", &format!("{error:#}"))],
+                    ));
                 }
             };
             let input = AgentMemoryInput {
@@ -272,15 +293,18 @@ pub fn run_with(
                         "kind": memory.kind,
                     }))
                     .unwrap_or_else(|_| "{\"updated\":true}".to_string()),
-                    summary: Some("Memória atualizada".to_string()),
+                    summary: Some(i18n::t("tools.memory.updated")),
                     ..Default::default()
                 },
-                Err(error) => ToolOutcome::error(format!("não foi possível atualizar: {error:#}")),
+                Err(error) => ToolOutcome::error(i18n::t_args(
+                    "tools.memory.updateFailed",
+                    &[("error", &format!("{error:#}"))],
+                )),
             }
         }
         "forget" => {
             let Some(id) = json_str(args, "id") else {
-                return ToolOutcome::error("o argumento `id` é obrigatório para esquecer");
+                return ToolOutcome::error(i18n::t("tools.memory.idRequiredForget"));
             };
             if scope == "shared" {
                 if let Err(outcome) = shared_allowed() {
@@ -294,12 +318,13 @@ pub fn run_with(
                             "id": id.trim()
                         })
                         .to_string(),
-                        summary: Some("Memória compartilhada removida".to_string()),
+                        summary: Some(i18n::t("tools.memory.sharedRemoved")),
                         ..Default::default()
                     },
-                    Err(error) => {
-                        ToolOutcome::error(format!("não foi possível remover: {error:#}"))
-                    }
+                    Err(error) => ToolOutcome::error(i18n::t_args(
+                        "tools.memory.removeFailed",
+                        &[("error", &format!("{error:#}"))],
+                    )),
                 };
             }
             match db.delete_agent_memory(agent_id, id.trim()) {
@@ -310,13 +335,16 @@ pub fn run_with(
                         "id": id.trim()
                     })
                     .to_string(),
-                    summary: Some("Memória removida".to_string()),
+                    summary: Some(i18n::t("tools.memory.removed")),
                     ..Default::default()
                 },
-                Err(error) => ToolOutcome::error(format!("não foi possível remover: {error:#}")),
+                Err(error) => ToolOutcome::error(i18n::t_args(
+                    "tools.memory.removeFailed",
+                    &[("error", &format!("{error:#}"))],
+                )),
             }
         }
-        _ => ToolOutcome::error("action inválida: use list, save, update ou forget"),
+        _ => ToolOutcome::error(i18n::t("tools.memory.invalidAction")),
     }
 }
 

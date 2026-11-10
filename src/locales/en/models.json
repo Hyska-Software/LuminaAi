@@ -1,0 +1,246 @@
+{
+  "effort": {
+    "none": "Off",
+    "minimal": "Minimal",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "xhigh": "Very high",
+    "max": "Maximum"
+  },
+  "effortDescriptions": {
+    "none": "No extended reasoning.",
+    "minimal": "Almost direct; the least reasoning.",
+    "low": "Fast, for simple tasks.",
+    "medium": "A balance between speed and depth.",
+    "high": "Thinks more before answering; good for complex problems.",
+    "xhigh": "Very high effort; slower and more detailed answers.",
+    "max": "The highest effort available; slower and more tokens.",
+    "fallback": "Adjusts how much the model thinks before answering."
+  },
+  "reasoning": {
+    "shortOff": "off",
+    "shortOn": "on",
+    "noControl": "No reasoning control",
+    "thinkingOff": "Thinking off",
+    "default": "Default",
+    "thinkingOn": "Thinking on",
+    "effortLabel": "Reasoning {{effort}}",
+    "budget": "Budget {{value}}"
+  },
+  "price": {
+    "free": "Free",
+    "freeShort": "free",
+    "pair": "{{input}} / {{output}}"
+  },
+  "badges": {
+    "free": "Free",
+    "vision": "Vision",
+    "reasoning": "Reasoning",
+    "open": "Open",
+    "preview": "Preview",
+    "unavailable": "Unavailable"
+  },
+  "capabilities": {
+    "free": "Free",
+    "freeTitle": "Free model on the gateway",
+    "vision": "Vision",
+    "visionTitle": "Accepts {{modalities}}",
+    "attachments": "attachments",
+    "reasoning": "Reasoning",
+    "reasoningTitle": "Exposes a thinking mode control",
+    "open": "Open",
+    "openTitle": "Open weights",
+    "preview": "Preview",
+    "previewTitle": "Preview model",
+    "unavailable": "Unavailable",
+    "unavailableTitle": "This model is not available on the gateway"
+  },
+  "family": {
+    "other": "Other"
+  },
+  "filters": {
+    "favorites": {
+      "label": "Favorites",
+      "title": "Show only favorite models"
+    },
+    "vision": {
+      "label": "Vision",
+      "title": "Models that accept images/attachments"
+    },
+    "reasoning": {
+      "label": "Reasoning",
+      "title": "Models with a thinking control"
+    },
+    "free": {
+      "label": "Free",
+      "title": "Free models on the gateway"
+    }
+  },
+  "groups": {
+    "favorites": "Favorites",
+    "providerFamily": "{{provider}} · {{family}}"
+  },
+  "budget": {
+    "fast": {
+      "label": "Fast",
+      "description": "About 4 thousand reasoning tokens."
+    },
+    "balanced": {
+      "label": "Balanced",
+      "description": "About 8 thousand reasoning tokens."
+    },
+    "deep": {
+      "label": "Deep",
+      "description": "About 16 thousand reasoning tokens."
+    },
+    "max": {
+      "label": "Maximum",
+      "description": "About 32 thousand reasoning tokens."
+    }
+  },
+  "thinking": {
+    "offLabel": "Off",
+    "offDescription": "Answers directly, without extended reasoning.",
+    "onLabel": "On",
+    "onDescription": "Enables model reasoning, without effort tuning.",
+    "alwaysEffort": "This model always thinks; choose the effort level.",
+    "alwaysBudget": "This model always thinks; choose the token budget.",
+    "noControl": "This model does not expose a reasoning control.",
+    "noReasoningHint": "This model does not expose a reasoning control",
+    "defaultLabel": "Default",
+    "headlineNoControl": "No reasoning control",
+    "headlineOff": "Thinking off",
+    "headlineDefault": "Model default",
+    "headlineEffort": "Reasoning {{effort}}",
+    "headlineOn": "Thinking on",
+    "headlineBudget": "Reasoning budget of {{value}} tokens",
+    "budgetK": "{{value}}k",
+    "modeLabel": "Thinking mode",
+    "backToList": "Back to the model list",
+    "empty": "This model does not expose a reasoning control.",
+    "budgetLabel": "Budget",
+    "budgetSliderAria": "Reasoning budget in tokens",
+    "budgetSliderLabel": "Reasoning budget",
+    "budgetRange": "From {{min}} to {{max}} tokens reserved for reasoning.",
+    "tokens": "{{value}} tokens"
+  },
+  "details": {
+    "context": "Context",
+    "maxOutput": "Max output",
+    "cost": "Cost (1M tok.)",
+    "input": "Input",
+    "protocol": "Protocol",
+    "knowledge": "Knowledge until",
+    "release": "Release"
+  },
+  "modalities": {
+    "text": "Text",
+    "image": "Image",
+    "pdf": "PDF",
+    "audio": "Audio",
+    "video": "Video"
+  },
+  "protocols": {
+    "openai-chat": "OpenAI Chat",
+    "openai-responses": "OpenAI Responses",
+    "anthropic": "Anthropic Messages",
+    "google": "Google Gemini"
+  },
+  "status": {
+    "unavailable": "Unavailable on the gateway — it cannot be used.",
+    "beta": "Preview model: it may change or leave the catalog.",
+    "free": "Free model on the gateway, with usage limits."
+  },
+  "keys": {
+    "settings": "Key configured",
+    "env": "Key via environment variable",
+    "opencodeCli": "OpenCode CLI key",
+    "chatgpt": "ChatGPT account connected",
+    "chatgptPlan": "ChatGPT plan connected",
+    "chatgptExpired": "ChatGPT session expired",
+    "noChatgpt": "No ChatGPT account",
+    "noKey": "No API key"
+  },
+  "detail": {
+    "emptyTitle": "Select a model",
+    "emptyDescription": "Details and the thinking mode appear here.",
+    "favoriteAdd": "Favorite {{name}}",
+    "favoriteRemove": "Remove {{name}} from favorites",
+    "estimated": "Estimated",
+    "estimatedTitle": "Model listed by your account: estimated capabilities.",
+    "planIncluded": "Included in your ChatGPT plan",
+    "planUsageNote": "Usage counts against your plan's shared limit.",
+    "manageUsage": "Manage usage",
+    "accountReauth": "Your ChatGPT session expired. Sign in again to keep using the plan.",
+    "accountReauthAction": "Reconnect",
+    "accountPlanDisabled": "Your ChatGPT account is connected, but plan usage is not enabled for this app.",
+    "accountPlanDisabledAction": "Enable plan usage",
+    "accountSignIn": "Connect your ChatGPT account to use these models with your plan.",
+    "accountSignInAction": "Connect ChatGPT account",
+    "planNotActive": "Plan usage is not enabled for this account. Enable it to use the models without paying per token.",
+    "planNotActiveAction": "Enable plan usage",
+    "missingKey": "No API key for {{provider}}. Configure it in Settings › Providers.",
+    "configure": "Configure",
+    "apiKeyNote": "You can also use this provider by pasting an OpenAI API key.",
+    "unavailableTitle": "Unavailable on the gateway — it cannot be used."
+  },
+  "row": {
+    "favoriteAdd": "Favorite {{name}}",
+    "favoriteRemove": "Remove {{name}} from favorites",
+    "favoriteRemoveShort": "Remove from favorites",
+    "favoriteAddShort": "Favorite",
+    "estimatedTitle": "Model listed by your account: estimated capabilities."
+  },
+  "list": {
+    "emptyTitle": "No models found",
+    "emptyHint": "Try another term or clear the filters."
+  },
+  "search": {
+    "placeholder": "Search models…",
+    "clear": "Clear search"
+  },
+  "picker": {
+    "title": "Select model",
+    "description": "Search by name, family, identifier or capability and adjust thinking before confirming.",
+    "searchAria": "Search models",
+    "filtersAria": "Model filters",
+    "planBadge": "ChatGPT plan",
+    "planBadgeTitle": "Models included in your ChatGPT plan",
+    "allProviders": "All providers",
+    "providersAria": "Providers",
+    "resultsAria": "Model search results",
+    "providerModelsAria": "Provider models",
+    "detailsAria": "Model details",
+    "footerNavigate": "navigate",
+    "footerUse": "use",
+    "footerClose": "close",
+    "inUse": "In use",
+    "useModel": "Use this model",
+    "lockedHint": "You can adjust the thinking mode with the ✦ button in the composer.",
+    "noResultsTitle": "No models found",
+    "noResultsHint": "Try another term or adjust the filters.",
+    "noModelsTitle": "No models available",
+    "noModelsHint": "This provider's catalog is empty right now.",
+    "clearSearchAndFilters": "Clear search and filters",
+    "emptyPillHint": "Try another term or search by provider.",
+    "clearSearch": "Clear search",
+    "allProvidersTitle": "Searches every provider",
+    "modelsAria": "Models",
+    "providerAria": "Provider",
+    "thinkingStep": "apply",
+    "chooseStep": "choose",
+    "kbdNavigate": "Navigate",
+    "kbdApply": "Apply",
+    "kbdClose": "Close",
+    "selectModel": "Select model",
+    "selectModelCurrent": "Select model. Current: {{name}}",
+    "selectThinking": "Select thinking mode. Current: {{value}}",
+    "lockedStreamingAria": "Model change unavailable while answering. Current: {{name}}",
+    "lockedConversationAria": "Model locked in this conversation. Current: {{name}}",
+    "viewAllModels": "View all models…",
+    "detailsGroupAria": "Model details",
+    "countOne": "{{count}} model",
+    "countOther": "{{count}} models"
+  }
+}

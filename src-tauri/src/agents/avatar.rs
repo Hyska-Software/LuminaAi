@@ -239,7 +239,7 @@ pub fn normalize_avatar(mut avatar: AgentAvatar) -> Result<AgentAvatar, String> 
             if trimmed.is_empty() {
                 *value = "🤖".to_string();
             } else if trimmed.len() > MAX_EMOJI_BYTES {
-                return Err("AGENT_AVATAR_INVALID: o emoji é grande demais.".to_string());
+                return Err(crate::i18n::t("agents.avatar.emojiTooLarge"));
             } else {
                 *value = trimmed;
             }
@@ -249,15 +249,13 @@ pub fn normalize_avatar(mut avatar: AgentAvatar) -> Result<AgentAvatar, String> 
                 .iter()
                 .find(|prefix| data_url.starts_with(**prefix))
             else {
-                return Err(
-                    "AGENT_AVATAR_INVALID: a imagem deve ser PNG, JPEG, GIF ou WebP.".to_string(),
-                );
+                return Err(crate::i18n::t("agents.avatar.invalidFormat"));
             };
             if data_url.len() > MAX_AVATAR_DATA_URL_CHARS {
-                return Err("AGENT_AVATAR_TOO_LARGE: a imagem do avatar é grande demais.".to_string());
+                return Err(crate::i18n::t("agents.avatar.tooLarge"));
             }
             if data_url.len() <= prefix.len() {
-                return Err("AGENT_AVATAR_INVALID: a imagem do avatar está vazia.".to_string());
+                return Err(crate::i18n::t("agents.avatar.empty"));
             }
         }
         AgentAvatarSource::Mascot { .. } => {}
@@ -276,11 +274,21 @@ fn decode_limits() -> image::Limits {
 fn read_dimensions(bytes: &[u8]) -> Result<(u32, u32), String> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
-        .map_err(|error| format!("AGENT_AVATAR_INVALID: falha ao identificar a imagem: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.avatar.identifyFailed",
+                &[("error", &error.to_string())],
+            )
+        })?;
     reader.limits(decode_limits());
     reader
         .into_dimensions()
-        .map_err(|error| format!("AGENT_AVATAR_INVALID: falha ao ler a imagem: {error}"))
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.avatar.readFailed",
+                &[("error", &error.to_string())],
+            )
+        })
 }
 
 fn data_url(mime: &str, bytes: &[u8]) -> String {
@@ -294,10 +302,10 @@ fn data_url(mime: &str, bytes: &[u8]) -> String {
 /// to the first frame.
 pub fn normalize_avatar_image(bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
-        return Err("AGENT_AVATAR_INVALID: a imagem está vazia.".to_string());
+        return Err(crate::i18n::t("agents.avatar.imageEmpty"));
     }
     if bytes.len() > MAX_AVATAR_SOURCE_BYTES {
-        return Err("AGENT_AVATAR_TOO_LARGE: a imagem passa de 10 MB.".to_string());
+        return Err(crate::i18n::t("agents.avatar.imageTooLarge"));
     }
     let format = sniff_format(bytes);
     let mime = match format {
@@ -306,35 +314,43 @@ pub fn normalize_avatar_image(bytes: &[u8]) -> Result<String, String> {
         ImageFormat::Gif => "image/gif",
         ImageFormat::Webp => "image/webp",
         _ => {
-            return Err(
-                "AGENT_AVATAR_UNSUPPORTED: a imagem deve ser PNG, JPEG, GIF ou WebP.".to_string(),
-            )
+            return Err(crate::i18n::t("agents.avatar.unsupportedFormat"))
         }
     };
 
     let (width, height) = read_dimensions(bytes)?;
     if width > MAX_AVATAR_SIDE || height > MAX_AVATAR_SIDE {
-        return Err("AGENT_AVATAR_INVALID: a imagem passa de 8192 px.".to_string());
+        return Err(crate::i18n::t("agents.avatar.dimensionsTooLarge"));
     }
 
     if matches!(format, ImageFormat::Gif | ImageFormat::Webp) && bytes.len() <= MAX_ANIMATED_BYTES {
         let url = data_url(mime, bytes);
         if url.len() > MAX_AVATAR_DATA_URL_CHARS {
-            return Err("AGENT_AVATAR_TOO_LARGE: a imagem do avatar é grande demais.".to_string());
+            return Err(crate::i18n::t("agents.avatar.tooLarge"));
         }
         return Ok(url);
     }
 
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
-        .map_err(|error| format!("AGENT_AVATAR_INVALID: falha ao identificar a imagem: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.avatar.identifyFailed",
+                &[("error", &error.to_string())],
+            )
+        })?;
     reader.limits(decode_limits());
     let decoded = reader
         .decode()
-        .map_err(|error| format!("AGENT_AVATAR_INVALID: falha ao decodificar a imagem: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.avatar.decodeFailed",
+                &[("error", &error.to_string())],
+            )
+        })?;
     let side = decoded.width().min(decoded.height());
     if side == 0 {
-        return Err("AGENT_AVATAR_INVALID: a imagem não tem dimensões válidas.".to_string());
+        return Err(crate::i18n::t("agents.avatar.invalidDimensions"));
     }
     let x = (decoded.width() - side) / 2;
     let y = (decoded.height() - side) / 2;
@@ -349,10 +365,15 @@ pub fn normalize_avatar_image(bytes: &[u8]) -> Result<String, String> {
             AVATAR_SIDE,
             image::ExtendedColorType::Rgba8,
         )
-        .map_err(|error| format!("AGENT_AVATAR_INVALID: falha ao gerar a imagem: {error}"))?;
+        .map_err(|error| {
+            crate::i18n::t_args(
+                "agents.avatar.generateFailed",
+                &[("error", &error.to_string())],
+            )
+        })?;
     let url = data_url("image/png", &png);
     if url.len() > MAX_AVATAR_DATA_URL_CHARS {
-        return Err("AGENT_AVATAR_TOO_LARGE: a imagem do avatar é grande demais.".to_string());
+        return Err(crate::i18n::t("agents.avatar.tooLarge"));
     }
     Ok(url)
 }
