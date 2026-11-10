@@ -56,6 +56,7 @@ export {
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_STEP,
 } from './uiStore';
+export { useThemeStore, BUILTIN_THEME_ID } from './themeStore';
 export type {
   AgentEditorState,
   AgentPanelTab,

@@ -52,8 +52,60 @@
       "aria": "Razonamiento contraído por defecto"
     }
   },
+  "themes": {
+    "mode": {
+      "title": "Apariencia",
+      "description": "Elige claro, oscuro o seguir el sistema. El tema proporciona ambas paletas.",
+      "label": "Modo",
+      "aria": "Modo del tema"
+    },
+    "library": {
+      "title": "Temas instalados",
+      "description": "Cada tema aporta su propia paleta, radios, fuentes y fondo de pantalla. Instala un paquete .zip con un manifiesto theme.json."
+    },
+    "builtin": {
+      "name": "Zylara",
+      "description": "El aspecto predeterminado de Zylara."
+    },
+    "actions": {
+      "install": "Instalar tema…",
+      "refresh": "Recargar temas",
+      "openFolder": "Abrir carpeta de temas",
+      "openFolderAria": "Abrir carpeta de temas",
+      "use": "Usar",
+      "active": "Activo",
+      "remove": "Eliminar",
+      "removeAria": "Eliminar el tema {{name}}"
+    },
+    "package": {
+      "filter": "Paquete de tema",
+      "pickTitle": "Selecciona un paquete de tema"
+    },
+    "meta": {
+      "version": "v{{version}}",
+      "by": "por {{author}}"
+    },
+    "loading": "Cargando temas…",
+    "empty": "Aún no hay temas personalizados. Instala un paquete .zip para añadir uno.",
+    "loadFailed": "No se pudieron cargar los temas instalados.",
+    "retry": "Reintentar",
+    "toasts": {
+      "installed": "Tema instalado",
+      "updated": "Tema actualizado",
+      "installFailed": "No se pudo instalar el tema",
+      "removed": "Tema eliminado",
+      "removeFailed": "No se pudo eliminar el tema",
+      "openFolderFailed": "No se pudo abrir la carpeta de temas"
+    },
+    "removeConfirm": {
+      "title": "¿Eliminar tema?",
+      "body": "¿Eliminar «{{name}}» de este equipo? El archivo del paquete en el disco no se modifica.",
+      "ok": "Eliminar"
+    }
+  },
   "tabs": {
     "general": "General",
+    "themes": "Temas",
     "providers": "Proveedores",
     "model": "Modelo predeterminado",
     "instructions": "Instrucciones",

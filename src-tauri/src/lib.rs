@@ -34,6 +34,7 @@ mod process_env;
 mod providers;
 mod state;
 mod terminal;
+mod themes;
 mod tools;
 mod update;
 mod workspace;
@@ -282,6 +283,11 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::settings::validate_provider,
             commands::settings::get_code_environment,
             commands::settings::open_skills_dir,
+            commands::themes::list_themes,
+            commands::themes::install_theme,
+            commands::themes::uninstall_theme,
+            commands::themes::get_theme_asset,
+            commands::themes::open_themes_dir,
             /* -------- atualizações -------- */
             commands::update::update_status,
             commands::update::check_for_update,

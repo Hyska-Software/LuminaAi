@@ -237,7 +237,7 @@ pub fn reset_app_data(app: AppHandle, state: State<'_, AppState>) -> Result<(), 
     config::reset_credentials_with(&app, || state.cancel_oauth()).map_err(to_error)?;
     state.clear_dynamic_models();
     let data_dir = config::data_dir(&app).map_err(to_error)?;
-    for sub in ["attachments", "artifacts"] {
+    for sub in ["attachments", "artifacts", "themes"] {
         clear_dir(&data_dir.join(sub)).map_err(|error| {
             crate::i18n::t_args(
                 "settings.errors.clearDir",

@@ -30,6 +30,7 @@ export const MAX_STEPS_DEFAULT = 64;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
+  themeId: 'zylara',
   locale: 'en',
   defaultProvider: 'opencode-go',
   defaultModel: 'deepseek-v4.1-flash',

@@ -14,7 +14,7 @@ import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { SourcesPanel } from '@/components/chat/SourcesPanel';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { TooltipProvider } from '@/components/ui';
-import { useAgentStore, useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { useAgentStore, useAppStore, useChatStore, useThemeStore, useUiStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
 import { api } from '@/lib/api';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
@@ -43,6 +43,7 @@ function bootstrap(): Promise<void> {
       useUiStore.getState().setTheme(settings.theme);
     }
     applyFontScale(settings.fontScale);
+    await useThemeStore.getState().init();
     await useChatStore.getState().init();
     await useAgentStore.getState().initialize();
     // A webview reload must reattach turns that kept running in Rust before a
@@ -179,7 +180,7 @@ export default function App() {
   useEffect(() => {
     if (theme !== 'system') return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => useUiStore.getState().applyTheme();
+    const handler = () => useThemeStore.getState().apply();
     media.addEventListener('change', handler);
     return () => media.removeEventListener('change', handler);
   }, [theme]);

@@ -8,6 +8,7 @@ import {
   type LayoutVisibility,
 } from '../layoutModes';
 import { DEFAULT_SETTINGS_TAB, isSettingsTabId, type SettingsTabId } from '../settingsTabs';
+import { applyThemeMode } from '../theme/apply';
 import type { AgentInput, Artifact, ThemeMode } from '../types';
 
 /**
@@ -772,11 +773,7 @@ export const useUiStore = create<UiState>()(
           goalDialog: null,
         }),
       applyTheme: () => {
-        const dark = resolveDark(get().theme);
-        const root = document.documentElement;
-        root.classList.toggle('dark', dark);
-        root.classList.toggle('light', !dark);
-        root.style.colorScheme = dark ? 'dark' : 'light';
+        applyThemeMode(resolveDark(get().theme));
       },
     }),
     {

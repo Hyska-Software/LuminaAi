@@ -25,6 +25,7 @@ import {
   Spinner,
   Tooltip,
 } from '@/components/ui';
+import { THEME_APPLIED_EVENT } from '@/lib/theme/apply';
 import type { TerminalTabInfo } from './terminalManager';
 import { terminalManager } from './terminalManager';
 import { useHorizontalWheelScroll } from './useHorizontalWheelScroll';
@@ -78,6 +79,15 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
     const observer = new MutationObserver(() => terminalManager.applyTheme());
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const handleThemeApplied = () => {
+      terminalManager.applyTheme();
+      terminalManager.refitAll();
+    };
+    window.addEventListener(THEME_APPLIED_EVENT, handleThemeApplied);
+    return () => window.removeEventListener(THEME_APPLIED_EVENT, handleThemeApplied);
   }, []);
 
   useEffect(() => {

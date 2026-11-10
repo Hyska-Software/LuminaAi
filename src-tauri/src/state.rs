@@ -480,6 +480,7 @@ pub fn ensure_dirs(app: &AppHandle) -> anyhow::Result<()> {
     for sub in [
         "attachments",
         "artifacts",
+        "themes",
         "logs",
         "code-runs",
         "skills",

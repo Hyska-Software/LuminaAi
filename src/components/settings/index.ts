@@ -1,5 +1,6 @@
 export { SettingsDialog } from './SettingsDialog';
 export { GeneralTab } from './GeneralTab';
+export { ThemesTab } from './ThemesTab';
 export { ProvidersTab } from './ProvidersTab';
 export { ModelTab } from './ModelTab';
 export { InstructionsTab } from './InstructionsTab';

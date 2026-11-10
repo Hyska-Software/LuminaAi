@@ -138,6 +138,7 @@ describe('groupByFamily', () => {
 describe('defaultSelection', () => {
   const baseSettings = {
     theme: 'system',
+    themeId: 'zylara',
     locale: 'pt-BR',
     defaultProvider: 'opencode-go',
     defaultModel: 'deepseek-v4.1-flash',

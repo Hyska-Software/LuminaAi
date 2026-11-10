@@ -52,8 +52,60 @@
       "aria": "Reasoning collapsed by default"
     }
   },
+  "themes": {
+    "mode": {
+      "title": "Appearance",
+      "description": "Choose light, dark or follow the system. The theme supplies both palettes.",
+      "label": "Mode",
+      "aria": "Theme mode"
+    },
+    "library": {
+      "title": "Installed themes",
+      "description": "Themes carry their own palette, radii, fonts and wallpaper. Install a .zip package with a theme.json manifest."
+    },
+    "builtin": {
+      "name": "Zylara",
+      "description": "The default Zylara look."
+    },
+    "actions": {
+      "install": "Install theme…",
+      "refresh": "Reload themes",
+      "openFolder": "Open themes folder",
+      "openFolderAria": "Open themes folder",
+      "use": "Use",
+      "active": "Active",
+      "remove": "Remove",
+      "removeAria": "Remove theme {{name}}"
+    },
+    "package": {
+      "filter": "Theme package",
+      "pickTitle": "Select a theme package"
+    },
+    "meta": {
+      "version": "v{{version}}",
+      "by": "by {{author}}"
+    },
+    "loading": "Loading themes…",
+    "empty": "No custom themes yet. Install a .zip package to add one.",
+    "loadFailed": "Could not load the installed themes.",
+    "retry": "Retry",
+    "toasts": {
+      "installed": "Theme installed",
+      "updated": "Theme updated",
+      "installFailed": "Could not install the theme",
+      "removed": "Theme removed",
+      "removeFailed": "Could not remove the theme",
+      "openFolderFailed": "Could not open the themes folder"
+    },
+    "removeConfirm": {
+      "title": "Remove theme?",
+      "body": "Remove \"{{name}}\" from this computer? The package file on disk is not affected.",
+      "ok": "Remove"
+    }
+  },
   "tabs": {
     "general": "General",
+    "themes": "Themes",
     "providers": "Providers",
     "model": "Default model",
     "instructions": "Instructions",

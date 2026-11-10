@@ -8,16 +8,19 @@
     <link rel="icon" type="image/svg+xml" href="/brand/zylara-tile.svg" />
     <style>
       html,
-      body,
+      body {
+        height: 100%;
+        margin: 0;
+        background-color: var(--background, #0f0f12);
+      }
       #root {
         height: 100%;
         margin: 0;
-        background: #0f0f12;
+        background-color: transparent;
       }
       html.light,
-      html.light body,
-      html.light #root {
-        background: #ffffff;
+      html.light body {
+        background-color: var(--background, #ffffff);
       }
     </style>
     <script>
@@ -30,6 +33,20 @@
           (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.classList.toggle('dark', dark);
         document.documentElement.classList.toggle('light', !dark);
+        const cached = JSON.parse(localStorage.getItem('zylara.theme.cache') || 'null');
+        if (cached && typeof cached === 'object') {
+          const tokens = dark ? cached.dark : cached.light;
+          if (tokens && typeof tokens === 'object') {
+            const names = [];
+            for (const [key, value] of Object.entries(tokens)) {
+              if (!/^[a-z0-9-]+$/.test(key) || typeof value !== 'string' || value.length > 64) continue;
+              const name = key.startsWith('radius-') ? `theme-${key}` : key;
+              document.documentElement.style.setProperty(`--${name}`, value);
+              names.push(name);
+            }
+            if (names.length) document.documentElement.dataset.themeTokens = names.join(',');
+          }
+        }
       } catch {
         document.documentElement.classList.add('dark');
       }

@@ -30,6 +30,7 @@ import { useAppStore } from '@/lib/store';
 function settings(overrides: Partial<Settings> = {}): Settings {
   return {
     theme: 'system',
+    themeId: 'zylara',
     locale: 'pt-BR',
     defaultProvider: 'opencode-go',
     defaultModel: 'deepseek-v4.1-flash',

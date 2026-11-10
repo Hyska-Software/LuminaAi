@@ -25,6 +25,7 @@ const GO = 'opencode-go';
 function settings(overrides: Partial<Settings> = {}): Settings {
   return {
     theme: 'system',
+    themeId: 'zylara',
     locale: 'pt-BR',
     defaultProvider: GO,
     defaultModel: 'glm-5.3-flash',

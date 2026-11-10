@@ -488,9 +488,13 @@ class TerminalManager {
   /** Re-applies the app theme to every live xterm. */
   applyTheme(): void {
     const theme: ITheme = buildTerminalTheme();
+    const fontFamily = terminalFontFamily();
     for (const runtime of this.runtimes.values()) {
       for (const instance of runtime.instances.values()) {
-        if (!instance.disposed) instance.term.options.theme = theme;
+        if (!instance.disposed) {
+          instance.term.options.theme = theme;
+          instance.term.options.fontFamily = fontFamily;
+        }
       }
     }
   }

@@ -37,6 +37,7 @@ import { i18n, setLanguage } from '@/lib/i18n';
 
 const settings: Settings = {
   theme: 'system',
+  themeId: 'zylara',
   locale: 'pt-BR',
   defaultProvider: 'openai',
   defaultModel: 'gpt-6.1-sol',

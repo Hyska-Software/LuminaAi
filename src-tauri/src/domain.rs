@@ -2,6 +2,8 @@
 //! the React renderer. Every struct here is part of the IPC contract: keep field
 //! names in sync with `src/lib/types.ts`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -1222,10 +1224,59 @@ fn default_computer_max_actions_per_hour() -> u32 {
     120
 }
 
+/* ------------------------------------------------------------------ */
+/* Themes                                                              */
+/* ------------------------------------------------------------------ */
+
+/// One palette variant of an installed theme.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeVariant {
+    /// CSS custom-property suffix (without `--`) -> validated value.
+    pub tokens: BTreeMap<String, String>,
+    /// Relative asset path inside the theme directory, when it has a wallpaper.
+    #[serde(default)]
+    pub wallpaper: Option<String>,
+}
+
+/// Bundled font files (relative to the theme directory).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeFontPaths {
+    #[serde(default)]
+    pub sans: Option<String>,
+    #[serde(default)]
+    pub mono: Option<String>,
+}
+
+/// Theme surfaced to the renderer by `list_themes`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    pub built_in: bool,
+    pub light: ThemeVariant,
+    pub dark: ThemeVariant,
+    pub fonts: ThemeFontPaths,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeInstallResult {
+    pub theme: ThemeInfo,
+    pub replaced: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub theme: String,
+    /// Installed/built-in theme id; independent of the light/dark/system mode.
+    pub theme_id: String,
     pub locale: String,
     pub default_provider: String,
     pub default_model: String,
@@ -1372,6 +1423,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: "system".into(),
+            theme_id: crate::themes::BUILTIN_THEME_ID.into(),
             locale: "en".into(),
             default_provider: "opencode-go".into(),
             default_model: "deepseek-v4.1-flash".into(),

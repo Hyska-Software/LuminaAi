@@ -86,6 +86,7 @@
   },
   "settingsTabDescriptions": {
     "general": "Tema, idioma y tamaño del texto",
+    "themes": "Temas instalados y paquetes",
     "providers": "Claves de API y estado de los proveedores",
     "model": "Modelo y modo de pensamiento predeterminados",
     "instructions": "Instrucciones del sistema",

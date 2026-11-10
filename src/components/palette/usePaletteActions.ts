@@ -62,6 +62,8 @@ function settingsTabDescription(id: SettingsTabId): string {
   switch (id) {
     case 'general':
       return t('palette:settingsTabDescriptions.general');
+    case 'themes':
+      return t('palette:settingsTabDescriptions.themes');
     case 'providers':
       return t('palette:settingsTabDescriptions.providers');
     case 'model':

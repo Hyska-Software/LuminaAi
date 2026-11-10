@@ -120,6 +120,9 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     if !matches!(settings.theme.as_str(), "light" | "dark" | "system") {
         settings.theme = defaults.theme;
     }
+    if !crate::themes::is_valid_theme_id(&settings.theme_id) {
+        settings.theme_id = crate::themes::BUILTIN_THEME_ID.to_string();
+    }
     settings.locale = crate::i18n::normalize_language(&settings.locale).to_string();
     if !matches!(settings.send_key.as_str(), "enter" | "ctrl+enter") {
         settings.send_key = defaults.send_key;
@@ -1729,6 +1732,27 @@ mod tests {
         // Booleano de preferência não passa por "normalização": preserva o true.
         assert!(normalized.thinking_collapsed_by_default);
         assert_eq!(normalized.disabled_skills, vec!["pdf", "zeta"]);
+    }
+
+    #[test]
+    fn normalizes_theme_id_syntax_and_preserves_installed_ids() {
+        let invalid = normalize_settings(Settings {
+            theme_id: "../evil".into(),
+            ..Settings::default()
+        });
+        assert_eq!(invalid.theme_id, crate::themes::BUILTIN_THEME_ID);
+
+        let valid = normalize_settings(Settings {
+            theme_id: "ocean".into(),
+            ..Settings::default()
+        });
+        assert_eq!(valid.theme_id, "ocean");
+
+        let empty = normalize_settings(Settings {
+            theme_id: String::new(),
+            ..Settings::default()
+        });
+        assert_eq!(empty.theme_id, crate::themes::BUILTIN_THEME_ID);
     }
 
     #[test]

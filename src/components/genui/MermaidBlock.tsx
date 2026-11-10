@@ -40,7 +40,7 @@ export function MermaidBlock({ code, className }: MermaidBlockProps) {
           securityLevel: 'strict',
           suppressErrorRendering: true,
           theme: dark ? 'dark' : 'neutral',
-          fontFamily: "'Inter Variable', ui-sans-serif, system-ui, sans-serif",
+          fontFamily: "var(--font-sans, 'Inter Variable', ui-sans-serif, system-ui, sans-serif)",
           flowchart: { htmlLabels: false, useMaxWidth: true },
           sequence: { useMaxWidth: true },
         });

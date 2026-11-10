@@ -1809,6 +1809,38 @@ export interface CodeEnvironmentStatus {
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+/** Palette of one theme variant; keys are CSS custom-property suffixes. */
+export interface ThemeVariant {
+  /** e.g. `{ background: '#fff', 'surface-raised': '#fafafa' }`. */
+  tokens: Record<string, string>;
+  /** Relative asset path inside the theme directory, or null. */
+  wallpaper: string | null;
+}
+
+/** Bundled font files, relative to the theme directory. */
+export interface ThemeFontPaths {
+  sans: string | null;
+  mono: string | null;
+}
+
+/** Installed (or built-in) theme returned by `list_themes`. */
+export interface ThemeInfo {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  builtIn: boolean;
+  light: ThemeVariant;
+  dark: ThemeVariant;
+  fonts: ThemeFontPaths;
+}
+
+export interface ThemeInstallResult {
+  theme: ThemeInfo;
+  replaced: boolean;
+}
+
 export type CacheTtl = '5m' | '1h';
 
 /** Preferências de cache de prompt (docs/goals/prompt-cache/PLAN.md §5.4). */
@@ -1822,6 +1854,8 @@ export interface CacheSettings {
 
 export interface Settings {
   theme: ThemeMode;
+  /** Installed theme id; independent of the light/dark/system mode. */
+  themeId: string;
   locale: AppLocale;
   defaultProvider: string;
   defaultModel: string;

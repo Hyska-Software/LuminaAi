@@ -52,8 +52,60 @@
       "aria": "Raciocínio recolhido por padrão"
     }
   },
+  "themes": {
+    "mode": {
+      "title": "Aparência",
+      "description": "Escolha claro, escuro ou seguir o sistema. O tema fornece as duas paletas.",
+      "label": "Modo",
+      "aria": "Modo do tema"
+    },
+    "library": {
+      "title": "Temas instalados",
+      "description": "Cada tema traz paleta, raios, fontes e papel de parede próprios. Instale um pacote .zip com um manifesto theme.json."
+    },
+    "builtin": {
+      "name": "Zylara",
+      "description": "A aparência padrão do Zylara."
+    },
+    "actions": {
+      "install": "Instalar tema…",
+      "refresh": "Recarregar temas",
+      "openFolder": "Abrir pasta de temas",
+      "openFolderAria": "Abrir pasta de temas",
+      "use": "Usar",
+      "active": "Ativo",
+      "remove": "Remover",
+      "removeAria": "Remover o tema {{name}}"
+    },
+    "package": {
+      "filter": "Pacote de tema",
+      "pickTitle": "Selecione um pacote de tema"
+    },
+    "meta": {
+      "version": "v{{version}}",
+      "by": "por {{author}}"
+    },
+    "loading": "Carregando temas…",
+    "empty": "Nenhum tema personalizado ainda. Instale um pacote .zip para adicionar um.",
+    "loadFailed": "Não foi possível carregar os temas instalados.",
+    "retry": "Tentar de novo",
+    "toasts": {
+      "installed": "Tema instalado",
+      "updated": "Tema atualizado",
+      "installFailed": "Não foi possível instalar o tema",
+      "removed": "Tema removido",
+      "removeFailed": "Não foi possível remover o tema",
+      "openFolderFailed": "Não foi possível abrir a pasta de temas"
+    },
+    "removeConfirm": {
+      "title": "Remover tema?",
+      "body": "Remover “{{name}}” deste computador? O arquivo do pacote no disco não é afetado.",
+      "ok": "Remover"
+    }
+  },
   "tabs": {
     "general": "Geral",
+    "themes": "Temas",
     "providers": "Provedores",
     "model": "Modelo padrão",
     "instructions": "Instruções",

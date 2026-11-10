@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Code2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui';
+import { useThemeRevision } from '@/lib/theme/useThemeRevision';
 import { useIsDark } from './useIsDark';
 
 const HEIGHT_MESSAGE = 'zylara:html-preview:height';
@@ -89,8 +90,9 @@ export function HtmlPreview({ html, title, className, minHeight = 240, maxHeight
   const { t } = useTranslation('genui');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const dark = useIsDark();
+  const revision = useThemeRevision();
   const [frameHeight, setFrameHeight] = useState(minHeight);
-  const srcDoc = useMemo(() => buildSrcDoc(html, dark), [html, dark]);
+  const srcDoc = useMemo(() => buildSrcDoc(html, dark), [html, dark, revision]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {

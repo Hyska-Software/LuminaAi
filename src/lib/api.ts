@@ -77,6 +77,8 @@ import type {
   SkillVersion,
   TerminalEvent,
   TerminalInfo,
+  ThemeInfo,
+  ThemeInstallResult,
   TurnEvent,
   TurnEventRecord,
   TurnPayload,
@@ -107,6 +109,12 @@ export const api = {
     invoke<ProviderValidation>('validate_provider', { providerId }),
   openDataDir: () => invoke<void>('open_data_dir'),
   resetAppData: () => invoke<void>('reset_app_data'),
+  listThemes: () => invoke<ThemeInfo[]>('list_themes'),
+  installTheme: (path: string) => invoke<ThemeInstallResult>('install_theme', { path }),
+  uninstallTheme: (themeId: string) => invoke<ThemeInfo[]>('uninstall_theme', { themeId }),
+  getThemeAsset: (themeId: string, asset: string) =>
+    invoke<string>('get_theme_asset', { themeId, asset }),
+  openThemesDir: () => invoke<void>('open_themes_dir'),
   getCodeEnvironment: () => invoke<CodeEnvironmentStatus>('get_code_environment'),
   notifyDesktop: (title: string, body: string) =>
     invoke<boolean>('notify_desktop', { title, body }),

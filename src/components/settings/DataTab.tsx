@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, FolderOpen, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import { useAppStore, useChatStore, useThemeStore, useUiStore } from '@/lib/store';
 import { Button } from '@/components/ui';
 import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 
@@ -35,6 +35,7 @@ export function DataTab() {
       useUiStore.getState().closeArtifactPanel();
       useChatStore.setState({ activeId: null, messagesByConversation: {}, conversations: [] });
       await Promise.all([useAppStore.getState().init(), useChatStore.getState().init()]);
+      await useThemeStore.getState().refresh();
       toast.success(t('data.toasts.clearedTitle'), {
         description: t('data.toasts.clearedDescription'),
       });

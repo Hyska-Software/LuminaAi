@@ -22,6 +22,7 @@ import { InstructionsTab } from './InstructionsTab';
 import { ModelTab } from './ModelTab';
 import { ProvidersTab } from './ProvidersTab';
 import { SETTINGS_TAB_ICONS } from './tabIcons';
+import { ThemesTab } from './ThemesTab';
 import { ToolsTab } from './ToolsTab';
 
 /**
@@ -92,6 +93,9 @@ export function SettingsDialog() {
                 <div className="px-6 py-5">
                   <TabsContent value="general">
                     <GeneralTab />
+                  </TabsContent>
+                  <TabsContent value="themes">
+                    <ThemesTab />
                   </TabsContent>
                   <TabsContent value="providers">
                     <ProvidersTab />

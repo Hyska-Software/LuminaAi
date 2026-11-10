@@ -8,6 +8,7 @@ import {
   Database,
   Info,
   KeyRound,
+  Palette,
   ScrollText,
   Settings2,
   Sparkles,
@@ -18,6 +19,7 @@ import type { SettingsTabId } from '@/lib/settingsTabs';
 
 export const SETTINGS_TAB_ICONS: Record<SettingsTabId, LucideIcon> = {
   general: Settings2,
+  themes: Palette,
   providers: KeyRound,
   model: Sparkles,
   instructions: ScrollText,
