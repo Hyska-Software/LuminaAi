@@ -276,7 +276,8 @@ Reaproveita o `Composer` atual (draft, anexos, model picker, envio/parada) com:
 3. **Controles**: modelo (existente), anexos (existente), enviar/parar e, no lugar dos pills globais
    de ferramentas do Chat (`Busca web`/`Criar arquivos`), os **controles da sessão**: **modo de
    permissão** (chip/escudo: Leitura/Editar/Revisar/Autônomo, menu com a descrição de cada modo e
-   atualização otimista com rollback), **Plano** (toggle somente ícone com `aria-pressed`; quando
+   atualização otimista com rollback; abaixo de 42rem de largura do composer o chip fica **somente
+   ícone**, com o rótulo no `aria-label`/`title`), **Plano** (toggle somente ícone com `aria-pressed`; quando
    ativo o campo mostra um badge accent com o ícone e o rótulo “Plano” — `aria-label="Desativar
    modo Plano"` — na área de chips, ao lado do `/goal`, que desativa o modo ao clique) e o **popover de
    plano/tarefas** (trigger somente ícone + indicadores: progresso `N/M` das tarefas e contador de

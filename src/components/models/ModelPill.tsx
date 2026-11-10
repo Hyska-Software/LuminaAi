@@ -196,6 +196,10 @@ function PillEmptyState({ query, onClear }: PillEmptyStateProps) {
  * 2. the thinking-mode list, reached after picking a model or straight from the
  *    ✦ segment (with a back button that returns without closing).
  * "Ver todos os modelos…" at the bottom opens the full dialog.
+ *
+ * Responsive: inside a `@container` ancestor (the composer controls row), the
+ * model name and thinking label collapse to their icons below 42rem; the full
+ * text stays available through `aria-label`/`title`.
  */
 export function ModelPill({
   providerId,
