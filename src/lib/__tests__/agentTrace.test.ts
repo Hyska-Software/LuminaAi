@@ -865,7 +865,73 @@ describe('buildAgentResponseBlocks', () => {
       ],
       trace: [{ reasoning: null, text: 'Rodando.', toolCalls: 1, durationMs: 1_000 }],
     });
-    expect(executionBlocks(blocks)[0].durationMs).toBe(1_000 + 3_500);
+    // The 1s request precedes the narration; the 3.5s tool runs after it.
+    expect(blockKinds(blocks)).toEqual(['execution', 'text', 'execution']);
+    expect(executionBlocks(blocks).map((block) => block.durationMs)).toEqual([1_000, 3_500]);
+  });
+
+  it('conta o tempo do passo que narrou no trecho anterior, não no seguinte', () => {
+    const blocks = buildAgentResponseBlocks({
+      reasoning: null,
+      toolCalls: [
+        tool({
+          name: 'run_command',
+          arguments: '{"command":"pnpm test"}',
+          startedAt: 10_000,
+          finishedAt: 11_500,
+        }),
+        tool({
+          name: 'read_file',
+          arguments: '{"path":"src/app.ts"}',
+          startedAt: 20_000,
+          finishedAt: 20_500,
+        }),
+      ],
+      trace: [
+        { reasoning: 'Vou verificar.', durationMs: 2_000, toolCalls: 1 },
+        {
+          reasoning: null,
+          text: 'Rodando os testes.',
+          durationMs: 9_000,
+          toolCalls: 1,
+        },
+        { reasoning: 'Verificação final.', durationMs: 1_000, toolCalls: 0 },
+      ],
+    });
+
+    const executions = executionBlocks(blocks);
+    // The first stretch is the 2s reasoning plus the 1.5s tool, then the 9s
+    // request that produced the narration; the tool it requested (0.5s) and
+    // the final 1s step come after the text.
+    expect(executions.map((block) => block.durationMs)).toEqual([12_500, 1_500]);
+    expect(blockKinds(blocks)).toEqual(['execution', 'text', 'execution']);
+  });
+
+  it('não perde o tempo de um passo inicial que só narrou', () => {
+    const blocks = buildAgentResponseBlocks({
+      reasoning: null,
+      toolCalls: [
+        tool({
+          name: 'read_file',
+          arguments: '{"path":"src/app.ts"}',
+          startedAt: 0,
+          finishedAt: 250,
+        }),
+      ],
+      trace: [
+        {
+          reasoning: null,
+          text: 'Vou começar explorando o projeto.',
+          durationMs: 7_000,
+          toolCalls: 1,
+        },
+      ],
+    });
+
+    expect(blockKinds(blocks)).toEqual(['execution', 'text', 'execution']);
+    const executions = executionBlocks(blocks);
+    expect(executions.map((block) => block.durationMs)).toEqual([7_000, 250]);
+    expect(executions[0].entries).toEqual([]);
   });
 
   it('nunca perde tool calls fora do trace e ignora passos vazios', () => {

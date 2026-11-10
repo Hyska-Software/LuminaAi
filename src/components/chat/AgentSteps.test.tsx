@@ -1051,6 +1051,78 @@ describe('AgentSteps — execução separada por resposta (Code e Agentes)', () 
     expect(screen.getByRole('button', { name: 'Raciocínio 6s' })).toBeTruthy();
   });
 
+  it('atribui o tempo do passo que só narrou à linha de execução anterior', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={message({
+          content: 'Resposta final.',
+          reasoning: 'Vou checar o fixture.\n\nConcluindo.',
+          toolCalls: [],
+          trace: [
+            { reasoning: 'Vou checar o fixture.', durationMs: 2_000, toolCalls: 0 },
+            {
+              reasoning: null,
+              text: 'Ambos rejeitados (exit 65).',
+              durationMs: 9_000,
+              toolCalls: 0,
+            },
+            { reasoning: 'Concluindo.', durationMs: 1_000, toolCalls: 0 },
+          ],
+          usage: { durationMs: 12_000 },
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Ambos rejeitados (exit 65).')).toBeTruthy();
+    // The 9s model request that produced the narration counts on the line
+    // above it (2s reasoning + 9s), not on the work that follows the text.
+    expect(
+      screen.getByRole('button', { name: 'Trabalhou por 11s', expanded: false }),
+    ).toBeTruthy();
+  });
+
+  it('mostra o tempo de um passo inicial que só narrou, mesmo sem linhas de detalhe', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(
+      <AgentSteps
+        streaming={false}
+        phase={null}
+        message={message({
+          content: 'Resposta final.',
+          reasoning: null,
+          toolCalls: [
+            tool({
+              name: 'read_file',
+              arguments: '{"path":"src/app.ts"}',
+              startedAt: 0,
+              finishedAt: 250,
+            }),
+          ],
+          trace: [
+            {
+              reasoning: null,
+              text: 'Vou começar explorando o projeto.',
+              durationMs: 7_000,
+              toolCalls: 1,
+            },
+          ],
+          usage: { durationMs: 10_000 },
+        })}
+      />,
+    );
+
+    expect(screen.getByText('Vou começar explorando o projeto.')).toBeTruthy();
+    // The model request happened before the narration, so its 7s are shown on
+    // the line above the text; the tool (0.25s) runs after it.
+    expect(screen.getByRole('button', { name: 'Trabalhou por 7s' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Trabalhou por 10s' })).toBeTruthy();
+  });
+
   it('expõe a duração do raciocínio em cada linha do bloco', async () => {
     const user = userEvent.setup();
     useUiStore.setState({ layoutMode: 'code' });

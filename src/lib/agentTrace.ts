@@ -133,7 +133,9 @@ export type AgentResponseBlock =
  *
  * Each execution block also carries the work time of its stretch: the model
  * time of its steps plus the execution time of its tool calls (used by the
- * finished "Trabalhou por …" line).
+ * finished "Trabalhou por …" line). A step's provider time belongs to the
+ * stretch that produced it — before its narration — even when the model did
+ * not expose reasoning; only the tool calls it requested run after the text.
  */
 export function buildAgentResponseBlocks(
   message: Pick<ChatMessage, 'reasoning' | 'toolCalls' | 'trace'>,
@@ -146,7 +148,9 @@ export function buildAgentResponseBlocks(
   let cursor = 0;
 
   const flush = () => {
-    if (pending.length > 0) {
+    // A step that only narrated (hidden reasoning) still spent model time;
+    // keep it as an execution block even when it has no visible rows.
+    if (pending.length > 0 || pendingDuration > 0) {
       blocks.push({ kind: 'execution', entries: pending, durationMs: pendingDuration });
     }
     pending = [];
@@ -168,6 +172,12 @@ export function buildAgentResponseBlocks(
     }
     const text = step.text?.trim() ?? '';
     if (text) {
+      // The provider time of this step produced the narration, so it belongs
+      // to the stretch before it, not to the tools that run afterwards.
+      if (!credited) {
+        pendingDuration += stepDuration;
+        credited = true;
+      }
       flush();
       blocks.push({ kind: 'text', text });
     }
