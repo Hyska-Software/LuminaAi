@@ -69,7 +69,7 @@ async function fetchText(url, accept, timeoutMs) {
       const response = await fetch(url, {
         headers: {
           Accept: accept,
-          'User-Agent': 'Lumina-catalog/1.0',
+          'User-Agent': 'Zylara-catalog/1.0',
         },
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -142,8 +142,8 @@ function inputsReady() {
 }
 
 function main() {
-  if (process.env.LUMINA_SKIP_CATALOG_SYNC === '1') {
-    log('sync pulado (LUMINA_SKIP_CATALOG_SYNC=1)');
+  if (process.env.ZYLARA_SKIP_CATALOG_SYNC === '1') {
+    log('sync pulado (ZYLARA_SKIP_CATALOG_SYNC=1)');
     return;
   }
 

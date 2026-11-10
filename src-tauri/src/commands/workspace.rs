@@ -232,7 +232,7 @@ pub async fn rename_workspace(
     Ok(updated)
 }
 
-/// Remove o workspace do Lumina. **Não** apaga a pasta do usuário.
+/// Remove o workspace do Zylara. **Não** apaga a pasta do usuário.
 #[tauri::command]
 pub async fn remove_workspace(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let conversations = state

@@ -591,20 +591,20 @@ describe('CommandPalette — comandos contextuais e deep-links', () => {
 
   it('focuses the composer after closing', async () => {
     const listener = vi.fn();
-    window.addEventListener('lumina:focus-composer', listener);
+    window.addEventListener('zylara:focus-composer', listener);
 
     renderPalette();
     typeQuery('focar campo de mensagem');
     fireEvent.click(await screen.findByRole('option', { name: /Focar campo de mensagem/ }));
 
     await waitFor(() => expect(listener).toHaveBeenCalled());
-    window.removeEventListener('lumina:focus-composer', listener);
+    window.removeEventListener('zylara:focus-composer', listener);
   });
 
   it('returns to the chat before focusing the composer from the Skills view', async () => {
     useUiStore.setState({ activeView: 'skills' });
     const listener = vi.fn();
-    window.addEventListener('lumina:focus-composer', listener);
+    window.addEventListener('zylara:focus-composer', listener);
 
     renderPalette();
     typeQuery('focar campo de mensagem');
@@ -612,7 +612,7 @@ describe('CommandPalette — comandos contextuais e deep-links', () => {
 
     await waitFor(() => expect(listener).toHaveBeenCalled());
     expect(useUiStore.getState().activeView).toBe('chat');
-    window.removeEventListener('lumina:focus-composer', listener);
+    window.removeEventListener('zylara:focus-composer', listener);
   });
 
   it('reports a failed async command with a toast', async () => {
@@ -639,7 +639,7 @@ describe('CommandPalette — biblioteca', () => {
 
   it('abre a biblioteca e aciona o seletor de arquivos pelo evento', async () => {
     const listener = vi.fn();
-    window.addEventListener('lumina:library-import', listener);
+    window.addEventListener('zylara:library-import', listener);
 
     renderPalette();
     typeQuery('enviar arquivos para a biblioteca');
@@ -649,7 +649,7 @@ describe('CommandPalette — biblioteca', () => {
 
     await waitFor(() => expect(useUiStore.getState().activeView).toBe('library'));
     await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
-    window.removeEventListener('lumina:library-import', listener);
+    window.removeEventListener('zylara:library-import', listener);
   });
 
   it('só oferece “Voltar ao chat” fora do chat (skills e biblioteca)', async () => {
@@ -810,7 +810,7 @@ describe('CommandPalette — layouts Chat e Code', () => {
   it('focuses the composer from the Code Skills page by returning to the session', async () => {
     useUiStore.setState({ layoutMode: 'code', codeView: 'skills' });
     const listener = vi.fn();
-    window.addEventListener('lumina:focus-composer', listener);
+    window.addEventListener('zylara:focus-composer', listener);
 
     renderPalette();
     typeQuery('focar campo de mensagem');
@@ -818,7 +818,7 @@ describe('CommandPalette — layouts Chat e Code', () => {
 
     await waitFor(() => expect(listener).toHaveBeenCalled());
     expect(useUiStore.getState().codeView).toBe('session');
-    window.removeEventListener('lumina:focus-composer', listener);
+    window.removeEventListener('zylara:focus-composer', listener);
   });
 });
 

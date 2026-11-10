@@ -130,7 +130,7 @@ export function TitleBar() {
         <div data-tauri-drag-region className="flex min-w-0 items-center gap-2 pl-1 pr-1">
           <BrandMark size={22} />
           <span className="truncate text-[14px] font-semibold tracking-tight text-foreground">
-            Lumina
+            Zylara
           </span>
         </div>
 

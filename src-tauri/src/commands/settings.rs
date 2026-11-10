@@ -132,7 +132,7 @@ pub fn set_provider_key(
 pub fn app_info(app: AppHandle, state: State<'_, AppState>) -> Result<AppInfo, String> {
     let _ = &app;
     Ok(AppInfo {
-        name: "Lumina".to_string(),
+        name: "Zylara".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         tauri_version: tauri::VERSION.to_string(),
         platform: std::env::consts::OS.to_string(),
@@ -367,7 +367,7 @@ fn oauth_blocker_message(registration: &StoredOAuthRegistration) -> Option<Strin
     }
 }
 
-/// Builds the model-list `GET` for a provider: Bearer credential, Lumina
+/// Builds the model-list `GET` for a provider: Bearer credential, Zylara
 /// User-Agent and the static headers declared by the catalog (e.g.
 /// `anthropic-version` for the official Anthropic API).
 ///
@@ -382,7 +382,7 @@ fn models_request(
     let mut request = client
         .get(url)
         .header("Authorization", format!("Bearer {token}"))
-        .header("User-Agent", concat!("Lumina/", env!("CARGO_PKG_VERSION")))
+        .header("User-Agent", concat!("Zylara/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(15));
     for (name, value) in provider.static_headers() {
         if matches!(
@@ -560,7 +560,7 @@ mod tests {
                 "oauth": {
                     "issuer": "https://auth.openai.com",
                     "registrationClientId": "dynamic_agent_client",
-                    "agentNameHint": "Lumina",
+                    "agentNameHint": "Zylara",
                     "resource": "https://api.openai.com/v1",
                     "scopes": ["openid"],
                     "planUsageScope": "chatgpt.tokens.use.direct",
@@ -662,7 +662,7 @@ mod tests {
         let mut fixture = anthropic_provider();
         fixture
             .headers
-            .insert("x-lumina-test".to_string(), "1".to_string());
+            .insert("x-zylara-test".to_string(), "1".to_string());
 
         let request = models_request(
             &client,
@@ -682,10 +682,10 @@ mod tests {
         let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
         assert_eq!(header("authorization"), Some("Bearer sk-ant-test-key"));
         assert_eq!(header("anthropic-version"), Some("2026-10-21"));
-        assert_eq!(header("x-lumina-test"), Some("1"));
+        assert_eq!(header("x-zylara-test"), Some("1"));
         assert!(
-            header("user-agent").is_some_and(|value| value.starts_with("Lumina/")),
-            "User-Agent do Lumina ausente"
+            header("user-agent").is_some_and(|value| value.starts_with("Zylara/")),
+            "User-Agent do Zylara ausente"
         );
     }
 
@@ -719,7 +719,7 @@ mod tests {
         assert!(headers
             .get("user-agent")
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("Lumina/")));
+            .is_some_and(|value| value.starts_with("Zylara/")));
     }
 
     #[test]

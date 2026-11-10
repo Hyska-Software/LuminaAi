@@ -12,7 +12,7 @@ function commit(overrides: Partial<WorkspaceGitCommit> = {}): WorkspaceGitCommit
   return {
     hash: 'abcdef1234567890abcdef1234567890abcdef12',
     subject: 'Corrige a listagem do workspace',
-    author: 'Lumina Agent',
+    author: 'Zylara Agent',
     date: '2026-10-27T17:00:00-03:00',
     ...overrides,
   };
@@ -21,8 +21,8 @@ function commit(overrides: Partial<WorkspaceGitCommit> = {}): WorkspaceGitCommit
 function detail(overrides: Partial<WorkspaceCommitDetail> = {}): WorkspaceCommitDetail {
   return {
     hash: 'abcdef1234567890abcdef1234567890abcdef12',
-    author: 'Lumina Agent',
-    email: 'agent@lumina.local',
+    author: 'Zylara Agent',
+    email: 'agent@zylara.local',
     date: '2026-10-27T17:00:00-03:00',
     subject: 'Corrige a listagem do workspace',
     body: 'Corpo do commit.',
@@ -90,7 +90,7 @@ describe('CodeCommitHistoryView', () => {
       'ws-1',
       'abcdef1234567890abcdef1234567890abcdef12',
     );
-    expect(screen.getByText(/Lumina Agent · agent@lumina\.local/)).toBeTruthy();
+    expect(screen.getByText(/Zylara Agent · agent@zylara\.local/)).toBeTruthy();
     expect(screen.getByText('Corpo do commit.')).toBeTruthy();
 
     // Primeiro arquivo já vem aberto com o diff (syntax highlight preservado).

@@ -1,6 +1,6 @@
 //! Launches the verified installer for the current platform.
 //!
-//! Windows reuses the branded Lumina setup wizard (it detects the existing
+//! Windows reuses the branded Zylara setup wizard (it detects the existing
 //! install, skips scope/location and preserves user data). macOS/Linux open the
 //! DMG/package or reveal the AppImage; replacing a running bundle is out of
 //! scope for v1.
@@ -108,10 +108,10 @@ mod tests {
 
     fn asset(sha256: &str) -> UpdateAsset {
         UpdateAsset {
-            name: "Lumina-Setup-0.2.0-windows-x64.exe".into(),
+            name: "Zylara-Setup-0.2.0-windows-x64.exe".into(),
             size: 6,
             sha256: sha256.into(),
-            download_url: "https://github.com/Hyska-Software/LuminaAi/releases/download/v0.2.0/Lumina-Setup-0.2.0-windows-x64.exe".into(),
+            download_url: "https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-Setup-0.2.0-windows-x64.exe".into(),
             platform_label: "Windows x64".into(),
             kind: "setup".into(),
         }
@@ -121,13 +121,13 @@ mod tests {
     fn verifies_size_and_hash_before_installing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("setup.exe");
-        std::fs::write(&path, b"lumina").expect("gravar");
+        std::fs::write(&path, b"zylara").expect("gravar");
         let digest = download::sha256_file(&path).expect("hash");
 
         verify_download(&path, &asset(&digest)).expect("hash correto");
         assert!(verify_download(&path, &asset(&"a".repeat(64))).is_err());
 
-        std::fs::write(&path, b"lumina!").expect("gravar maior");
+        std::fs::write(&path, b"zylara!").expect("gravar maior");
         assert!(verify_download(&path, &asset(&digest)).is_err());
     }
 

@@ -10,7 +10,7 @@
 
 ## 1. Objetivo
 
-O chat do Lumina deve renderizar **tudo o que Markdown/GFM oferece** de forma
+O chat do Zylara deve renderizar **tudo o que Markdown/GFM oferece** de forma
 correta, segura, acessível e consistente com o design system — e o agente deve
 ser **instruído a usar esses recursos corretamente**.
 
@@ -23,7 +23,7 @@ Pipeline hoje (`src/components/chat/Markdown.tsx`):
   (Prism/copy ou fences delegadas `ui`, `mermaid`, `chart`, `html`, `svg`),
   `<a>` (abre no navegador via plugin opener), `<table>` (wrapper com scroll),
   `<img>` (`loading="lazy"`).
-- Estilos em `.lumina-prose` (`src/styles/globals.css`) + CSS do KaTeX.
+- Estilos em `.zylara-prose` (`src/styles/globals.css`) + CSS do KaTeX.
 - `MermaidBlock` lazy com `securityLevel: 'strict'` + sanitização de SVG.
 - Testes: **nenhum** dedicado a Markdown/CodeBlock (418 testes existentes).
 
@@ -77,7 +77,7 @@ Pipeline hoje (`src/components/chat/Markdown.tsx`):
    transformar toda quebra em `<br>` — listas/parágrafos do modelo quebrariam.
 5. **Isolamento do prose × GenUI**: os estilos de elemento do Markdown ficam em
    `@layer components` e os blocos `ui` são renderizados dentro de
-   `.lumina-genui` com resets escopados (`p`, `ol`/`ul`/`li`, headings,
+   `.zylara-genui` com resets escopados (`p`, `ol`/`ul`/`li`, headings,
    `details`, `blockquote`, tabela). Assim utilitários Tailwind da UI
    generativa sempre vencem e margens/padding/bordas do Markdown não vazam para
    os componentes (`docs/GENUI.md` §10).
@@ -124,7 +124,7 @@ links externos e `mailto:` abertos no navegador/app padrão; âncoras internas
 | Fase | Entrega | Área |
 | --- | --- | --- |
 | F0 | `rehype-raw@7` + `@types/hast` instalados; contrato congelado neste doc | Lead |
-| F1 | Renderer: títulos h5/h6, task lists, notas de rodapé, alertas, `del/mark/kbd/sup/sub/abbr/details`, tabelas (alinhamento/caption), imagens com fallback, links (`mailto:`, âncoras, URLs inseguras), `<pre>` de HTML cru, `.katex-error`, caret de streaming; CSS `.lumina-prose` completo | ui-core |
+| F1 | Renderer: títulos h5/h6, task lists, notas de rodapé, alertas, `del/mark/kbd/sup/sub/abbr/details`, tabelas (alinhamento/caption), imagens com fallback, links (`mailto:`, âncoras, URLs inseguras), `<pre>` de HTML cru, `.katex-error`, caret de streaming; CSS `.zylara-prose` completo | ui-core |
 | F2 | Sanitizador `rehypeSafeHtml` + testes de segurança (XSS/atributos/URLs) | ui-core |
 | F3 | Prompt do sistema: seção de formatação Markdown (contrato §4 + regras de uso) e testes Rust | harness-dev |
 | F4 | Docs (`DESIGN.md` §6.3, `ARCHITECTURE.md` pipeline) + este status | Lead |
@@ -200,7 +200,7 @@ contrato) + testes existentes.
   cosmético, sem XSS.
 - Ids das notas de rodapé (`user-content-fn-*`, `footnote-label`) se repetem
   entre mensagens da mesma conversa. A navegação por âncora é escopada à
-  mensagem (`.lumina-prose`), mas o documento acumula ids duplicados —
+  mensagem (`.zylara-prose`), mas o documento acumula ids duplicados —
   melhoria futura de acessibilidade, não bloqueia o chat.
 - Links e imagens com URL relativa são descartados (só `http(s)`, `mailto:` e
   `#âncora`): decisão de segurança, não bug.
@@ -222,7 +222,7 @@ contrato) + testes existentes.
   via opener, âncoras com scroll escopado, URL insegura vira texto), imagens
   (`MarkdownImage.tsx`, lazy + fallback acessível), notas de rodapé localizadas,
   task lists tight **e loose**, tabelas com caption/wrapper, HTML cru seguro,
-  `<pre>` preservado, caret de streaming por classe; CSS `.lumina-prose`
+  `<pre>` preservado, caret de streaming por classe; CSS `.zylara-prose`
   completo (h5/h6, alertas, footnotes, task lists, `details`, `.katex-error`) e
   `external.ts` com `mailto:`.
 - **Prompt** (`harness-dev`): seção `# Markdown formatting` (texto em inglês) gerada à mão a partir
@@ -235,7 +235,7 @@ contrato) + testes existentes.
   `DESIGN.md` §6.3 e `ARCHITECTURE.md` §2/§8.1/§13/§15.
 - **Correções pós-verificação**: task list loose passou a aceitar o checkbox em
   qualquer ancestral `li.task-list-item` (regressão coberta); classe morta
-  `lumina-task-item` removida; texto do sandbox `html`/`svg` no prompt
+  `zylara-task-item` removida; texto do sandbox `html`/`svg` no prompt
   corrigido ("sandbox isolado do app, sem acesso ao IPC").
 - **Rodada 2 — `\$` em math** (`ui-core` + `harness-dev` + Lead): novo
   `src/components/chat/markdown/mathDollars.ts` (sentinela + restauração por
@@ -249,7 +249,7 @@ contrato) + testes existentes.
 | --- | --- |
 | `pnpm typecheck` | 0 erros |
 | `pnpm test` | **19 arquivos / 496 testes verdes** (418 anteriores + 78 novos) |
-| `pnpm build` | OK; CSS gerado contém `.lumina-alert*`, `.lumina-footnotes`, `.lumina-task-checkbox`, `.lumina-prose--streaming`, `.sr-only`, `.katex-error` e h5/h6 |
+| `pnpm build` | OK; CSS gerado contém `.zylara-alert*`, `.zylara-footnotes`, `.zylara-task-checkbox`, `.zylara-prose--streaming`, `.sr-only`, `.katex-error` e h5/h6 |
 | `cd src-tauri && cargo test --lib` | **154 passed / 0 failed / 8 ignored** (20 de prompt) |
 | Harness independente (`verifier`, re-executado após os fixes) | matriz **223 checks / 1 falha conhecida** (marcador escapado, §8.1); segurança **3.696 checks / 0 falhas** |
 
@@ -310,7 +310,7 @@ contrato de sintaxe desta §4** — não há dialeto reduzido no Thinking.
   `variant?: 'default' | 'thinking'`. As duas variantes compartilham plugins
   (`remark-gfm`, `remark-math`, `rehype-raw`, `rehypeSafeHtml`, `rehype-katex`) e
   overrides de componentes; a variante `thinking` só aplica o modificador
-  `.lumina-prose--thinking` (13px, `foreground-muted`, ritmo vertical compacto,
+  `.zylara-prose--thinking` (13px, `foreground-muted`, ritmo vertical compacto,
   títulos escalados, tabelas/listas/notas menores — somente tokens).
 - **Modelo da timeline**: `buildAgentTrace` devolve **uma entrada de raciocínio
   por passo** com o Markdown **bruto** (apenas `trim` nas pontas); não divide por
@@ -325,7 +325,7 @@ contrato de sintaxe desta §4** — não há dialeto reduzido no Thinking.
   superfície nova de XSS: os vetores de §6 valem para as duas variantes.
 - **Streaming**: a timeline externa abre durante o turno; a linha de raciocínio
   continua recolhida por padrão (spinner no header) e, quando expandida, o último
-  bloco recebe o caret (`lumina-prose--streaming`) enquanto a fase é `reasoning`;
+  bloco recebe o caret (`zylara-prose--streaming`) enquanto a fase é `reasoning`;
   fence ainda não fechada renderiza como card de código parcial. Com a resposta
   pronta a timeline recolhe (ou permanece recolhida, com a opção **Raciocínio
   recolhido por padrão**).

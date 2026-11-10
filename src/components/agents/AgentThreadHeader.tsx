@@ -54,10 +54,10 @@ export function AgentThreadHeader({
       const detail = (event as CustomEvent<AgentTaskUpdatedEvent>).detail;
       if (detail?.taskId === taskId) setTaskStatus(detail.status as AgentTaskStatus);
     };
-    window.addEventListener('lumina:agent-task-updated', onTaskUpdated);
+    window.addEventListener('zylara:agent-task-updated', onTaskUpdated);
     return () => {
       cancelled = true;
-      window.removeEventListener('lumina:agent-task-updated', onTaskUpdated);
+      window.removeEventListener('zylara:agent-task-updated', onTaskUpdated);
     };
   }, [taskId]);
 

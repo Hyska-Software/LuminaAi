@@ -14,7 +14,7 @@
 
 ## 1. Objetivo e escopo
 
-Refazer por completo o **seletor de modelos** do Lumina — o pill compacto do
+Refazer por completo o **seletor de modelos** do Zylara — o pill compacto do
 composer (o titlebar não monta mais o pill) e o dialog completo ("Ver todos os
 modelos…") — elevando
 qualidade de UI/UX, consistência, acessibilidade e desempenho, **sem mudar o
@@ -83,7 +83,7 @@ Problemas encontrados na auditoria do código atual (`ModelPill.tsx`,
 
 ## 3. Direção de design
 
-Mantém a linguagem do Lumina (`docs/DESIGN.md`): superfícies neutras, borda 1px,
+Mantém a linguagem do Zylara (`docs/DESIGN.md`): superfícies neutras, borda 1px,
 sombras suaves, accent só em seleção/foco, movimento 150–260ms, pt-BR, tokens
 apenas. O seletor deve parecer **parte do produto** — não um componente de
 terceiros.

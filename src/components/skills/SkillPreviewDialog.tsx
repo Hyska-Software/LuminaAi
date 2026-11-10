@@ -43,7 +43,7 @@ export interface SkillPreviewDialogProps {
 /**
  * Read-only preview of a skill's `SKILL.md` body (FILES §7.4), fetched on demand
  * from `get_skill_content`. The document uses the exact chat Markdown pipeline
- * (GFM + KaTeX + `.lumina-prose`); the "Código" tab shows the raw Markdown in a
+ * (GFM + KaTeX + `.zylara-prose`); the "Código" tab shows the raw Markdown in a
  * `CodeBlock`. The frontmatter is stripped by the backend and never displayed.
  */
 export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) {

@@ -841,7 +841,7 @@ pub async fn suggest_commit_message(
     let diff = crate::workspace::git::commit_diff(&root, &status, scope, COMMIT_DIFF_BUDGET)
         .await
         .unwrap_or_else(|error| {
-            eprintln!("lumina: failed to build commit diff: {error:#}");
+            eprintln!("zylara: failed to build commit diff: {error:#}");
             String::new()
         });
     let user_text = build_commit_user_text(&entries, &diff, target);
@@ -886,7 +886,7 @@ pub async fn suggest_commit_message(
         Ok(text) => Ok(sanitize_commit_message(&text)
             .unwrap_or_else(|| heuristic_commit_message(&entries))),
         Err(error) => {
-            eprintln!("lumina: AI commit message suggestion failed, using heuristic: {error:#}");
+            eprintln!("zylara: AI commit message suggestion failed, using heuristic: {error:#}");
             Ok(heuristic_commit_message(&entries))
         }
     }

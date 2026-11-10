@@ -88,7 +88,7 @@ pub fn docker_shell_for(
         "--security-opt".to_string(),
         "no-new-privileges".to_string(),
         "--label".to_string(),
-        "lumina.owner=lumina".to_string(),
+        "zylara.owner=zylara".to_string(),
         "--pids-limit".to_string(),
         sandbox.pids_limit.max(32).to_string(),
         "--memory".to_string(),
@@ -288,7 +288,7 @@ pub fn sanitized_env(extra: &[(&str, &str)]) -> Vec<(String, String)> {
         let (Some(key), Some(value)) = (key.to_str(), value.to_str()) else {
             continue;
         };
-        if is_sensitive_env(key) || key.to_ascii_uppercase().starts_with("LUMINA_") {
+        if is_sensitive_env(key) || key.to_ascii_uppercase().starts_with("ZYLARA_") {
             continue;
         }
         if let Some(value) =
@@ -301,7 +301,7 @@ pub fn sanitized_env(extra: &[(&str, &str)]) -> Vec<(String, String)> {
         env.insert((*key).to_string(), (*value).to_string());
     }
     for (key, value) in [
-        ("LUMINA_AGENT", "1"),
+        ("ZYLARA_AGENT", "1"),
         ("NO_COLOR", "1"),
         ("TERM", "dumb"),
         ("GIT_TERMINAL_PROMPT", "0"),
@@ -1091,12 +1091,12 @@ mod tests {
             return;
         }
         let temp = tempfile::tempdir().expect("tempdir");
-        let (program, args) = shell_for("Write-Output $env:LUMINA_EXTRA");
+        let (program, args) = shell_for("Write-Output $env:ZYLARA_EXTRA");
         let req = ExecRequest {
             program,
             args,
             cwd: temp.path().to_path_buf(),
-            env: sanitized_env(&[("LUMINA_EXTRA", "valor-ok")]),
+            env: sanitized_env(&[("ZYLARA_EXTRA", "valor-ok")]),
             timeout: Duration::from_secs(20),
             cancel: CancellationToken::new(),
             max_output_bytes: 64 * 1024,
@@ -1107,19 +1107,19 @@ mod tests {
 
     #[test]
     fn sanitized_env_scrubs_secrets_and_internal_vars() {
-        std::env::set_var("LUMINA_TEST_API_KEY_LOCAL", "leak");
-        let env = sanitized_env(&[("LUMINA_EXTRA", "ok")]);
+        std::env::set_var("ZYLARA_TEST_API_KEY_LOCAL", "leak");
+        let env = sanitized_env(&[("ZYLARA_EXTRA", "ok")]);
         let get = |name: &str| {
             env.iter()
                 .find(|(key, _)| key.eq_ignore_ascii_case(name))
                 .map(|(_, value)| value.as_str())
         };
-        assert!(get("LUMINA_TEST_API_KEY_LOCAL").is_none());
-        assert_eq!(get("LUMINA_EXTRA"), Some("ok"));
-        assert_eq!(get("LUMINA_AGENT"), Some("1"));
+        assert!(get("ZYLARA_TEST_API_KEY_LOCAL").is_none());
+        assert_eq!(get("ZYLARA_EXTRA"), Some("ok"));
+        assert_eq!(get("ZYLARA_AGENT"), Some("1"));
         assert_eq!(get("NO_COLOR"), Some("1"));
         assert_eq!(get("GIT_TERMINAL_PROMPT"), Some("0"));
-        std::env::remove_var("LUMINA_TEST_API_KEY_LOCAL");
+        std::env::remove_var("ZYLARA_TEST_API_KEY_LOCAL");
     }
 
     #[test]

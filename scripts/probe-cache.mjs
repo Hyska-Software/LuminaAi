@@ -38,7 +38,7 @@ function nowStamp() {
 }
 
 function filler(approxChars = 6_000) {
-  const line = 'Lumina cache probe: stable prefix content for prompt-cache validation. ';
+  const line = 'Zylara cache probe: stable prefix content for prompt-cache validation. ';
   return line.repeat(Math.ceil(approxChars / line.length)).slice(0, approxChars);
 }
 
@@ -108,10 +108,10 @@ function baseHeaders(provider, credential) {
   const headers = {
     'content-type': 'application/json',
     authorization: `Bearer ${credential.token}`,
-    'user-agent': 'Lumina-cache-probe/1.0',
+    'user-agent': 'Zylara-cache-probe/1.0',
   };
   if (provider.headers) Object.assign(headers, provider.headers);
-  if (provider.id.startsWith('opencode')) headers['x-opencode-session'] = 'lumina-cache-probe';
+  if (provider.id.startsWith('opencode')) headers['x-opencode-session'] = 'zylara-cache-probe';
   return headers;
 }
 
@@ -185,7 +185,7 @@ function routeFor(provider, model, kind, oauth = false) {
         ...(oauth
           ? { store: false, include: ['reasoning.encrypted_content'] }
           : { max_output_tokens: 32, prompt_cache_retention: '24h' }),
-        prompt_cache_key: 'lumina-cache-probe',
+        prompt_cache_key: 'zylara-cache-probe',
       },
     };
   }
@@ -200,7 +200,7 @@ function routeFor(provider, model, kind, oauth = false) {
           { role: 'system', content: filler() },
           { role: 'user', content: 'Responda apenas OK.' },
         ],
-        prompt_cache_key: 'lumina-cache-probe',
+        prompt_cache_key: 'zylara-cache-probe',
       },
     };
   }
@@ -251,7 +251,7 @@ function modelsFor(provider) {
 
 const report = {
   generatedAt: new Date().toISOString(),
-  fixture: 'lumina-cache-probe-v1',
+  fixture: 'zylara-cache-probe-v1',
   providers: [],
 };
 

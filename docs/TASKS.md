@@ -98,13 +98,13 @@ Limites:
   (resultado como dados, não instrução) e publicam no canal quando aplicável;
   quando o dono conclui pela tool `finish_task`, o runner observa o `done` e
   publica o resultado no canal mesmo sem transicionar a tarefa de novo;
-- cada turno de tarefa persiste `turn_events` e emite `lumina:turn-event`, então
+- cada turno de tarefa persiste `turn_events` e emite `zylara:turn-event`, então
   abrir a thread da tarefa durante a execução mostra streaming/passos em vez de
   um transcript vazio;
 - tarefas criadas a partir da thread de um líder de canal ficam retidas enquanto
   o turno do líder está ativo; o reply dele é publicado primeiro e o próximo
   tick do scheduler inicia as tarefas;
-- emite `lumina:agent-task-updated` (com `originConversationId`) no claim, em
+- emite `zylara:agent-task-updated` (com `originConversationId`) no claim, em
   cada transição relevante e no fim.
 
 ## UI
@@ -120,8 +120,8 @@ Limites:
 - Diálogo **Atividade** lista turnos do renderer e turnos de fundo registrados
   no backend, aprovações/perguntas pendentes e tarefas aguardando o usuário.
 - Canal: mensagens de tarefa usam o mesmo histórico; o resultado é publicado
-  como mensagem do agente e emite `lumina:agent-channel-updated`.
-- Eventos atualizam o renderer via `lumina:agent-task-updated`.
+  como mensagem do agente e emite `zylara:agent-channel-updated`.
+- Eventos atualizam o renderer via `zylara:agent-task-updated`.
 
 ## Limitações atuais
 

@@ -13,8 +13,8 @@ socket do Docker nem home persistente. O runner usa `--user 1000:1000`, que
 corresponde ao usuário `node` da imagem.
 
 ```bash
-docker build -t lumina/agent:latest docker/agent
+docker build -t zylara/agent:latest docker/agent
 ```
 
-Em produção, faça pull/pin por digest (`lumina/agent@sha256:...`) e valide com
+Em produção, faça pull/pin por digest (`zylara/agent@sha256:...`) e valide com
 `docker_validate_image` na aba de ferramentas.

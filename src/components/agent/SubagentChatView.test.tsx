@@ -49,7 +49,7 @@ const detail: ConversationDetail = {
     mode: 'code',
     codeLinked: false,
     workspaceId: 'ws-1',
-    agentKind: 'lumina',
+    agentKind: 'zylara',
     permissionMode: 'read_only',
     parentConversationId: 'parent-1',
     subagentTaskCallId: 'task-1',

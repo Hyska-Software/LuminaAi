@@ -1042,8 +1042,8 @@ mod smoke {
             base_url: provider.base_url.clone(),
             api_key: key.to_string(),
             model: model.clone(),
-            session_id: format!("lumina-smoke-{}", uuid::Uuid::new_v4()),
-            user_agent: concat!("Lumina/", env!("CARGO_PKG_VERSION")).to_string(),
+            session_id: format!("zylara-smoke-{}", uuid::Uuid::new_v4()),
+            user_agent: concat!("Zylara/", env!("CARGO_PKG_VERSION")).to_string(),
             endpoints: provider.endpoints.clone(),
             request_profile: provider.request_profile(ProviderAuth::ApiKey),
             auth_mode: ProviderAuth::ApiKey,
@@ -1522,7 +1522,7 @@ mod smoke {
             .model("opencode-go", "glm-5.3-flash")
             .expect("glm-5.3-flash in catalog");
         let mut config = provider_config(provider, model, &key);
-        config.api_key = "chave-invalida-lumina".to_string();
+        config.api_key = "chave-invalida-zylara".to_string();
         let error = collect(
             config,
             vec![WireProtocol::OpenaiChat],
@@ -1941,7 +1941,7 @@ mod tests {
             api_key: "sk-test".to_string(),
             model,
             session_id: "session-1".to_string(),
-            user_agent: "Lumina/test".to_string(),
+            user_agent: "Zylara/test".to_string(),
             endpoints: provider.endpoints.clone(),
             request_profile: provider.request_profile(ProviderAuth::ApiKey),
             auth_mode: ProviderAuth::ApiKey,
@@ -2037,7 +2037,7 @@ mod tests {
                 config: test_config("opencode-go", model_id),
                 protocols: vec![protocol],
                 history: vec![HistoryMessage::user("diga olá")],
-                system_prompt: "Você é o Lumina.".to_string(),
+                system_prompt: "Você é o Zylara.".to_string(),
                 tools: vec![ToolDefinition {
                     name: "echo".to_string(),
                     description: "Devolve o texto recebido.".to_string(),
@@ -2156,7 +2156,7 @@ mod tests {
                     api_key: "sk-test".to_string(),
                     model: model.clone(),
                     session_id: String::new(),
-                    user_agent: "Lumina/test".to_string(),
+                    user_agent: "Zylara/test".to_string(),
                     endpoints: provider.endpoints.clone(),
                     request_profile: provider.request_profile(ProviderAuth::ApiKey),
                     auth_mode: ProviderAuth::ApiKey,
@@ -2196,7 +2196,7 @@ mod tests {
         let headers = go.headers();
         assert_eq!(header(&headers, "authorization"), Some("Bearer sk-test"));
         assert_eq!(header(&headers, "x-opencode-session"), Some("session-1"));
-        assert_eq!(header(&headers, "user-agent"), Some("Lumina/test"));
+        assert_eq!(header(&headers, "user-agent"), Some("Zylara/test"));
 
         let zen = test_config("opencode-zen", "gpt-6-luna");
         assert_eq!(
@@ -2227,13 +2227,13 @@ mod tests {
         let mut config = test_config("openai", "gpt-6.1-sol");
         config.api_key.clear();
         config.extra_headers = vec![
-            ("x-lumina-test".to_string(), "1".to_string()),
-            ("x-lumina-extra".to_string(), "dois".to_string()),
+            ("x-zylara-test".to_string(), "1".to_string()),
+            ("x-zylara-extra".to_string(), "dois".to_string()),
         ];
         let headers = config.headers();
         assert!(header(&headers, "authorization").is_none());
-        assert_eq!(header(&headers, "x-lumina-test"), Some("1"));
-        assert_eq!(header(&headers, "x-lumina-extra"), Some("dois"));
+        assert_eq!(header(&headers, "x-zylara-test"), Some("1"));
+        assert_eq!(header(&headers, "x-zylara-extra"), Some("dois"));
     }
 
     /* --------------------- structured errors ------------------------ */

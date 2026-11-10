@@ -32,15 +32,15 @@ function releaseInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
     currentVersion: '0.1.0',
     latestVersion: '0.2.0',
     available: true,
-    releaseName: 'Lumina v0.2.0',
+    releaseName: 'Zylara v0.2.0',
     releasedAt: '2026-11-01T12:00:00Z',
-    htmlUrl: 'https://github.com/Hyska-Software/LuminaAi/releases/tag/v0.2.0',
+    htmlUrl: 'https://github.com/Hyska-Software/ZylaraAi/releases/tag/v0.2.0',
     asset: {
-      name: 'Lumina-Setup-0.2.0-windows-x64.exe',
+      name: 'Zylara-Setup-0.2.0-windows-x64.exe',
       size: 100,
       sha256: 'a'.repeat(64),
       downloadUrl:
-        'https://github.com/Hyska-Software/LuminaAi/releases/download/v0.2.0/Lumina-Setup-0.2.0-windows-x64.exe',
+        'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-Setup-0.2.0-windows-x64.exe',
       platformLabel: 'Windows x64',
       kind: 'setup',
     },
@@ -67,7 +67,7 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
 
 const downloaded: DownloadedUpdate = {
   version: '0.2.0',
-  path: 'C:\\Users\\ana\\AppData\\Roaming\\app.lumina.chat\\updates\\0.2.0\\setup.exe',
+  path: 'C:\\Users\\ana\\AppData\\Roaming\\app.zylara.chat\\updates\\0.2.0\\setup.exe',
   size: 100,
   sha256: 'a'.repeat(64),
 };
@@ -124,7 +124,7 @@ describe('updateStore', () => {
     expect(mocks.checkForUpdate).toHaveBeenCalledWith(false);
     expect(mocks.markUpdateNotified).toHaveBeenCalledWith('0.2.0');
     expect(toast.info).toHaveBeenCalledWith(
-      'Lumina v0.2.0 disponível',
+      'Zylara v0.2.0 disponível',
       expect.objectContaining({ action: expect.anything() }),
     );
     expect(useUpdateStore.getState().preferences.notifiedVersion).toBe('0.2.0');
@@ -244,7 +244,7 @@ describe('updateStore', () => {
     await useUpdateStore.getState().check({ force: true });
     expect(toast.success).toHaveBeenCalledWith(
       'Você está na versão mais recente',
-      expect.objectContaining({ description: 'Lumina v0.1.0' }),
+      expect.objectContaining({ description: 'Zylara v0.1.0' }),
     );
     expect(useUpdateStore.getState().phase).toBe('up-to-date');
   });
@@ -336,7 +336,7 @@ describe('updateStore', () => {
     mocks.getUpdateNotes.mockResolvedValue({
       notes: '## Novidades\n- Correções',
       releasedAt: '2026-11-01T12:00:00Z',
-      htmlUrl: 'https://github.com/Hyska-Software/LuminaAi/releases/tag/v0.2.0',
+      htmlUrl: 'https://github.com/Hyska-Software/ZylaraAi/releases/tag/v0.2.0',
     });
 
     await useUpdateStore.getState().loadNotes();

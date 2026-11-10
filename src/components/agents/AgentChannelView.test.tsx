@@ -297,7 +297,7 @@ describe('AgentChannelView — anexos', () => {
 
     act(() => {
       window.dispatchEvent(
-        new CustomEvent('lumina:channel-drop', { detail: { paths: ['C:\\a.pdf'] } }),
+        new CustomEvent('zylara:channel-drop', { detail: { paths: ['C:\\a.pdf'] } }),
       );
     });
 

@@ -66,7 +66,7 @@ function openAiProvider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
     oauth: {
       issuer: 'https://auth.openai.com',
       registrationClientId: 'dynamic_agent_client',
-      agentNameHint: 'Lumina',
+      agentNameHint: 'Zylara',
       resource: 'https://api.openai.com/v1',
       scopes: ['openid', 'chatgpt.tokens.use.direct'],
       planUsageScope: 'chatgpt.tokens.use.direct',
@@ -113,7 +113,7 @@ function seedApp(options: {
 }
 
 function typeMessage(value = 'Olá'): void {
-  fireEvent.change(screen.getByRole('textbox', { name: 'Mensagem para o Lumina' }), {
+  fireEvent.change(screen.getByRole('textbox', { name: 'Mensagem para o Zylara' }), {
     target: { value },
   });
 }
@@ -320,7 +320,7 @@ describe('Composer — gate de envio (D9)', () => {
     seedApp({ auth: null });
     render(<Composer />);
 
-    const textarea = screen.getByRole('textbox', { name: 'Mensagem para o Lumina' });
+    const textarea = screen.getByRole('textbox', { name: 'Mensagem para o Zylara' });
     expect(textarea.getAttribute('aria-describedby')).toBe('composer-credential-notice');
   });
 
@@ -353,7 +353,7 @@ describe('Composer — variant por layoutMode (Chat | Code)', () => {
   it('no modo Chat mantém placeholder e rótulo atuais', () => {
     render(<Composer />);
 
-    const textarea = screen.getByRole('textbox', { name: 'Mensagem para o Lumina' });
+    const textarea = screen.getByRole('textbox', { name: 'Mensagem para o Zylara' });
     expect(textarea.getAttribute('placeholder')).toBe('Pergunte alguma coisa…');
   });
 
@@ -363,7 +363,7 @@ describe('Composer — variant por layoutMode (Chat | Code)', () => {
 
     const textarea = screen.getByRole('textbox', { name: 'Tarefa para o agente' });
     expect(textarea.getAttribute('placeholder')).toBe('Descreva a tarefa para o agente…');
-    expect(screen.queryByRole('textbox', { name: 'Mensagem para o Lumina' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Mensagem para o Zylara' })).toBeNull();
   });
 
   it('troca a copy ao alternar o modo sem perder o rascunho nem o envio', () => {
@@ -572,7 +572,7 @@ describe('Composer — colar arquivos com Ctrl+V', () => {
   }
 
   const composerTextarea = () =>
-    screen.getByRole('textbox', { name: 'Mensagem para o Lumina' });
+    screen.getByRole('textbox', { name: 'Mensagem para o Zylara' });
 
   it('importa arquivos do clipboard e mostra o chip com tipo', async () => {
     const spy = vi

@@ -77,7 +77,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     mode: 'code',
     codeLinked: false,
     workspaceId: null,
-    agentKind: 'lumina',
+    agentKind: 'zylara',
     permissionMode: 'edit',
     ...overrides,
   };
@@ -86,12 +86,12 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
     id: 'ws-1',
-    name: 'lumina',
-    path: 'C:/projetos/lumina',
+    name: 'zylara',
+    path: 'C:/projetos/zylara',
     createdAt: 1,
     updatedAt: 2,
     trusted: true,
-    git: { root: 'C:/projetos/lumina', branch: 'main', ahead: 0, behind: 0, dirty: true },
+    git: { root: 'C:/projetos/zylara', branch: 'main', ahead: 0, behind: 0, dirty: true },
     ...overrides,
   };
 }
@@ -232,7 +232,7 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     expect(apiMock.listWorkspaceFiles).toHaveBeenCalledWith('ws-1', '.', 2);
     // A barra workspace · branch vive só na aba Alterações.
     fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
-    expect(await screen.findByText(/lumina/)).toBeTruthy();
+    expect(await screen.findByText(/zylara/)).toBeTruthy();
   });
 
   it('destaca na árvore o arquivo que já está aberto na aba central', async () => {
@@ -286,13 +286,13 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
 
     render(<CodePanel />);
 
-    expect(screen.queryByText(/lumina · main/)).toBeNull();
+    expect(screen.queryByText(/zylara · main/)).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
-    expect(await screen.findByText(/lumina · main/)).toBeTruthy();
+    expect(await screen.findByText(/zylara · main/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Filtrar alterações' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Terminal' }));
-    expect(screen.queryByText(/lumina · main/)).toBeNull();
+    expect(screen.queryByText(/zylara · main/)).toBeNull();
   });
 
   it('usa abas só com ícone quando o painel está na largura mínima', () => {
@@ -398,7 +398,7 @@ describe('CodePanel — histórico de commits', () => {
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
     apiMock.gitStatus.mockResolvedValue({
       isRepo: true,
-      root: 'C:/projetos/lumina',
+      root: 'C:/projetos/zylara',
       branch: 'main',
       staged: [],
       unstaged: [],
@@ -448,7 +448,7 @@ describe('CodePanel — histórico de commits', () => {
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
     const repoStatus = {
       isRepo: true,
-      root: 'C:/projetos/lumina',
+      root: 'C:/projetos/zylara',
       branch: 'main',
       staged: [],
       unstaged: [],

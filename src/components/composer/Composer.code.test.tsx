@@ -353,7 +353,7 @@ describe('Composer — menção @arquivo', () => {
   it('não abre menção no Chat nem no Code sem workspace', async () => {
     useUiStore.setState({ layoutMode: 'chat' });
     const { unmount } = render(<Composer />);
-    fireEvent.change(screen.getByRole('textbox', { name: 'Mensagem para o Lumina' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Mensagem para o Zylara' }), {
       target: { value: '@' },
     });
     await waitFor(() => expect(mocks.searchWorkspaceFiles).not.toHaveBeenCalled());
@@ -499,7 +499,7 @@ describe('Composer — comandos /', () => {
     useUiStore.setState({ layoutMode: 'chat' });
     render(<Composer />);
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Mensagem para o Lumina' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Mensagem para o Zylara' }), {
       target: { value: '/' },
     });
 

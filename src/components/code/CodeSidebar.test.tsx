@@ -82,12 +82,12 @@ function settings(overrides: Partial<Settings> = {}): Settings {
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
     id: 'ws-1',
-    name: 'lumina-core',
-    path: 'C:/dev/lumina',
+    name: 'zylara-core',
+    path: 'C:/dev/zylara',
     createdAt: 1,
     updatedAt: 2,
     trusted: true,
-    git: { root: 'C:/dev/lumina', branch: 'main', dirty: true },
+    git: { root: 'C:/dev/zylara', branch: 'main', dirty: true },
     ...overrides,
   };
 }
@@ -111,12 +111,12 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
 
 function appInfo(): AppInfo {
   return {
-    name: 'Lumina',
+    name: 'Zylara',
     version: '0.1.0',
     tauriVersion: '2.0.0',
     platform: 'windows',
     startedAt: 1,
-    dataDir: 'C:/lumina',
+    dataDir: 'C:/zylara',
   };
 }
 
@@ -237,7 +237,7 @@ describe('CodeSidebar — chrome e ações', () => {
 
   it('+ Novo agente sem workspace ativo pede uma pasta', async () => {
     const ws = workspace();
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
     renderSidebar();
@@ -334,7 +334,7 @@ describe('CodeSidebar — Workspaces reais', () => {
     ).toBeTruthy();
 
     const cta = screen.getByRole('button', { name: 'Abrir pasta…' });
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(workspace());
     mocks.listWorkspaces.mockResolvedValue([workspace()]);
     fireEvent.click(cta);
@@ -356,7 +356,7 @@ describe('CodeSidebar — Workspaces reais', () => {
 
     renderSidebar();
 
-    const core = await screen.findByRole('button', { name: 'lumina-core' });
+    const core = await screen.findByRole('button', { name: 'zylara-core' });
     expect(core.textContent).toContain('main');
     expect(core.textContent).toContain('2');
     const site = screen.getByRole('button', { name: 'site-institucional' });
@@ -375,11 +375,11 @@ describe('CodeSidebar — Workspaces reais', () => {
     renderSidebar();
 
     expect(await screen.findByRole('button', { name: 'Corrigir o build' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Recolher sessões de lumina-core' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recolher sessões de zylara-core' }));
 
     expect(screen.queryByRole('button', { name: 'Corrigir o build' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Expandir sessões de lumina-core' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Expandir sessões de zylara-core' }));
     expect(screen.getByRole('button', { name: 'Corrigir o build' })).toBeTruthy();
   });
 
@@ -409,7 +409,7 @@ describe('CodeSidebar — Workspaces reais', () => {
     useUiStore.setState({ activeWorkspaceId: 'ws-1' });
     renderSidebar();
 
-    const row = await screen.findByRole('button', { name: 'lumina-core' });
+    const row = await screen.findByRole('button', { name: 'zylara-core' });
     expect(row.getAttribute('aria-current')).toBe('true');
     expect(row.textContent).toContain('Leitura');
   });
@@ -465,14 +465,14 @@ describe('CodeSidebar — Workspaces reais', () => {
       workspace({ id: 'ws-2', name: 'Site Hyska', path: 'C:/dev/hyska', git: null }),
     ]);
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Pesquisar workspaces' }));
     fireEvent.change(screen.getByRole('textbox', { name: /Pesquisar workspaces/ }), {
       target: { value: 'hyska' },
     });
 
-    expect(screen.queryByRole('button', { name: 'lumina-core' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'zylara-core' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Site Hyska' })).toBeTruthy();
     expect(screen.getByText('1 de 2 workspaces')).toBeTruthy();
   });
@@ -483,12 +483,12 @@ describe('CodeSidebar — Workspaces reais', () => {
       workspace({ id: 'ws-2', name: 'Site Hyska', path: 'C:/dev/hyska', git: null }),
     ]);
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     openMenu(screen.getByRole('button', { name: 'Filtrar workspaces' }));
     fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Com git' }));
 
-    expect(screen.getByRole('button', { name: 'lumina-core' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'zylara-core' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Site Hyska' })).toBeNull();
 
     openMenu(screen.getByRole('button', { name: 'Filtrar workspaces' }));
@@ -532,7 +532,7 @@ describe('CodeSidebar — Workspaces reais', () => {
     mocks.listWorkspaces.mockResolvedValue([workspace()]);
     fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'lumina-core' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'zylara-core' })).toBeTruthy());
   });
 });
 
@@ -541,14 +541,14 @@ describe('CodeSidebar — menu do workspace', () => {
     const ws = workspace();
     mocks.listWorkspaces.mockResolvedValue([ws]);
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
     return ws;
   }
 
   it('cria uma sessão no workspace pelo menu', async () => {
     await renderWithWorkspace();
 
-    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace zylara-core' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Nova sessão' }));
 
     await waitFor(() => expect(mocks.createConversation).toHaveBeenCalledTimes(1));
@@ -560,7 +560,7 @@ describe('CodeSidebar — menu do workspace', () => {
   it('abre a pasta no Explorer', async () => {
     await renderWithWorkspace();
 
-    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace zylara-core' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Abrir no Explorer' }));
 
     await waitFor(() => expect(mocks.openWorkspaceInExplorer).toHaveBeenCalledWith('ws-1'));
@@ -574,17 +574,17 @@ describe('CodeSidebar — menu do workspace', () => {
     });
     await renderWithWorkspace();
 
-    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace zylara-core' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Copiar caminho' }));
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('C:/dev/lumina'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('C:/dev/zylara'));
   });
 
   it('renomeia o workspace pelo diálogo', async () => {
     mocks.renameWorkspace.mockResolvedValue(workspace({ name: 'core' }));
     await renderWithWorkspace();
 
-    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace zylara-core' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Renomear' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Renomear workspace' });
@@ -597,14 +597,14 @@ describe('CodeSidebar — menu do workspace', () => {
     );
   });
 
-  it('remove do Lumina com confirmação, avisando que a pasta não é apagada', async () => {
+  it('remove do Zylara com confirmação, avisando que a pasta não é apagada', async () => {
     mocks.removeWorkspace.mockResolvedValue(undefined);
     await renderWithWorkspace();
 
-    openMenu(screen.getByRole('button', { name: 'Opções do workspace lumina-core' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remover do Lumina' }));
+    openMenu(screen.getByRole('button', { name: 'Opções do workspace zylara-core' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remover do Zylara' }));
 
-    const dialog = await screen.findByRole('dialog', { name: 'Remover workspace do Lumina?' });
+    const dialog = await screen.findByRole('dialog', { name: 'Remover workspace do Zylara?' });
     expect(dialog.textContent).toContain('não será apagada');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remover' }));
 
@@ -658,7 +658,7 @@ describe('CodeSidebar — ações da sessão', () => {
     seedSession();
     mocks.setConversationPinned.mockResolvedValue(conversation({ id: 'c-1', pinned: true }));
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Fixar' }));
@@ -670,7 +670,7 @@ describe('CodeSidebar — ações da sessão', () => {
     seedSession();
     mocks.renameConversation.mockResolvedValue(conversation({ id: 'c-1', title: 'Sessão nova' }));
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Renomear' }));
@@ -686,7 +686,7 @@ describe('CodeSidebar — ações da sessão', () => {
     seedSession();
     mocks.exportConversation.mockResolvedValue('C:/exports/sessao.md');
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Exportar' }));
@@ -699,7 +699,7 @@ describe('CodeSidebar — ações da sessão', () => {
   it('remove uma sessão compartilhada do Code pelo menu', async () => {
     seedSession({ codeLinked: true });
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remover do Code' }));
@@ -713,7 +713,7 @@ describe('CodeSidebar — ações da sessão', () => {
     seedSession();
     mocks.deleteConversation.mockResolvedValue(undefined);
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     openMenu(await screen.findByRole('button', { name: 'Opções de Sessão antiga' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Excluir' }));
@@ -729,7 +729,7 @@ describe('CodeSidebar — ações da sessão', () => {
 describe('CodeSidebar — reordenação por teclado', () => {
   it('move o workspace e persiste a ordem', async () => {
     mocks.listWorkspaces.mockResolvedValue([
-      workspace({ id: 'ws-1', name: 'lumina-core', path: 'C:/dev/lumina', lastOpenedAt: 20 }),
+      workspace({ id: 'ws-1', name: 'zylara-core', path: 'C:/dev/zylara', lastOpenedAt: 20 }),
       workspace({
         id: 'ws-2',
         name: 'site',
@@ -741,7 +741,7 @@ describe('CodeSidebar — reordenação por teclado', () => {
     mocks.reorderWorkspaces.mockResolvedValue(undefined);
     renderSidebar();
 
-    const button = await screen.findByRole('button', { name: 'lumina-core' });
+    const button = await screen.findByRole('button', { name: 'zylara-core' });
     fireEvent.keyDown(button, { key: 'ArrowDown', altKey: true });
 
     await waitFor(() =>
@@ -751,18 +751,18 @@ describe('CodeSidebar — reordenação por teclado', () => {
 
   it('não reordena enquanto a busca de workspaces está ativa', async () => {
     mocks.listWorkspaces.mockResolvedValue([
-      workspace({ id: 'ws-1', name: 'lumina-core', path: 'C:/dev/lumina', lastOpenedAt: 20 }),
+      workspace({ id: 'ws-1', name: 'zylara-core', path: 'C:/dev/zylara', lastOpenedAt: 20 }),
       workspace({ id: 'ws-2', name: 'site', path: 'C:/dev/site', lastOpenedAt: 10, git: null }),
     ]);
     renderSidebar();
-    await screen.findByRole('button', { name: 'lumina-core' });
+    await screen.findByRole('button', { name: 'zylara-core' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Pesquisar workspaces' }));
     fireEvent.change(screen.getByRole('textbox', { name: /Pesquisar workspaces/ }), {
       target: { value: 'C:/dev' },
     });
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'lumina-core' }), {
+    fireEvent.keyDown(screen.getByRole('button', { name: 'zylara-core' }), {
       key: 'ArrowDown',
       altKey: true,
     });

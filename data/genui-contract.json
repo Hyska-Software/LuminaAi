@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "name": "Lumina Generative UI",
+  "name": "Zylara Generative UI",
   "description": "Contrato único da UI generativa declarativa (blocos ```ui). É consumido pelo system prompt (Rust), pelo validador/ferramenta do agente (Rust) e pelo renderer (TypeScript). Alterar este arquivo exige atualizar a implementação dos dois lados — os testes de paridade (data/genui-fixtures.json) garantem que isso aconteça.",
   "format": {
     "root": "JSON object { \"version\"?: 2, \"components\": [...] }; a bare array of components is also accepted (normalized).",

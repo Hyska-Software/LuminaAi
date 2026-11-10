@@ -385,7 +385,7 @@ fn safe_file_stem(value: &str) -> String {
     }
 }
 
-/// Writes a portable `lumina-agent` JSON document through the native save dialog.
+/// Writes a portable `zylara-agent` JSON document through the native save dialog.
 #[tauri::command]
 pub fn export_agent(
     app: AppHandle,
@@ -406,7 +406,7 @@ pub fn export_agent(
         .dialog()
         .file()
         .set_file_name(&file_name)
-        .add_filter("Agente Lumina", &["json"])
+        .add_filter("Agente Zylara", &["json"])
         .blocking_save_file()
     else {
         return Ok(None);
@@ -469,7 +469,7 @@ pub async fn suggest_agent(
         refresh_override: None,
         model_source: None,
     };
-    let system = "You design AI agent personas for Lumina, a desktop AI workspace. \
+    let system = "You design AI agent personas for Zylara, a desktop AI workspace. \
                   Reply with ONLY one JSON object, no markdown fences and no commentary. \
                   Keys: name (<=40 chars), role (<=80), description (<=500, one sentence), \
                   emoji (one emoji), department (<=40), instructions (3-8 short sentences in \
@@ -478,7 +478,7 @@ pub async fn suggest_agent(
                   Never claim permissions or tools; the app controls those.";
     let user = format!(
         "Create an agent for this brief:\n\n{prompt}\n\n\
-         The agent will run on Lumina. Keep the instructions concrete, safe and useful."
+         The agent will run on Zylara. Keep the instructions concrete, safe and useful."
     );
     let text = harness::batch::complete_text(
         &deps,
@@ -626,7 +626,7 @@ pub async fn revise_agent(
         refresh_override: None,
         model_source: None,
     };
-    let system = "You revise an existing AI agent for Lumina, a desktop AI workspace. \
+    let system = "You revise an existing AI agent for Zylara, a desktop AI workspace. \
                   The current configuration is JSON. Reply with ONLY one JSON object containing \
                   only the fields you changed. Allowed keys: name, role, description, \
                   department, instructions, starters (array of 1-3 strings), memoryEnabled. \
@@ -679,7 +679,7 @@ fn extract_json_object(text: &str) -> Option<String> {
     Some(trimmed[start..=end].to_string())
 }
 
-/// Imports a `lumina-agent` JSON document selected through the native dialog.
+/// Imports a `zylara-agent` JSON document selected through the native dialog.
 #[tauri::command]
 pub fn import_agent(
     app: AppHandle,
@@ -688,7 +688,7 @@ pub fn import_agent(
     let Some(selected) = app
         .dialog()
         .file()
-        .add_filter("Agente Lumina", &["json"])
+        .add_filter("Agente Zylara", &["json"])
         .blocking_pick_file()
     else {
         return Ok(None);

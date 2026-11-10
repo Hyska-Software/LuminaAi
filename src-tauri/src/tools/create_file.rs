@@ -73,7 +73,7 @@ pub async fn run(rt: &ToolRuntime, args: &Value) -> ToolOutcome {
         Ok(artifact) => ToolOutcome {
             content: format!(
                 "Arquivo `{}` criado com sucesso ({} bytes, tipo `{}`). Artifact id: {}. \
-                 O arquivo já está disponível no painel de artefatos do Lumina para visualização e \
+                 O arquivo já está disponível no painel de artefatos do Zylara para visualização e \
                  download; não repita o conteúdo completo no chat.",
                 artifact.name, artifact.size, artifact.mime_type, artifact.id
             ),
@@ -103,7 +103,7 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "lumina-create-file-test-{}",
+                "zylara-create-file-test-{}",
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&path).expect("criar diretório temporário");

@@ -41,7 +41,7 @@ impl EventEmitter for PersistingEmitter {
             "conversationId": self.conversation_id,
             "event": event.clone(),
         });
-        let _ = self.app.emit("lumina:turn-event", payload);
+        let _ = self.app.emit("zylara:turn-event", payload);
         let _ = self.channel.send(event);
     }
 }

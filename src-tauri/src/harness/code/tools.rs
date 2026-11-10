@@ -326,7 +326,7 @@ mod tests {
             settings: crate::domain::Settings::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
             agent_hooks: None,
-            data_dir: std::env::temp_dir().join("lumina-code-tools-test"),
+            data_dir: std::env::temp_dir().join("zylara-code-tools-test"),
             approval: None,
             observed: None,
             jobs: None,

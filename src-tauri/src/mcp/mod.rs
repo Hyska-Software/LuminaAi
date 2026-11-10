@@ -8,7 +8,7 @@
 //! ```
 //!
 //! O transporte é o oficial de stdio: JSON-RPC 2.0 delimitado por linha (uma
-//! mensagem por linha no stdin/stdout do processo filho). O Lumina faz
+//! mensagem por linha no stdin/stdout do processo filho). O Zylara faz
 //! `initialize` → `notifications/initialized` → `tools/list`, expõe as tools
 //! como `mcp__<servidor>__<tool>` no perfil Code e executa `tools/call` sob
 //! aprovação explícita do usuário nos modos interativos (o Autônomo executa
@@ -264,7 +264,7 @@ impl McpClient {
                 json!({
                     "protocolVersion": MCP_PROTOCOL_VERSION,
                     "capabilities": {},
-                    "clientInfo": { "name": "lumina", "version": env!("CARGO_PKG_VERSION") }
+                    "clientInfo": { "name": "zylara", "version": env!("CARGO_PKG_VERSION") }
                 }),
             ),
         )

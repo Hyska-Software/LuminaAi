@@ -362,7 +362,7 @@ describe('ProvidersTab — cards de provedor', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Entendi' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(window.localStorage.getItem('lumina.openaiPlanNoticeShown')).toBe('1');
+    expect(window.localStorage.getItem('zylara.openaiPlanNoticeShown')).toBe('1');
 
     // A fresh mount reads the persisted flag and never shows the notice again.
     cleanup();

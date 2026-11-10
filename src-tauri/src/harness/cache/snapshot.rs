@@ -440,7 +440,7 @@ mod tests {
         let tools = vec![tool("read_file"), tool("edit_file")];
         let project = crate::domain::ProjectInfo {
             kind: "node".to_string(),
-            name: Some("lumina".to_string()),
+            name: Some("zylara".to_string()),
             checks: vec![crate::domain::ProjectCheckInfo {
                 id: "test".to_string(),
                 label: "Testes".to_string(),
@@ -450,7 +450,7 @@ mod tests {
         let base = code_config_hash(
             &model(),
             Some("demo"),
-            Some("C:/dev/lumina"),
+            Some("C:/dev/zylara"),
             Some("# Regras do projeto"),
             Some(&project),
             "Windows",
@@ -465,7 +465,7 @@ mod tests {
             code_config_hash(
                 &model(),
                 Some("demo"),
-                Some("C:/dev/lumina"),
+                Some("C:/dev/zylara"),
                 Some("# Regras do projeto"),
                 Some(&project),
                 "Windows",
@@ -484,7 +484,7 @@ mod tests {
             code_config_hash(
                 &model(),
                 Some("demo"),
-                Some("C:/dev/lumina"),
+                Some("C:/dev/zylara"),
                 Some("# Outras regras"),
                 Some(&project),
                 "Windows",
@@ -504,7 +504,7 @@ mod tests {
             code_config_hash(
                 &model(),
                 Some("demo"),
-                Some("C:/dev/lumina"),
+                Some("C:/dev/zylara"),
                 Some("# Regras do projeto"),
                 Some(&other_project),
                 "Windows",
@@ -519,7 +519,7 @@ mod tests {
             code_config_hash(
                 &model(),
                 Some("demo"),
-                Some("C:/dev/lumina"),
+                Some("C:/dev/zylara"),
                 Some("# Regras do projeto"),
                 Some(&project),
                 "Linux",
@@ -534,7 +534,7 @@ mod tests {
             code_config_hash(
                 &model(),
                 Some("demo"),
-                Some("C:/dev/lumina"),
+                Some("C:/dev/zylara"),
                 Some("# Regras do projeto"),
                 Some(&project),
                 "Windows",

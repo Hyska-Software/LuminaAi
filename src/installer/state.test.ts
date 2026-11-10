@@ -18,16 +18,16 @@ function context(overrides: Partial<InstallerContext> = {}): InstallerContext {
     version: '0.1.0',
     arch: 'x86_64',
     isAdmin: false,
-    defaultPathUser: 'C:\\Users\\ana\\AppData\\Local\\Programs\\Lumina',
-    defaultPathMachine: 'C:\\Program Files\\Lumina',
+    defaultPathUser: 'C:\\Users\\ana\\AppData\\Local\\Programs\\Zylara',
+    defaultPathMachine: 'C:\\Program Files\\Zylara',
     existing: null,
     conflicting: null,
     appRunning: false,
     webview2Installed: true,
     freeBytes: 1_000_000_000,
     requiredBytes: 25_000_000,
-    logPath: 'C:\\Temp\\lumina-setup.log',
-    dataPaths: ['C:\\Users\\ana\\AppData\\Roaming\\app.lumina.chat'],
+    logPath: 'C:\\Temp\\zylara-setup.log',
+    dataPaths: ['C:\\Users\\ana\\AppData\\Roaming\\app.zylara.chat'],
     canElevate: true,
     pendingOptions: null,
     ...overrides,
@@ -49,7 +49,7 @@ describe('installer state', () => {
         isAdmin: true,
         pendingOptions: {
           scope: 'machine',
-          path: 'C:\\Program Files\\Lumina',
+          path: 'C:\\Program Files\\Zylara',
           desktopShortcut: false,
           startMenuShortcut: true,
           launchAfterInstall: true,
@@ -73,7 +73,7 @@ describe('installer state', () => {
         mode: 'uninstall',
         existing: {
           scope: 'machine',
-          path: 'C:\\Program Files\\Lumina',
+          path: 'C:\\Program Files\\Zylara',
           version: '0.0.9',
         },
       }),
@@ -87,7 +87,7 @@ describe('installer state', () => {
     const current = context({
       existing: {
         scope: 'user',
-        path: 'D:\\Apps\\Lumina',
+        path: 'D:\\Apps\\Zylara',
         version: '0.0.9',
       },
     });
@@ -109,18 +109,18 @@ describe('installer state', () => {
     const next = applyAction(state, {
       type: 'scope',
       scope: 'machine',
-      defaultPath: 'C:\\Program Files\\Lumina',
+      defaultPath: 'C:\\Program Files\\Zylara',
     });
     expect(next.draft.scope).toBe('machine');
-    expect(next.draft.path).toBe('C:\\Program Files\\Lumina');
+    expect(next.draft.path).toBe('C:\\Program Files\\Zylara');
   });
 
   it('validates local absolute Windows paths', () => {
-    expect(isAbsoluteWindowsPath('C:\\Program Files\\Lumina')).toBe(true);
-    expect(isAbsoluteWindowsPath('D:/Apps/Lumina')).toBe(true);
-    expect(isAbsoluteWindowsPath('relative\\Lumina')).toBe(false);
-    expect(isAbsoluteWindowsPath('\\\\server\\share\\Lumina')).toBe(false);
-    expect(pathError('C:\\Program Files\\Lumina')).toBeNull();
+    expect(isAbsoluteWindowsPath('C:\\Program Files\\Zylara')).toBe(true);
+    expect(isAbsoluteWindowsPath('D:/Apps/Zylara')).toBe(true);
+    expect(isAbsoluteWindowsPath('relative\\Zylara')).toBe(false);
+    expect(isAbsoluteWindowsPath('\\\\server\\share\\Zylara')).toBe(false);
+    expect(pathError('C:\\Program Files\\Zylara')).toBeNull();
     expect(pathError('C:\\')).not.toBeNull();
     expect(pathError('C:\\a\\..\\b')).not.toBeNull();
   });
@@ -129,12 +129,12 @@ describe('installer state', () => {
     const state = createInitialState(context());
     const location = { ...state, screen: 'location' as const, draft: { ...state.draft, path: 'x' } };
     expect(canAdvance(location, context())).toBe(false);
-    expect(canAdvance({ ...location, draft: { ...location.draft, path: 'D:\\Apps\\Lumina' } }, context())).toBe(true);
+    expect(canAdvance({ ...location, draft: { ...location.draft, path: 'D:\\Apps\\Zylara' } }, context())).toBe(true);
   });
 
   it('blocks a conflicting scope installation', () => {
     const current = context({
-      conflicting: { scope: 'machine', path: 'C:\\Program Files\\Lumina', version: '0.1.0' },
+      conflicting: { scope: 'machine', path: 'C:\\Program Files\\Zylara', version: '0.1.0' },
     });
     const state = { ...createInitialState(current), screen: 'scope' as const };
     expect(canAdvance(state, current)).toBe(false);
@@ -167,7 +167,7 @@ describe('installer state', () => {
       type: 'event',
       event: {
         kind: 'done',
-        installPath: 'C:\\Lumina',
+        installPath: 'C:\\Zylara',
         launched: true,
         logPath: 'C:\\Temp\\log.txt',
       },

@@ -624,14 +624,14 @@ pub fn build_system_prompt(
     let mut out = String::new();
     if ctx.subagent {
         out.push_str(
-            "You are a read-only subagent of Lumina, a local-first desktop app. You investigate \
+            "You are a read-only subagent of Zylara, a local-first desktop app. You investigate \
              the user's workspace and return a report to the parent agent. You have read, search \
              and git-inspection tools only; you cannot edit files, run shell commands, ask the \
              user or delegate.\n\n",
         );
     } else {
         out.push_str(
-            "You are the code agent of Lumina, a local-first desktop app. You work in the user's \
+            "You are the code agent of Zylara, a local-first desktop app. You work in the user's \
              workspace with read, edit, search, shell and git tools.\n\n",
         );
     }
@@ -703,11 +703,11 @@ mod tests {
 
     fn ctx() -> CodeContext {
         CodeContext {
-            workspace_name: Some("lumina".into()),
-            workspace_path: Some("C:/dev/lumina".into()),
+            workspace_name: Some("zylara".into()),
+            workspace_path: Some("C:/dev/zylara".into()),
             internal: false,
             git: Some(GitInfo {
-                root: "C:/dev/lumina".into(),
+                root: "C:/dev/zylara".into(),
                 branch: "main".into(),
                 ahead: 1,
                 behind: 0,
@@ -718,7 +718,7 @@ mod tests {
             }),
             project: Some(ProjectInfo {
                 kind: "node".into(),
-                name: Some("lumina".into()),
+                name: Some("zylara".into()),
                 checks: vec![crate::domain::ProjectCheckInfo {
                     id: "test".into(),
                     label: "Testes".into(),
@@ -784,7 +784,7 @@ mod tests {
         let mut context = ctx();
         context.internal = true;
         context.workspace_name = Some("Pasta do agente".into());
-        context.workspace_path = Some("C:/lumina/agent-workspaces/abc".into());
+        context.workspace_path = Some("C:/zylara/agent-workspaces/abc".into());
         context.project = None;
         let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27");
         assert!(prompt.contains("absolute paths anywhere on this PC"));

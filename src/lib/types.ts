@@ -1369,7 +1369,7 @@ export interface Conversation {
   codeLinked?: boolean;
   /** Workspace de código da sessão (ausente = sem workspace). */
   workspaceId?: string | null;
-  /** Motor do agente: `lumina` (nativo); `acp:<agente>` é futuro. */
+  /** Motor do agente: `zylara` (nativo); `acp:<agente>` é futuro. */
   agentKind?: string;
   /** Modo de permissão da sessão de código (o Chat ignora). */
   permissionMode?: PermissionMode;
@@ -1757,7 +1757,7 @@ export interface SkillSummary {
   source: string;
   /** `false` quando a skill está desativada nas configurações. */
   enabled: boolean;
-  /** Só skills do Lumina (`user`) podem ser excluídas; externas são somente leitura. */
+  /** Só skills do Zylara (`user`) podem ser excluídas; externas são somente leitura. */
   deletable: boolean;
 }
 

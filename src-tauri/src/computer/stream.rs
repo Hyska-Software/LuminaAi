@@ -91,7 +91,7 @@ pub async fn open(
         if interactive {
             // Cleanup runs inside the container only after socat has closed the
             // RFB socket; its exit status is the completion acknowledgement.
-            command.args(["sh", "-c", "socat -t 0 - TCP:127.0.0.1:5901; exec /usr/local/bin/lumina-clear-input"]);
+            command.args(["sh", "-c", "socat -t 0 - TCP:127.0.0.1:5901; exec /usr/local/bin/zylara-clear-input"]);
         } else {
             command.args(["socat", "-", "TCP:127.0.0.1:5900"]);
         }
@@ -221,14 +221,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker and the lumina/computer:test image"]
+    #[ignore = "requires Docker and the zylara/computer:test image"]
     async fn rfb_input_is_cleared_on_disconnect_and_control_revocation() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let db = Arc::new(Db::open(&dir.path().join("test.db")).expect("database"));
         let settings = Settings {
             execution_environment: "docker".into(),
-            computer_docker_image: "lumina/computer:test".into(),
-            computer_docker_container: format!("lumina-input-it-{}", uuid::Uuid::new_v4().simple()),
+            computer_docker_image: "zylara/computer:test".into(),
+            computer_docker_container: format!("zylara-input-it-{}", uuid::Uuid::new_v4().simple()),
             docker_network: false,
             ..Settings::default()
         };
@@ -330,10 +330,10 @@ print(int(bool(k[38//8] & (1<<(38%8)))), int(bool(m.value & 256)))"#;
             // The wrapper exists only in this disposable container. It pauses
             // the real helper so the agent can race the production handoff.
             let wrap = r#"import os
-p='/usr/local/bin/lumina-clear-input'
+p='/usr/local/bin/zylara-clear-input'
 os.rename(p,p+'-real')
 with open(p,'w') as f:
- f.write('#!/bin/sh\ntouch /tmp/lumina-cleanup-entered\nwhile [ ! -f /tmp/lumina-cleanup-continue ]; do sleep 0.05; done\nexec /usr/local/bin/lumina-clear-input-real\n')
+ f.write('#!/bin/sh\ntouch /tmp/zylara-cleanup-entered\nwhile [ ! -f /tmp/zylara-cleanup-continue ]; do sleep 0.05; done\nexec /usr/local/bin/zylara-clear-input-real\n')
 os.chmod(p,0o755)"#;
             let status = Command::new("docker").args(["exec", "-u", "0", &name, "python3", "-c", wrap])
                 .status().await.map_err(|e| e.to_string())?;
@@ -345,7 +345,7 @@ os.chmod(p,0o755)"#;
             });
             let marker_wait = async {
                 loop {
-                    let status = Command::new("docker").args(["exec", &name, "test", "-f", "/tmp/lumina-cleanup-entered"])
+                    let status = Command::new("docker").args(["exec", &name, "test", "-f", "/tmp/zylara-cleanup-entered"])
                         .status().await.map_err(|e| e.to_string())?;
                     if status.success() { return Ok::<(), String>(()); }
                     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -371,7 +371,7 @@ os.chmod(p,0o755)"#;
                 return Err("control changed before cleanup finished".into());
             }
             println!("Production handoff: agent screenshot rejected while cleanup is blocked");
-            let status = Command::new("docker").args(["exec", &name, "touch", "/tmp/lumina-cleanup-continue"])
+            let status = Command::new("docker").args(["exec", &name, "touch", "/tmp/zylara-cleanup-continue"])
                 .status().await.map_err(|e| e.to_string())?;
             if !status.success() { return Err("cannot resume cleanup".into()); }
             tokio::time::timeout(Duration::from_secs(20), release).await.map_err(|e| e.to_string())?
@@ -430,15 +430,15 @@ os.chmod(p,0o755)"#;
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker and the lumina/computer:test image"]
+    #[ignore = "requires Docker and the zylara/computer:test image"]
     async fn private_desktop_bridge_reads_rfb_without_container_network() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let db = Arc::new(Db::open(&dir.path().join("test.db")).expect("database"));
         let settings = Settings {
             execution_environment: "docker".into(),
-            computer_docker_image: "lumina/computer:test".into(),
+            computer_docker_image: "zylara/computer:test".into(),
             computer_docker_container: format!(
-                "lumina-stream-it-{}",
+                "zylara-stream-it-{}",
                 uuid::Uuid::new_v4().simple()
             ),
             docker_network: false,

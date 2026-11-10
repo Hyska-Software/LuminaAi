@@ -6,9 +6,9 @@ const read = (relative: string) => readFileSync(new URL(relative, import.meta.ur
 const pathsOf = (svg: string) =>
   [...svg.matchAll(/<path[^>]*\sd="([^"]+)"[^>]*>/g)].map((match) => match[1]);
 
-const source = read('../../../assets/Lumina_Logo.svg');
-const mark = read('../../../public/brand/lumina-mark.svg');
-const tile = read('../../../public/brand/lumina-tile.svg');
+const source = read('../../../assets/Zylara_Logo.svg');
+const mark = read('../../../public/brand/zylara-mark.svg');
+const tile = read('../../../public/brand/zylara-tile.svg');
 const appIcon = read('../../../assets/app-icon.svg');
 const appIconPng = readFileSync(new URL('../../../app-icon.png', import.meta.url));
 
@@ -25,7 +25,7 @@ describe('brand assets', () => {
   it('mantém o símbolo sem fundo, recortado à arte', () => {
     expect(mark).toContain('viewBox="18 161 5189 4904"');
     expect(mark).toContain('role="img"');
-    expect(mark).toContain('aria-label="Lumina"');
+    expect(mark).toContain('aria-label="Zylara"');
     expect(mark).not.toContain('<rect');
     expect(mark).not.toContain('#EBEBEB');
   });

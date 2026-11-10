@@ -679,13 +679,13 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
 
   useEffect(() => {
     loadChannels();
-    window.addEventListener('lumina:channels-changed', loadChannels);
-    window.addEventListener('lumina:agent-channel-updated', loadChannels);
-    window.addEventListener('lumina:agent-inbox-updated', loadChannels);
+    window.addEventListener('zylara:channels-changed', loadChannels);
+    window.addEventListener('zylara:agent-channel-updated', loadChannels);
+    window.addEventListener('zylara:agent-inbox-updated', loadChannels);
     return () => {
-      window.removeEventListener('lumina:channels-changed', loadChannels);
-      window.removeEventListener('lumina:agent-channel-updated', loadChannels);
-      window.removeEventListener('lumina:agent-inbox-updated', loadChannels);
+      window.removeEventListener('zylara:channels-changed', loadChannels);
+      window.removeEventListener('zylara:agent-channel-updated', loadChannels);
+      window.removeEventListener('zylara:agent-inbox-updated', loadChannels);
     };
   }, [loadChannels]);
 
@@ -1436,12 +1436,12 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           });
           setActiveChannelId(saved.id);
           clearActiveConversation();
-          window.dispatchEvent(new CustomEvent('lumina:channels-changed'));
+          window.dispatchEvent(new CustomEvent('zylara:channels-changed'));
         }}
         onDeleted={(deletedId) => {
           setChannels((current) => current.filter((channel) => channel.id !== deletedId));
           if (activeChannelId === deletedId) setActiveChannelId(null);
-          window.dispatchEvent(new CustomEvent('lumina:channels-changed'));
+          window.dispatchEvent(new CustomEvent('zylara:channels-changed'));
         }}
       />
 

@@ -18,16 +18,16 @@ function context(overrides: Partial<InstallerContext> = {}): InstallerContext {
     version: '0.1.0',
     arch: 'x86_64',
     isAdmin: false,
-    defaultPathUser: 'C:\\Users\\ana\\AppData\\Local\\Programs\\Lumina',
-    defaultPathMachine: 'C:\\Program Files\\Lumina',
+    defaultPathUser: 'C:\\Users\\ana\\AppData\\Local\\Programs\\Zylara',
+    defaultPathMachine: 'C:\\Program Files\\Zylara',
     existing: null,
     conflicting: null,
     appRunning: false,
     webview2Installed: true,
     freeBytes: 1_000_000_000,
     requiredBytes: 25_000_000,
-    logPath: 'C:\\Temp\\lumina-setup.log',
-    dataPaths: ['C:\\Users\\ana\\AppData\\Roaming\\app.lumina.chat'],
+    logPath: 'C:\\Temp\\zylara-setup.log',
+    dataPaths: ['C:\\Users\\ana\\AppData\\Roaming\\app.zylara.chat'],
     canElevate: true,
     pendingOptions: null,
     ...overrides,
@@ -53,7 +53,7 @@ describe('InstallerApp', () => {
     const user = userEvent.setup();
     render(<InstallerApp api={api(context())} />);
 
-    expect(await screen.findByText('Instale o Lumina')).toBeTruthy();
+    expect(await screen.findByText('Instale o Zylara')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: /continuar/i }));
 
     expect(await screen.findByText('Para quem vamos instalar?')).toBeTruthy();
@@ -65,7 +65,7 @@ describe('InstallerApp', () => {
 
     expect(await screen.findByText('Ajuste os detalhes')).toBeTruthy();
     expect(screen.getByText(/Program Files/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /instalar lumina/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /instalar zylara/i })).toBeTruthy();
   });
 
   it('renders the uninstall confirmation with data preserved by default', async () => {
@@ -73,16 +73,16 @@ describe('InstallerApp', () => {
       mode: 'uninstall',
       existing: {
         scope: 'user',
-        path: 'C:\\Users\\ana\\AppData\\Local\\Programs\\Lumina',
+        path: 'C:\\Users\\ana\\AppData\\Local\\Programs\\Zylara',
         version: '0.0.9',
       },
     });
     render(<InstallerApp api={api(uninstall)} />);
 
-    expect(await screen.findByText('Remover o Lumina?')).toBeTruthy();
+    expect(await screen.findByText('Remover o Zylara?')).toBeTruthy();
     expect(
       screen.getByRole('checkbox', { name: /remover também meus dados/i }).getAttribute('aria-checked'),
     ).toBe('false');
-    expect(screen.getByRole('button', { name: /remover lumina/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /remover zylara/i })).toBeTruthy();
   });
 });

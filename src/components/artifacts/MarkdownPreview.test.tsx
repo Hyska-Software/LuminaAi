@@ -31,8 +31,8 @@ describe('MarkdownPreview', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Título' })).toBeTruthy();
     expect(screen.getByText('forte').tagName).toBe('STRONG');
     expect(screen.getByRole('region', { name: 'Prévia do Markdown' })).toBeTruthy();
-    // O componente `Markdown` do chat aplica a classe de prosa da Lumina.
-    expect(document.querySelector('.lumina-prose')).toBeTruthy();
+    // O componente `Markdown` do chat aplica a classe de prosa da Zylara.
+    expect(document.querySelector('.zylara-prose')).toBeTruthy();
   });
 
   it('alterna entre Documento e Código', () => {

@@ -192,12 +192,12 @@ async fn git_info(root: &Path) -> Option<GitInfo> {
     })
 }
 
-/// Lê `AGENTS.md` (raiz) + `.lumina/instructions.md` quando existirem.
+/// Lê `AGENTS.md` (raiz) + `.zylara/instructions.md` quando existirem.
 pub fn read_agents_md(root: &Path) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     for (relative, label) in [
         ("AGENTS.md", "AGENTS.md"),
-        (".lumina/instructions.md", ".lumina/instructions.md"),
+        (".zylara/instructions.md", ".zylara/instructions.md"),
     ] {
         let path = root.join(relative);
         let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -234,7 +234,7 @@ pub fn tree_summary(root: &Path) -> Option<String> {
             .flatten()
             .filter_map(|entry| {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with('.') && name != ".github" && name != ".lumina" {
+                if name.starts_with('.') && name != ".github" && name != ".zylara" {
                     return None;
                 }
                 if IGNORED_DIRS.contains(&name.as_str()) {
@@ -313,7 +313,7 @@ mod tests {
             mode: CONVERSATION_MODE_CODE.to_string(),
             code_linked: false,
             workspace_id,
-            agent_kind: "lumina".to_string(),
+            agent_kind: "zylara".to_string(),
             permission_mode: PermissionMode::Edit,
             parent_conversation_id: None,
             subagent_task_call_id: None,
@@ -400,14 +400,14 @@ mod tests {
     fn internal_workspace_is_named_for_the_prompt() {
         let context = CodeTurnContext {
             internal: true,
-            root: Some(std::path::PathBuf::from("C:/lumina/agent-workspaces/abc")),
+            root: Some(std::path::PathBuf::from("C:/zylara/agent-workspaces/abc")),
             ..CodeTurnContext::default()
         };
         let prompt = context.prompt_context();
         assert_eq!(prompt.workspace_name.as_deref(), Some("Pasta do agente"));
         assert_eq!(
             prompt.workspace_path.as_deref(),
-            Some("C:/lumina/agent-workspaces/abc")
+            Some("C:/zylara/agent-workspaces/abc")
         );
     }
 }

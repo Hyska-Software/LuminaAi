@@ -247,7 +247,7 @@ com erro — o fallback é de rota, não um retry infinito.
   de conversa.
 - Várias threads de agente rodam ao mesmo tempo. O backend aceita **um turno
   por conversa** (`register_if_idle`); o renderer enfileira só a thread ocupada.
-- `messageQueueStore` persiste a fila em `localStorage` (`lumina.agent-queue.v1`,
+- `messageQueueStore` persiste a fila em `localStorage` (`zylara.agent-queue.v1`,
   chave legada) e cada item carrega texto, anexos, rota e `turnOptions`/`goalRequest`.
   O composer oferece **Enfileirar mensagem** (padrão do Enter) em **todos os
   layouts** enquanto há streaming; **Enviar agora** (botão ⚡ e ação do toast)
@@ -289,7 +289,7 @@ com erro — o fallback é de rota, não um retry infinito.
   `notificationsTasks` e `notificationsDnd` controlam as categorias; DND mantém
   os avisos apenas no diálogo Atividade.
 - Cada evento de turno é persistido em `turn_events` com `seq` e espelhado em
-  `lumina:turn-event`. Ao recarregar o webview, `reattachTurns()` reconstrói o
+  `zylara:turn-event`. Ao recarregar o webview, `reattachTurns()` reconstrói o
   stream ativo sem duplicar mensagens; turnos de outra instância são aplicados
   pelo barramento global.
 
@@ -303,7 +303,7 @@ com erro — o fallback é de rota, não um retry infinito.
   painel direito e editor do painel); excluir preserva a conversa principal do
   agente. **Execuções** lista `agent_routine_runs` em diálogo próprio.
 - `list_all_agent_routines` alimenta a página; a lista é recarregada no mount,
-  no evento `lumina:agent-routine-run`, no foco da janela e no botão de
+  no evento `zylara:agent-routine-run`, no foco da janela e no botão de
   recarregar.
 - Com a capability `automation`, o próprio agente pode listar, criar, editar e
   excluir rotinas pelas tools `routine_*`; cada agente tem no máximo 50 rotinas
@@ -319,7 +319,7 @@ com erro — o fallback é de rota, não um retry infinito.
   Rotinas diárias têm `days_of_week` (bitmask segunda=1 … domingo=64; padrão
   127 = todos os dias); intervalos são contínuos. As tools `routine_create`/
   `routine_update` aceitam `daysOfWeek`.
-- Status/erro ficam na rotina; o evento `lumina:agent-routine-run` atualiza a
+- Status/erro ficam na rotina; o evento `zylara:agent-routine-run` atualiza a
   lista de conversas e mostra um toast.
 - Cada execução grava uma linha em `agent_routine_runs` (status, início/fim,
   erro, conversa); o painel do agente lista esse histórico em **Rotinas →
@@ -348,7 +348,7 @@ com erro — o fallback é de rota, não um retry infinito.
   a contagem e os nomes do grupo; `@` navega os membros por teclado e o envio
   segue a preferência `sendKey` do chat. O composer aceita **anexos** pelo botão
   `+`, por `Ctrl+V` (clipboard) e por drag & drop roteado pelo `App.tsx`
-  (`lumina:channel-drop`): os chips mostram tipo/tamanho, miniatura de imagens e
+  (`zylara:channel-drop`): os chips mostram tipo/tamanho, miniatura de imagens e
   prévia ao clicar; remover o chip apaga o arquivo importado.
 - Publicar uma mensagem: Grava a mensagem `user` (texto pode ser vazio quando há
   anexos), e cada membro **mencionado** (ou todos, quando não há
@@ -358,7 +358,7 @@ com erro — o fallback é de rota, não um retry infinito.
   histórico compartilhado entra como `surface_item` `kind="channel"` (volátil,
   últimas 24 mensagens/12 KiB, delimitado e marcado como não confiável, com os
   nomes dos anexos de cada mensagem), não como mensagem `user` duplicada. A
-  resposta é publicada no canal e um evento `lumina:agent-channel-updated`
+  resposta é publicada no canal e um evento `zylara:agent-channel-updated`
   atualiza a view; como os turnos são sequenciais, o segundo agente vê a resposta
   do primeiro.
 - Threads de canal são ocultas das listas/paleta (`channelId`), mas preservadas
@@ -387,7 +387,7 @@ com erro — o fallback é de rota, não um retry infinito.
   `conversations.agent_id` (turnos, tokens de entrada/saída/raciocínio, total,
   custo e última atividade). A Equipe e a home do agente mostram esses números;
   threads de rotina/canal entram no mesmo agregado.
-- Exportar gera um documento `lumina-agent` **versão 2** (JSON) com configuração
+- Exportar gera um documento `zylara-agent` **versão 2** (JSON) com configuração
   + memórias; a importação ainda lê documentos versão 1 convertendo o `emoji`
   antigo em avatar. Importar valida versão, modelo/workspace e recria o agente.
 - Arquivar/restaurar/excluir ficam na **Equipe** (página central): cada card
@@ -456,7 +456,7 @@ Contrato completo: `docs/DOCKER.md`.
   limites e rede off.
 - `run_code` e o terminal interativo também rodam em Docker, com cleanup de
   container no timeout/cancelamento/fechamento da aba e label
-  `lumina.owner=lumina` para limpeza no boot.
+  `zylara.owner=zylara` para limpeza no boot.
 - `docker_status`, `docker_pull_image`, `docker_validate_image`,
   `docker_cleanup`; imagem do computer use é separada.
 - Perfil por workspace, compose/devcontainer e containers gráficos por sessão

@@ -593,7 +593,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
               Nenhuma sessão aberta.
             </p>
             <p className="max-w-64 text-[11px] text-foreground-subtle">
-              O Lumina abre um Chromium/Edge isolado em segundo plano, com perfil próprio por
+              O Zylara abre um Chromium/Edge isolado em segundo plano, com perfil próprio por
               conversa. A página aparece aqui, sem janela externa.
             </p>
             <Button size="sm" disabled={busy} onClick={() => void openSession()}>

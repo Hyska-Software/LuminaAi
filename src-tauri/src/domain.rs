@@ -58,7 +58,7 @@ pub struct Conversation {
     /// Workspace de código ao qual a sessão pertence (NULL = sem workspace).
     #[serde(default)]
     pub workspace_id: Option<String>,
-    /// Motor do agente: `lumina` (nativo). Reservado para `acp:<agente>` no futuro.
+    /// Motor do agente: `zylara` (nativo). Reservado para `acp:<agente>` no futuro.
     #[serde(default = "default_agent_kind")]
     pub agent_kind: String,
     /// Modo de permissão da sessão de código (Chat ignora).
@@ -89,7 +89,7 @@ pub struct Conversation {
 }
 
 fn default_agent_kind() -> String {
-    "lumina".to_string()
+    "zylara".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -991,7 +991,7 @@ pub struct SkillSummary {
     /// Desativada em Configurações → Skills; o agente não a vê no prompt nem
     /// nas ferramentas `list_skills`/`read_skill`.
     pub enabled: bool,
-    /// Apenas skills do Lumina (`source == user`) podem ser excluídas pela
+    /// Apenas skills do Zylara (`source == user`) podem ser excluídas pela
     /// interface; skills de repositórios externos são somente leitura.
     pub deletable: bool,
 }
@@ -1172,7 +1172,7 @@ fn default_docker_image() -> String {
 ///
 /// Kept here (and mirrored by `src/lib/computerDocker.ts`) so the settings
 /// default, the error guidance and the release workflow agree on one tag.
-pub const DEFAULT_COMPUTER_DOCKER_IMAGE: &str = "ghcr.io/hyska-software/lumina-computer:latest";
+pub const DEFAULT_COMPUTER_DOCKER_IMAGE: &str = "ghcr.io/hyska-software/zylara-computer:latest";
 
 fn default_computer_environment_setting() -> String {
     "auto".to_string()
@@ -1211,7 +1211,7 @@ fn default_computer_docker_image() -> String {
 }
 
 fn default_computer_docker_container() -> String {
-    "lumina-computer".to_string()
+    "zylara-computer".to_string()
 }
 
 fn default_computer_max_actions_per_turn() -> u32 {
@@ -2661,7 +2661,7 @@ mod tests {
             mode: CONVERSATION_MODE_CODE.to_string(),
             code_linked: true,
             workspace_id: Some("ws-1".into()),
-            agent_kind: "lumina".into(),
+            agent_kind: "zylara".into(),
             permission_mode: PermissionMode::Edit,
             parent_conversation_id: None,
             subagent_task_call_id: None,

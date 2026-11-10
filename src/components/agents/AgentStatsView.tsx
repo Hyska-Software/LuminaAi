@@ -108,7 +108,7 @@ export function AgentStatsView() {
             <div className="min-w-0 flex-1">
               <h1 className="text-xl font-semibold tracking-tight">Estatísticas</h1>
               <p className="mt-0.5 text-[12px] text-foreground-muted">
-                {PERIOD_LABELS[period]} · Uso de tokens e custo em todas as conversas do Lumina.
+                {PERIOD_LABELS[period]} · Uso de tokens e custo em todas as conversas do Zylara.
               </p>
             </div>
             <IconButton

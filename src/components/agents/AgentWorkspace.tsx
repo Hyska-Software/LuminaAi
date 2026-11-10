@@ -196,12 +196,12 @@ export function AgentWorkspace() {
           onSaved={() => {
             setEditingChannel(null);
             setChannelRevision((current) => current + 1);
-            window.dispatchEvent(new CustomEvent('lumina:channels-changed'));
+            window.dispatchEvent(new CustomEvent('zylara:channels-changed'));
           }}
           onDeleted={() => {
             setEditingChannel(null);
             setActiveChannelId(null);
-            window.dispatchEvent(new CustomEvent('lumina:channels-changed'));
+            window.dispatchEvent(new CustomEvent('zylara:channels-changed'));
           }}
         />
         <AgentEditorDialog />

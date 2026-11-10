@@ -179,7 +179,7 @@ fn find_skill(data_dir: &Path, name: &str) -> anyhow::Result<Skill> {
 /// `content` é **somente o corpo** do `SKILL.md`: o frontmatter (nome/descrição)
 /// não entra no Markdown exibido, porque esses dados vão nos metadados. `dir` é
 /// o diretório absoluto da skill, apenas para exibição. Origens e precedência
-/// (Lumina, repositórios externos e embutidas) em docs/FILES.md §7.2; gestão e
+/// (Zylara, repositórios externos e embutidas) em docs/FILES.md §7.2; gestão e
 /// prévia da interface em §7.4.
 fn content_of(skill: &Skill) -> SkillContent {
     SkillContent {
@@ -279,7 +279,7 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "lumina-skills-cmd-test-{}",
+                "zylara-skills-cmd-test-{}",
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&path).expect("criar diretório temporário");
@@ -466,7 +466,7 @@ mod tests {
         assert!(gama.enabled);
         assert!(!gama.deletable, "skill externa é somente leitura");
 
-        // Precedência: a skill do Lumina vence a externa de mesmo nome.
+        // Precedência: a skill do Zylara vence a externa de mesmo nome.
         let alfa = by_name("alfa");
         assert_eq!(alfa.source, "user");
         assert!(alfa.deletable);

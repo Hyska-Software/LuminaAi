@@ -410,7 +410,7 @@ describe('ArtifactPreview — roteamento v1.5', () => {
     );
 
     expect(screen.getByRole('heading', { level: 1, name: 'Relatório' })).toBeTruthy();
-    expect(document.querySelector('.lumina-prose')).toBeTruthy();
+    expect(document.querySelector('.zylara-prose')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('radio', { name: 'Código' }));
 
@@ -458,7 +458,7 @@ describe('ArtifactPreview — roteamento v1.5', () => {
   it('roteia json para JsonPreview (árvore e código)', () => {
     render(
       <ArtifactPreview
-        content={contentFor('json', { content: '{"nome":"Lumina","tags":["a","b"]}' })}
+        content={contentFor('json', { content: '{"nome":"Zylara","tags":["a","b"]}' })}
       />,
     );
 
@@ -466,11 +466,11 @@ describe('ArtifactPreview — roteamento v1.5', () => {
       screen.getByRole('radiogroup', { name: 'Modo de visualização do JSON' }),
     ).toBeTruthy();
     expect(screen.getByText(/"nome"/)).toBeTruthy();
-    expect(screen.getByText('"Lumina"')).toBeTruthy();
+    expect(screen.getByText('"Zylara"')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('radio', { name: 'Código' }));
 
-    expect(document.querySelector('pre')?.textContent).toContain('"nome": "Lumina"');
+    expect(document.querySelector('pre')?.textContent).toContain('"nome": "Zylara"');
   });
 
   it('roteia csv e tabula com ponto e vírgula, números à direita', () => {

@@ -274,7 +274,7 @@ async fn fetch_remote_models(
             .http
             .get(&url)
             .header("Authorization", format!("Bearer {bearer}"))
-            .header("User-Agent", concat!("Lumina/", env!("CARGO_PKG_VERSION")))
+            .header("User-Agent", concat!("Zylara/", env!("CARGO_PKG_VERSION")))
             .timeout(std::time::Duration::from_secs(25));
         // Provider-declared headers (e.g. `anthropic-version`) are required by
         // direct APIs even on the model-list endpoint.

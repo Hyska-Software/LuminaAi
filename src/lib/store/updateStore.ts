@@ -187,7 +187,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       const available = next.info;
       if (available) {
         if (silent && status.preferences.notifiedVersion !== available.latestVersion) {
-          toast.info(`Lumina v${available.latestVersion} disponível`, {
+          toast.info(`Zylara v${available.latestVersion} disponível`, {
             description: 'Abra o aviso na barra de título para baixar e instalar.',
             action: {
               label: 'Ver',
@@ -204,7 +204,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         }
       } else if (!silent) {
         toast.success('Você está na versão mais recente', {
-          description: `Lumina v${status.currentVersion}`,
+          description: `Zylara v${status.currentVersion}`,
         });
       }
     } catch (error) {
@@ -317,7 +317,7 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
       toast.success('Instalador aberto', {
         description: manual
           ? 'Siga as instruções do instalador do sistema.'
-          : 'Conclua a atualização na janela do Lumina Setup. Suas conversas e configurações são mantidas.',
+          : 'Conclua a atualização na janela do Zylara Setup. Suas conversas e configurações são mantidas.',
       });
       set({ phase: 'ready' });
     } catch (error) {

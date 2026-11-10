@@ -1269,7 +1269,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "arquivo".to_string());
     let temp = path.with_file_name(format!(
-        ".{file_name}.lumina-{}.tmp",
+        ".{file_name}.zylara-{}.tmp",
         uuid::Uuid::new_v4().simple()
     ));
     std::fs::write(&temp, bytes)?;
@@ -1422,9 +1422,9 @@ fn observed_hash(bytes: &[u8]) -> String {
 }
 
 
-/// Comandos de hook do projeto (`.lumina/hooks.json`): `postWrite`.
+/// Comandos de hook do projeto (`.zylara/hooks.json`): `postWrite`.
 fn project_post_write_hooks(root: &Path) -> Vec<String> {
-    let path = root.join(".lumina").join("hooks.json");
+    let path = root.join(".zylara").join("hooks.json");
     let Ok(raw) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
@@ -1452,7 +1452,7 @@ fn project_post_write_hooks(root: &Path) -> Vec<String> {
 }
 
 /// Roda os hooks pós-escrita e anexa o resultado ao retorno da tool. Os hooks
-/// são configurados pelo usuário no próprio workspace (`.lumina/hooks.json`) e
+/// são configurados pelo usuário no próprio workspace (`.zylara/hooks.json`) e
 /// não mutam a decisão da política: falha vira aviso, nunca erro do turno.
 async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -> String {
     if !ctx.settings.shell_enabled
@@ -1479,7 +1479,7 @@ async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -
             program,
             args,
             cwd: root.clone(),
-            env: exec::sanitized_env(&[("LUMINA_HOOK", "postWrite")]),
+            env: exec::sanitized_env(&[("ZYLARA_HOOK", "postWrite")]),
             timeout: std::time::Duration::from_secs(120),
             cancel: ctx.cancel.clone(),
             max_output_bytes: 16 * 1024,
@@ -1518,7 +1518,7 @@ async fn with_post_write_hooks(ctx: &ToolCtx, relative: &str, content: String) -
     if notes.is_empty() {
         return body;
     }
-    body.push_str("\n\nHooks do projeto (`.lumina/hooks.json` · postWrite):\n");
+    body.push_str("\n\nHooks do projeto (`.zylara/hooks.json` · postWrite):\n");
     for note in notes {
         body.push_str(&note);
         body.push('\n');
@@ -2046,7 +2046,7 @@ async fn run_command(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         program,
         args: program_args,
         cwd: workdir,
-        env: exec::sanitized_env(&[("LUMINA_AGENT", "1")]),
+        env: exec::sanitized_env(&[("ZYLARA_AGENT", "1")]),
         timeout: Duration::from_millis(timeout_ms as u64),
         cancel: ctx.cancel.child_token(),
         max_output_bytes: 1024 * 1024,
@@ -4437,7 +4437,7 @@ mod tests {
     fn project_hooks_parse_strings_and_objects() {
         let fixture = Fixture::new();
         fixture.write(
-            ".lumina/hooks.json",
+            ".zylara/hooks.json",
             r#"{"postWrite":["echo um",{"command":"echo dois"},"  ","echo tres"]}"#,
         );
         let hooks = super::project_post_write_hooks(&fixture.root);
@@ -4448,7 +4448,7 @@ mod tests {
     async fn write_file_runs_project_post_write_hooks() {
         let fixture = Fixture::new();
         fixture.write(
-            ".lumina/hooks.json",
+            ".zylara/hooks.json",
             r#"{"postWrite":["echo hook-run >> hook.log"]}"#,
         );
         fixture.set_permission_mode(PermissionMode::Autonomous);
@@ -4474,7 +4474,7 @@ mod tests {
     async fn internal_agent_workspace_never_runs_project_hooks() {
         let fixture = Fixture::new();
         fixture.write(
-            ".lumina/hooks.json",
+            ".zylara/hooks.json",
             r#"{"postWrite":["echo hook-run >> hook.log"]}"#,
         );
         fixture.set_permission_mode(PermissionMode::Autonomous);

@@ -1,7 +1,7 @@
-# Lumina graphical computer-use sandbox.
+# Zylara graphical computer-use sandbox.
 #
 # Build (pin the digest in production):
-#   docker build -t lumina/computer:latest docker/computer
+#   docker build -t zylara/computer:latest docker/computer
 #
 # The agent talks to X11 through `docker exec` (scrot/xdotool/wmctrl). noVNC is
 # exposed for the human to watch the session; the model never talks VNC.
@@ -16,13 +16,13 @@ RUN apt-get update \
        xvfb openbox x11vnc socat chromium xdotool scrot wmctrl xclip x11-utils \
        fonts-dejavu-core ca-certificates tini python3 \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 1000 --shell /bin/bash lumina
+    && useradd --create-home --uid 1000 --shell /bin/bash zylara
 
-COPY entrypoint.sh /usr/local/bin/lumina-computer-entrypoint
-COPY clear-input.py /usr/local/bin/lumina-clear-input
-RUN chmod 0755 /usr/local/bin/lumina-computer-entrypoint /usr/local/bin/lumina-clear-input
+COPY entrypoint.sh /usr/local/bin/zylara-computer-entrypoint
+COPY clear-input.py /usr/local/bin/zylara-clear-input
+RUN chmod 0755 /usr/local/bin/zylara-computer-entrypoint /usr/local/bin/zylara-clear-input
 
-USER lumina
-WORKDIR /home/lumina
+USER zylara
+WORKDIR /home/zylara
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/lumina-computer-entrypoint"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/zylara-computer-entrypoint"]

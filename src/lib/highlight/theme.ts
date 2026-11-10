@@ -2,7 +2,7 @@ import type { PrismTheme } from 'prism-react-renderer';
 
 /**
  * Single syntax theme for every code surface (chat fences, generative UI,
- * artifacts, JSON preview). Colors are Lumina CSS variables, so the same theme
+ * artifacts, JSON preview). Colors are Zylara CSS variables, so the same theme
  * follows light/dark without a second palette — the previous chat/genui local
  * themes are unified here.
  */

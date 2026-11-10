@@ -4,8 +4,8 @@
     "active": true,
     "targets": ["app", "dmg"],
     "category": "Utility",
-    "publisher": "Lumina",
-    "copyright": "© 2026 Lumina",
+    "publisher": "Zylara",
+    "copyright": "© 2026 Zylara",
     "macOS": {
       "minimumSystemVersion": "11.0",
       "hardenedRuntime": true,

@@ -57,7 +57,7 @@ export function UpdateSection() {
       return `${checked ?? 'Verificação recente'} · ${where}.`;
     }
     if (checked) return checked;
-    return 'O Lumina consulta o GitHub em busca de versões estáveis. Nada é instalado sem a sua confirmação.';
+    return 'O Zylara consulta o GitHub em busca de versões estáveis. Nada é instalado sem a sua confirmação.';
   })();
 
   return (
@@ -65,7 +65,7 @@ export function UpdateSection() {
       title="Atualizações"
       description="Baixa e instala versões publicadas no GitHub. O download é verificado por SHA-256 e a instalação é sempre confirmada por você."
     >
-      <SettingRow label="Versão atual" description="Versão do Lumina em execução.">
+      <SettingRow label="Versão atual" description="Versão do Zylara em execução.">
         <Badge tone="accent" size="md">
           v{appInfo?.version ?? info?.currentVersion ?? '—'}
         </Badge>

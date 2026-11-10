@@ -1,15 +1,15 @@
 [package]
-name = "lumina"
-version = "0.4.0"
-description = "Lumina — desktop AI chat harness (OpenCode Go / Zen / OpenAI ChatGPT plan)"
-authors = ["Lumina"]
+name = "zylara"
+version = "0.5.0"
+description = "Zylara — desktop AI chat harness (OpenCode Go / Zen / OpenAI ChatGPT plan)"
+authors = ["Zylara"]
 edition = "2021"
 # Necessário pelo harness de código: `notify` (watch) exige 1.85 e `ignore`/crates
 # de busca exigem 1.88; o toolchain do projeto é 1.99 (docs/goals/code-harness/PLAN.md §10).
 rust-version = "1.89"
 
 [lib]
-name = "lumina_lib"
+name = "zylara_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

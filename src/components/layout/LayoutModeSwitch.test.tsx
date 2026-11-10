@@ -65,7 +65,7 @@ describe('LayoutModeSwitch', () => {
     expect(screen.getByRole('button', { name: 'Code' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByRole('button', { name: 'Chat' }).getAttribute('aria-pressed')).toBe('false');
 
-    const raw = window.localStorage.getItem('lumina.ui');
+    const raw = window.localStorage.getItem('zylara.ui');
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string) as { state?: { layoutMode?: string } };
     expect(persisted.state?.layoutMode).toBe('code');

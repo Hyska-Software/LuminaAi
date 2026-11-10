@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish ghcr.io/hyska-software/lumina-computer
+    name: Publish ghcr.io/hyska-software/zylara-computer
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/hyska-software/lumina-computer
+          images: ghcr.io/hyska-software/zylara-computer
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag

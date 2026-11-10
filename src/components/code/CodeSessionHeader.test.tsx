@@ -89,12 +89,12 @@ function settings(overrides: Partial<Settings> = {}): Settings {
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
     id: 'ws-1',
-    name: 'lumina-core',
-    path: 'C:/dev/lumina',
+    name: 'zylara-core',
+    path: 'C:/dev/zylara',
     createdAt: 1,
     updatedAt: 2,
     trusted: true,
-    git: { root: 'C:/dev/lumina', branch: 'main', dirty: true },
+    git: { root: 'C:/dev/zylara', branch: 'main', dirty: true },
     ...overrides,
   };
 }
@@ -118,12 +118,12 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
 
 function appInfo(): AppInfo {
   return {
-    name: 'Lumina',
+    name: 'Zylara',
     version: '0.1.0',
     tauriVersion: '2.0.0',
     platform: 'windows',
     startedAt: 1,
-    dataDir: 'C:/lumina',
+    dataDir: 'C:/zylara',
   };
 }
 
@@ -398,10 +398,10 @@ describe('CodeSessionHeader — workspace real', () => {
     render(<CodeSessionHeader />);
 
     const chip = await screen.findByRole('button', {
-      name: 'Workspace lumina-core, branch main, alterações não commitadas',
+      name: 'Workspace zylara-core, branch main, alterações não commitadas',
     });
     expect(chip).toBeTruthy();
-    expect(chip.textContent).toContain('lumina-core');
+    expect(chip.textContent).toContain('zylara-core');
     expect(chip.textContent).toContain('main');
   });
 
@@ -414,7 +414,7 @@ describe('CodeSessionHeader — workspace real', () => {
     });
 
     render(<CodeSessionHeader />);
-    const chip = await screen.findByRole('button', { name: /Workspace lumina-core/ });
+    const chip = await screen.findByRole('button', { name: /Workspace zylara-core/ });
     openMenu(chip);
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Atualizar' }));
     await waitFor(() => expect(mocks.getWorkspace).toHaveBeenCalledWith('ws-1'));
@@ -434,7 +434,7 @@ describe('CodeSessionHeader — workspace real', () => {
     render(<CodeSessionHeader />);
     const chip = await screen.findByRole('button', { name: /Sem workspace/ });
     openMenu(chip);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'lumina-core' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'zylara-core' }));
 
     await waitFor(() =>
       expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-1', 'ws-1'),
@@ -446,7 +446,7 @@ describe('CodeSessionHeader — workspace real', () => {
   it('sem workspace o chip oferece Abrir pasta… (não é beco sem saída)', async () => {
     mocks.listWorkspaces.mockResolvedValue([]);
     const ws = workspace({ trusted: false });
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValueOnce([]).mockResolvedValue([ws]);
 
@@ -465,7 +465,7 @@ describe('CodeSessionHeader — workspace real', () => {
 describe('CodeSessionHeader — confiança da pasta', () => {
   it('“Confiar” aplica trusted e mantém o modo de permissão da sessão', async () => {
     const ws = workspace({ trusted: false });
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
     mocks.setWorkspaceTrusted.mockResolvedValue({ ...ws, trusted: true });

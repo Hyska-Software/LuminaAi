@@ -501,13 +501,13 @@ describe('LibraryView — upload e drag & drop', () => {
     await screen.findAllByRole('listitem');
 
     act(() => {
-      window.dispatchEvent(new CustomEvent('lumina:library-drag', { detail: { active: true } }));
+      window.dispatchEvent(new CustomEvent('zylara:library-drag', { detail: { active: true } }));
     });
     expect(screen.getByText('Solte para enviar à biblioteca')).toBeTruthy();
 
     await act(async () => {
       window.dispatchEvent(
-        new CustomEvent('lumina:library-drop', { detail: { paths: ['C:\\tmp\\drop.pdf'] } }),
+        new CustomEvent('zylara:library-drop', { detail: { paths: ['C:\\tmp\\drop.pdf'] } }),
       );
     });
 
@@ -517,7 +517,7 @@ describe('LibraryView — upload e drag & drop', () => {
     expect(screen.queryByText('Solte para enviar à biblioteca')).toBeNull();
   });
 
-  it('abre o seletor quando a paleta dispara lumina:library-import', async () => {
+  it('abre o seletor quando a paleta dispara zylara:library-import', async () => {
     dialogMocks.open.mockResolvedValue(['C:\\tmp\\paleta.pdf']);
     mocks.importLibraryFiles.mockResolvedValueOnce([]);
 
@@ -525,7 +525,7 @@ describe('LibraryView — upload e drag & drop', () => {
     await screen.findAllByRole('listitem');
 
     await act(async () => {
-      window.dispatchEvent(new CustomEvent('lumina:library-import'));
+      window.dispatchEvent(new CustomEvent('zylara:library-import'));
     });
 
     await waitFor(() => expect(dialogMocks.open).toHaveBeenCalled());

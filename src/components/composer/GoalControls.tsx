@@ -93,7 +93,7 @@ export interface GoalControlsProps {
   /**
    * Intenção `/goal` do turno (badge no campo), controlada pelo `Composer`.
    * Sem as props, o botão sem objetivo mantém o fallback
-   * `requestGoalCreation()` (evento `lumina:goal-intent`).
+   * `requestGoalCreation()` (evento `zylara:goal-intent`).
    */
   goalIntent?: boolean;
   /** Alterna a intenção `/goal`; ausente ⇒ fallback `requestGoalCreation()`. */

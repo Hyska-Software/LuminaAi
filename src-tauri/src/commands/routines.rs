@@ -169,7 +169,7 @@ pub async fn scheduler_tick(app: AppHandle) {
         match state.db.claim_due_agent_routines(now, 8) {
             Ok(due) => due,
             Err(error) => {
-                eprintln!("lumina: falha ao listar rotinas: {error:#}");
+                eprintln!("zylara: falha ao listar rotinas: {error:#}");
                 return;
             }
         }
@@ -203,7 +203,7 @@ pub async fn scheduler_tick(app: AppHandle) {
             Ok(())
         })();
         if let Err(error) = result {
-            eprintln!("lumina: falha ao enfileirar rotina `{}`: {error}", routine.title);
+            eprintln!("zylara: falha ao enfileirar rotina `{}`: {error}", routine.title);
         }
         let _ = state.db.clear_agent_routine_lease(&routine.id);
     }
@@ -216,7 +216,7 @@ pub async fn event_tick(app: AppHandle) {
     let events = match state.db.list_unprocessed_agent_events(50) {
         Ok(events) => events,
         Err(error) => {
-            eprintln!("lumina: falha ao listar eventos: {error:#}");
+            eprintln!("zylara: falha ao listar eventos: {error:#}");
             return;
         }
     };
@@ -240,7 +240,7 @@ pub async fn event_tick(app: AppHandle) {
     let deliveries = match state.db.list_pending_event_deliveries(8) {
         Ok(deliveries) => deliveries,
         Err(error) => {
-            eprintln!("lumina: falha ao listar deliveries: {error:#}");
+            eprintln!("zylara: falha ao listar deliveries: {error:#}");
             return;
         }
     };
@@ -303,7 +303,7 @@ pub async fn routine_queue_tick(app: AppHandle) {
     let pending = match state.db.list_pending_agent_routine_queue(20) {
         Ok(pending) => pending,
         Err(error) => {
-            eprintln!("lumina: falha ao listar a fila de rotinas: {error:#}");
+            eprintln!("zylara: falha ao listar a fila de rotinas: {error:#}");
             return;
         }
     };
@@ -339,7 +339,7 @@ async fn execute_queued_routine(app: AppHandle, item: AgentRoutineQueueItem) {
             return;
         }
         Err(error) => {
-            eprintln!("lumina: falha ao carregar rotina da fila: {error:#}");
+            eprintln!("zylara: falha ao carregar rotina da fila: {error:#}");
             let _ = db.finish_agent_routine_queue_item(&item.id);
             return;
         }
@@ -362,7 +362,7 @@ async fn execute_queued_routine(app: AppHandle, item: AgentRoutineQueueItem) {
             let _ = db.finish_agent_routine_queue_item(&item.id);
         }
         Err(error) => {
-            eprintln!("lumina: rotina `{}` falhou: {error}", routine.title);
+            eprintln!("zylara: rotina `{}` falhou: {error}", routine.title);
             let _ = db.finish_agent_routine_queue_item(&item.id);
         }
     }
@@ -617,7 +617,7 @@ fn emit_run(
     event: Option<&AgentEvent>,
 ) {
     let _ = app.emit(
-        "lumina:agent-routine-run",
+        "zylara:agent-routine-run",
         AgentRoutineRunEvent {
             routine_id: routine.id.clone(),
             agent_id: routine.agent_id.clone(),

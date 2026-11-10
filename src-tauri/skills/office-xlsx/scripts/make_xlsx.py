@@ -633,8 +633,8 @@ def build_theme() -> str:
     solid = '<a:solidFill><a:schemeClr val="phClr"/></a:solidFill>'
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        f'<a:theme xmlns:a="{A_NS}" name="Lumina"><a:themeElements>'
-        '<a:clrScheme name="Lumina">'
+        f'<a:theme xmlns:a="{A_NS}" name="Zylara"><a:themeElements>'
+        '<a:clrScheme name="Zylara">'
         '<a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1>'
         '<a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>'
         '<a:dk2><a:srgbClr val="1F2937"/></a:dk2>'
@@ -643,11 +643,11 @@ def build_theme() -> str:
         '<a:hlink><a:srgbClr val="1D4ED8"/></a:hlink>'
         '<a:folHlink><a:srgbClr val="7C3AED"/></a:folHlink>'
         "</a:clrScheme>"
-        '<a:fontScheme name="Lumina">'
+        '<a:fontScheme name="Zylara">'
         '<a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont>'
         '<a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont>'
         "</a:fontScheme>"
-        '<a:fmtScheme name="Lumina">'
+        '<a:fmtScheme name="Zylara">'
         f"<a:fillStyleLst>{solid}{solid}{solid}</a:fillStyleLst>"
         f"<a:lnStyleLst>{ln}{ln}{ln}</a:lnStyleLst>"
         "<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle>"
@@ -744,8 +744,8 @@ def build_core(title: str) -> str:
         f'<cp:coreProperties xmlns:cp="{CP_NS}" xmlns:dc="{DC_NS}" '
         f'xmlns:dcterms="{DCTERMS_NS}" xmlns:dcmitype="{DCMITYPE_NS}" xmlns:xsi="{XSI_NS}">'
         f"<dc:title>{escape(title)}</dc:title>"
-        "<dc:creator>Lumina</dc:creator>"
-        "<cp:lastModifiedBy>Lumina</cp:lastModifiedBy>"
+        "<dc:creator>Zylara</dc:creator>"
+        "<cp:lastModifiedBy>Zylara</cp:lastModifiedBy>"
         f'<dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created>'
         f'<dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified>'
         "</cp:coreProperties>"
@@ -760,7 +760,7 @@ def build_app(sheets: list[SheetModel]) -> str:
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         f'<Properties xmlns="{EP_NS}" '
         'xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">'
-        "<Application>Lumina</Application><DocSecurity>0</DocSecurity>"
+        "<Application>Zylara</Application><DocSecurity>0</DocSecurity>"
         "<ScaleCrop>false</ScaleCrop>"
         f'<HeadingPairs><vt:vector size="2" baseType="variant">'
         "<vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant>"

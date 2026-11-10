@@ -132,7 +132,7 @@ export function ComputerDockerHelp({
           Build local (desenvolvimento)
         </summary>
         <p className="mt-1.5 text-[10px] leading-relaxed text-foreground-muted">
-          Na raiz do repositório do Lumina, construa a imagem gráfica:
+          Na raiz do repositório do Zylara, construa a imagem gráfica:
         </p>
         <div className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1.5">
           <code className="min-w-0 flex-1 break-all font-mono text-[10px] leading-relaxed text-foreground">

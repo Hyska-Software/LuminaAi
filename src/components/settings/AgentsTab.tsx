@@ -423,7 +423,7 @@ export function AgentsTab() {
           description="Nome fixo do container gráfico. Ele é criado no primeiro screenshot e mantido entre ações."
         >
           <Input
-            defaultValue={settings.computerDockerContainer ?? 'lumina-computer'}
+            defaultValue={settings.computerDockerContainer ?? 'zylara-computer'}
             maxLength={80}
             aria-label="Nome do container do computer use"
             onBlur={(event) => {
@@ -488,7 +488,7 @@ export function AgentsTab() {
                   .then((count) =>
                     toast.success(
                       count === 0
-                        ? 'Nenhum container Lumina ativo'
+                        ? 'Nenhum container Zylara ativo'
                         : `${count} container(s) removido(s)`,
                     ),
                   )

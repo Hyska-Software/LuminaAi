@@ -48,16 +48,16 @@ export interface InstallerUiState {
 
 export const INSTALL_STEPS: Array<Pick<InstallStep, 'id' | 'label'>> = [
   { id: 'prepare', label: 'Validar destino e permissões' },
-  { id: 'closeApp', label: 'Fechar o Lumina em execução' },
+  { id: 'closeApp', label: 'Fechar o Zylara em execução' },
   { id: 'copy', label: 'Copiar arquivos do aplicativo' },
   { id: 'shortcuts', label: 'Criar atalhos' },
   { id: 'register', label: 'Registrar desinstalação' },
-  { id: 'launch', label: 'Iniciar o Lumina' },
+  { id: 'launch', label: 'Iniciar o Zylara' },
 ];
 
 export const UNINSTALL_STEPS: Array<Pick<InstallStep, 'id' | 'label'>> = [
   { id: 'prepare', label: 'Validar a instalação' },
-  { id: 'closeApp', label: 'Fechar o Lumina em execução' },
+  { id: 'closeApp', label: 'Fechar o Zylara em execução' },
   { id: 'removeFiles', label: 'Remover arquivos do aplicativo' },
   { id: 'removeRegistry', label: 'Remover registro e atalhos' },
   { id: 'removeData', label: 'Remover dados do usuário' },
@@ -103,7 +103,7 @@ export function createInitialState(context: InstallerContext): InstallerUiState 
     progress: 0,
     progressMessage: '',
     logLines: [],
-    error: missingInstall ? 'O Lumina não está instalado para este usuário.' : null,
+    error: missingInstall ? 'O Zylara não está instalado para este usuário.' : null,
     outcome: null,
     starting: false,
     cancelling: false,
@@ -212,7 +212,7 @@ export function pathError(path: string): string | null {
   const value = path.trim();
   if (!value) return 'Escolha uma pasta de instalação.';
   if (!isAbsoluteWindowsPath(value)) {
-    return 'Use um caminho absoluto em uma unidade local, como C:\\Program Files\\Lumina.';
+    return 'Use um caminho absoluto em uma unidade local, como C:\\Program Files\\Zylara.';
   }
   if (value.split(/[\\/]/).some((part) => part === '..')) {
     return 'O caminho não pode conter "..".';

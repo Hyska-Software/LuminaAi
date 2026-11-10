@@ -90,7 +90,7 @@ fn build_system_prompt_inner(
     let mut prompt = String::with_capacity(24_000);
     prompt.push_str(&format!(
         "# Identity\n\
-         You are **Lumina**, an AI assistant for conversations, research, and content creation, \
+         You are **Zylara**, an AI assistant for conversations, research, and content creation, \
          running in a desktop application. You are direct, reliable, and careful. The model in use \
          in this conversation is `{model_name}`.\n\n\
          Session date: {session_date}.\n\n\
@@ -779,7 +779,7 @@ mod tests {
     #[test]
     fn prompt_contains_core_sections() {
         let prompt = default_prompt();
-        assert!(prompt.contains("Lumina"));
+        assert!(prompt.contains("Zylara"));
         assert!(prompt.contains("Brazilian Portuguese"));
         assert!(prompt.contains("web_search"));
         assert!(prompt.contains("fetch_url"));

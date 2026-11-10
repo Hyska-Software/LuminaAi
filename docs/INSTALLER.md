@@ -1,4 +1,4 @@
-# Lumina — instalador e distribuição
+# Zylara — instalador e distribuição
 
 > Fonte única do desenho de empacotamento. Mudou o instalador? Atualize este
 > documento, `README.md` (seção Desenvolvimento) e `docs/ARCHITECTURE.md` §14.
@@ -7,11 +7,11 @@
 
 | Plataforma | Instalador | Formato |
 | --- | --- | --- |
-| Windows | **Sim**, wizard próprio em React dentro do binário | `Lumina-Setup-<versão>-x64.exe` |
+| Windows | **Sim**, wizard próprio em React dentro do binário | `Zylara-Setup-<versão>-x64.exe` |
 | macOS | **Não é necessário wizard** | `.dmg` com o `.app` + atalho de Aplicativos |
 | Linux | **Não é necessário wizard** | `.deb`, `.rpm` e `.AppImage` |
 
-O Windows usa o **próprio executável do Lumina** em modo setup. Isso mantém a
+O Windows usa o **próprio executável do Zylara** em modo setup. Isso mantém a
 identidade visual (tokens, Inter, botões, cards, ícones e movimento do app) sem
 um segundo frontend e sem manter um template NSIS. O setup copia o binário para
 o destino; o app instalado é o mesmo arquivo.
@@ -27,15 +27,15 @@ instalador.
 ### 2.1 Detecção de modo
 
 > O setup usa o mesmo binário do app, mas **não** inicializa o chat. O perfil
-> WebView2 do instalador fica em `%TEMP%\LuminaSetup`, separado dos dados do
+> WebView2 do instalador fica em `%TEMP%\ZylaraSetup`, separado dos dados do
 > app, para que a desinstalação com purga não tente apagar um diretório em uso.
 
 O binário entra em modo setup/uninstall quando:
 
 - recebe `--setup` ou `--uninstall`; ou
 - o nome do arquivo contém `setup`/`uninstall` (o build gera
-  `Lumina-Setup-<versão>-x64.exe`); ou
-- `LUMINA_SETUP=1` no ambiente (somente desenvolvimento).
+  `Zylara-Setup-<versão>-x64.exe`); ou
+- `ZYLARA_SETUP=1` no ambiente (somente desenvolvimento).
 
 Sem essas condições, o binário abre o app normal. O modo setup **não inicializa**
 `AppState`, SQLite, harness, OAuth ou terminais.
@@ -57,12 +57,12 @@ Atualizações mantêm conversas, arquivos, configurações e chaves de API. O e
 
 | | Por usuário | Todos os usuários |
 | --- | --- | --- |
-| Pasta padrão | `%LOCALAPPDATA%\Programs\Lumina` | `%ProgramFiles%\Lumina` |
+| Pasta padrão | `%LOCALAPPDATA%\Programs\Zylara` | `%ProgramFiles%\Zylara` |
 | UAC | Não | Sim, no início da instalação |
-| Registro | `HKCU\...\Uninstall\Lumina` | `HKLM\...\Uninstall\Lumina` (visão 64-bit) |
+| Registro | `HKCU\...\Uninstall\Zylara` | `HKLM\...\Uninstall\Zylara` (visão 64-bit) |
 | Atalhos | Desktop/Menu do usuário | Desktop público/Menu comum |
 | Desinstalação | Sem elevação | Relança elevada |
-| Dados | `%APPDATA%\app.lumina.chat` + `%LOCALAPPDATA%\app.lumina.chat` | idem, por usuário |
+| Dados | `%APPDATA%\app.zylara.chat` + `%LOCALAPPDATA%\app.zylara.chat` | idem, por usuário |
 
 Em instalação por máquina, o desinstalador remove apenas os dados do usuário que
 está executando a remoção; os demais perfis mantêm os próprios dados. A remoção
@@ -70,10 +70,10 @@ de dados é sempre opt-in e pede confirmação.
 
 ### 2.4 Engine
 
-- Cópia atômica: `Lumina.exe.new` → `ReplaceFileW`/rename; remove o
+- Cópia atômica: `Zylara.exe.new` → `ReplaceFileW`/rename; remove o
   `Zone.Identifier` para o app instalado não herdar Mark-of-the-Web.
 - Fecha o app em execução (`taskkill` sem `/F`, com timeout), nunca o setup.
-- Atalhos via `IShellLinkW`; `Desinstalar Lumina.lnk` usa `--uninstall`.
+- Atalhos via `IShellLinkW`; `Desinstalar Zylara.lnk` usa `--uninstall`.
 - Registro de Apps & Features com `DisplayName`, `DisplayVersion`, `Publisher`,
   `InstallLocation`, `DisplayIcon`, `UninstallString`, `QuietUninstallString`,
   `EstimatedSize`, `NoModify` e `NoRepair`.
@@ -82,7 +82,7 @@ de dados é sempre opt-in e pede confirmação.
 - WebView2: checagem por registro; se ausente, baixa o bootstrapper oficial da
   Microsoft e executa `/silent /install` antes de abrir a janela. A primeira
   execução em uma máquina sem WebView2 mostra uma mensagem nativa.
-- Log em `%TEMP%\Lumina-Setup-<data>.log`, sem chaves de API.
+- Log em `%TEMP%\Zylara-Setup-<data>.log`, sem chaves de API.
 
 ### 2.5 Flags
 
@@ -140,11 +140,11 @@ Saída:
 
 ```text
 release/<versão>/
-  windows-x64/Lumina-Setup-<versão>-windows-x64.exe
-  macos-arm64/Lumina-<versão>-macos-arm64.dmg
-  linux-x64/Lumina-<versão>-linux-x64.deb
-  linux-x64/Lumina-<versão>-linux-x64.rpm
-  linux-x64/Lumina-<versão>-linux-x64.AppImage
+  windows-x64/Zylara-Setup-<versão>-windows-x64.exe
+  macos-arm64/Zylara-<versão>-macos-arm64.dmg
+  linux-x64/Zylara-<versão>-linux-x64.deb
+  linux-x64/Zylara-<versão>-linux-x64.rpm
+  linux-x64/Zylara-<versão>-linux-x64.AppImage
   linux-x64/release.json
   SHA256SUMS.txt
 ```
@@ -182,7 +182,7 @@ Arquivos mantidos em sincronia:
 | `src-tauri/Cargo.toml` | `CARGO_PKG_VERSION` (`app_info`, updater, wizard e `DisplayVersion`) |
 | `src-tauri/tauri.conf.json` | metadados do bundle |
 | `src/lib/appVersion.ts` | fallback da versão na interface |
-| `src-tauri/Cargo.lock` | registro do pacote `lumina` |
+| `src-tauri/Cargo.lock` | registro do pacote `zylara` |
 
 Todas as plataformas usam a mesma versão; não há versão por app. A sidebar, o
 Sobre e o wizard do instalador leem a versão compilada, então um build futuro já
@@ -199,10 +199,10 @@ compilado. O build de release exige árvore limpa (`--require-clean`).
 Sem certificados, o build é **unsigned** e o manifesto registra
 `signed: false`:
 
-- **Windows:** SmartScreen pode avisar. O `Lumina-Setup.exe` é o mesmo binário do
+- **Windows:** SmartScreen pode avisar. O `Zylara-Setup.exe` é o mesmo binário do
   app; assinar o executável cobre setup, app instalado e desinstalador.
-  Configure `LUMINA_WINDOWS_CERT_THUMBPRINT` (e opcionalmente
-  `LUMINA_TIMESTAMP_URL`) ou use `tauri.conf`/`signCommand`.
+  Configure `ZYLARA_WINDOWS_CERT_THUMBPRINT` (e opcionalmente
+  `ZYLARA_TIMESTAMP_URL`) ou use `tauri.conf`/`signCommand`.
 - **macOS:** sem identidade, o script usa assinatura **ad-hoc** (`-`), necessária
   em Apple Silicon, mas o Gatekeeper ainda avisa. Para distribuição pública:
   Developer ID Application + notarização (`APPLE_SIGNING_IDENTITY`,
@@ -219,10 +219,10 @@ Sem certificados, o build é **unsigned** e o manifesto registra
   na imagem `macos-26`; não há mais DMG Intel nem universal. `--universal`
   continua disponível para builds locais sob demanda (exige os alvos Rust
   `x86_64-apple-darwin` e `aarch64-apple-darwin`).
-- O usuário arrasta o Lumina para Aplicativos. Não há wizard; a remoção é
+- O usuário arrasta o Zylara para Aplicativos. Não há wizard; a remoção é
   arrastar para o Lixeira.
-- Dados: `~/Library/Application Support/app.lumina.chat`,
-  `~/Library/Caches/app.lumina.chat` e dados do WebKit. O app tem “limpar
+- Dados: `~/Library/Application Support/app.zylara.chat`,
+  `~/Library/Caches/app.zylara.chat` e dados do WebKit. O app tem “limpar
   dados” nas Configurações.
 
 ## 5. Linux
@@ -236,7 +236,7 @@ Sem certificados, o build é **unsigned** e o manifesto registra
   `libgtk-3-dev`, `librsvg2-dev`, `patchelf`, `rpm` e, por causa dos previews
   de mídia, as bibliotecas de runtime do GStreamer
   (`libgstreamer1.0-0`, `libgstreamer-plugins-base1.0-0` e plugins).
-- Dados: `~/.local/share/app.lumina.chat`; o pacote não apaga dados do usuário.
+- Dados: `~/.local/share/app.zylara.chat`; o pacote não apaga dados do usuário.
 
 ## 6. Testes e validação
 
@@ -264,10 +264,10 @@ Smoke test manual no Windows:
 
 ```powershell
 $dir = Join-Path (Get-Location) '.tmp-install'
-.\src-tauri\target\debug\lumina.exe --setup --silent --scope user --dir $dir --no-desktop --no-start-menu --no-launch
+.\src-tauri\target\debug\zylara.exe --setup --silent --scope user --dir $dir --no-desktop --no-start-menu --no-launch
 Get-ChildItem $dir
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina"
-.\src-tauri\target\debug\lumina.exe --uninstall --silent
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Zylara"
+.\src-tauri\target\debug\zylara.exe --uninstall --silent
 ```
 
 ## 7. Release pelo GitHub Actions
@@ -305,7 +305,7 @@ strategy:
 Use labels de imagens **suportadas** pelo GitHub: `macos-14` foi aposentada em
 02/11/2026 e, durante os *brownouts* de depreciação, o job é encerrado com
 "This job was cancelled" sem rodar nenhum passo. O release publica só **Apple
-Silicon** (`macos-26`, arm64): o artefato é `Lumina-<v>-macos-arm64.dmg`, sem
+Silicon** (`macos-26`, arm64): o artefato é `Zylara-<v>-macos-arm64.dmg`, sem
 DMG Intel e sem `--universal` (nada de cross-compile no CI).
 
 O workflow **não roda testes** por decisão de release: ele instala dependências,
@@ -339,7 +339,7 @@ push na `main` publica. O workflow precisa de `contents: write`
 | SmartScreen “app não reconhecido” | Build unsigned; assine com Authenticode. Não desative proteções. |
 | Gatekeeper bloqueia o `.app` | Build unsigned/ad-hoc; use “Abrir mesmo assim” ou notarize. |
 | Setup não abre | WebView2 ausente e download falhou; instale o WebView2 Runtime. |
-| “O Lumina não fechou” | Feche o app manualmente; o setup não força a morte para não perder dados. |
+| “O Zylara não fechou” | Feche o app manualmente; o setup não força a morte para não perder dados. |
 | Pasta bloqueada na atualização | O app está aberto ou um antivírus está segurando o exe; feche e tente de novo. |
 | `pnpm installer` avisa sobre árvore suja | Normal em desenvolvimento; use `--require-clean` no CI e faça commit antes do release. |
 | Linux não abre em distro antiga | Build foi feito em glibc mais nova; use Ubuntu 22.04 como baseline. |
@@ -350,13 +350,13 @@ push na `main` publica. O workflow precisa de `contents: write`
 
 ## 9. Atualização no app
 
-O Lumina consulta as releases publicadas em `Hyska-Software/LuminaAi` e avisa o
+O Zylara consulta as releases publicadas em `Hyska-Software/ZylaraAi` e avisa o
 usuário quando há uma versão estável mais nova. **Verificar é automático;
 baixar e instalar são sempre decisões explícitas.**
 
 ### 9.1 Fonte
 
-1. `https://github.com/Hyska-Software/LuminaAi/releases/latest/download/release.json`
+1. `https://github.com/Hyska-Software/ZylaraAi/releases/latest/download/release.json`
    — apelido do GitHub para a release estável mais recente. É a fonte primária:
    não passa pelo limite de 60 req/h da API e já traz `version`, tamanho e
    SHA-256 de cada artefato.
@@ -411,8 +411,8 @@ release, o estado é “tudo atualizado” (sem toast de erro).
 
 | Plataforma | Arquivo | Ação |
 | --- | --- | --- |
-| Windows | `Lumina-Setup-<v>-windows-x64.exe` | Abre o wizard existente; ele detecta a instalação, pula escopo/pasta, fecha o app e preserva os dados |
-| macOS | `Lumina-<v>-macos-arm64.dmg` | Abre o DMG; arrastar para Aplicativos |
+| Windows | `Zylara-Setup-<v>-windows-x64.exe` | Abre o wizard existente; ele detecta a instalação, pula escopo/pasta, fecha o app e preserva os dados |
+| macOS | `Zylara-<v>-macos-arm64.dmg` | Abre o DMG; arrastar para Aplicativos |
 | Linux | `.AppImage` (preferido), `.deb`, `.rpm` | Abre o pacote no sistema ou revela o AppImage na pasta |
 
 A instalação não é silenciosa na v1. Assinatura/Authenticode continuam sendo o
@@ -444,7 +444,7 @@ Notas não são persistidas. Arquivo ausente/corrompido volta aos defaults
 Em builds **debug** é possível apontar o feed para um servidor local:
 
 ```powershell
-$env:LUMINA_UPDATE_BASE_URL = "http://127.0.0.1:8787"
+$env:ZYLARA_UPDATE_BASE_URL = "http://127.0.0.1:8787"
 ```
 
 O servidor deve responder `/releases/latest/download/release.json` e
@@ -468,7 +468,7 @@ GitHub real sob demanda.
 
 ## 10. Fora de escopo (por enquanto)
 
-- `tauri-plugin-updater` (o app usa o próprio manifesto e o instalador Lumina).
+- `tauri-plugin-updater` (o app usa o próprio manifesto e o instalador Zylara).
 - Delta updates, instalação silenciosa em segundo plano e canal beta.
 - Substituição automática do `.app` no macOS e do AppImage em execução.
 - Instalador customizado em macOS/Linux.

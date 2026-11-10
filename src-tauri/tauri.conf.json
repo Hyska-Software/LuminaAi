@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Lumina",
-  "version": "0.4.0",
-  "identifier": "app.lumina.chat",
+  "productName": "Zylara",
+  "version": "0.5.0",
+  "identifier": "app.zylara.chat",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Lumina",
+        "title": "Zylara",
         "width": 1320,
         "height": 860,
         "minWidth": 900,
@@ -42,6 +42,6 @@
       "icons/icon.ico"
     ],
     "shortDescription": "Chat desktop com harness de agentes",
-    "longDescription": "Lumina é um aplicativo de chat com LLMs (OpenCode Go e Zen), com busca na web, análise de documentos, criação de arquivos e componentes generativos na conversa."
+    "longDescription": "Zylara é um aplicativo de chat com LLMs (OpenCode Go e Zen), com busca na web, análise de documentos, criação de arquivos e componentes generativos na conversa."
   }
 }

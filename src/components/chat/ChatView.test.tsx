@@ -40,7 +40,7 @@ function provider(overrides: Partial<ProviderInfo> = {}): ProviderInfo {
     oauth: {
       issuer: 'https://auth.openai.com',
       registrationClientId: 'dynamic_agent_client',
-      agentNameHint: 'Lumina',
+      agentNameHint: 'Zylara',
       resource: 'https://api.openai.com/v1',
       scopes: ['openid', 'chatgpt.tokens.use.direct'],
       planUsageScope: 'chatgpt.tokens.use.direct',

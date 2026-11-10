@@ -33,12 +33,12 @@ test('maps hosts and artifact labels', () => {
   assert.equal(platformLabel('linux', 'x64'), 'linux-x64');
   assert.equal(
     artifactFileName('1.2.3', 'windows', 'x64', '.exe'),
-    'Lumina-Setup-1.2.3-windows-x64.exe',
+    'Zylara-Setup-1.2.3-windows-x64.exe',
   );
 });
 
 test('requires all version sources to match', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'lumina-version-'));
+  const root = mkdtempSync(path.join(tmpdir(), 'zylara-version-'));
   writeFileSync(path.join(root, 'package.json'), JSON.stringify({ version: '0.2.0' }));
   mkdirSync(path.join(root, 'src-tauri'), { recursive: true });
   mkdirSync(path.join(root, 'src/lib'), { recursive: true });
@@ -48,7 +48,7 @@ test('requires all version sources to match', () => {
   );
   writeFileSync(
     path.join(root, 'src-tauri/Cargo.toml'),
-    '[package]\nname = "lumina"\nversion = "0.2.0"\n',
+    '[package]\nname = "zylara"\nversion = "0.2.0"\n',
   );
   writeFileSync(
     path.join(root, 'src/lib/appVersion.ts'),
@@ -56,7 +56,7 @@ test('requires all version sources to match', () => {
   );
   writeFileSync(
     path.join(root, 'src-tauri/Cargo.lock'),
-    '[[package]]\nname = "lumina"\nversion = "0.2.0"\n',
+    '[[package]]\nname = "zylara"\nversion = "0.2.0"\n',
   );
   assert.equal(assertVersionsInSync(root), '0.2.0');
 
@@ -65,9 +65,9 @@ test('requires all version sources to match', () => {
 });
 
 test('manifest records checksums and sizes', () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lumina-manifest-'));
-  const file = path.join(directory, 'Lumina-Setup.exe');
-  writeFileSync(file, 'lumina');
+  const directory = mkdtempSync(path.join(tmpdir(), 'zylara-manifest-'));
+  const file = path.join(directory, 'Zylara-Setup.exe');
+  writeFileSync(file, 'zylara');
   const hash = sha256File(file);
   assert.equal(hash.length, 64);
   const manifest = buildManifest({
@@ -80,7 +80,7 @@ test('manifest records checksums and sizes', () => {
     signed: false,
     minOs: 'Windows 10/11',
   });
-  assert.equal(manifest.product, 'Lumina');
+  assert.equal(manifest.product, 'Zylara');
   assert.equal(manifest.artifacts.length, 1);
   assert.equal(manifest.artifacts[0].sha256, hash);
   assert.equal(manifest.artifacts[0].size, 6);

@@ -1,5 +1,5 @@
 /**
- * xterm theme derived from the Lumina design tokens.
+ * xterm theme derived from the Zylara design tokens.
  *
  * xterm needs concrete color strings (its renderer does not resolve CSS
  * variables for all surfaces), so the values are read from the tokens on

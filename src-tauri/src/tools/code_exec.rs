@@ -616,7 +616,7 @@ async fn run_script(
         // Docker execution: the workspace is the only host path visible; the
         // rootfs is read-only, there is no network and the container is
         // removed with the run (including on cancellation).
-        let name = format!("lumina-code-{}", uuid::Uuid::new_v4());
+        let name = format!("zylara-code-{}", uuid::Uuid::new_v4());
         container_name = Some(name.clone());
         let binary = match language {
             Language::Python => "python",
@@ -633,7 +633,7 @@ async fn run_script(
             "--security-opt",
             "no-new-privileges",
             "--label",
-            "lumina.owner=lumina",
+            "zylara.owner=zylara",
         ]);
         command
             .arg("--pids-limit")
@@ -818,7 +818,7 @@ fn apply_environment(command: &mut Command) {
     command.env_clear();
     let appdir = crate::process_env::appdir();
     for (key, value) in std::env::vars_os() {
-        if is_sensitive_env(&key) || key.to_string_lossy().to_ascii_uppercase().starts_with("LUMINA_")
+        if is_sensitive_env(&key) || key.to_string_lossy().to_ascii_uppercase().starts_with("ZYLARA_")
         {
             continue;
         }
@@ -1099,7 +1099,7 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "lumina-code-exec-test-{}",
+                "zylara-code-exec-test-{}",
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&path).expect("criar diretório temporário");

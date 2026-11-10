@@ -1,6 +1,6 @@
-# Lumina — Arquitetura
+# Zylara — Arquitetura
 
-Lumina é um aplicativo desktop de conversação com LLMs, construído em **Tauri 2 + React 19 + Tailwind CSS 4**. O objetivo é reproduzir a experiência dos chats de IA modernos (ChatGPT/Claude) — streaming com raciocínio visível, ferramentas, anexos, artefatos e UI generativa — usando **OpenCode Go**, **OpenCode Zen**, **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) e **Anthropic** (API oficial, API key) como provedores.
+Zylara é um aplicativo desktop de conversação com LLMs, construído em **Tauri 2 + React 19 + Tailwind CSS 4**. O objetivo é reproduzir a experiência dos chats de IA modernos (ChatGPT/Claude) — streaming com raciocínio visível, ferramentas, anexos, artefatos e UI generativa — usando **OpenCode Go**, **OpenCode Zen**, **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) e **Anthropic** (API oficial, API key) como provedores.
 
 ## 1. Princípios
 
@@ -20,7 +20,7 @@ Lumina é um aplicativo desktop de conversação com LLMs, construído em **Taur
 | Estado | Zustand (app, chat, ui) |
 | Backend | Rust: tokio + reqwest (rustls) + rusqlite (SQLite embutido) + scraper/zip/quick-xml/calamine/pdf-extract |
 | Streaming | SSE lido no Rust, reemitido ao renderer via `tauri::ipc::Channel` |
-| Persistência | SQLite (`lumina.db`) + arquivos em `attachments/` e `artifacts/` |
+| Persistência | SQLite (`zylara.db`) + arquivos em `attachments/` e `artifacts/` |
 
 ## 3. Visão de processos
 
@@ -106,7 +106,7 @@ prompt de continuação, `origin` próprio na mensagem do usuário e fecho em `g
 
 ## 5. Modelo de dados
 
-### SQLite (`%APPDATA%/app.lumina.chat/lumina.db`)
+### SQLite (`%APPDATA%/app.zylara.chat/zylara.db`)
 
 ```sql
 conversations(id PK, title, created_at, updated_at, pinned, provider_id, model_id, message_count, preview,
@@ -196,12 +196,12 @@ envio).
   agent-workspaces/<sha256 da conversa>/  # pasta interna de agente sem workspace escolhido
   checkpoints/objects/<sha256>   # journal do harness de código (conteúdo por hash)
   spill/<conversa>/<id>.txt      # saída completa de tool acima do limite inline
-  lumina.db
+  zylara.db
 ```
 
 `workspaces.path` aponta para uma pasta real do usuário (nada é copiado para o app-data);
 `conversations.workspace_id` é nulo em sessões sem workspace, e `conversations.agent_kind`
-(`lumina`) deixa a porta aberta para agentes externos via ACP no futuro.
+(`zylara`) deixa a porta aberta para agentes externos via ACP no futuro.
 `conversations.permission_mode` (`read_only` | `review` | `edit` | `autonomous`) é o modo de
 permissões da sessão de código; o Chat ignora os modos. Cada sessão guarda o próprio modo (o
 chip do composer troca por sessão) e as **novas sessões do Code** nascem com
@@ -259,7 +259,7 @@ listagem de modelos e validação).
 | `google` | `/google/v1beta/models/{model}` | Gemini |
 
 Cabeçalhos: `Authorization: Bearer <key>`, `x-opencode-session: <session>` (só
-OpenCode), `User-Agent: Lumina/<versão>` e os headers estáticos do catálogo
+OpenCode), `User-Agent: Zylara/<versão>` e os headers estáticos do catálogo
 (`ProviderInfo.headers`).
 
 ### Autenticação OpenAI (plano ChatGPT)
@@ -384,16 +384,16 @@ Skills são diretórios com `SKILL.md` (frontmatter `name`/`description` +
 instruções) opcionalmente com `scripts/`. O backend materializa as skills
 embutidas (`src-tauri/skills/**`, via `include_dir!`) em
 `<app-data>/skills-bundled/` e varre `<app-data>/skills/` (usuário vence por
-nome). Além da pasta do Lumina, o catálogo lê **em modo somente leitura** os
+nome). Além da pasta do Zylara, o catálogo lê **em modo somente leitura** os
 repositórios padrão usados por outros agentes: `~/.agents/skills` (Agent
 Skills), `~/.codex/skills`/`CODEX_HOME`, `~/.claude/skills`/`CLAUDE_CONFIG_DIR`
-e `~/.config/opencode/skills`/XDG (precedência: Lumina > agents > codex >
+e `~/.config/opencode/skills`/XDG (precedência: Zylara > agents > codex >
 claude > opencode > embutidas). O catálogo entra no system prompt e
 `read_skill` devolve `instructions` + `baseDir` + lista de arquivos,
 permitindo ao agente rodar o helper stdlib da skill por `run_code`. Skills
 desativadas (`Settings.disabled_skills`) são filtradas do prompt, de
 `list_skills` e de `read_skill`; a gestão (ativar/desativar; excluir apenas as
-do Lumina) fica na sidebar e em Configurações → Ferramentas. Desenho completo,
+do Zylara) fica na sidebar e em Configurações → Ferramentas. Desenho completo,
 limites e segurança: **`docs/FILES.md`**.
 
 ### 8.3 Harness de código (perfil `code`)
@@ -402,7 +402,7 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
 
 1. **Contexto do turno** (`harness/code/context.rs`): workspace da sessão, git (branch/ahead/
    behind/dirty), perfil do projeto (comandos de test/lint/build detectados), `AGENTS.md`
-   (raiz + `.lumina/instructions.md`, cap 32 KiB), árvore resumida (2 níveis) e estado da
+   (raiz + `.zylara/instructions.md`, cap 32 KiB), árvore resumida (2 níveis) e estado da
    sessão (plano/tarefas/contexto) projetado de `code_events`.
 2. **Prompt próprio** (`harness/code/prompt.rs`): identidade de agente de código, ambiente,
    política de permissões, orientações das tools (geradas do registry — fonte única),
@@ -507,7 +507,7 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
   lease/sweep.
 - **Canais**: `agent_channels` + membros + mensagens; só os membros mencionados
   (ou todos, sem menção) respondem em threads privadas; o histórico entra como
-  `surface_item` volátil e um evento `lumina:agent-channel-updated` atualiza a
+  `surface_item` volátil e um evento `zylara:agent-channel-updated` atualiza a
   view.
 - **Delegação**: `agent_tasks`/`agent_task_events` com dono, lease, orçamento,
   deadline, `origin_conversation_id` e máquina de estados; tools
@@ -527,7 +527,7 @@ Contrato completo: **`docs/AGENTS.md`**. Resumo:
   (`get_agent_usage`/`list_agent_usage`), exibido na Equipe/home.
 - **Portabilidade/edição**: templates locais, construtor por IA (`suggest_agent`),
   revisão por IA com diff (`revise_agent`), duplicar e export/import de documento
-  `lumina-agent` versionado.
+  `zylara-agent` versionado.
 
 ### 8.4 Cache de prompt (v1.10)
 
@@ -591,7 +591,7 @@ O contrato completo (sintaxe suportada, decisões e matriz de testes) está em
   Markdown puro e nunca emitir HTML perigoso.
 - **Thinking do modelo**: o raciocínio visível (`ChatMessage.reasoning` e
   `trace[].reasoning`) usa o **mesmo** renderer pela variante
-  `variant="thinking"` (modificador `.lumina-prose--thinking`: 13px,
+  `variant="thinking"` (modificador `.zylara-prose--thinking`: 13px,
   `foreground-muted`, ritmo compacto), com a **mesma** sanitização/allowlist. A
   timeline (`src/lib/agentTrace.ts` → `AgentSteps`) devolve o Markdown **bruto
   por passo** (sem dividir por linha em branco nem remover marcadores de lista) e
@@ -676,7 +676,7 @@ a emissão final.
 ### Interação
 
 `actions` são declarativas e seguras: `prompt` **preenche o composer** (evento
-`lumina:suggest`) — nunca envia sozinho — e `copy` copia texto. `choices` é um
+`zylara:suggest`) — nunca envia sozinho — e `copy` copia texto. `choices` é um
 formulário de seleção **com estado local** (rádio/checkbox/segmentado, contador
 e progresso sincronizados); o botão de envio preenche o composer com
 `submitPrefix + seleção`, mantendo a regra de ouro: a interface nunca dispara um
@@ -890,7 +890,7 @@ mesclado (catálogo + modelos da conta).
   dedicado, com timeout, cancelamento, teto de saída/arquivos e ambiente sem
   segredos. Riscos e mitigações: `docs/FILES.md` §8.
 - **Atualizações**: feed e artefatos só são aceitos sob o prefixo de release do
-  repositório oficial (`https://github.com/Hyska-Software/LuminaAi/releases/`;
+  repositório oficial (`https://github.com/Hyska-Software/ZylaraAi/releases/`;
   HTTP só em `127.0.0.1` para fixtures de debug), nomes de arquivo são
   validados contra path traversal, o download é limitado a 1,5 GB e o SHA-256
   do `release.json` é conferido durante o stream e **de novo antes de
@@ -920,7 +920,7 @@ GitHub), compara SemVer e guarda o resultado em `<app-data>/updates.json`. O
 renderer agenda a checagem ao abrir e a cada 60 min (`useUpdateCheck`), mostra o
 chip na title bar e o popover com notas/progresso. O download vai para
 `<app-data>/updates/<versão>/`, com SHA-256 conferido durante o stream e de novo
-antes de instalar. No Windows a instalação abre o wizard Lumina existente; não
+antes de instalar. No Windows a instalação abre o wizard Zylara existente; não
 há execução silenciosa. Contrato e matriz por plataforma: `docs/INSTALLER.md`
 §9.
 
@@ -939,7 +939,7 @@ fecho de `goal_round` no harness (recusas antes do provider, origin, `goal_updat
 estável), a tool `goal` (limites, presentation, ausência em subagente), os comandos IPC
 (CAS/idempotência/preflight/degradação de rodada órfã) e a migração de `messages.origin`.
 3. **Integração com o gateway real** (testes `#[ignore]`, executados sob demanda): streaming nos 4 protocolos, tool call + replay de `provider_state`, fallback de protocolo, mapeamento de 401, cancelamento e o caso canônico **DeepSeek V4.1 Flash com esforço máximo**.
-4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/lumina.exe`).
+4. **Build**: `pnpm typecheck`, `pnpm build` e `pnpm tauri build --no-bundle` (artefato em `src-tauri/target/release/zylara.exe`).
 5. **Manual (release)**: abrir o app e validar visualmente os fluxos principais.
 
 ## 16. Decisões registradas
@@ -963,7 +963,7 @@ estável), a tool `goal` (limites, presentation, ausência em subagente), os com
 | 15 | Biblioteca de artefatos com **escopo de usuário** (todas as conversas) | escopo por conversa (v1 inicial) | pedido do produto: o usuário precisa reaproveitar arquivos criados em outras conversas como contexto; a exposição é limitada a artefatos/metadados (mensagens de outras conversas continuam privadas) e a leitura é local/read-only |
 | 16 | **Página Biblioteca** no lugar do chat (como Skills) + upload do usuário para a biblioteca (`conversation_id NULL` no mesmo `artifacts`) + favoritos/rename | página separada de "arquivos enviados" com tabela própria; pastas/coleções | o usuário precisa de uma visão única dos seus arquivos e o agente precisa do mesmo caminho de leitura; usar a tabela existente evita segunda fonte de verdade, e `Option<conversation_id>` preserva a proveniência sem inventar conversa sintética. Pastas/edição de conteúdo ficam para v2 (pedido não as exige) |
 | 17 | **Sessões separadas por layout** (`conversations.mode`) + vínculo explicitamente compartilhado (`code_linked`) | uma única lista de conversas filtrada por “origem” no renderer sem coluna nova / workspace tables | os modos são produto distintos: o Chat não deve ver sessões do Code e vice-versa, mas o usuário precisa poder promover uma sessão do Chat ao Code compartilhando a **mesma** conversa; duas colunas aditivas guardam a intenção sem duplicar mensagens/artefatos e a migração deixa todo o histórico existente no Chat (docs/goals/chat-code-sessions/PLAN.md) |
-| 18 | **Harness de código nativo** (perfil `code` do mesmo loop), não orquestração de CLIs externos | daemon + Codex/Claude Code (modelo Paseo) | o Lumina já é dono do loop/histórico/provedores; um runtime próprio evita dependência de CLIs instalados e mantém o estado (SQLite + `provider_state`) sob controle. O seam `agent_kind` deixa a porta aberta para ACP no futuro (docs/goals/code-harness/PLAN.md §3 D1) |
+| 18 | **Harness de código nativo** (perfil `code` do mesmo loop), não orquestração de CLIs externos | daemon + Codex/Claude Code (modelo Paseo) | o Zylara já é dono do loop/histórico/provedores; um runtime próprio evita dependência de CLIs instalados e mantém o estado (SQLite + `provider_state`) sob controle. O seam `agent_kind` deixa a porta aberta para ACP no futuro (docs/goals/code-harness/PLAN.md §3 D1) |
 | 19 | **Workspace = pasta real do usuário**, git opcional, 1 workspace ↔ N sessões | pasta gerenciada no app-data / worktree por tarefa | ninguém trabalha num repo espelhado; o journal cobre diff/revert sem git e worktrees ficam para v2 (Windows + build compartilhado desencorajam paralelismo no mesmo repo) |
 | 20 | **Permissões por modos + regras**, confinamento de path e aprovação interativa; **sem prometer sandbox de SO** no Windows | AppContainer/token restrito como requisito da v1 | Windows não tem equivalente barato a Seatbelt/Landlock; a barreira honesta é política + path jail + auditoria + kill de processo. Sandbox nativo (token/ACL/AppContainer) é spike de v2 (docs/research/workspace-runtime-options.md §4) |
 | 21 | **Git via CLI do usuário** (porcelain v2) com trait futuro para backend nativo | libgit2/gix como backend principal | hooks, filtros, LFS, `core.autocrlf`, credential manager e worktrees se comportam como o usuário espera, sem dependência nativa; o painel usa o mesmo status/diff do terminal |

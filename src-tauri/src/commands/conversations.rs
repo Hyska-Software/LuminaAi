@@ -537,7 +537,7 @@ fn export_markdown(detail: &ConversationDetail) -> String {
     }
 
     out.push_str(&format!(
-        "\n_Exportado por Lumina {} em {}._\n",
+        "\n_Exportado por Zylara {} em {}._\n",
         env!("CARGO_PKG_VERSION"),
         format_timestamp(crate::domain::now_ms())
     ));
@@ -560,7 +560,7 @@ fn file_stem(title: &str) -> String {
     let stem = stem.trim_matches('-');
     let stem: String = stem.chars().take(60).collect();
     if stem.is_empty() {
-        "conversa-lumina".to_string()
+        "conversa-zylara".to_string()
     } else {
         stem
     }
@@ -669,7 +669,7 @@ mod tests {
                 mode: "chat".to_string(),
                 code_linked: false,
                 workspace_id: None,
-                agent_kind: "lumina".to_string(),
+                agent_kind: "zylara".to_string(),
                 permission_mode: crate::domain::PermissionMode::Edit,
                 parent_conversation_id: None,
                 subagent_task_call_id: None,
@@ -724,13 +724,13 @@ mod tests {
         assert!(markdown.contains("**Citações:**"));
         assert!(markdown.contains("[Receita simples](https://example.com/receita)"));
         assert!(markdown.contains("Uso de tokens: entrada 10, saída 20"));
-        assert!(markdown.contains("_Exportado por Lumina "));
+        assert!(markdown.contains("_Exportado por Zylara "));
     }
 
     #[test]
     fn file_stem_is_safe_and_bounded() {
         assert_eq!(file_stem("Receita de bolo"), "Receita-de-bolo");
-        assert_eq!(file_stem("  ...  "), "conversa-lumina");
+        assert_eq!(file_stem("  ...  "), "conversa-zylara");
         assert_eq!(file_stem("a/b\\c:d*e?f"), "a-b-c-d-e-f");
         let long = file_stem(&"x".repeat(200));
         assert_eq!(long.chars().count(), 60);

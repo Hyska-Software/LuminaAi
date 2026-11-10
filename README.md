@@ -1,4 +1,4 @@
-# Lumina
+# Zylara
 
 Chat desktop de IA construído com **Tauri 2 + React 19 + Tailwind CSS 4**, usando **OpenCode Go**, **OpenCode Zen**, **OpenAI** (plano ChatGPT via "Sign in with ChatGPT" ou API key) e **Anthropic** (API oficial, API key) como provedores.
 
@@ -62,7 +62,7 @@ Atualiza `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`,
 `src/lib/appVersion.ts` e `src-tauri/Cargo.lock`. O equivalente cross-platform é
 `pnpm version:set 0.2.0`.
 
-Vetores e ícones da marca (a partir de `assets/Lumina_Logo.svg`):
+Vetores e ícones da marca (a partir de `assets/Zylara_Logo.svg`):
 
 ```bash
 pnpm brand
@@ -78,7 +78,7 @@ pnpm installer                 # detecta a plataforma atual
 pnpm installer --dry-run       # valida versão, git e assets sem compilar
 ```
 
-Saída em `release/<versão>/`: `Lumina-Setup-<versão>-windows-x64.exe` no
+Saída em `release/<versão>/`: `Zylara-Setup-<versão>-windows-x64.exe` no
 Windows; `.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com
 `SHA256SUMS.txt` e `release.json`. O instalador do Windows tem UI própria
 (dark), escopo por usuário ou para todos, atalhos, atualização, desinstalação e
@@ -95,14 +95,14 @@ Também é possível rodar manualmente em **Actions → Release** (input `draft`
 O app instalado consulta automaticamente essas releases (ao abrir e a cada hora
 enquanto estiver aberto) e mostra um aviso na barra de título quando há uma
 versão estável mais nova. O download é verificado por SHA-256 e a instalação usa o instalador da
-plataforma, sempre com confirmação — no Windows, o wizard do Lumina. A
+plataforma, sempre com confirmação — no Windows, o wizard do Zylara. A
 verificação manual fica em **Configurações → Sobre → Atualizações**. Detalhes:
 [`docs/INSTALLER.md`](docs/INSTALLER.md) §9.
 
 Somente o executável (sem instalador):
 
 ```bash
-pnpm tauri build --no-bundle   # src-tauri/target/release/lumina.exe
+pnpm tauri build --no-bundle   # src-tauri/target/release/zylara.exe
 ```
 
 ## Testes
@@ -131,7 +131,7 @@ cargo test --lib tools::fetch_url::tests::live -- --ignored --nocapture
 ```
 data/catalog.json        catálogo de modelos (gerado)
 scripts/                 geração do catálogo e sondagens dos provedores
-assets/                  logo oficial (`Lumina_Logo.svg`) e masters do ícone (`app-icon.svg`/`app-icon.png`); `pnpm brand` regenera vetores e src-tauri/icons
+assets/                  logo oficial (`Zylara_Logo.svg`) e masters do ícone (`app-icon.svg`/`app-icon.png`); `pnpm brand` regenera vetores e src-tauri/icons
 public/brand/            vetores da marca usados na UI, no favicon e no instalador
 src/                     renderer React (componentes, stores, genui)
 src-tauri/src/           core Rust (providers, harness, tools, documents, db)
@@ -143,11 +143,11 @@ Documentação: [Arquitetura](docs/ARCHITECTURE.md) · [Instalador](docs/INSTALL
 
 ## Privacidade
 
-Conversas, anexos e artefatos ficam apenas na sua máquina. As API keys são armazenadas localmente (`secrets.json` no app-data) e nunca são expostas ao renderer. Requisições vão direto para o provedor escolhido (gateway do OpenCode, API da OpenAI ou API da Anthropic); nada passa por um servidor do Lumina.
+Conversas, anexos e artefatos ficam apenas na sua máquina. As API keys são armazenadas localmente (`secrets.json` no app-data) e nunca são expostas ao renderer. Requisições vão direto para o provedor escolhido (gateway do OpenCode, API da OpenAI ou API da Anthropic); nada passa por um servidor do Zylara.
 
 ## Natureza do projeto
 
-O Lumina é um projeto de código aberto (open source), mantido sem fins lucrativos. Essa declaração descreve a finalidade do projeto e não restringe os direitos concedidos pela licença MIT.
+O Zylara é um projeto de código aberto (open source), mantido sem fins lucrativos. Essa declaração descreve a finalidade do projeto e não restringe os direitos concedidos pela licença MIT.
 
 ## Licença
 

@@ -118,15 +118,15 @@ describe('renderização das primitivas', () => {
 /* ------------------------------------------------------------------ */
 
 describe('actions', () => {
-  it('prompt dispara lumina:suggest com o texto exato e NÃO envia mensagem', async () => {
+  it('prompt dispara zylara:suggest com o texto exato e NÃO envia mensagem', async () => {
     const received: string[] = [];
     const dispatched: string[] = [];
     const onSuggest = (event: Event) => received.push((event as CustomEvent<string>).detail);
     const onAny = (event: Event) => dispatched.push(event.type);
-    window.addEventListener('lumina:suggest', onSuggest);
-    window.addEventListener('lumina:suggest', onAny);
-    window.addEventListener('lumina:scroll-bottom', onAny);
-    window.addEventListener('lumina:focus-composer', onAny);
+    window.addEventListener('zylara:suggest', onSuggest);
+    window.addEventListener('zylara:suggest', onAny);
+    window.addEventListener('zylara:scroll-bottom', onAny);
+    window.addEventListener('zylara:focus-composer', onAny);
 
     try {
       renderBlock([
@@ -152,13 +152,13 @@ describe('actions', () => {
 
       await waitFor(() => expect(received).toEqual(['Compare os cenários A e B, canal por canal.']));
       // Prompt só preenche o composer: nada de envio (scroll-bottom) ou toast.
-      expect(dispatched).toEqual(['lumina:suggest']);
+      expect(dispatched).toEqual(['zylara:suggest']);
       expect(toast.success).not.toHaveBeenCalled();
     } finally {
-      window.removeEventListener('lumina:suggest', onSuggest);
-      window.removeEventListener('lumina:suggest', onAny);
-      window.removeEventListener('lumina:scroll-bottom', onAny);
-      window.removeEventListener('lumina:focus-composer', onAny);
+      window.removeEventListener('zylara:suggest', onSuggest);
+      window.removeEventListener('zylara:suggest', onAny);
+      window.removeEventListener('zylara:scroll-bottom', onAny);
+      window.removeEventListener('zylara:focus-composer', onAny);
     }
   });
 
@@ -293,7 +293,7 @@ describe('GenUIBlock — diagnósticos', () => {
       // Feedback só no console do DevTools, com os diagnósticos estruturados.
       expect(warn).toHaveBeenCalledTimes(1);
       const [title, payload] = warn.mock.calls[0] as [string, Array<{ code: string }>];
-      expect(title).toMatch(/Lumina GenUI/);
+      expect(title).toMatch(/Zylara GenUI/);
       expect(payload.some((entry) => entry.code === 'ui.card-title')).toBe(true);
     } finally {
       warn.mockRestore();
@@ -306,7 +306,7 @@ describe('GenUIBlock — diagnósticos', () => {
 /* ------------------------------------------------------------------ */
 
 describe('a11y/UX das primitivas', () => {
-  it('o bloco renderizado usa o escopo .lumina-genui (isolamento do prose)', () => {
+  it('o bloco renderizado usa o escopo .zylara-genui (isolamento do prose)', () => {
     renderBlock([
       {
         type: 'reveal',
@@ -314,7 +314,7 @@ describe('a11y/UX das primitivas', () => {
         children: [{ type: 'steps', props: { items: [{ title: 'Passo 1' }, { title: 'Passo 2' }] } }],
       },
     ]);
-    const scoped = document.querySelector('.lumina-genui');
+    const scoped = document.querySelector('.zylara-genui');
     expect(scoped).toBeTruthy();
     expect(scoped?.querySelector('details')).toBeTruthy();
   });
@@ -512,10 +512,10 @@ describe('v3 — conteúdo informativo', () => {
 function captureSuggestions() {
   const received: string[] = [];
   const listener = (event: Event) => received.push((event as CustomEvent<string>).detail);
-  window.addEventListener('lumina:suggest', listener);
+  window.addEventListener('zylara:suggest', listener);
   return {
     received,
-    stop: () => window.removeEventListener('lumina:suggest', listener),
+    stop: () => window.removeEventListener('zylara:suggest', listener),
   };
 }
 

@@ -76,7 +76,7 @@ function skillContent(overrides: Partial<SkillContent> = {}): SkillContent {
     name: 'office-docx',
     description: 'Criar documentos Word (.docx) com script Python stdlib.',
     source: 'bundled',
-    dir: 'C:\\lumina\\skills-bundled\\office-docx',
+    dir: 'C:\\zylara\\skills-bundled\\office-docx',
     content:
       '# Office DOCX\n\nUse o script `make_docx.py` para gerar o documento.\n\n- passo um\n- passo dois',
     ...overrides,
@@ -165,12 +165,12 @@ describe('SkillsView — carregamento e listagem', () => {
     expect(screen.getByRole('region', { name: 'Gerenciamento de skills' })).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1, name: 'Skills' })).toBeTruthy();
     expect(screen.getByText(/Instruções e scripts que o agente pode consultar/)).toBeTruthy();
-    expect(await screen.findByRole('region', { name: 'Lumina' })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: 'Zylara' })).toBeTruthy();
   });
 
   it('move o foco para a view ao montar', async () => {
     renderView();
-    await screen.findByRole('region', { name: 'Lumina' });
+    await screen.findByRole('region', { name: 'Zylara' });
 
     expect(document.activeElement).toBe(
       screen.getByRole('region', { name: 'Gerenciamento de skills' }),
@@ -187,11 +187,11 @@ describe('SkillsView — carregamento e listagem', () => {
 
   it('agrupa por origem na ordem canônica, com contagem, badge e nota de somente leitura', async () => {
     renderView();
-    await screen.findByRole('region', { name: 'Lumina' });
+    await screen.findByRole('region', { name: 'Zylara' });
 
     // Section order follows the precedence documented in FILES §7.2/§7.4.
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
-      'Lumina',
+      'Zylara',
       'Agentes',
       'Codex',
       'Claude',
@@ -199,10 +199,10 @@ describe('SkillsView — carregamento e listagem', () => {
       'Embutidas',
     ]);
 
-    const lumina = screen.getByRole('region', { name: 'Lumina' });
-    expect(within(lumina).getByText('1')).toBeTruthy();
-    expect(within(lumina).getByText('Do Lumina')).toBeTruthy();
-    expect(within(lumina).getByText('relatorios')).toBeTruthy();
+    const zylara = screen.getByRole('region', { name: 'Zylara' });
+    expect(within(zylara).getByText('1')).toBeTruthy();
+    expect(within(zylara).getByText('Do Zylara')).toBeTruthy();
+    expect(within(zylara).getByText('relatorios')).toBeTruthy();
 
     expect(within(screen.getByRole('region', { name: 'Embutidas' })).getByText('Embutida')).toBeTruthy();
     expect(rowFor('git-helper')?.textContent).toContain('Agentes');
@@ -235,7 +235,7 @@ describe('SkillsView — carregamento e listagem', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
 
-    expect(await screen.findByRole('region', { name: 'Lumina' })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: 'Zylara' })).toBeTruthy();
     expect(mocks.getSkills).toHaveBeenCalledTimes(2);
   });
 
@@ -244,7 +244,7 @@ describe('SkillsView — carregamento e listagem', () => {
 
     renderView();
 
-    expect(await screen.findByRole('region', { name: 'Lumina' })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: 'Zylara' })).toBeTruthy();
     expect(useUiStore.getState().activeView).toBe('skills');
   });
 });
@@ -306,10 +306,10 @@ describe('SkillsView — ativar/desativar', () => {
 });
 
 describe('SkillsView — exclusão', () => {
-  it('só oferece excluir para skills do Lumina', async () => {
+  it('só oferece excluir para skills do Zylara', async () => {
     renderView();
 
-    await screen.findByRole('region', { name: 'Lumina' });
+    await screen.findByRole('region', { name: 'Zylara' });
 
     expect(screen.getByRole('button', { name: 'Excluir skill relatorios' })).toBeTruthy();
     for (const name of ['office-docx', 'git-helper', 'codex-review', 'claude-notes', 'opencode-plan']) {
@@ -317,7 +317,7 @@ describe('SkillsView — exclusão', () => {
     }
   });
 
-  it('pede confirmação inline e exclui a skill do Lumina', async () => {
+  it('pede confirmação inline e exclui a skill do Zylara', async () => {
     renderView();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Excluir skill relatorios' }));
@@ -330,7 +330,7 @@ describe('SkillsView — exclusão', () => {
     await waitFor(() => expect(mocks.deleteSkill).toHaveBeenCalledWith('relatorios'));
     await waitFor(() => expect(mocks.getSettings).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText('relatorios')).toBeNull());
-    expect(screen.queryByRole('region', { name: 'Lumina' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Zylara' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Agentes' })).toBeTruthy();
   });
 
@@ -348,7 +348,7 @@ describe('SkillsView — exclusão', () => {
 describe('SkillsView — navegação e pasta', () => {
   it('volta ao chat pelo botão do header', async () => {
     renderView();
-    await screen.findByRole('region', { name: 'Lumina' });
+    await screen.findByRole('region', { name: 'Zylara' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Voltar ao chat' }));
 
@@ -357,7 +357,7 @@ describe('SkillsView — navegação e pasta', () => {
 
   it('abre a pasta de skills pelo header', async () => {
     renderView();
-    await screen.findByRole('region', { name: 'Lumina' });
+    await screen.findByRole('region', { name: 'Zylara' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Abrir pasta de skills' }));
 
@@ -367,7 +367,7 @@ describe('SkillsView — navegação e pasta', () => {
   it('uses the onBack/backLabel overrides of the Code layout', async () => {
     const onBack = vi.fn();
     render(<SkillsView onBack={onBack} backLabel="Voltar à sessão" />);
-    await screen.findByRole('region', { name: 'Lumina' });
+    await screen.findByRole('region', { name: 'Zylara' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Voltar à sessão' }));
 
@@ -379,7 +379,7 @@ describe('SkillsView — navegação e pasta', () => {
 describe('SkillsView — prévia em Markdown', () => {
   it('oferece "Visualizar skill" para skills de todas as origens', async () => {
     renderView();
-    await screen.findByRole('region', { name: 'Lumina' });
+    await screen.findByRole('region', { name: 'Zylara' });
 
     for (const name of [
       'relatorios',
@@ -432,7 +432,7 @@ describe('SkillsView — prévia em Markdown', () => {
       await within(dialog).findByRole('heading', { level: 1, name: 'Office DOCX' }),
     ).toBeTruthy();
     expect(within(dialog).getByText('make_docx.py')).toBeTruthy();
-    expect(dialog.querySelector('.lumina-prose')).toBeTruthy();
+    expect(dialog.querySelector('.zylara-prose')).toBeTruthy();
     expect(
       within(dialog).getByRole('region', { name: 'Conteúdo da skill office-docx' }),
     ).toBeTruthy();
@@ -489,7 +489,7 @@ describe('SkillsView — prévia em Markdown', () => {
     expect(within(dialog).queryByRole('heading', { level: 1, name: 'Office DOCX' })).toBeNull();
     expect(within(dialog).getByText('SKILL.md')).toBeTruthy();
     expect(dialog.querySelector('pre')?.textContent).toContain('# Office DOCX');
-    expect(dialog.querySelector('.lumina-prose')).toBeNull();
+    expect(dialog.querySelector('.zylara-prose')).toBeNull();
 
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Documento' }));
 

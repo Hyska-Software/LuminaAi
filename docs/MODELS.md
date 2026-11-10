@@ -17,7 +17,7 @@ Headers obrigatórios/recomendados (Go/Zen):
 ```
 Authorization: Bearer <OPENCODE_API_KEY>
 Content-Type: application/json
-User-Agent: Lumina/<versão>
+User-Agent: Zylara/<versão>
 x-opencode-session: <id estável da conversa>
 ```
 
@@ -53,7 +53,7 @@ o IPC; o renderer recebe apenas e-mail, ids mascarados, escopos e expiração.
 
 Perfil de request do plano (`RequestProfile::ChatgptPlan`): `store:false`,
 `stream:true`, system prompt via `instructions`, sem `max_output_tokens`,
-`temperature`, `top_p`, `metadata`, `previous_response_id`, etc.; tools do Lumina
+`temperature`, `top_p`, `metadata`, `previous_response_id`, etc.; tools do Zylara
 são function tools do cliente; `include:["reasoning.encrypted_content"]` permite
 replay de raciocínio. O perfil `Standard` (API key) mantém o body completo.
 
@@ -73,7 +73,7 @@ por isso a UI nunca inventa percentual/reset.
 Caminho suportado para apps de terceiros. **Não** há OAuth de assinatura: o
 login do Claude Code é interno da Anthropic e a doc do Agent SDK proíbe oferecer
 login claude.ai/limites do plano em apps de terceiros sem aprovação prévia. O
-Lumina usa a API oficial cobrada por token na conta do usuário:
+Zylara usa a API oficial cobrada por token na conta do usuário:
 
 | Item | Valor |
 | --- | --- |
@@ -151,7 +151,7 @@ completo (fases, SLO 98–99%, diagnóstico e evidência) está em
 breakpoints, OpenCode e DeepSeek Harness) em
 **`docs/research/prompt-caching.md`**.
 
-| Protocolo | Mecanismo | Implementação no Lumina |
+| Protocolo | Mecanismo | Implementação no Zylara |
 | --- | --- | --- |
 | `anthropic` | explícito (`cache_control` em tools/system/messages, até 4 breakpoints, TTL 5m/1h) | `system` em blocos + 3 breakpoints e TTL 1h (`Settings.cache.anthropicTtl`); leitura de `cache_creation_input_tokens` |
 | `openai-responses` / `openai-chat` | automático por prefixo + `prompt_cache_key` (≤64), retenção/TTL | chave hash estável por conversa/rota/modelo/versão do prompt; retenção quando a rota suporta (perfil ChatGPT-plan só após probe) |

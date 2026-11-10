@@ -376,7 +376,7 @@ pub async fn post_agent_channel_message(
         None => channel_targets(&content, &member_names),
     };
     let _ = app.emit(
-        "lumina:agent-channel-updated",
+        "zylara:agent-channel-updated",
         AgentChannelUpdatedEvent {
             channel_id: channel.id.clone(),
         },
@@ -472,7 +472,7 @@ pub async fn post_agent_channel_message(
             Ok(result) if result.assistant_message.status == MessageStatus::Cancelled => {
                 errors.push(format!("{} foi interrompido.", agent.name));
                 let _ = app.emit(
-                    "lumina:agent-channel-updated",
+                    "zylara:agent-channel-updated",
                     AgentChannelUpdatedEvent {
                         channel_id: channel.id.clone(),
                     },
@@ -493,7 +493,7 @@ pub async fn post_agent_channel_message(
                     );
                 }
                 let _ = app.emit(
-                    "lumina:agent-channel-updated",
+                    "zylara:agent-channel-updated",
                     AgentChannelUpdatedEvent {
                         channel_id: channel.id.clone(),
                     },
@@ -502,7 +502,7 @@ pub async fn post_agent_channel_message(
             Err(error) => {
                 errors.push(format!("{} falhou: {error:#}", agent.name));
                 let _ = app.emit(
-                    "lumina:agent-channel-updated",
+                    "zylara:agent-channel-updated",
                     AgentChannelUpdatedEvent {
                         channel_id: channel.id.clone(),
                     },

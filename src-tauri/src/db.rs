@@ -415,10 +415,10 @@ CREATE TABLE IF NOT EXISTS conversations (
   -- Sessão do Chat adicionada ao Code (compartilhada nos dois layouts).
   code_linked   INTEGER NOT NULL DEFAULT 0,
   -- Harness de código: workspace da sessão (NULL = sem workspace), motor do
-  -- agente ('lumina'; 'acp:<agente>' fica reservado) e modo de permissão
+  -- agente ('zylara'; 'acp:<agente>' fica reservado) e modo de permissão
   -- ('read_only' | 'edit' | 'autonomous'). O Chat ignora os três.
   workspace_id    TEXT,
-  agent_kind      TEXT NOT NULL DEFAULT 'lumina',
+  agent_kind      TEXT NOT NULL DEFAULT 'zylara',
   permission_mode TEXT NOT NULL DEFAULT 'edit',
   -- Retained subagent transcript: parent session + task call + kind. NULL for
   -- normal sessions; children are hidden from the sidebar and cascade on delete.
@@ -1191,7 +1191,7 @@ fn migrate_messages_schema(conn: &Connection) -> Result<()> {
 /// 1. Chat/Code split: databases created before the two layouts get `mode`
 ///    (`'chat'` on every existing row) and `code_linked` (`0`);
 /// 2. code harness: databases created before the harness get `workspace_id`
-///    (`NULL` = no workspace), `agent_kind` (`'lumina'`) and `permission_mode`
+///    (`NULL` = no workspace), `agent_kind` (`'zylara'`) and `permission_mode`
 ///    (`'edit'`). Chat ignores the three; `workspace_id` is filled when the
 ///    user opens a Code session with a workspace;
 /// 3. subagents: `parent_conversation_id`, `subagent_task_call_id` and
@@ -1221,7 +1221,7 @@ fn migrate_conversations_schema(conn: &Connection) -> Result<()> {
         conn,
         "conversations",
         "agent_kind",
-        "ALTER TABLE conversations ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'lumina'",
+        "ALTER TABLE conversations ADD COLUMN agent_kind TEXT NOT NULL DEFAULT 'zylara'",
     )?;
     ensure_column(
         conn,
@@ -1822,7 +1822,7 @@ fn conversation_from_row(row: &Row<'_>) -> rusqlite::Result<Conversation> {
         mode: row.get(9)?,
         code_linked: row.get::<_, i64>(10)? != 0,
         // Sessões do harness de código. A migração aditiva preenche os bancos
-        // legados com NULL/'lumina'/'edit'; o Chat ignora os três campos.
+        // legados com NULL/'zylara'/'edit'; o Chat ignora os três campos.
         workspace_id: row.get(11)?,
         agent_kind: row.get(12)?,
         permission_mode: PermissionMode::from_str(&permission_mode),
@@ -2567,7 +2567,7 @@ fn insert_agent_main_conversation(
          (id, title, created_at, updated_at, pinned, sort_order, provider_id, model_id, \
           message_count, preview, mode, code_linked, workspace_id, agent_kind, permission_mode, \
           agent_id, is_main) \
-         VALUES (?1, ?2, ?3, ?3, 1, 0, ?4, ?5, 0, NULL, ?6, 0, ?7, 'lumina', ?8, ?9, 1)",
+         VALUES (?1, ?2, ?3, ?3, 1, 0, ?4, ?5, 0, NULL, ?6, 0, ?7, 'zylara', ?8, ?9, 1)",
         params![
             &id,
             AGENT_MAIN_CONVERSATION_TITLE,
@@ -2735,7 +2735,7 @@ impl Db {
         // Mensagens `streaming` de um processo morto: preserva o parcial e
         // fecha como canceladas (best-effort: falha não impede o boot).
         if let Err(error) = Self::recover_interrupted_messages(conn) {
-            eprintln!("lumina: falha ao reconciliar mensagens interrompidas: {error:#}");
+            eprintln!("zylara: falha ao reconciliar mensagens interrompidas: {error:#}");
         }
         Ok(())
     }
@@ -3180,7 +3180,7 @@ impl Db {
                 "INSERT INTO conversations (id, title, created_at, updated_at, pinned, \
                  provider_id, model_id, message_count, preview, mode, code_linked, workspace_id, \
                  agent_kind, permission_mode, agent_id, channel_id) \
-                 VALUES (?1, ?2, ?3, ?3, 0, ?4, ?5, 0, NULL, ?6, 0, ?7, 'lumina', ?8, ?9, ?10)",
+                 VALUES (?1, ?2, ?3, ?3, 0, ?4, ?5, 0, NULL, ?6, 0, ?7, 'zylara', ?8, ?9, ?10)",
                 params![
                     &id,
                     title,
@@ -7002,7 +7002,7 @@ impl Db {
         self.set_conversation_workspace(id, None)
     }
 
-    /// Define o motor do agente da sessão (`lumina` hoje). Vazio é rejeitado.
+    /// Define o motor do agente da sessão (`zylara` hoje). Vazio é rejeitado.
     pub fn set_conversation_agent_kind(&self, id: &str, agent_kind: &str) -> anyhow::Result<()> {
         let agent_kind = agent_kind.trim();
         if agent_kind.is_empty() {
@@ -8651,8 +8651,8 @@ mod tests {
 
     #[test]
     fn opens_legacy_agent_channels_without_dm_key() {
-        let temp = TempDir::new("lumina-db-legacy-channels");
-        let path = temp.path.join("lumina.db");
+        let temp = TempDir::new("zylara-db-legacy-channels");
+        let path = temp.path.join("zylara.db");
         {
             let conn = rusqlite::Connection::open(&path).expect("legacy connection");
             conn.execute_batch(
@@ -8681,8 +8681,8 @@ mod tests {
 
     #[test]
     fn migrates_legacy_agent_channel_messages_with_attachments_column() {
-        let temp = TempDir::new("lumina-db-legacy-channel-messages");
-        let path = temp.path.join("lumina.db");
+        let temp = TempDir::new("zylara-db-legacy-channel-messages");
+        let path = temp.path.join("zylara.db");
         {
             let conn = rusqlite::Connection::open(&path).expect("legacy connection");
             conn.execute_batch(
@@ -9565,7 +9565,7 @@ mod tests {
                 favorite: false,
             },
             path: std::env::temp_dir()
-                .join("lumina-db-tests")
+                .join("zylara-db-tests")
                 .join("artifacts")
                 .join(id)
                 .join("resumo.md")
@@ -9590,7 +9590,7 @@ mod tests {
                 favorite: false,
             },
             path: std::env::temp_dir()
-                .join("lumina-db-tests")
+                .join("zylara-db-tests")
                 .join("artifacts")
                 .join(id)
                 .join(name)
@@ -10685,7 +10685,7 @@ mod tests {
         assert_eq!(
             stored.path,
             std::env::temp_dir()
-                .join("lumina-db-tests")
+                .join("zylara-db-tests")
                 .join("artifacts")
                 .join("art-meta")
                 .join("resumo.md")
@@ -10713,7 +10713,7 @@ mod tests {
             .expect("insert");
 
         let new_path = std::env::temp_dir()
-            .join("lumina-db-tests")
+            .join("zylara-db-tests")
             .join("artifacts")
             .join("art-rename")
             .join("contrato-final.pdf")
@@ -10760,8 +10760,8 @@ mod tests {
 
     #[test]
     fn migrates_legacy_artifacts_table_preserving_rows_and_allowing_uploads() {
-        let temp = TempDir::new("lumina-db-migrate");
-        let path = temp.path.join("lumina.db");
+        let temp = TempDir::new("zylara-db-migrate");
+        let path = temp.path.join("zylara.db");
         create_legacy_database(&path);
 
         // `Db::open` roda o schema novo (idempotente) e a migração.
@@ -10815,8 +10815,8 @@ mod tests {
         // Estado intermediário: `favorite` já foi adicionada, mas a tabela ainda
         // tem `conversation_id NOT NULL` (uma migração anterior foi interrompida
         // entre os dois passos). O rebuild precisa copiar a coluna existente.
-        let temp = TempDir::new("lumina-db-migrate-partial");
-        let path = temp.path.join("lumina.db");
+        let temp = TempDir::new("zylara-db-migrate-partial");
+        let path = temp.path.join("zylara.db");
         create_legacy_database(&path);
         {
             let conn = Connection::open(&path).expect("abrir legado");
@@ -10894,8 +10894,8 @@ mod tests {
 
     #[test]
     fn migrates_legacy_conversations_with_the_code_harness_columns() {
-        let temp = TempDir::new("lumina-db-code-harness-migrate");
-        let path = temp.path.join("lumina.db");
+        let temp = TempDir::new("zylara-db-code-harness-migrate");
+        let path = temp.path.join("zylara.db");
         create_legacy_code_harness_database(&path);
 
         // `Db::open` roda o schema novo (idempotente) e as migrações aditivas.
@@ -10908,7 +10908,7 @@ mod tests {
         assert!(conversation.pinned);
         assert_eq!(conversation.mode, "chat");
         assert_eq!(conversation.workspace_id, None);
-        assert_eq!(conversation.agent_kind, "lumina");
+        assert_eq!(conversation.agent_kind, "zylara");
         assert_eq!(conversation.permission_mode, PermissionMode::Edit);
         drop(db);
 
@@ -10929,7 +10929,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("valores migrados");
-        assert_eq!(raw, (None, "lumina".to_string(), "edit".to_string()));
+        assert_eq!(raw, (None, "zylara".to_string(), "edit".to_string()));
         drop(conn);
 
         // A migração é idempotente: reabrir o arquivo mantém tudo.
@@ -11334,7 +11334,7 @@ mod tests {
             .expect("workspace");
         let conversation = code_conversation(&db);
         assert!(conversation.workspace_id.is_none());
-        assert_eq!(conversation.agent_kind, "lumina");
+        assert_eq!(conversation.agent_kind, "zylara");
         assert_eq!(conversation.permission_mode, PermissionMode::Edit);
 
         db.set_conversation_workspace(&conversation.id, Some(&workspace.id))
@@ -11879,8 +11879,8 @@ mod tests {
 
     #[test]
     fn migrates_legacy_usage_log_with_cache_columns_preserving_rows() {
-        let temp = TempDir::new("lumina-db-cache-migrate");
-        let path = temp.path.join("lumina.db");
+        let temp = TempDir::new("zylara-db-cache-migrate");
+        let path = temp.path.join("zylara.db");
         {
             // Banco anterior ao cache de prompt: `usage_log` sem as colunas novas.
             let conn = Connection::open(&path).expect("abrir banco legado");
@@ -11988,8 +11988,8 @@ mod tests {
 
     #[test]
     fn migrates_legacy_cache_state_with_the_chat_cut_watermark() {
-        let temp = TempDir::new("lumina-db-chat-cut-migrate");
-        let path = temp.path.join("lumina.db");
+        let temp = TempDir::new("zylara-db-chat-cut-migrate");
+        let path = temp.path.join("zylara.db");
         {
             // `cache_state` do F0b.3, antes do watermark do histórico do Chat.
             let conn = Connection::open(&path).expect("abrir banco legado");
@@ -13079,7 +13079,7 @@ mod tests {
 
     #[test]
     fn interrupted_streaming_messages_are_settled_on_open() {
-        let dir = TempDir::new("lumina-interrupted-messages");
+        let dir = TempDir::new("zylara-interrupted-messages");
         let path = dir.path.join("test.db");
         let message_id = {
             let db = Db::open(&path).expect("open");

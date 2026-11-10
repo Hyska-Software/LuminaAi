@@ -50,7 +50,7 @@ impl EventEmitter for TaskEventEmitter {
             "conversationId": self.conversation_id,
             "event": event,
         });
-        let _ = self.app.emit("lumina:turn-event", payload);
+        let _ = self.app.emit("zylara:turn-event", payload);
     }
 }
 
@@ -262,7 +262,7 @@ pub async fn run_agent_task_now(
     let spawned = task.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = execute_task(&app, spawned).await {
-            eprintln!("lumina: tarefa iniciada manualmente falhou: {error}");
+            eprintln!("zylara: tarefa iniciada manualmente falhou: {error}");
         }
     });
     Ok(task)
@@ -317,7 +317,7 @@ pub async fn scheduler_tick(app: AppHandle) {
                         crate::domain::now_ms(),
                     );
                     let _ = app.emit(
-                        "lumina:agent-channel-updated",
+                        "zylara:agent-channel-updated",
                         crate::commands::channels::AgentChannelUpdatedEvent {
                             channel_id: channel_id.to_string(),
                         },
@@ -330,7 +330,7 @@ pub async fn scheduler_tick(app: AppHandle) {
     let due = match state.db.list_queued_agent_tasks(now, 12) {
         Ok(tasks) => tasks,
         Err(error) => {
-            eprintln!("lumina: falha ao listar tarefas: {error:#}");
+            eprintln!("zylara: falha ao listar tarefas: {error:#}");
             return;
         }
     };
@@ -345,7 +345,7 @@ pub async fn scheduler_tick(app: AppHandle) {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(error) = execute_task(&app, task).await {
-                eprintln!("lumina: tarefa falhou: {error}");
+                eprintln!("zylara: tarefa falhou: {error}");
             }
         });
     }
@@ -391,7 +391,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
     {
         Ok(task) => task,
         Err(error) => {
-            eprintln!("lumina: tarefa não reivindicada: {error:#}");
+            eprintln!("zylara: tarefa não reivindicada: {error:#}");
             return Ok(());
         }
     };
@@ -771,7 +771,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         let text = current.result.as_deref().unwrap_or("");
         if let Some(channel_id) = publish_task_result_to_channel(&state.db, &current, text) {
             let _ = app.emit(
-                "lumina:agent-channel-updated",
+                "zylara:agent-channel-updated",
                 crate::commands::channels::AgentChannelUpdatedEvent { channel_id },
             );
         }
@@ -872,7 +872,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         .to_string();
     if let Some(channel_id) = publish_task_result_to_channel(&state.db, &task, &text) {
         let _ = app.emit(
-            "lumina:agent-channel-updated",
+            "zylara:agent-channel-updated",
             crate::commands::channels::AgentChannelUpdatedEvent { channel_id },
         );
     }
@@ -921,7 +921,7 @@ fn finish_failure(app: &AppHandle, task: &AgentTask, message: &str) -> Result<()
             crate::domain::now_ms(),
         );
         let _ = app.emit(
-            "lumina:agent-channel-updated",
+            "zylara:agent-channel-updated",
             crate::commands::channels::AgentChannelUpdatedEvent {
                 channel_id: channel_id.to_string(),
             },
@@ -981,7 +981,7 @@ fn deliver_task_result(app: &AppHandle, task: &AgentTask, status: &str, text: &s
 
 fn emit_updated(app: &AppHandle, task: &AgentTask) {
     let _ = app.emit(
-        "lumina:agent-task-updated",
+        "zylara:agent-task-updated",
         AgentTaskUpdatedEvent {
             task_id: task.id.clone(),
             owner_agent_id: task.owner_agent_id.clone(),

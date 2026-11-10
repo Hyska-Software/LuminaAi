@@ -1751,7 +1751,7 @@ mod tests {
             "stream_options": {"include_usage": true},
             "max_tokens": 1_024,
             "messages": [
-                {"role": "system", "content": "Você é o Lumina."},
+                {"role": "system", "content": "Você é o Zylara."},
                 {"role": "user", "content": "Liste os arquivos."},
                 {
                     "role": "assistant",
@@ -1781,7 +1781,7 @@ mod tests {
             "model": "claude-haiku-5-5",
             "stream": true,
             "max_tokens": 1_024,
-            "system": "Você é o Lumina.",
+            "system": "Você é o Zylara.",
             "tools": [{
                 "name": "list_dir",
                 "description": "Lista um diretório.",
@@ -1809,7 +1809,7 @@ mod tests {
         json!({
             "model": "gpt-6.1-sol",
             "stream": true,
-            "instructions": "Você é o Lumina.",
+            "instructions": "Você é o Zylara.",
             "tools": [{
                 "type": "function",
                 "name": "list_dir",
@@ -1832,7 +1832,7 @@ mod tests {
     /// Google body: systemInstruction, tools, contents.
     fn google_body() -> Value {
         json!({
-            "systemInstruction": {"parts": [{"text": "Você é o Lumina."}]},
+            "systemInstruction": {"parts": [{"text": "Você é o Zylara."}]},
             "tools": [{
                 "functionDeclarations": [{
                     "name": "list_dir",
@@ -1935,7 +1935,7 @@ mod tests {
         // prefix break. Cache markers live inside tools, system and messages.
         let mut first = anthropic_body();
         first["system"] = json!([
-            {"type": "text", "text": "Você é o Lumina."},
+            {"type": "text", "text": "Você é o Zylara."},
             {"type": "text", "text": "Contexto estável."},
         ]);
         let reference = digest(WireProtocol::Anthropic, "anthropic", &first);
@@ -2006,7 +2006,7 @@ mod tests {
         );
 
         let mut system_changed = base.clone();
-        system_changed["messages"][0]["content"] = json!("Você é o Lumina. Responda em pt-BR.");
+        system_changed["messages"][0]["content"] = json!("Você é o Zylara. Responda em pt-BR.");
         let changed = digest(WireProtocol::OpenaiChat, "openai", &system_changed);
         assert_eq!(changed.common_prefix_segments(&reference), 0);
     }
@@ -2505,7 +2505,7 @@ mod tests {
                 api_key: "sk-test".to_string(),
                 model,
                 session_id: "session-1".to_string(),
-                user_agent: "Lumina/test".to_string(),
+                user_agent: "Zylara/test".to_string(),
                 endpoints: provider.endpoints.clone(),
                 request_profile: crate::catalog::RequestProfile::Standard,
                 auth_mode: crate::catalog::ProviderAuth::ApiKey,
@@ -2515,7 +2515,7 @@ mod tests {
             history: vec![super::super::HistoryMessage::user(
                 "Liste os arquivos do src.",
             )],
-            system_prompt: "Você é o Lumina.".to_string(),
+            system_prompt: "Você é o Zylara.".to_string(),
             tools: vec![super::super::ToolDefinition {
                 name: "list_dir".to_string(),
                 description: "Lista um diretório.".to_string(),
@@ -2835,7 +2835,7 @@ mod tests {
         let system = body["system"].as_array().expect("system virou array");
         assert_eq!(system.len(), 1);
         assert_eq!(system[0]["type"], json!("text"));
-        assert_eq!(system[0]["text"], json!("Você é o Lumina."));
+        assert_eq!(system[0]["text"], json!("Você é o Zylara."));
         assert_eq!(
             system[0]["cache_control"],
             json!({"type": "ephemeral", "ttl": "1h"})
@@ -3068,7 +3068,7 @@ mod tests {
     /// Deterministic filler for the stable prefix (~chars/4 estimated tokens).
     fn stable_filler(chars: usize) -> String {
         const BASE: &str = "Contexto estavel do workspace: os arquivos src/lib.rs e src/main.rs \
-             descrevem utilitarios, testes deterministicos e convencoes do projeto Lumina. ";
+             descrevem utilitarios, testes deterministicos e convencoes do projeto Zylara. ";
         let mut text = String::with_capacity(chars);
         while text.chars().count() < chars {
             text.push_str(BASE);
@@ -3131,8 +3131,8 @@ mod tests {
                 base_url: provider.base_url.clone(),
                 api_key: api_key.to_string(),
                 model: model.clone(),
-                session_id: format!("lumina-live-cache-{}", uuid::Uuid::new_v4()),
-                user_agent: concat!("Lumina/", env!("CARGO_PKG_VERSION")).to_string(),
+                session_id: format!("zylara-live-cache-{}", uuid::Uuid::new_v4()),
+                user_agent: concat!("Zylara/", env!("CARGO_PKG_VERSION")).to_string(),
                 endpoints: provider.endpoints.clone(),
                 request_profile: provider.request_profile(crate::catalog::ProviderAuth::ApiKey),
                 auth_mode: crate::catalog::ProviderAuth::ApiKey,
@@ -3140,7 +3140,7 @@ mod tests {
             },
             protocols: vec![WireProtocol::Anthropic],
             history: vec![super::super::HistoryMessage::user("Responda apenas: ok")],
-            system_prompt: format!("Você é o Lumina, um agente de código. {filler}"),
+            system_prompt: format!("Você é o Zylara, um agente de código. {filler}"),
             tools: Vec::new(),
             reasoning: super::super::ReasoningRequest::Auto,
             max_output_tokens: Some(64),
@@ -3187,7 +3187,7 @@ mod tests {
     }
 
     /// Catalog-only check (no network): the probed OpenCode gateway declares
-    /// `explicit`, `minTokens: 2048`, `ttlOptions: ["1h"]`, and the Lumina path
+    /// `explicit`, `minTokens: 2048`, `ttlOptions: ["1h"]`, and the Zylara path
     /// (`capabilities_for` → `plan_with_caps`) produces a plan for Anthropic.
     #[test]
     fn catalog_gateway_anthropic_plans_explicit_cache_with_one_hour_ttl() {
@@ -3271,7 +3271,7 @@ mod tests {
         );
     }
 
-    /// Live proof of the full Lumina path against the OpenCode gateway:
+    /// Live proof of the full Zylara path against the OpenCode gateway:
     /// `capabilities_for` → `plan_with_caps` → `CompletionRequest.cache_plan` →
     /// adapter `cache::apply` → 1st request writes, 2nd request reads.
     ///
@@ -3403,7 +3403,7 @@ mod tests {
     }
 
     /// F6.1 live bench: **10 requests** on the same `session_id` with a growing
-    /// history, through the real Lumina path (`capabilities_for` →
+    /// history, through the real Zylara path (`capabilities_for` →
     /// `plan_with_caps` → `CompletionRequest.cache_plan` → adapter
     /// `cache::apply` → gateway).
     ///
@@ -3454,7 +3454,7 @@ mod tests {
 
         let nonce = uuid::Uuid::new_v4().to_string();
         let filler = format!("Bench de cache {nonce}. {}", stable_filler(FILLER_CHARS));
-        let session_id = format!("lumina-live-bench-{nonce}");
+        let session_id = format!("zylara-live-bench-{nonce}");
 
         let mut history = vec![super::super::HistoryMessage::user("Responda apenas: ok")];
         let mut turns: Vec<BenchTurn> = Vec::with_capacity(TURNS);

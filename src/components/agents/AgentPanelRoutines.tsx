@@ -53,8 +53,8 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
   useEffect(() => {
     void load();
     const reload = () => void load();
-    window.addEventListener('lumina:agent-routine-run', reload);
-    return () => window.removeEventListener('lumina:agent-routine-run', reload);
+    window.addEventListener('zylara:agent-routine-run', reload);
+    return () => window.removeEventListener('zylara:agent-routine-run', reload);
   }, [load]);
 
   const toggle = async (routine: AgentRoutine) => {

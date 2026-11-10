@@ -524,7 +524,7 @@ def build_pdf(spec: dict) -> bytes:
     title_literal = _pdf_literal(as_text(spec.get("title"), "title"))
     objects.append(
         (
-            f"<< /Producer (Lumina) /Creator (Lumina) /Title "
+            f"<< /Producer (Zylara) /Creator (Zylara) /Title "
             f"({title_literal}) /CreationDate (D:{now}) >>"
         ).encode("latin-1", errors="replace")
     )

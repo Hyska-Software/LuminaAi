@@ -54,7 +54,7 @@ describe('highlight — Prism estendido', () => {
       ['bash', 'echo "oi"'],
       ['java', 'public class Main {}'],
       ['ruby', 'def ola; puts "oi"; end'],
-      ['toml', 'titulo = "Lumina"'],
+      ['toml', 'titulo = "Zylara"'],
       ['csharp', 'public int Soma(int a, int b) { return a + b; }'],
     ];
 
@@ -91,7 +91,7 @@ describe('highlight — Prism estendido', () => {
     expect(html).toMatch(/class="token (variable|property|selector|keyword)/);
   });
 
-  it('exporta um tema único baseado em variáveis CSS do Lumina', () => {
+  it('exporta um tema único baseado em variáveis CSS do Zylara', () => {
     expect(SYNTAX_THEME.plain?.color).toBe('var(--foreground)');
     expect(SYNTAX_THEME.plain?.backgroundColor).toBe('transparent');
 

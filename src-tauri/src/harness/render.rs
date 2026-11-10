@@ -111,7 +111,7 @@ fn load_decision(db: &Db, message_id: &str, kind: &str) -> Option<serde_json::Va
         Ok(Some(decision)) => serde_json::from_str(&decision.payload).ok(),
         Ok(None) => None,
         Err(error) => {
-            eprintln!("lumina: falha ao ler decisão de render `{kind}`: {error:#}");
+            eprintln!("zylara: falha ao ler decisão de render `{kind}`: {error:#}");
             None
         }
     }
@@ -139,7 +139,7 @@ fn persist_decision(
         created_at: crate::domain::now_ms(),
     };
     if let Err(error) = db.upsert_render_decision(&decision) {
-        eprintln!("lumina: falha ao congelar decisão de render `{kind}`: {error:#}");
+        eprintln!("zylara: falha ao congelar decisão de render `{kind}`: {error:#}");
     }
 }
 
@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn image_render_is_deterministic_across_turns_and_restart() {
         let path =
-            std::env::temp_dir().join(format!("lumina-render-decisions-{}.db", std::process::id()));
+            std::env::temp_dir().join(format!("zylara-render-decisions-{}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let budget = 10_000_000usize;
         let old = image_message("old", 6);

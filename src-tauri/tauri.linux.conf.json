@@ -4,8 +4,8 @@
     "active": true,
     "targets": ["deb", "rpm", "appimage"],
     "category": "Utility",
-    "publisher": "Lumina",
-    "copyright": "© 2026 Lumina",
+    "publisher": "Zylara",
+    "copyright": "© 2026 Zylara",
     "licenseFile": "../LICENSE",
     "linux": {
       "appimage": {

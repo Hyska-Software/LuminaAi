@@ -51,7 +51,7 @@ const concurrency = args.includes('--concurrency')
 const headers = {
   Authorization: `Bearer ${apiKey}`,
   'Content-Type': 'application/json',
-  'User-Agent': 'Lumina-probe/1.0',
+  'User-Agent': 'Zylara-probe/1.0',
   'x-opencode-session': `probe-${Date.now()}`,
 };
 

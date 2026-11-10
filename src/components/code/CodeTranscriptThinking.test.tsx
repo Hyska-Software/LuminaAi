@@ -285,8 +285,8 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     expect(container.textContent).not.toContain('```ts');
 
     // Prosa do raciocínio na variante compacta/muted; resposta na variante default.
-    expect(container.querySelectorAll('.lumina-prose--thinking')).toHaveLength(1);
-    expect(container.querySelectorAll('.lumina-prose')).toHaveLength(2);
+    expect(container.querySelectorAll('.zylara-prose--thinking')).toHaveLength(1);
+    expect(container.querySelectorAll('.zylara-prose')).toHaveLength(2);
 
     // Diferença do layout mantida: uma linha por chamada (ToolCallRow), com
     // rótulos pt-BR — não os resumos agrupados do Chat.
@@ -345,7 +345,7 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
       useUiStore.setState({ layoutMode: 'chat' });
     });
 
-    expect(screen.getByRole('textbox', { name: 'Mensagem para o Lumina' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Mensagem para o Zylara' })).toBeTruthy();
     expect(screen.queryByRole('textbox', { name: 'Tarefa para o agente' })).toBeNull();
 
     // A copy do mesmo bloco acompanha o layout: Chat volta a "Pensou por …".
@@ -358,7 +358,7 @@ describe('CodeTranscriptThinking — Thinking em Markdown no layout Code', () =>
     expect(bulletTexts(container)).toContain('leu src/app.ts');
     expect(screen.getByRole('listitem', { name: 'Leu src/app.ts' })).toBeTruthy();
     expect(screen.getByRole('listitem', { name: 'Executou pnpm test' })).toBeTruthy();
-    expect(container.querySelector('.lumina-prose--thinking')).toBeTruthy();
+    expect(container.querySelector('.zylara-prose--thinking')).toBeTruthy();
     expect(container.textContent).toContain('export const total = 2;');
   });
 

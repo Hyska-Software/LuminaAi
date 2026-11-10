@@ -419,7 +419,7 @@ mod tests {
             issuer: "https://auth.openai.com".into(),
             discovery_url: String::new(),
             registration_client_id: "dynamic_agent_client".into(),
-            agent_name_hint: "Lumina".into(),
+            agent_name_hint: "Zylara".into(),
             resource: "https://api.openai.com/v1".into(),
             scopes: vec![
                 "openid".into(),
@@ -464,7 +464,7 @@ mod tests {
             pkce: &pkce,
             state: "state-1",
             nonce: "nonce-1",
-            agent_name_hint: Some("Lumina"),
+            agent_name_hint: Some("Zylara"),
             id_token_hint: None,
             login_hint: None,
             force_consent: false,
@@ -484,7 +484,7 @@ mod tests {
         assert_eq!(query["code_challenge"], "challenge");
         assert_eq!(query["code_challenge_method"], "S256");
         assert_eq!(query["ext_agent_host_id"], "urn:uuid:host");
-        assert_eq!(query["agent_name_hint"], "Lumina");
+        assert_eq!(query["agent_name_hint"], "Zylara");
         assert!(!query.contains_key("prompt"));
         assert!(!query.contains_key("id_token_hint"));
     }

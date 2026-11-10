@@ -23,7 +23,7 @@ const PERMISSION_LABELS: Record<string, string> = {
 };
 
 function fillComposer(text: string) {
-  window.dispatchEvent(new CustomEvent<string>('lumina:suggest', { detail: text }));
+  window.dispatchEvent(new CustomEvent<string>('zylara:suggest', { detail: text }));
 }
 
 /** Billing snapshot of the persona; refreshed after edits and agent switches. */

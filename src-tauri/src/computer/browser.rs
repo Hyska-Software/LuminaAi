@@ -504,7 +504,7 @@ impl BrowserManager {
         if let Some(port) = self.test_start_port {
             let child = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
                 .args(["--exact", "computer::browser::tests::cdp_stub_lifetime_child"])
-                .env("LUMINA_CDP_STUB_CHILD", "1")
+                .env("ZYLARA_CDP_STUB_CHILD", "1")
                 .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
                 .spawn().map_err(|e| e.to_string())?;
             self.sessions.lock().insert(conversation_id.to_owned(), BrowserSession {
@@ -1708,7 +1708,7 @@ fn free_port() -> Result<u16, String> {
 }
 
 fn find_browser_executable() -> Option<PathBuf> {
-    if let Ok(explicit) = std::env::var("LUMINA_BROWSER_PATH") {
+    if let Ok(explicit) = std::env::var("ZYLARA_BROWSER_PATH") {
         let path = PathBuf::from(explicit);
         if path.is_file() {
             return Some(path);
@@ -1991,7 +1991,7 @@ mod tests {
     // The integration fixture needs a harmless live child owned by BrowserManager.
     #[test]
     fn cdp_stub_lifetime_child() {
-        if std::env::var_os("LUMINA_CDP_STUB_CHILD").is_some() {
+        if std::env::var_os("ZYLARA_CDP_STUB_CHILD").is_some() {
             std::thread::sleep(Duration::from_secs(60));
         }
     }
@@ -2083,7 +2083,7 @@ mod tests {
         let manager = Arc::new(BrowserManager::new(temp.path().to_path_buf()));
         let child = Command::new(std::env::current_exe().expect("test binary"))
             .args(["--exact", "computer::browser::tests::cdp_stub_lifetime_child"])
-            .env("LUMINA_CDP_STUB_CHILD", "1")
+            .env("ZYLARA_CDP_STUB_CHILD", "1")
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
             .spawn().expect("stub process");
         manager.sessions.lock().insert(conversation.clone(), BrowserSession {
@@ -2268,9 +2268,9 @@ mod tests {
             normalize_navigation("example.com").expect("host"),
             "https://example.com/"
         );
-        assert!(normalize_navigation("lumina agentes")
+        assert!(normalize_navigation("zylara agentes")
             .expect("search")
-            .starts_with("https://duckduckgo.com/?q=lumina+agentes"));
+            .starts_with("https://duckduckgo.com/?q=zylara+agentes"));
         assert!(normalize_navigation("file:///etc/passwd").is_err());
     }
 
@@ -2310,7 +2310,7 @@ mod tests {
                 tokio::spawn(async move {
                     let mut buffer = [0u8; 4096];
                     let _ = socket.read(&mut buffer).await;
-                    let body = "<!doctype html><html><head><title>Lumina CDP</title></head><body><h1>Olá</h1><button id=\"go\">Enviar</button><input aria-label=\"Nome\" /></body></html>";
+                    let body = "<!doctype html><html><head><title>Zylara CDP</title></head><body><h1>Olá</h1><button id=\"go\">Enviar</button><input aria-label=\"Nome\" /></body></html>";
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                         body.len(),
@@ -2322,7 +2322,7 @@ mod tests {
         });
 
         let dir = std::env::temp_dir().join(format!(
-            "lumina-browser-test-{}",
+            "zylara-browser-test-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&dir).expect("temp");
@@ -2340,7 +2340,7 @@ mod tests {
             .snapshot("conv-test", None)
             .await
             .expect("snapshot");
-        assert!(snapshot.title.contains("Lumina") || snapshot.url.contains(&port.to_string()));
+        assert!(snapshot.title.contains("Zylara") || snapshot.url.contains(&port.to_string()));
         assert!(!snapshot.elements.is_empty());
         let button = snapshot
             .elements
@@ -2357,7 +2357,7 @@ mod tests {
             .find(|element| element.role == "textbox")
             .expect("textbox ref");
         manager
-            .type_text("conv-test", None, &input.reference, "Lumina")
+            .type_text("conv-test", None, &input.reference, "Zylara")
             .await
             .expect("type");
         let frame = manager.frame("conv-test", None).await.expect("frame");

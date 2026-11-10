@@ -119,7 +119,7 @@ fn terminal_command(cwd: &std::path::Path, settings: &Settings) -> (CommandBuild
     let mut container = None;
     let shell = env::shell_program();
     let mut builder = if let Some(image) = docker_image.as_deref() {
-        let name = format!("lumina-term-{}", uuid::Uuid::new_v4());
+        let name = format!("zylara-term-{}", uuid::Uuid::new_v4());
         let mut builder = CommandBuilder::new("docker");
         builder.arg("run");
         builder.arg("--rm");
@@ -133,7 +133,7 @@ fn terminal_command(cwd: &std::path::Path, settings: &Settings) -> (CommandBuild
         builder.arg("--security-opt");
         builder.arg("no-new-privileges");
         builder.arg("--label");
-        builder.arg("lumina.owner=lumina");
+        builder.arg("zylara.owner=zylara");
         builder.arg("--pids-limit");
         builder.arg(settings.docker_pids_limit.max(32).to_string());
         builder.arg("--memory");
@@ -198,7 +198,7 @@ fn terminal_command(cwd: &std::path::Path, settings: &Settings) -> (CommandBuild
 
     builder.env("TERM", "xterm-256color");
     builder.env("COLORTERM", "truecolor");
-    builder.env("LUMINA_AGENT", "1");
+    builder.env("ZYLARA_AGENT", "1");
     (builder, container)
 }
 
@@ -559,7 +559,7 @@ mod tests {
         };
         assert_eq!(value("TERM").as_deref(), Some("xterm-256color"));
         assert_eq!(value("COLORTERM").as_deref(), Some("truecolor"));
-        assert_eq!(value("LUMINA_AGENT").as_deref(), Some("1"));
+        assert_eq!(value("ZYLARA_AGENT").as_deref(), Some("1"));
         #[cfg(unix)]
         assert!(value("SHELL").is_some());
     }

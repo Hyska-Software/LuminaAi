@@ -36,5 +36,5 @@ test('linux ships deb, rpm and AppImage with media support', () => {
   const linux = read('src-tauri/tauri.linux.conf.json');
   assert.deepEqual(linux.bundle.targets, ['deb', 'rpm', 'appimage']);
   assert.equal(linux.bundle.linux.appimage.bundleMediaFramework, true);
-  assert.equal(linux.bundle.publisher, 'Lumina');
+  assert.equal(linux.bundle.publisher, 'Zylara');
 });

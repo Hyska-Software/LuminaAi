@@ -6,7 +6,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ------------------------------------------------------------------ */
-/* Design tokens — Lumina                                              */
+/* Design tokens — Zylara                                              */
 /* ------------------------------------------------------------------ */
 :root {
   color-scheme: light;
@@ -474,50 +474,50 @@
    Fica em `components` para que utilitários Tailwind (usados pela UI generativa)
    vençam estes defaults sem herdar o estilo de elementos do Markdown. */
 @layer components {
-.lumina-prose {
+.zylara-prose {
   font-size: 0.9375rem;
   line-height: 1.7;
   color: var(--foreground);
   overflow-wrap: anywhere;
 }
-.lumina-prose > *:first-child {
+.zylara-prose > *:first-child {
   margin-top: 0;
 }
-.lumina-prose > *:last-child {
+.zylara-prose > *:last-child {
   margin-bottom: 0;
 }
-.lumina-prose p {
+.zylara-prose p {
   margin-block: 0.75em;
 }
 
 /* Headings — h5/h6 were missing before (audit §2 item 2). */
-.lumina-prose h1,
-.lumina-prose h2,
-.lumina-prose h3,
-.lumina-prose h4,
-.lumina-prose h5,
-.lumina-prose h6 {
+.zylara-prose h1,
+.zylara-prose h2,
+.zylara-prose h3,
+.zylara-prose h4,
+.zylara-prose h5,
+.zylara-prose h6 {
   font-weight: 600;
   letter-spacing: -0.011em;
   line-height: 1.3;
   margin-block: 1.35em 0.6em;
 }
-.lumina-prose h1 {
+.zylara-prose h1 {
   font-size: 1.375em;
 }
-.lumina-prose h2 {
+.zylara-prose h2 {
   font-size: 1.2em;
 }
-.lumina-prose h3 {
+.zylara-prose h3 {
   font-size: 1.06em;
 }
-.lumina-prose h4 {
+.zylara-prose h4 {
   font-size: 1em;
 }
-.lumina-prose h5 {
+.zylara-prose h5 {
   font-size: 0.95em;
 }
-.lumina-prose h6 {
+.zylara-prose h6 {
   font-size: 0.9em;
   color: var(--foreground-muted);
   text-transform: uppercase;
@@ -525,42 +525,42 @@
 }
 
 /* Lists */
-.lumina-prose ul,
-.lumina-prose ol {
+.zylara-prose ul,
+.zylara-prose ol {
   margin-block: 0.7em;
   padding-inline-start: 1.35em;
 }
-.lumina-prose ul {
+.zylara-prose ul {
   list-style: disc;
 }
-.lumina-prose ol {
+.zylara-prose ol {
   list-style: decimal;
 }
-.lumina-prose li {
+.zylara-prose li {
   margin-block: 0.3em;
   padding-inline-start: 0.15em;
 }
-.lumina-prose li::marker {
+.zylara-prose li::marker {
   color: var(--foreground-subtle);
 }
-.lumina-prose li > ul,
-.lumina-prose li > ol {
+.zylara-prose li > ul,
+.zylara-prose li > ol {
   margin-block: 0.35em;
 }
 
 /* GFM task lists — no duplicated marker, checkbox aligned with the text. */
-.lumina-prose ul.contains-task-list {
+.zylara-prose ul.contains-task-list {
   list-style: none;
   padding-inline-start: 0.25em;
 }
-.lumina-prose li.task-list-item {
+.zylara-prose li.task-list-item {
   list-style: none;
   padding-inline-start: 0;
 }
-.lumina-prose li.task-list-item::marker {
+.zylara-prose li.task-list-item::marker {
   content: none;
 }
-.lumina-prose .lumina-task-checkbox {
+.zylara-prose .zylara-task-checkbox {
   width: 0.95em;
   height: 0.95em;
   margin-inline-end: 0.45em;
@@ -570,17 +570,17 @@
 }
 
 /* Inline extras: del, mark, kbd, sup/sub, abbr. */
-.lumina-prose del {
+.zylara-prose del {
   text-decoration-thickness: 1px;
   color: var(--foreground-muted);
 }
-.lumina-prose mark {
+.zylara-prose mark {
   padding: 0.05em 0.25em;
   border-radius: 0.25em;
   background: var(--warning-soft);
   color: var(--foreground);
 }
-.lumina-prose kbd {
+.zylara-prose kbd {
   padding: 0.12em 0.4em;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
@@ -591,51 +591,51 @@
   font-size: 0.82em;
   white-space: nowrap;
 }
-.lumina-prose sup,
-.lumina-prose sub {
+.zylara-prose sup,
+.zylara-prose sub {
   position: relative;
   font-size: 0.75em;
   line-height: 0;
   vertical-align: baseline;
 }
-.lumina-prose sup {
+.zylara-prose sup {
   top: -0.5em;
 }
-.lumina-prose sub {
+.zylara-prose sub {
   bottom: -0.25em;
 }
-.lumina-prose abbr[title] {
+.zylara-prose abbr[title] {
   cursor: help;
   text-decoration: underline dotted;
   text-underline-offset: 2px;
 }
 
 /* <details>/<summary> from safe raw HTML. */
-.lumina-prose details {
+.zylara-prose details {
   margin-block: 0.9em;
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   background: var(--surface);
   overflow: hidden;
 }
-.lumina-prose summary {
+.zylara-prose summary {
   padding: 0.55em 0.85em;
   cursor: pointer;
   font-weight: 500;
   list-style-position: inside;
 }
-.lumina-prose summary:hover {
+.zylara-prose summary:hover {
   background: var(--surface-hover);
 }
-.lumina-prose details[open] > summary {
+.zylara-prose details[open] > summary {
   border-bottom: 1px solid var(--border);
 }
-.lumina-prose details > :not(summary) {
+.zylara-prose details > :not(summary) {
   margin-inline: 0.85em;
 }
 
 /* Links and footnote anchors. */
-.lumina-prose a {
+.zylara-prose a {
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -643,83 +643,83 @@
   text-decoration-color: color-mix(in oklab, var(--accent) 40%, transparent);
   font-weight: 500;
 }
-.lumina-prose a:hover {
+.zylara-prose a:hover {
   text-decoration-color: var(--accent);
 }
-.lumina-prose a[data-footnote-ref] {
+.zylara-prose a[data-footnote-ref] {
   font-weight: 600;
   text-decoration: none;
 }
 
 /* Blockquotes: texto citado sem moldura. Regra do produto: blocos de conteúdo
    nunca usam borda assimétrica (um lado maior que os outros). */
-.lumina-prose blockquote {
+.zylara-prose blockquote {
   margin-block: 0.9em;
   padding-inline-start: 0;
   border: 0;
   color: var(--foreground-muted);
   font-style: italic;
 }
-.lumina-prose blockquote blockquote {
+.zylara-prose blockquote blockquote {
   margin-block: 0.6em;
   color: var(--foreground-subtle);
 }
 
 /* GitHub alerts (`> [!NOTE]`, `> [!TIP]`…): bloco neutro com rótulo + ícone,
    SEM caixa, fundo colorido ou borda — o produto não usa caixas de destaque. */
-.lumina-prose .lumina-alert {
+.zylara-prose .zylara-alert {
   margin-block: 0.9em;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--foreground-muted);
 }
-.lumina-prose .lumina-alert-header {
+.zylara-prose .zylara-alert-header {
   margin-bottom: 0.15em;
   color: var(--foreground);
   font-size: 0.875em;
 }
-.lumina-prose .lumina-alert-body > :first-child {
+.zylara-prose .zylara-alert-body > :first-child {
   margin-top: 0.15em;
 }
-.lumina-prose .lumina-alert-body > :last-child {
+.zylara-prose .zylara-alert-body > :last-child {
   margin-bottom: 0;
 }
 
 /* GFM footnotes: localized, styled and anchored inside the message. */
-.lumina-prose .lumina-footnotes {
+.zylara-prose .zylara-footnotes {
   margin-top: 1.75em;
   padding-top: 0.6em;
   border-top: 1px solid var(--border);
   color: var(--foreground-muted);
   font-size: 0.875em;
 }
-.lumina-prose .lumina-footnotes ol {
+.zylara-prose .zylara-footnotes ol {
   margin-block: 0.2em 0;
   padding-inline-start: 1.35em;
 }
-.lumina-prose .lumina-footnotes li {
+.zylara-prose .zylara-footnotes li {
   margin-block: 0.35em;
 }
-.lumina-prose .lumina-footnotes p {
+.zylara-prose .zylara-footnotes p {
   margin-block: 0.25em;
 }
-.lumina-prose .lumina-footnotes a[data-footnote-backref] {
+.zylara-prose .zylara-footnotes a[data-footnote-backref] {
   margin-inline-start: 0.3em;
   font-size: 0.95em;
   text-decoration: none;
 }
-.lumina-prose .lumina-footnotes a[data-footnote-backref]:hover {
+.zylara-prose .zylara-footnotes a[data-footnote-backref]:hover {
   text-decoration: underline;
 }
-.lumina-prose .lumina-footnotes :target {
+.zylara-prose .zylara-footnotes :target {
   border-radius: 0.25em;
   background: var(--accent-soft);
 }
 
 /* Hidden heading generated for the footnote section: Tailwind does not emit
    `sr-only` for a class that only appears in generated HTML, so scope it here. */
-.lumina-prose .sr-only {
+.zylara-prose .sr-only {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -731,12 +731,12 @@
   border: 0;
 }
 
-.lumina-prose hr {
+.zylara-prose hr {
   margin-block: 1.5em;
   border: 0;
   border-top: 1px solid var(--border);
 }
-.lumina-prose :not(pre) > code {
+.zylara-prose :not(pre) > code {
   font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 0.16em 0.4em;
@@ -745,16 +745,16 @@
   border: 1px solid var(--border);
   white-space: break-spaces;
 }
-.lumina-prose pre {
+.zylara-prose pre {
   margin: 0;
 }
 
 /* Tables: the wrapper scrolls horizontally; captions sit below the table.
    `white-space` was reviewed: cells wrap naturally instead of forcing nowrap. */
-.lumina-prose .lumina-table-wrap {
+.zylara-prose .zylara-table-wrap {
   margin-block: 1em;
 }
-.lumina-prose table {
+.zylara-prose table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
@@ -764,43 +764,43 @@
   border-radius: 0.75rem;
   overflow: hidden;
 }
-.lumina-prose caption {
+.zylara-prose caption {
   padding-top: 0.5em;
   caption-side: bottom;
   color: var(--foreground-subtle);
   font-size: 0.8125em;
   text-align: start;
 }
-.lumina-prose thead {
+.zylara-prose thead {
   background: var(--surface);
 }
-.lumina-prose th {
+.zylara-prose th {
   padding: 0.5em 0.85em;
   border-bottom: 1px solid var(--border);
   text-align: left;
   font-weight: 600;
   vertical-align: bottom;
 }
-.lumina-prose td {
+.zylara-prose td {
   padding: 0.5em 0.85em;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
-.lumina-prose tr:last-child td {
+.zylara-prose tr:last-child td {
   border-bottom: 0;
 }
-.lumina-prose img {
+.zylara-prose img {
   max-width: 100%;
   border-radius: 0.75rem;
 }
-.lumina-prose .katex-display {
+.zylara-prose .katex-display {
   margin-block: 1em;
   overflow-x: auto;
   overflow-y: hidden;
   padding-block: 0.25em;
 }
 /* KaTeX paints error output with an inline color; force the danger token. */
-.lumina-prose .katex-error {
+.zylara-prose .katex-error {
   color: var(--danger) !important;
   font-family: var(--font-mono);
   font-size: 0.85em;
@@ -813,203 +813,203 @@
    aqui só o ritmo tipográfico muda (13px, muted, margens curtas). O
    contraste AA fica garantido pelos tokens `foreground` (títulos h1–h4)
    e `foreground-muted` (texto corrido), em claro e escuro. */
-.lumina-prose--thinking {
+.zylara-prose--thinking {
   font-size: 0.8125rem; /* 13px */
   line-height: 1.6;
   color: var(--foreground-muted);
   overflow-wrap: anywhere;
 }
-.lumina-prose--thinking > *:first-child {
+.zylara-prose--thinking > *:first-child {
   margin-top: 0;
 }
-.lumina-prose--thinking > *:last-child {
+.zylara-prose--thinking > *:last-child {
   margin-bottom: 0;
 }
-.lumina-prose--thinking p {
+.zylara-prose--thinking p {
   margin-block: 0.5em;
 }
 
 /* Títulos escalados: h1–h4 recuperam o contraste do texto de resposta;
    h5/h6 mantêm o tratamento discreto já existente (muted/uppercase). */
-.lumina-prose--thinking h1 {
+.zylara-prose--thinking h1 {
   font-size: 1.15em;
   color: var(--foreground);
 }
-.lumina-prose--thinking h2 {
+.zylara-prose--thinking h2 {
   font-size: 1.1em;
   color: var(--foreground);
 }
-.lumina-prose--thinking h3 {
+.zylara-prose--thinking h3 {
   font-size: 1.05em;
   color: var(--foreground);
 }
-.lumina-prose--thinking h4 {
+.zylara-prose--thinking h4 {
   font-size: 1em;
   color: var(--foreground);
 }
-.lumina-prose--thinking h5 {
+.zylara-prose--thinking h5 {
   font-size: 0.95em;
 }
-.lumina-prose--thinking h6 {
+.zylara-prose--thinking h6 {
   font-size: 0.95em;
 }
-.lumina-prose--thinking h1,
-.lumina-prose--thinking h2,
-.lumina-prose--thinking h3,
-.lumina-prose--thinking h4,
-.lumina-prose--thinking h5,
-.lumina-prose--thinking h6 {
+.zylara-prose--thinking h1,
+.zylara-prose--thinking h2,
+.zylara-prose--thinking h3,
+.zylara-prose--thinking h4,
+.zylara-prose--thinking h5,
+.zylara-prose--thinking h6 {
   margin-block: 0.9em 0.35em;
   line-height: 1.28;
 }
 
 /* Listas e itens com respiro mínimo. */
-.lumina-prose--thinking ul,
-.lumina-prose--thinking ol {
+.zylara-prose--thinking ul,
+.zylara-prose--thinking ol {
   margin-block: 0.45em;
   padding-inline-start: 1.15em;
 }
-.lumina-prose--thinking li {
+.zylara-prose--thinking li {
   margin-block: 0.15em;
 }
-.lumina-prose--thinking li > ul,
-.lumina-prose--thinking li > ol {
+.zylara-prose--thinking li > ul,
+.zylara-prose--thinking li > ol {
   margin-block: 0.2em;
 }
 
 /* Réguas, citações, alertas, notas e detalhes com gaps menores. */
-.lumina-prose--thinking hr {
+.zylara-prose--thinking hr {
   margin-block: 1em;
 }
-.lumina-prose--thinking blockquote {
+.zylara-prose--thinking blockquote {
   margin-block: 0.6em;
 }
-.lumina-prose--thinking blockquote blockquote {
+.zylara-prose--thinking blockquote blockquote {
   margin-block: 0.45em;
 }
-.lumina-prose--thinking .lumina-alert {
+.zylara-prose--thinking .zylara-alert {
   margin-block: 0.65em;
 }
-.lumina-prose--thinking .lumina-alert-header {
+.zylara-prose--thinking .zylara-alert-header {
   font-size: 0.9em;
 }
-.lumina-prose--thinking .lumina-alert-body > :first-child {
+.zylara-prose--thinking .zylara-alert-body > :first-child {
   margin-top: 0.1em;
 }
-.lumina-prose--thinking .lumina-footnotes {
+.zylara-prose--thinking .zylara-footnotes {
   margin-top: 1.15em;
   padding-top: 0.5em;
   font-size: 0.9em;
 }
-.lumina-prose--thinking .lumina-footnotes li {
+.zylara-prose--thinking .zylara-footnotes li {
   margin-block: 0.25em;
 }
-.lumina-prose--thinking .lumina-footnotes p {
+.zylara-prose--thinking .zylara-footnotes p {
   margin-block: 0.2em;
 }
-.lumina-prose--thinking details {
+.zylara-prose--thinking details {
   margin-block: 0.65em;
 }
-.lumina-prose--thinking summary {
+.zylara-prose--thinking summary {
   padding: 0.4em 0.65em;
 }
-.lumina-prose--thinking details > :not(summary) {
+.zylara-prose--thinking details > :not(summary) {
   margin-inline: 0.65em;
 }
 
 /* Código inline e tabelas mais compactos. */
-.lumina-prose--thinking :not(pre) > code {
+.zylara-prose--thinking :not(pre) > code {
   font-size: 0.92em;
 }
-.lumina-prose--thinking .lumina-table-wrap {
+.zylara-prose--thinking .zylara-table-wrap {
   margin-block: 0.6em;
 }
-.lumina-prose--thinking table {
+.zylara-prose--thinking table {
   font-size: 0.95em;
 }
-.lumina-prose--thinking th,
-.lumina-prose--thinking td {
+.zylara-prose--thinking th,
+.zylara-prose--thinking td {
   padding: 0.35em 0.6em;
 }
 
 /* Math display com menos respiro. */
-.lumina-prose--thinking .katex-display {
+.zylara-prose--thinking .katex-display {
   margin-block: 0.7em;
 }
 
 /* ------------------------------------------------------------------ */
 /* UI generativa: isolamento do "prose" do Markdown                    */
 /* ------------------------------------------------------------------ */
-/* GenUIBlock vive dentro de `.lumina-prose`, cujos seletores de elemento
+/* GenUIBlock vive dentro de `.zylara-prose`, cujos seletores de elemento
    (p, listas, headings, details, blockquote, tabela) também atingem a UI
    declarativa e desalinham o conteúdo (listas indentadas, margens extras,
    bordas duplicadas). Os resets abaixo vencem o prose (mesma layer, mais
    específicos) e continuam deixando os utilitários Tailwind vencerem, pois
    `utilities` é a última layer. */
-.lumina-prose .lumina-genui p {
+.zylara-prose .zylara-genui p {
   margin-block: 0;
 }
-.lumina-prose .lumina-genui ol,
-.lumina-prose .lumina-genui ul {
+.zylara-prose .zylara-genui ol,
+.zylara-prose .zylara-genui ul {
   margin-block: 0;
   padding-inline-start: 0;
   list-style: none;
 }
-.lumina-prose .lumina-genui li {
+.zylara-prose .zylara-genui li {
   margin-block: 0;
   padding-inline-start: 0;
 }
-.lumina-prose .lumina-genui h1,
-.lumina-prose .lumina-genui h2,
-.lumina-prose .lumina-genui h3,
-.lumina-prose .lumina-genui h4,
-.lumina-prose .lumina-genui h5,
-.lumina-prose .lumina-genui h6 {
+.zylara-prose .zylara-genui h1,
+.zylara-prose .zylara-genui h2,
+.zylara-prose .zylara-genui h3,
+.zylara-prose .zylara-genui h4,
+.zylara-prose .zylara-genui h5,
+.zylara-prose .zylara-genui h6 {
   margin-block: 0;
 }
-.lumina-prose .lumina-genui details {
+.zylara-prose .zylara-genui details {
   margin-block: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
   overflow: visible;
 }
-.lumina-prose .lumina-genui summary {
+.zylara-prose .zylara-genui summary {
   padding: 0;
   font-weight: inherit;
   list-style: none;
 }
-.lumina-prose .lumina-genui summary:hover {
+.zylara-prose .zylara-genui summary:hover {
   background: transparent;
 }
-.lumina-prose .lumina-genui details[open] > summary {
+.zylara-prose .zylara-genui details[open] > summary {
   border-bottom: 0;
 }
-.lumina-prose .lumina-genui details > :not(summary) {
+.zylara-prose .zylara-genui details > :not(summary) {
   margin-inline: 0;
 }
-.lumina-prose .lumina-genui blockquote {
+.zylara-prose .zylara-genui blockquote {
   margin-block: 0;
   padding: 0;
   border: 0;
   font-style: normal;
 }
-.lumina-prose .lumina-genui table {
+.zylara-prose .zylara-genui table {
   width: auto;
   border-collapse: collapse;
   margin-block: 0;
   font-size: inherit;
 }
-.lumina-prose .lumina-genui caption {
+.zylara-prose .zylara-genui caption {
   margin-top: 0;
 }
-.lumina-prose .lumina-genui img {
+.zylara-prose .zylara-genui img {
   border-radius: 0;
 }
-.lumina-prose .lumina-genui hr {
+.zylara-prose .zylara-genui hr {
   margin-block: 0;
 }
-.lumina-prose .lumina-genui :not(pre) > code {
+.zylara-prose .zylara-genui :not(pre) > code {
   border: 0;
   background: transparent;
   padding: 0;
@@ -1018,9 +1018,9 @@
 
 /* Streaming caret: only when the message ends in inline text (p/heading/quote/
    alert). Tables, code cards and genui blocks no longer get a stray caret. */
-.lumina-prose--streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-.lumina-prose--streaming > blockquote:last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-.lumina-prose--streaming > .lumina-alert:last-child .lumina-alert-body > :is(p, h1, h2, h3, h4, h5, h6, li):last-child::after {
+.zylara-prose--streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.zylara-prose--streaming > blockquote:last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+.zylara-prose--streaming > .zylara-alert:last-child .zylara-alert-body > :is(p, h1, h2, h3, h4, h5, h6, li):last-child::after {
   content: '';
   display: inline-block;
   width: 0.5em;
@@ -1032,15 +1032,15 @@
   animation: blink 1.1s steps(2, start) infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .lumina-prose--streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-  .lumina-prose--streaming > blockquote:last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
-  .lumina-prose--streaming > .lumina-alert:last-child .lumina-alert-body > :is(p, h1, h2, h3, h4, h5, h6, li):last-child::after {
+  .zylara-prose--streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+  .zylara-prose--streaming > blockquote:last-child > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
+  .zylara-prose--streaming > .zylara-alert:last-child .zylara-alert-body > :is(p, h1, h2, h3, h4, h5, h6, li):last-child::after {
     animation: none;
   }
 }
 
 /* Blinking caret used while streaming */
-.lumina-caret::after {
+.zylara-caret::after {
   content: '';
   display: inline-block;
   width: 0.5em;
@@ -1053,8 +1053,8 @@
 }
 
 /* Pointer-based sidebar reordering (see components/ui/sortable-list.tsx). */
-body.lumina-sortable-dragging,
-body.lumina-sortable-dragging * {
+body.zylara-sortable-dragging,
+body.zylara-sortable-dragging * {
   cursor: grabbing !important;
   user-select: none !important;
 }

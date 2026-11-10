@@ -39,13 +39,13 @@ import {
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
     id: 'ws-1',
-    name: 'lumina-core',
-    path: 'C:/dev/lumina',
+    name: 'zylara-core',
+    path: 'C:/dev/zylara',
     createdAt: 1,
     updatedAt: 2,
     lastOpenedAt: 2,
     trusted: false,
-    git: { root: 'C:/dev/lumina', branch: 'feat/code-harness', dirty: true },
+    git: { root: 'C:/dev/zylara', branch: 'feat/code-harness', dirty: true },
     ...overrides,
   };
 }
@@ -129,7 +129,7 @@ describe('useWorkspaces — carregamento', () => {
 describe('useWorkspaces — abrir pasta e confiança', () => {
   it('abre a pasta, cria a sessão vinculada e deixa a confiança pendente', async () => {
     const ws = workspace();
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
 
@@ -141,7 +141,7 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
     });
 
     expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1);
-    expect(mocks.addWorkspace).toHaveBeenCalledWith('C:/dev/lumina', false);
+    expect(mocks.addWorkspace).toHaveBeenCalledWith('C:/dev/zylara', false);
     expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1');
     expect(useUiStore.getState().activeWorkspaceId).toBe('ws-1');
     expect(useUiStore.getState().openSessionsByWorkspace['ws-1']).toEqual(['c-new']);
@@ -151,7 +151,7 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
 
   it('não pergunta a confiança de uma pasta já confiada', async () => {
     const ws = workspace({ trusted: true });
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
 
@@ -167,7 +167,7 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
 
   it('com uma sessão existente vincula sem criar outra conversa', async () => {
     const ws = workspace();
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
 
@@ -199,7 +199,7 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
 
   it('confiar libera o workspace e mantém o modo de permissão padrão da sessão', async () => {
     const ws = workspace();
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
 
@@ -227,7 +227,7 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
 
   it('abrir em leitura força Leitura na sessão e mantém o workspace sem confiança', async () => {
     const ws = workspace();
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValue([ws]);
 
@@ -259,7 +259,7 @@ describe('useWorkspaces — abrir pasta e confiança', () => {
 
   it('cancelar a confiança remove o workspace recém-criado da lista', async () => {
     const ws = workspace();
-    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+    mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
     mocks.addWorkspace.mockResolvedValue(ws);
     mocks.listWorkspaces.mockResolvedValueOnce([ws]).mockResolvedValue([]);
     mocks.removeWorkspace.mockResolvedValue(undefined);
@@ -356,8 +356,8 @@ describe('useWorkspaces — ações do menu', () => {
     await waitFor(() => expect(result.current.loaded).toBe(true));
 
     const context: WorkspaceContext = {
-      workspace: { ...ws, git: { root: 'C:/dev/lumina', branch: 'main', dirty: false } },
-      project: { kind: 'node', name: 'lumina', checks: [] },
+      workspace: { ...ws, git: { root: 'C:/dev/zylara', branch: 'main', dirty: false } },
+      project: { kind: 'node', name: 'zylara', checks: [] },
     };
     mocks.getWorkspace.mockResolvedValue(context);
 

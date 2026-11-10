@@ -8,7 +8,7 @@
 //!   e compara com um baseline (mesmo benchmark com catálogo **sem** `cache`).
 //!
 //! Estatísticas: média, mínimo e percentis **p50/p10** dos hits por request
-//! (por run; com `LUMINA_BENCH_REPETITIONS>1` os hits de todas as runs são
+//! (por run; com `ZYLARA_BENCH_REPETITIONS>1` os hits de todas as runs são
 //! agregados antes dos percentis). Gate live: target 98%, hard floor 95%.
 //!
 //! Gate: `cargo test --lib cache_bench -- --ignored` encontra o teste live
@@ -37,9 +37,9 @@ const TARGET_STEADY_HIT: f64 = 98.0;
 const HARD_FLOOR_STEADY_HIT: f64 = 95.0;
 const STEADY_CEILING: f32 = 98.0;
 /// Repetições run-level do cenário live (PLAN §2.4/fixture `repetitions`).
-/// Default 1 para não onerar a execução; `LUMINA_BENCH_REPETITIONS=5` reproduz
+/// Default 1 para não onerar a execução; `ZYLARA_BENCH_REPETITIONS=5` reproduz
 /// o protocolo p50/p10 de N runs. Cada run usa DB/conversa novas.
-const REPETITIONS_ENV: &str = "LUMINA_BENCH_REPETITIONS";
+const REPETITIONS_ENV: &str = "ZYLARA_BENCH_REPETITIONS";
 
 /// Fixture `bench-fixture.json` (Lead). Campos extras são ignorados.
 #[derive(Debug, Clone, Deserialize)]
@@ -146,7 +146,7 @@ pub fn metrics(samples: &[CacheSample]) -> BenchMetrics {
     }
 }
 
-/// Agrega métricas de N runs (`LUMINA_BENCH_REPETITIONS`): percentis sobre todos
+/// Agrega métricas de N runs (`ZYLARA_BENCH_REPETITIONS`): percentis sobre todos
 /// os hits steady de todas as runs; requests/steady somados.
 pub fn aggregate_metrics(runs: &[BenchMetrics]) -> BenchMetrics {
     let steady_hits: Vec<f32> = runs
@@ -401,7 +401,7 @@ fn write_artifact(artifact: &Value) -> anyhow::Result<std::path::PathBuf> {
 /// Skip auditável: grava `{ skipped: true, reason, at }` num artifact único e
 /// imprime o caminho (não falha o CI). O EVIDENCE distingue skip de prova.
 fn skip_artifact(reason: &str) {
-    eprintln!("lumina bench: SKIP ({reason})");
+    eprintln!("zylara bench: SKIP ({reason})");
     let artifact = json!({
         "skipped": true,
         "reason": reason,
@@ -409,14 +409,14 @@ fn skip_artifact(reason: &str) {
         "fixture": fixture_paths()[0].display().to_string(),
     });
     match write_artifact(&artifact) {
-        Ok(path) => eprintln!("lumina bench: skip auditável em {}", path.display()),
-        Err(error) => eprintln!("lumina bench: falha ao gravar skip auditável: {error:#}"),
+        Ok(path) => eprintln!("zylara bench: skip auditável em {}", path.display()),
+        Err(error) => eprintln!("zylara bench: falha ao gravar skip auditável: {error:#}"),
     }
 }
 
 fn print_metrics(label: &str, fixture: &BenchFixture, metrics: &BenchMetrics) {
     eprintln!(
-        "lumina bench {label} ({} / {}): requests={} steady={} hit_steady={:?}% hit_all={:?}% min_steady={:?}% p50={:?}% p10={:?}% coldWrite={} firstHit={:?}% lifecycle={:?}%",
+        "zylara bench {label} ({} / {}): requests={} steady={} hit_steady={:?}% hit_all={:?}% min_steady={:?}% p50={:?}% p10={:?}% coldWrite={} firstHit={:?}% lifecycle={:?}%",
         fixture.provider_id,
         fixture.model_id,
         metrics.requests,
@@ -467,7 +467,7 @@ fn metrics_json(metrics: &BenchMetrics) -> Value {
 #[ignore = "live gateway: requer OPENCODE_API_KEY/auth.json e bench-fixture.json; rodar com --ignored"]
 async fn cache_bench_e2e_live() {
     let Some(fixture) = load_fixture().unwrap_or_else(|error| {
-        eprintln!("lumina bench: fixture inválida: {error:#}");
+        eprintln!("zylara bench: fixture inválida: {error:#}");
         None
     }) else {
         skip_artifact("bench-fixture.json ausente em docs/goals/prompt-cache/evidence/");
@@ -505,7 +505,7 @@ async fn cache_bench_e2e_live() {
     let reps = repetitions();
 
     let temp_dir =
-        std::env::temp_dir().join(format!("lumina-cache-bench-{}", uuid::Uuid::new_v4()));
+        std::env::temp_dir().join(format!("zylara-cache-bench-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&temp_dir).expect("criar data_dir do bench");
     let db_path = temp_dir.join("bench.db");
     let db = Arc::new(Db::open(&db_path).expect("abrir DB do bench"));
@@ -534,7 +534,7 @@ async fn cache_bench_e2e_live() {
         return;
     }
     eprintln!(
-        "lumina bench: live gateway {}/{} x{reps} run(s) (LUMINA_BENCH_REPETITIONS; artifact único)",
+        "zylara bench: live gateway {}/{} x{reps} run(s) (ZYLARA_BENCH_REPETITIONS; artifact único)",
         fixture.provider_id, fixture.model_id
     );
 
@@ -557,7 +557,7 @@ async fn cache_bench_e2e_live() {
             &nonce,
         );
         eprintln!(
-            "lumina bench: live run {}/{} nonce={nonce} (1º request frio)",
+            "zylara bench: live run {}/{} nonce={nonce} (1º request frio)",
             run_index + 1,
             reps
         );
@@ -585,7 +585,7 @@ async fn cache_bench_e2e_live() {
     // Cold-start real: o nonce no 1º turno força o 1º request frio. Se vier
     // quente, o nonce não entrou no prefixo do request.
     eprintln!(
-        "lumina bench: cold-start coldWriteTokens={} firstRequestHit={:?}% lifecycleHit={:?}%",
+        "zylara bench: cold-start coldWriteTokens={} firstRequestHit={:?}% lifecycleHit={:?}%",
         steady_metrics.cold_write_tokens,
         steady_metrics.first_request_hit,
         steady_metrics.lifecycle_hit
@@ -619,7 +619,7 @@ async fn cache_bench_e2e_live() {
     let baseline_metrics = aggregate_metrics(&baseline_runs);
     print_metrics("baseline agregado", &fixture, &baseline_metrics);
     eprintln!(
-        "lumina bench: baseline sem catálogo cache (plan=None) — hit_steady={:?}% (esperado ~0)",
+        "zylara bench: baseline sem catálogo cache (plan=None) — hit_steady={:?}% (esperado ~0)",
         baseline_metrics.steady_mean_hit
     );
 
@@ -700,12 +700,12 @@ async fn cache_bench_e2e_live() {
         })).collect::<Vec<_>>(),
     });
     match write_artifact(&artifact) {
-        Ok(path) => eprintln!("lumina bench: evidência gravada em {}", path.display()),
-        Err(error) => eprintln!("lumina bench: falha ao gravar evidência: {error:#}"),
+        Ok(path) => eprintln!("zylara bench: evidência gravada em {}", path.display()),
+        Err(error) => eprintln!("zylara bench: falha ao gravar evidência: {error:#}"),
     }
 
     eprintln!(
-        "lumina bench: GATE live steady hit {:.1}% (target {:.0}%, hard floor {:.0}%); baseline {:.1}%",
+        "zylara bench: GATE live steady hit {:.1}% (target {:.0}%, hard floor {:.0}%); baseline {:.1}%",
         steady_metrics.steady_mean_hit.unwrap_or(0.0),
         TARGET_STEADY_HIT,
         HARD_FLOOR_STEADY_HIT,
@@ -950,7 +950,7 @@ struct TempDbBench {
 impl TempDbBench {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!(
-            "lumina-cache-bench-synthetic-{}.db",
+            "zylara-cache-bench-synthetic-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = Arc::new(Db::open(&path).expect("abrir DB do bench"));
@@ -968,7 +968,7 @@ impl Drop for TempDbBench {
 
 fn synthetic_deps(db: Arc<Db>) -> HarnessDeps {
     let temp_dir =
-        std::env::temp_dir().join(format!("lumina-cache-bench-data-{}", uuid::Uuid::new_v4()));
+        std::env::temp_dir().join(format!("zylara-cache-bench-data-{}", uuid::Uuid::new_v4()));
     let _ = std::fs::create_dir_all(&temp_dir);
     HarnessDeps {
         app: None,

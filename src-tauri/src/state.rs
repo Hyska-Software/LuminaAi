@@ -231,7 +231,7 @@ impl AppState {
     pub fn init(app: &AppHandle) -> anyhow::Result<Self> {
         let data_dir = crate::config::data_dir(app)?;
         crate::computer::browser::init_global(&data_dir);
-        let db_path = data_dir.join("lumina.db");
+        let db_path = data_dir.join("zylara.db");
         let db = Db::open(&db_path)?;
         let catalog = CatalogFile::load()?;
         let state = Self {

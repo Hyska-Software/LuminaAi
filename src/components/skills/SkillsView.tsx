@@ -64,7 +64,7 @@ function SkillGroup({
         </div>
         {meta.external ? (
           <p className="text-[11px] leading-relaxed text-foreground-subtle">
-            Repositório de outro agente: desative para o agente ignorar; o Lumina não altera estes
+            Repositório de outro agente: desative para o agente ignorar; o Zylara não altera estes
             arquivos.
           </p>
         ) : null}
@@ -333,7 +333,7 @@ export function SkillsView({ onBack, backLabel = 'Voltar ao chat' }: SkillsViewP
               <p className="text-[13px] font-medium text-foreground">Nenhuma skill encontrada</p>
               <p className="max-w-md text-xs leading-relaxed text-foreground-muted">
                 Adicione uma pasta com um arquivo <code className="font-mono">SKILL.md</code> na
-                pasta de skills do Lumina (botão “Abrir pasta de skills”) e tente novamente. As
+                pasta de skills do Zylara (botão “Abrir pasta de skills”) e tente novamente. As
                 skills de outros agentes são detectadas automaticamente.
               </p>
             </div>

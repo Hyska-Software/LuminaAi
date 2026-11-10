@@ -253,7 +253,7 @@ export function SortableList({
       window.removeEventListener('keydown', onWindowKeyDown, true);
       window.removeEventListener('blur', onCancel);
       cancelAnimationFrame(frame);
-      document.body.classList.remove('lumina-sortable-dragging');
+      document.body.classList.remove('zylara-sortable-dragging');
       try {
         if (element.hasPointerCapture?.(pointerId)) element.releasePointerCapture(pointerId);
       } catch {
@@ -270,7 +270,7 @@ export function SortableList({
         started = true;
         rects = measure();
         scroller = findScrollParent(containerRef.current);
-        document.body.classList.add('lumina-sortable-dragging');
+        document.body.classList.add('zylara-sortable-dragging');
         setDraggingId(id);
         frame = requestAnimationFrame(tick);
       }

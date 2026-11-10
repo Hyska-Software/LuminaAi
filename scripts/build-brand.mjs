@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Regenerates every brand asset derived from `assets/Lumina_Logo.svg`.
+ * Regenerates every brand asset derived from `assets/Zylara_Logo.svg`.
  *
  * The original export is a 5225x5225 square canvas whose artwork is centred at
  * (2612.5, 2612.5) and spans about 99% of the width. Shipping it as-is would
  * leave the OS icon glued to the edges, so the derived vectors below crop the
- * art (`lumina-mark.svg`), mount it on the light tile (`lumina-tile.svg`) and
+ * art (`zylara-mark.svg`), mount it on the light tile (`zylara-tile.svg`) and
  * pad the square app-icon canvas by 400 units on each side.
  *
  * Usage: pnpm brand
@@ -18,9 +18,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourceFile = path.join(root, 'assets/Lumina_Logo.svg');
-const markFile = path.join(root, 'public/brand/lumina-mark.svg');
-const tileFile = path.join(root, 'public/brand/lumina-tile.svg');
+const sourceFile = path.join(root, 'assets/Zylara_Logo.svg');
+const markFile = path.join(root, 'public/brand/zylara-mark.svg');
+const tileFile = path.join(root, 'public/brand/zylara-tile.svg');
 const appIconVector = path.join(root, 'assets/app-icon.svg');
 const appIconPng = path.join(root, 'app-icon.png');
 const tauriCli = path.join(root, 'node_modules/@tauri-apps/cli/tauri.js');
@@ -51,7 +51,7 @@ function readSource() {
 }
 
 function svg({ viewBox, width, height, body }) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="${width}" height="${height}" style="${STYLE}" role="img" aria-label="Lumina">\n${body}\n</svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="${width}" height="${height}" style="${STYLE}" role="img" aria-label="Zylara">\n${body}\n</svg>\n`;
 }
 
 function writeVectors(paths) {
@@ -59,7 +59,7 @@ function writeVectors(paths) {
     viewBox: `${ART.x - 2} ${ART.y - 2} ${ART.width + 4} ${ART.height + 4}`,
     width: ART.width + 4,
     height: ART.height + 4,
-    body: `  <g id="Lumina">\n${paths}\n  </g>`,
+    body: `  <g id="Zylara">\n${paths}\n  </g>`,
   });
 
   const tile = svg({
@@ -68,7 +68,7 @@ function writeVectors(paths) {
     height: TILE,
     body: [
       `  <rect x="0" y="0" width="${TILE}" height="${TILE}" rx="184.412" ry="184.412" fill="#EBEBEB"/>`,
-      `  <g id="Lumina" transform="translate(${TILE_OFFSET.toFixed(2)} ${TILE_OFFSET.toFixed(2)}) scale(${TILE_SCALE.toFixed(5)})">`,
+      `  <g id="Zylara" transform="translate(${TILE_OFFSET.toFixed(2)} ${TILE_OFFSET.toFixed(2)}) scale(${TILE_SCALE.toFixed(5)})">`,
       paths,
       '  </g>',
     ].join('\n'),
@@ -78,7 +78,7 @@ function writeVectors(paths) {
     viewBox: `${-PADDING} ${-PADDING} ${SQUARE} ${SQUARE}`,
     width: SQUARE,
     height: SQUARE,
-    body: `  <g id="Lumina">\n${paths}\n  </g>`,
+    body: `  <g id="Zylara">\n${paths}\n  </g>`,
   });
 
   writeFileSync(markFile, mark);
@@ -115,7 +115,7 @@ function writeIcons(scratch) {
 const paths = readSource();
 writeVectors(paths);
 
-const scratch = mkdtempSync(path.join(tmpdir(), 'lumina-brand-'));
+const scratch = mkdtempSync(path.join(tmpdir(), 'zylara-brand-'));
 try {
   writePngMaster(scratch);
   writeIcons(scratch);

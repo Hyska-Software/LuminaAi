@@ -70,13 +70,13 @@ export function AgentActivityDialog({
     void loadTasks();
     void loadActiveTurns();
     const reload = () => void loadTasks();
-    window.addEventListener('lumina:agent-task-updated', reload);
+    window.addEventListener('zylara:agent-task-updated', reload);
     const poll = window.setInterval(() => void loadActiveTurns(), 2000);
     const clock = window.setInterval(() => setClock((value) => value + 1), 1000);
     return () => {
       window.clearInterval(poll);
       window.clearInterval(clock);
-      window.removeEventListener('lumina:agent-task-updated', reload);
+      window.removeEventListener('zylara:agent-task-updated', reload);
     };
   }, [open, loadTasks, loadActiveTurns]);
 

@@ -1,4 +1,4 @@
-# Docker gráfico do Lumina
+# Docker gráfico do Zylara
 
 Imagem usada pelo backend de computer use quando o agente roda em Docker.
 
@@ -7,7 +7,7 @@ Imagem usada pelo backend de computer use quando o agente roda em Docker.
 O workflow `.github/workflows/computer-image.yml` publica a imagem em:
 
 ```text
-ghcr.io/hyska-software/lumina-computer:latest
+ghcr.io/hyska-software/zylara-computer:latest
 ```
 
 Ela é o default de `computerDockerImage`. No app, vá em **Configurações →
@@ -22,10 +22,10 @@ multi-arquitetura (`linux/amd64` e `linux/arm64`).
 ## Build local (desenvolvimento)
 
 ```bash
-docker build -t lumina/computer:latest docker/computer
+docker build -t zylara/computer:latest docker/computer
 ```
 
-No app, informe `lumina/computer:latest` em Configurações → Agentes → Desktop
+No app, informe `zylara/computer:latest` em Configurações → Agentes → Desktop
 privado → Imagem do computer use.
 
 O app inicia o container automaticamente com:

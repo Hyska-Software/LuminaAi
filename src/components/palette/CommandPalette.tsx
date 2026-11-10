@@ -48,7 +48,7 @@ const QUICK_ACTIONS = [
 ] as const;
 
 function optionDomId(key: string): string {
-  return `lumina-palette-${key}`;
+  return `zylara-palette-${key}`;
 }
 
 function groupSections(commandResults: readonly PaletteCommandResult[]): PaletteSection[] {
@@ -423,7 +423,7 @@ export function CommandPalette() {
         >
           <DialogTitle className="sr-only">Paleta de comandos</DialogTitle>
           <DialogDescription className="sr-only">
-            Busque conversas ou execute comandos do Lumina. Use as setas para navegar, Enter para
+            Busque conversas ou execute comandos do Zylara. Use as setas para navegar, Enter para
             executar e Esc para limpar a busca ou fechar.
           </DialogDescription>
   
@@ -440,7 +440,7 @@ export function CommandPalette() {
               aria-label="Buscar conversas ou comandos"
               role="combobox"
               aria-expanded
-              aria-controls="lumina-palette-list"
+              aria-controls="zylara-palette-list"
               aria-autocomplete="list"
               aria-activedescendant={activeItem ? optionDomId(activeItem.key) : undefined}
               autoFocus
@@ -456,7 +456,7 @@ export function CommandPalette() {
   
           <div className="max-h-[min(420px,calc(100vh-220px))] overflow-y-auto overscroll-contain">
             <div
-              id="lumina-palette-list"
+              id="zylara-palette-list"
               role="listbox"
               aria-label="Comandos e conversas"
               className={sections.length ? 'p-1.5' : 'hidden'}
@@ -465,11 +465,11 @@ export function CommandPalette() {
                 <div
                   key={section.id}
                   role="group"
-                  aria-labelledby={`lumina-palette-section-${section.id}`}
+                  aria-labelledby={`zylara-palette-section-${section.id}`}
                   className="flex flex-col"
                 >
                   <span
-                    id={`lumina-palette-section-${section.id}`}
+                    id={`zylara-palette-section-${section.id}`}
                     className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-foreground-subtle"
                   >
                     {section.label}

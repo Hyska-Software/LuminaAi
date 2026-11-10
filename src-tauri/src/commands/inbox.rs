@@ -32,7 +32,7 @@ pub async fn inbox_tick(app: AppHandle) {
         match state.db.list_pending_agent_inbox(8) {
             Ok(items) => items,
             Err(error) => {
-                eprintln!("lumina: falha ao listar inbox: {error:#}");
+                eprintln!("zylara: falha ao listar inbox: {error:#}");
                 return;
             }
         }
@@ -54,7 +54,7 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
     let fail = |message: String| {
         let _ = db.finish_agent_inbox(&item.id, "failed", Some(&message), now_ms());
         let _ = app.emit(
-            "lumina:agent-inbox-updated",
+            "zylara:agent-inbox-updated",
             InboxUpdatedEvent {
                 channel_id: item.channel_id.clone(),
                 recipient_agent_id: item.recipient_agent_id.clone(),
@@ -160,7 +160,7 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
             // Shutdown/global Stop: the DM stays pending and is retried later.
             let _ = db.requeue_agent_inbox(&item.id);
             let _ = app.emit(
-                "lumina:agent-inbox-updated",
+                "zylara:agent-inbox-updated",
                 InboxUpdatedEvent {
                     channel_id: channel.id.clone(),
                     recipient_agent_id: agent.id.clone(),
@@ -181,13 +181,13 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
             }
             let _ = db.finish_agent_inbox(&item.id, "delivered", None, now_ms());
             let _ = app.emit(
-                "lumina:agent-channel-updated",
+                "zylara:agent-channel-updated",
                 crate::commands::channels::AgentChannelUpdatedEvent {
                     channel_id: channel.id.clone(),
                 },
             );
             let _ = app.emit(
-                "lumina:agent-inbox-updated",
+                "zylara:agent-inbox-updated",
                 InboxUpdatedEvent {
                     channel_id: channel.id.clone(),
                     recipient_agent_id: agent.id.clone(),

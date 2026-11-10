@@ -27,7 +27,7 @@ export type SlashInvoke =
  */
 export function requestGoalCreation(): void {
   if (typeof window === 'undefined') return;
-  window.dispatchEvent(new CustomEvent('lumina:goal-intent'));
+  window.dispatchEvent(new CustomEvent('zylara:goal-intent'));
 }
 
 export interface SlashCommand {

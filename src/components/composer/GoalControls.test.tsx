@@ -108,9 +108,9 @@ afterEach(() => {
 });
 
 describe('GoalControls — sem objetivo', () => {
-  it('sem props mantém o fallback: botão só-ícone dispara lumina:goal-intent', () => {
+  it('sem props mantém o fallback: botão só-ícone dispara zylara:goal-intent', () => {
     const listener = vi.fn();
-    window.addEventListener('lumina:goal-intent', listener);
+    window.addEventListener('zylara:goal-intent', listener);
     try {
       render(<GoalControls conversationId={CONVERSATION_ID} />);
 
@@ -124,7 +124,7 @@ describe('GoalControls — sem objetivo', () => {
       // O chip é uma intenção do turno; nenhum diálogo de criação é aberto.
       expect(useUiStore.getState().goalDialog).toBeNull();
     } finally {
-      window.removeEventListener('lumina:goal-intent', listener);
+      window.removeEventListener('zylara:goal-intent', listener);
     }
   });
 
@@ -148,7 +148,7 @@ describe('GoalControls — sem objetivo', () => {
   it('com goalIntent=true fica accent/aria-pressed e "Desativar objetivo" alterna', () => {
     const onToggleGoalIntent = vi.fn();
     const listener = vi.fn();
-    window.addEventListener('lumina:goal-intent', listener);
+    window.addEventListener('zylara:goal-intent', listener);
     try {
       render(
         <GoalControls
@@ -167,7 +167,7 @@ describe('GoalControls — sem objetivo', () => {
       // Com handler próprio o evento global (fallback) não é disparado.
       expect(listener).not.toHaveBeenCalled();
     } finally {
-      window.removeEventListener('lumina:goal-intent', listener);
+      window.removeEventListener('zylara:goal-intent', listener);
     }
   });
 });

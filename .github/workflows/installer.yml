@@ -152,8 +152,8 @@ jobs:
           --require-clean
           --channel stable
         env:
-          LUMINA_WINDOWS_CERT_THUMBPRINT: ${{ secrets.LUMINA_WINDOWS_CERT_THUMBPRINT }}
-          LUMINA_TIMESTAMP_URL: ${{ secrets.LUMINA_TIMESTAMP_URL }}
+          ZYLARA_WINDOWS_CERT_THUMBPRINT: ${{ secrets.ZYLARA_WINDOWS_CERT_THUMBPRINT }}
+          ZYLARA_TIMESTAMP_URL: ${{ secrets.ZYLARA_TIMESTAMP_URL }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -163,7 +163,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: lumina-${{ matrix.platform }}
+          name: zylara-${{ matrix.platform }}
           path: release/**
           if-no-files-found: error
 
@@ -184,7 +184,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          pattern: lumina-*
+          pattern: zylara-*
           path: release
           merge-multiple: true
 
@@ -204,7 +204,7 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG já existe; atualizando assets."
             gh release upload "$TAG" "${files[@]}" --clobber
-            gh release edit "$TAG" --title "Lumina $TAG" --draft="$DRAFT"
+            gh release edit "$TAG" --title "Zylara $TAG" --draft="$DRAFT"
           else
             echo "Criando release $TAG."
             extra=()
@@ -213,13 +213,13 @@ jobs:
             fi
             gh release create "$TAG" "${files[@]}" \
               --target "$GITHUB_SHA" \
-              --title "Lumina $TAG" \
+              --title "Zylara $TAG" \
               --generate-notes \
               "${extra[@]}"
           fi
 
           {
-            echo "### Lumina $TAG"
+            echo "### Zylara $TAG"
             echo
             echo "Artefatos publicados:"
             echo

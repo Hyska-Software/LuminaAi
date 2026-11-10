@@ -119,7 +119,7 @@ export const useMessageQueueStore = create<MessageQueueState>()(
     {
       // Legacy key: it already holds every queued message in the field, and a
       // rename would silently drop them on the next boot.
-      name: 'lumina.agent-queue.v1',
+      name: 'zylara.agent-queue.v1',
       version: 1,
       migrate: (persisted) => sanitizeMessageQueue(persisted) as MessageQueueState,
       merge: (persisted, current) => ({

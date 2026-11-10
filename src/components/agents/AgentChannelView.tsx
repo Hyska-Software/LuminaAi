@@ -287,8 +287,8 @@ export function AgentChannelView({
       const detail = (event as CustomEvent<{ paths?: string[] }>).detail;
       void importPaths(detail?.paths ?? []);
     };
-    window.addEventListener('lumina:channel-drop', onDrop);
-    return () => window.removeEventListener('lumina:channel-drop', onDrop);
+    window.addEventListener('zylara:channel-drop', onDrop);
+    return () => window.removeEventListener('zylara:channel-drop', onDrop);
   }, [importPaths]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -347,15 +347,15 @@ export function AgentChannelView({
     // Polling refreshes replies published by the member agents while a post is
     // still running; the backend appends each reply as it finishes.
     const reload = () => void load(true);
-    window.addEventListener('lumina:channels-changed', reload);
-    window.addEventListener('lumina:agent-channel-updated', reload);
-    window.addEventListener('lumina:agent-task-updated', reload);
+    window.addEventListener('zylara:channels-changed', reload);
+    window.addEventListener('zylara:agent-channel-updated', reload);
+    window.addEventListener('zylara:agent-task-updated', reload);
     const interval = window.setInterval(reload, 3000);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener('lumina:channels-changed', reload);
-      window.removeEventListener('lumina:agent-channel-updated', reload);
-      window.removeEventListener('lumina:agent-task-updated', reload);
+      window.removeEventListener('zylara:channels-changed', reload);
+      window.removeEventListener('zylara:agent-channel-updated', reload);
+      window.removeEventListener('zylara:agent-task-updated', reload);
     };
   }, [load]);
 
@@ -869,7 +869,7 @@ export function AgentChannelView({
                 </div>
               </div>
               <p className="mt-1.5 text-center text-[11px] leading-relaxed text-foreground-subtle">
-                Lumina pode cometer erros. Verifique informações importantes.
+                Zylara pode cometer erros. Verifique informações importantes.
               </p>
             </>
           )}

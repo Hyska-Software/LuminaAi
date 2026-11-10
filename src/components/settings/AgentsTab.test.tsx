@@ -62,7 +62,7 @@ beforeEach(() => {
     settings: next,
     keys: [],
   }));
-  mocks.dockerPullImage.mockResolvedValue('ghcr.io/hyska-software/lumina-computer:latest');
+  mocks.dockerPullImage.mockResolvedValue('ghcr.io/hyska-software/zylara-computer:latest');
   useAppStore.setState({ settings: settings() });
 });
 
@@ -138,7 +138,7 @@ describe('AgentsTab', () => {
 
     await waitFor(() =>
       expect(mocks.dockerPullImage).toHaveBeenCalledWith(
-        'ghcr.io/hyska-software/lumina-computer:latest',
+        'ghcr.io/hyska-software/zylara-computer:latest',
       ),
     );
   });

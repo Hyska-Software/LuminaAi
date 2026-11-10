@@ -54,9 +54,9 @@ function plainNotes(value: string): string {
 function installHint(kind: string | undefined): string {
   switch (kind) {
     case 'setup':
-      return 'O Lumina será fechado durante a instalação. Suas conversas e configurações são mantidas.';
+      return 'O Zylara será fechado durante a instalação. Suas conversas e configurações são mantidas.';
     case 'dmg':
-      return 'Arraste o Lumina para a pasta Aplicativos e abra a nova versão.';
+      return 'Arraste o Zylara para a pasta Aplicativos e abra a nova versão.';
     case 'appimage':
       return 'Substitua o AppImage atual pelo novo arquivo e abra-o novamente.';
     case 'deb':
@@ -147,7 +147,7 @@ export function UpdateActions({ className }: { className?: string }) {
           <span className="text-[11px] tabular-nums text-foreground-subtle">
             {phase === 'downloading' && progress
               ? `${formatBytes(progress.bytesPerSec)}/s`
-              : 'Não feche o Lumina enquanto a verificação termina.'}
+              : 'Não feche o Zylara enquanto a verificação termina.'}
           </span>
           {phase === 'downloading' ? (
             <Button size="sm" variant="ghost" onClick={() => void cancelDownload()}>
@@ -266,7 +266,7 @@ export function UpdatePopoverBody({ onClose }: { onClose: () => void }) {
             <p className="mt-0.5 text-[11.5px] leading-snug text-foreground-muted">
               {checking
                 ? 'Buscando a versão mais recente no GitHub.'
-                : 'Você está usando a versão mais recente do Lumina.'}
+                : 'Você está usando a versão mais recente do Zylara.'}
             </p>
           </div>
         </div>

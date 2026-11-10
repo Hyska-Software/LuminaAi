@@ -16,7 +16,7 @@ export function useComputerControlEvents(conversationId: string | null, onChange
     if (!conversationId) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void Promise.resolve().then(() => listen<ComputerControlEvent>('lumina:computer-control', ({ payload }) => {
+    void Promise.resolve().then(() => listen<ComputerControlEvent>('zylara:computer-control', ({ payload }) => {
       if (!disposed && payload.conversationId === conversationId) callback.current(payload);
     })).then((stop) => {
       if (disposed) stop();

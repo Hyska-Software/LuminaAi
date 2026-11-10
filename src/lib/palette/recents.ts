@@ -7,7 +7,7 @@
  * empty list instead of throwing.
  */
 
-export const PALETTE_RECENTS_KEY = 'lumina.palette.recents';
+export const PALETTE_RECENTS_KEY = 'zylara.palette.recents';
 export const MAX_RECENT_COMMANDS = 6;
 
 export interface PaletteRecentsStorage {

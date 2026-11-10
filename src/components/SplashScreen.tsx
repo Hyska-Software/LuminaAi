@@ -9,7 +9,7 @@ export function SplashScreen() {
         <BrandMark size={72} className="relative" />
       </div>
       <div className="flex flex-col items-center gap-1.5">
-        <span className="text-lg font-semibold tracking-tight">Lumina</span>
+        <span className="text-lg font-semibold tracking-tight">Zylara</span>
         <span className="text-[13px] text-foreground-muted">Preparando seu espaço…</span>
       </div>
       <div className="h-1 w-36 overflow-hidden rounded-full bg-surface-active">

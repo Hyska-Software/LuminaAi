@@ -408,7 +408,7 @@ mod tests {
             cancel: tokio_util::sync::CancellationToken::new(),
             agent_hooks: None,
             data_dir: std::env::temp_dir().join(format!(
-                "lumina-tools-dispatch-{}",
+                "zylara-tools-dispatch-{}",
                 uuid::Uuid::new_v4()
             )),
             skills_roots: Vec::new(),

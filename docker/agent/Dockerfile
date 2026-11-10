@@ -1,7 +1,7 @@
-# Lumina agent sandbox.
+# Zylara agent sandbox.
 #
 # Build:
-#   docker build -t lumina/agent:latest docker/agent
+#   docker build -t zylara/agent:latest docker/agent
 #
 # The workspace is mounted at /workspace by the app; this image only provides
 # the common toolchains. It intentionally has no agent secrets and no Docker

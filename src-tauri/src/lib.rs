@@ -1,4 +1,4 @@
-//! Lumina — desktop AI chat harness.
+//! Zylara — desktop AI chat harness.
 //!
 //! Layer map:
 //! - `catalog`:   bundled model catalog (protocols + reasoning capabilities)
@@ -68,7 +68,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
         .setup(|app| {
             crate::state::ensure_dirs(app.handle()).expect("failed to create app dirs");
             let state = crate::state::AppState::init(app.handle())
-                .expect("failed to initialize Lumina state");
+                .expect("failed to initialize Zylara state");
             app.manage(state);
             let data_dir = crate::config::data_dir(app.handle())
                 .expect("failed to resolve the app data directory");
@@ -148,7 +148,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                     retention,
                 );
                 if let Err(error) = crate::commands::docker::cleanup_containers(&state).await {
-                    eprintln!("lumina: limpeza de containers no boot falhou: {error}");
+                    eprintln!("zylara: limpeza de containers no boot falhou: {error}");
                 }
             });
             Ok(())
@@ -382,7 +382,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::terminal::list_terminals,
         ])
         .build(context)
-        .expect("error while building Lumina");
+        .expect("error while building Zylara");
 
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { code: None, api, .. } => {

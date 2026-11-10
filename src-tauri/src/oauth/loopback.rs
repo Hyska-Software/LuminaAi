@@ -99,7 +99,7 @@ pub async fn serve_once(
         } else {
             (
                 "Conta conectada",
-                "Você já pode voltar ao Lumina. Esta janela pode ser fechada.".to_string(),
+                "Você já pode voltar ao Zylara. Esta janela pode ser fechada.".to_string(),
             )
         };
         respond(&mut stream, 200, title, Some(&message)).await;

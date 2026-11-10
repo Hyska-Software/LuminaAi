@@ -213,7 +213,7 @@ describe('useUiStore sidebar width', () => {
   it('persists the width in the UI storage', () => {
     useUiStore.getState().setSidebarWidth(340);
 
-    const raw = window.localStorage.getItem('lumina.ui');
+    const raw = window.localStorage.getItem('zylara.ui');
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string) as { state?: { sidebarWidth?: number } };
     expect(persisted.state?.sidebarWidth).toBe(340);
@@ -221,7 +221,7 @@ describe('useUiStore sidebar width', () => {
 
   it('clamps a corrupted persisted width while rehydrating', async () => {
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({ version: 0, state: { sidebarWidth: 9000 } }),
     );
 
@@ -265,7 +265,7 @@ describe('useUiStore side panel width', () => {
   it('persists the width in the UI storage', () => {
     useUiStore.getState().setSidePanelWidth(520);
 
-    const raw = window.localStorage.getItem('lumina.ui');
+    const raw = window.localStorage.getItem('zylara.ui');
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string) as { state?: { sidePanelWidth?: number } };
     expect(persisted.state?.sidePanelWidth).toBe(520);
@@ -273,7 +273,7 @@ describe('useUiStore side panel width', () => {
 
   it('clamps a corrupted persisted width while rehydrating', async () => {
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({ version: 0, state: { sidePanelWidth: 9000 } }),
     );
 
@@ -296,7 +296,7 @@ describe('useUiStore side panel mode', () => {
     useUiStore.getState().setSidePanelMode('docked');
     expect(useUiStore.getState().sidePanelMode).toBe('docked');
 
-    const raw = window.localStorage.getItem('lumina.ui');
+    const raw = window.localStorage.getItem('zylara.ui');
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string) as { state?: { sidePanelMode?: string } };
     expect(persisted.state?.sidePanelMode).toBe('docked');
@@ -307,14 +307,14 @@ describe('useUiStore side panel mode', () => {
 
   it('keeps a valid docked preference and normalizes an invalid one while rehydrating', async () => {
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({ version: 0, state: { sidePanelMode: 'docked' } }),
     );
     await useUiStore.persist.rehydrate();
     expect(useUiStore.getState().sidePanelMode).toBe('docked');
 
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({ version: 0, state: { sidePanelMode: 'floating' } }),
     );
     await useUiStore.persist.rehydrate();
@@ -441,7 +441,7 @@ describe('useUiStore — layouts Chat e Code', () => {
     useUiStore.getState().setLayoutMode('code');
     useUiStore.getState().setCodePanelOpen(false);
 
-    const raw = window.localStorage.getItem('lumina.ui');
+    const raw = window.localStorage.getItem('zylara.ui');
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string) as {
       state?: { layoutMode?: string; codePanelOpen?: boolean };
@@ -452,7 +452,7 @@ describe('useUiStore — layouts Chat e Code', () => {
 
   it('keeps a valid persisted layout and normalizes corrupted values while rehydrating', async () => {
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({ version: 0, state: { layoutMode: 'code', codePanelOpen: false } }),
     );
     await useUiStore.persist.rehydrate();
@@ -463,7 +463,7 @@ describe('useUiStore — layouts Chat e Code', () => {
     // so storing it first would be overwritten before the rehydrate below.
     useUiStore.setState({ codePanelOpen: true });
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({ version: 0, state: { layoutMode: 'work', codePanelOpen: 'yes' } }),
     );
     await useUiStore.persist.rehydrate();
@@ -513,7 +513,7 @@ describe('useUiStore — visibilidade dos layouts', () => {
       agent: true,
     });
 
-    const raw = window.localStorage.getItem('lumina.ui');
+    const raw = window.localStorage.getItem('zylara.ui');
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string) as {
       state?: { enabledLayouts?: Record<string, boolean> };
@@ -558,7 +558,7 @@ describe('useUiStore — visibilidade dos layouts', () => {
 
   it('repairs a persisted snapshot that points at a hidden layout', async () => {
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({
         version: 0,
         state: {
@@ -579,7 +579,7 @@ describe('useUiStore — visibilidade dos layouts', () => {
     // `setState` persists, so the corrupted snapshot has to be written after it.
     useUiStore.setState({ codeView: 'session' });
     window.localStorage.setItem(
-      'lumina.ui',
+      'zylara.ui',
       JSON.stringify({
         version: 0,
         state: {

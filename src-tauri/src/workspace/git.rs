@@ -1253,8 +1253,8 @@ pub(crate) mod test_support {
             eprintln!("git init falhou: teste ignorado");
             return None;
         }
-        let _ = run_git(dir, &["config", "user.email", "teste@lumina.local"]);
-        let _ = run_git(dir, &["config", "user.name", "Teste Lumina"]);
+        let _ = run_git(dir, &["config", "user.email", "teste@zylara.local"]);
+        let _ = run_git(dir, &["config", "user.name", "Teste Zylara"]);
         std::fs::write(dir.join("a.txt"), "linha1\n").expect("escrever a.txt");
         if !run_git(dir, &["add", "."]) || !run_git(dir, &["commit", "-m", "initial commit"]) {
             eprintln!("commit inicial falhou: teste ignorado");
@@ -1457,7 +1457,7 @@ mod tests {
             temp.path(),
             &["clone", origin_str.as_str(), other.to_string_lossy().as_ref()]
         ));
-        assert!(run_git(&other, &["config", "user.email", "outro@lumina.local"]));
+        assert!(run_git(&other, &["config", "user.email", "outro@zylara.local"]));
         assert!(run_git(&other, &["config", "user.name", "Outro"]));
         fs::write(other.join("a.txt"), "linha1\nremoto\n").expect("modificar a");
         assert!(run_git(&other, &["commit", "-am", "alteração remota"]));
@@ -1841,8 +1841,8 @@ mod tests {
         let detail = commit_detail(temp.path(), &head, 0).await.expect("detalhe");
         assert_eq!(detail.hash, head);
         assert_eq!(detail.subject, "altera a e cria novo");
-        assert_eq!(detail.author, "Teste Lumina");
-        assert_eq!(detail.email, "teste@lumina.local");
+        assert_eq!(detail.author, "Teste Zylara");
+        assert_eq!(detail.email, "teste@zylara.local");
         assert!(!detail.date.is_empty());
         assert_eq!(detail.files.len(), 2);
 

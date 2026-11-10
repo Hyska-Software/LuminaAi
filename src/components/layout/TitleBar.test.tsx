@@ -36,7 +36,7 @@ function openAiProvider(): ProviderInfo {
     oauth: {
       issuer: 'https://auth.openai.com',
       registrationClientId: 'dynamic_agent_client',
-      agentNameHint: 'Lumina',
+      agentNameHint: 'Zylara',
       resource: 'https://api.openai.com/v1',
       scopes: ['openid', 'chatgpt.tokens.use.direct'],
       planUsageScope: 'chatgpt.tokens.use.direct',
@@ -71,7 +71,7 @@ describe('TitleBar', () => {
 
     await waitFor(() => expect(windowMock.isMaximized).toHaveBeenCalled());
 
-    expect(screen.getByText('Lumina')).toBeTruthy();
+    expect(screen.getByText('Zylara')).toBeTruthy();
     // The topbar search was removed; the command palette stays on ⌘/Ctrl+K.
     expect(screen.queryByRole('button', { name: 'Buscar conversas e comandos' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Minimizar' })).toBeTruthy();

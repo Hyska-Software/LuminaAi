@@ -394,7 +394,7 @@ describe('MessageList — UI generativa no layout Code', () => {
 
     render(<MessageList messages={[userMessage(), assistant]} streaming={null} />);
 
-    expect(document.querySelector('.lumina-genui')).toBeTruthy();
+    expect(document.querySelector('.zylara-genui')).toBeTruthy();
     expect(screen.getByText('Verificação do turno')).toBeTruthy();
     expect(screen.getByText('Testes')).toBeTruthy();
     expect(screen.queryByText(/ui\.invalid-json/)).toBeNull();

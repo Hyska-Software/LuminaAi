@@ -137,7 +137,7 @@ export function UpdateChip() {
         align="end"
         sideOffset={8}
         collisionPadding={12}
-        aria-label="Atualização do Lumina"
+        aria-label="Atualização do Zylara"
         className="w-[360px] p-4"
       >
         <UpdatePopoverBody onClose={() => setOpen(false)} />

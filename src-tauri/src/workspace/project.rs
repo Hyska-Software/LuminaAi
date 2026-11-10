@@ -235,12 +235,12 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         fs::write(
             temp.path().join("package.json"),
-            r#"{"name":"lumina-web","scripts":{"test":"vitest","lint":"eslint .","build":"vite build"}}"#,
+            r#"{"name":"zylara-web","scripts":{"test":"vitest","lint":"eslint .","build":"vite build"}}"#,
         )
         .expect("package.json");
         let profile = detect(temp.path());
         assert_eq!(profile.kind, "node");
-        assert_eq!(profile.name.as_deref(), Some("lumina-web"));
+        assert_eq!(profile.name.as_deref(), Some("zylara-web"));
         let ids: Vec<&str> = profile.checks.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, vec!["npm:test", "npm:lint", "npm:build"]);
         assert_eq!(profile.checks[0].command, "npm run test");
@@ -264,12 +264,12 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         fs::write(
             temp.path().join("Cargo.toml"),
-            "[package]\nname = \"lumina\"\nversion = \"0.1.0\"\n",
+            "[package]\nname = \"zylara\"\nversion = \"0.1.0\"\n",
         )
         .expect("Cargo.toml");
         let profile = detect(temp.path());
         assert_eq!(profile.kind, "rust");
-        assert_eq!(profile.name.as_deref(), Some("lumina"));
+        assert_eq!(profile.name.as_deref(), Some("zylara"));
         assert!(profile.checks.iter().any(|c| c.id == "cargo:test"));
     }
 

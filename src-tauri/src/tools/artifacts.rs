@@ -592,7 +592,7 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "lumina-artifacts-test-{}",
+                "zylara-artifacts-test-{}",
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&path).expect("criar diretório temporário");

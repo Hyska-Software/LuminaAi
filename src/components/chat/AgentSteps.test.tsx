@@ -643,7 +643,7 @@ describe('AgentSteps — raciocínio em Markdown', () => {
     expect(container.querySelector('strong')?.textContent).toBe('negrito');
     expect(container.querySelector('ul li')?.textContent).toBe('item um');
     expect(container.querySelector('table th')?.textContent).toBe('coluna');
-    expect(container.querySelector('.lumina-table-wrap')).toBeTruthy();
+    expect(container.querySelector('.zylara-table-wrap')).toBeTruthy();
     // Código cercado vira card com header da linguagem + ação de copiar.
     expect(screen.getByText('ts')).toBeTruthy();
     expect(container.textContent).toContain('const valor = 1;');
@@ -689,24 +689,24 @@ describe('AgentSteps — raciocínio em Markdown', () => {
 
     await expandTimeline(user);
 
-    const prose = container.querySelector('.lumina-prose');
+    const prose = container.querySelector('.zylara-prose');
     expect(prose).toBeTruthy();
-    expect(prose?.classList.contains('lumina-prose--thinking')).toBe(true);
+    expect(prose?.classList.contains('zylara-prose--thinking')).toBe(true);
     expect(prose?.classList.contains('text-[15px]')).toBe(false);
   });
 
   it('abre links externos do raciocínio pelo navegador do sistema', async () => {
     const user = userEvent.setup();
     openExternalUrl.mockClear();
-    renderTimeline('Veja o [site do Lumina](https://lumina.dev/docs).');
+    renderTimeline('Veja o [site do Zylara](https://zylara.dev/docs).');
 
     await expandTimeline(user);
 
-    const link = screen.getByRole('link', { name: 'site do Lumina' });
-    expect(link.getAttribute('href')).toBe('https://lumina.dev/docs');
+    const link = screen.getByRole('link', { name: 'site do Zylara' });
+    expect(link.getAttribute('href')).toBe('https://zylara.dev/docs');
     expect(link.getAttribute('target')).toBeNull();
     await user.click(link);
-    expect(openExternalUrl).toHaveBeenCalledWith('https://lumina.dev/docs');
+    expect(openExternalUrl).toHaveBeenCalledWith('https://zylara.dev/docs');
   });
 
   it('mantém raciocínio em texto puro visível com o rótulo "Pensou"', async () => {
@@ -749,10 +749,10 @@ describe('AgentSteps — raciocínio em Markdown', () => {
       await user.click(row);
     }
 
-    const blocks = Array.from(container.querySelectorAll<HTMLElement>('.lumina-prose'));
+    const blocks = Array.from(container.querySelectorAll<HTMLElement>('.zylara-prose'));
     expect(blocks).toHaveLength(2);
-    expect(blocks[0].classList.contains('lumina-prose--streaming')).toBe(false);
-    expect(blocks[1].classList.contains('lumina-prose--streaming')).toBe(true);
+    expect(blocks[0].classList.contains('zylara-prose--streaming')).toBe(false);
+    expect(blocks[1].classList.contains('zylara-prose--streaming')).toBe(true);
   });
 
   it('não mostra caret quando a fase não é raciocínio', async () => {
@@ -773,8 +773,8 @@ describe('AgentSteps — raciocínio em Markdown', () => {
 
     await user.click(screen.getByRole('button', { name: 'Pensou' }));
 
-    expect(container.querySelector('.lumina-prose--streaming')).toBeNull();
-    expect(container.querySelector('.lumina-prose')).toBeTruthy();
+    expect(container.querySelector('.zylara-prose--streaming')).toBeNull();
+    expect(container.querySelector('.zylara-prose')).toBeTruthy();
   });
 
   it('preserva os resumos agrupados do layout Chat com raciocínio em Markdown', async () => {

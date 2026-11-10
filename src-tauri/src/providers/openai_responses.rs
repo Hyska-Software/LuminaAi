@@ -716,7 +716,7 @@ mod tests {
                 api_key: "sk-test".to_string(),
                 model,
                 session_id: "session".to_string(),
-                user_agent: "Lumina/test".to_string(),
+                user_agent: "Zylara/test".to_string(),
                 endpoints: provider.endpoints.clone(),
                 request_profile: profile,
                 auth_mode: if matches!(profile, RequestProfile::ChatgptPlan) {
@@ -733,7 +733,7 @@ mod tests {
                 HistoryMessage::assistant("hi there"),
                 HistoryMessage::tool_result("call_1", "echo", r#"{"ok":true}"#),
             ],
-            system_prompt: "You are Lumina.".to_string(),
+            system_prompt: "You are Zylara.".to_string(),
             tools: vec![ToolDefinition {
                 name: "echo".to_string(),
                 description: "Echo text back.".to_string(),
@@ -772,7 +772,7 @@ mod tests {
         );
         assert_eq!(
             body["instructions"],
-            json!("You are Lumina.\n\nsystem from history")
+            json!("You are Zylara.\n\nsystem from history")
         );
         assert_eq!(body["tools"][0]["type"], json!("function"));
         assert_eq!(body["tools"][0]["name"], json!("echo"));
@@ -829,7 +829,7 @@ mod tests {
         // Preserved: instructions, client function tools, reasoning.
         assert_eq!(
             body["instructions"],
-            json!("You are Lumina.\n\nsystem from history")
+            json!("You are Zylara.\n\nsystem from history")
         );
         assert_eq!(body["tools"][0]["type"], json!("function"));
         assert_eq!(body["tools"][0]["name"], json!("echo"));

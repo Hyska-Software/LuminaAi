@@ -37,11 +37,11 @@ export function AgentComputerControl({ conversationId }: { conversationId: strin
       role="group"
       aria-label="Computer use ativo"
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-warning/30 bg-warning-soft py-1 pl-2 pr-1 text-warning"
-      title={`Lumina está controlando o computador · ${session.backend}`}
+      title={`Zylara está controlando o computador · ${session.backend}`}
     >
       <MonitorStop className="size-3.5 shrink-0" aria-hidden />
       <span className="hidden max-w-56 truncate text-[11px] font-medium xl:inline">
-        Lumina está controlando o computador
+        Zylara está controlando o computador
       </span>
       <span className="text-[11px] font-medium xl:hidden">Controlando</span>
       <Button

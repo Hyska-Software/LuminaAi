@@ -189,7 +189,7 @@ fn import_paths_impl(
     }
     if !errors.is_empty() {
         // Partial import: the UI still gets the good attachments.
-        eprintln!("[lumina] anexos ignorados: {}", errors.join("; "));
+        eprintln!("[zylara] anexos ignorados: {}", errors.join("; "));
     }
     Ok(imported)
 }

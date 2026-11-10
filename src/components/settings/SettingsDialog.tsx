@@ -55,7 +55,7 @@ export function SettingsDialog() {
             <div className="px-4 pb-3 pt-5">
               <DialogTitle className="text-[15px]">Configurações</DialogTitle>
               <DialogDescription className="mt-0.5 text-[11px]">
-                Preferências do Lumina
+                Preferências do Zylara
               </DialogDescription>
             </div>
             <TabsList variant="sidebar" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">

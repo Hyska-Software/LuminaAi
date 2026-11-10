@@ -1,7 +1,7 @@
 ﻿#requires -Version 5.1
 <#
 .SYNOPSIS
-    Atualiza a versão do Lumina em todos os arquivos de origem.
+    Atualiza a versão do Zylara em todos os arquivos de origem.
 
 .DESCRIPTION
     Interativo. Não compila, não roda testes e não gera instalador.
@@ -123,7 +123,7 @@ $nextMinor = "$($core.Major).$($core.Minor + 1).0"
 $nextMajor = "$($core.Major + 1).0.0"
 
 Write-Host ''
-Write-Host 'Lumina - atualização de versão' -ForegroundColor Cyan
+Write-Host 'Zylara - atualização de versão' -ForegroundColor Cyan
 Write-Host ''
 Write-Host 'Fontes atuais:' -ForegroundColor DarkGray
 $rows = @(

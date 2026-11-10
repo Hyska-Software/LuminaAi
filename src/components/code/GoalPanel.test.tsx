@@ -121,7 +121,7 @@ afterEach(cleanup);
 describe('GoalPanel — estados', () => {
   it('sem objetivo mostra o estado vazio com CTA do fluxo /goal', () => {
     const listener = vi.fn();
-    window.addEventListener('lumina:goal-intent', listener);
+    window.addEventListener('zylara:goal-intent', listener);
     try {
       // View do painel aberta: o composer está oculto atrás dela.
       useUiStore.setState({ codeView: 'goal', codeGoalOpen: true });
@@ -139,7 +139,7 @@ describe('GoalPanel — estados', () => {
       expect(useUiStore.getState().codeView).toBe('session');
       expect(useUiStore.getState().codeGoalOpen).toBe(false);
     } finally {
-      window.removeEventListener('lumina:goal-intent', listener);
+      window.removeEventListener('zylara:goal-intent', listener);
     }
   });
 
@@ -259,7 +259,7 @@ describe('GoalPanel — ações', () => {
 
   it('concluído oferece Reabrir e Novo objetivo pelo fluxo /goal', () => {
     const listener = vi.fn();
-    window.addEventListener('lumina:goal-intent', listener);
+    window.addEventListener('zylara:goal-intent', listener);
     try {
       seedSession({ goal: goal({ status: 'completed', completedAt: Date.now() - 1_000 }) });
       useUiStore.setState({ codeView: 'goal', codeGoalOpen: true });
@@ -275,7 +275,7 @@ describe('GoalPanel — ações', () => {
       expect(useUiStore.getState().codeView).toBe('session');
       expect(useUiStore.getState().codeGoalOpen).toBe(false);
     } finally {
-      window.removeEventListener('lumina:goal-intent', listener);
+      window.removeEventListener('zylara:goal-intent', listener);
     }
   });
 });

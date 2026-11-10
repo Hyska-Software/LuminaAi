@@ -28,7 +28,7 @@ export function MermaidBlock({ code, className }: MermaidBlockProps) {
     setSvg(null);
     setError(null);
 
-    const renderId = `lumina-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}-${++renderCounter}`;
+    const renderId = `zylara-mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}-${++renderCounter}`;
 
     void (async () => {
       try {

@@ -618,7 +618,7 @@ mod tests {
             api_key: "sk-ant-test".to_string(),
             model,
             session_id: "session-1".to_string(),
-            user_agent: "Lumina/test".to_string(),
+            user_agent: "Zylara/test".to_string(),
             endpoints: provider.endpoints.clone(),
             request_profile: RequestProfile::Standard,
             auth_mode: ProviderAuth::ApiKey,
@@ -628,7 +628,7 @@ mod tests {
             config,
             protocols: vec![WireProtocol::Anthropic],
             history: vec![HistoryMessage::user("diga olá")],
-            system_prompt: "Você é o Lumina.".to_string(),
+            system_prompt: "Você é o Zylara.".to_string(),
             tools: vec![ToolDefinition {
                 name: "echo".to_string(),
                 description: "Devolve o texto recebido.".to_string(),
@@ -681,7 +681,7 @@ mod tests {
             body["max_tokens"].as_u64().unwrap_or(0) > 0,
             "max_tokens ausente: {body}"
         );
-        assert_eq!(body["system"], json!("Você é o Lumina."));
+        assert_eq!(body["system"], json!("Você é o Zylara."));
         assert_eq!(
             body["messages"],
             json!([{

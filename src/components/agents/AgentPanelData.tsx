@@ -96,8 +96,8 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
   useEffect(() => {
     void load();
     const reload = () => void load();
-    window.addEventListener('lumina:agent-task-updated', reload);
-    return () => window.removeEventListener('lumina:agent-task-updated', reload);
+    window.addEventListener('zylara:agent-task-updated', reload);
+    return () => window.removeEventListener('zylara:agent-task-updated', reload);
   }, [load]);
 
   const openTasks = tasks.filter((task) =>

@@ -4,7 +4,7 @@
  * O agente NUNCA executa código na interface: `actions` apenas declara uma de
  * duas intenções permitidas pelo contrato (`data/genui-contract.json`):
  *
- * - `prompt`: preenche o composer (evento `lumina:suggest`) para o usuário
+ * - `prompt`: preenche o composer (evento `zylara:suggest`) para o usuário
  *   revisar e enviar — nunca dispara um turno sozinho;
  * - `copy`: copia texto para a área de transferência.
  *
@@ -32,7 +32,7 @@ export async function runGenUIAction(item: GenUIActionItem): Promise<GenUIAction
     if (typeof window === 'undefined') {
       return { ok: false, message: 'Não foi possível preparar a sugestão.' };
     }
-    window.dispatchEvent(new CustomEvent<string>('lumina:suggest', { detail: prompt }));
+    window.dispatchEvent(new CustomEvent<string>('zylara:suggest', { detail: prompt }));
     return { ok: true };
   }
 

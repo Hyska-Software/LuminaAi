@@ -23,7 +23,7 @@ impl AppAgentHooks {
 impl AgentHooks for AppAgentHooks {
     fn task_updated(&self, task: &crate::agents::AgentTask) {
         let _ = self.app.emit(
-            "lumina:agent-task-updated",
+            "zylara:agent-task-updated",
             AgentTaskUpdatedEvent {
                 task_id: task.id.clone(),
                 owner_agent_id: task.owner_agent_id.clone(),
@@ -36,7 +36,7 @@ impl AgentHooks for AppAgentHooks {
 
     fn channel_updated(&self, channel_id: &str) {
         let _ = self.app.emit(
-            "lumina:agent-channel-updated",
+            "zylara:agent-channel-updated",
             AgentChannelUpdatedEvent {
                 channel_id: channel_id.to_string(),
             },
@@ -63,7 +63,7 @@ impl AgentHooks for AppAgentHooks {
 
     fn agent_created(&self, agent: &crate::agents::Agent) {
         let _ = self.app.emit(
-            "lumina:agent-created",
+            "zylara:agent-created",
             serde_json::json!({ "agentId": agent.id, "name": agent.name }),
         );
     }

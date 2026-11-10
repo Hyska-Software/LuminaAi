@@ -29,7 +29,7 @@ const MESSAGE_MOTION = {
   transition: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
 };
 
-/** Blinking caret is rendered by `.lumina-prose--streaming` in globals.css. */
+/** Blinking caret is rendered by `.zylara-prose--streaming` in globals.css. */
 
 function useCopyFeedback() {
   const [copied, setCopied] = useState(false);
@@ -201,7 +201,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   );
   /* The Code workbench is task-focused: the assistant avatar (brand mark) adds
      chrome without information, so it only belongs to the Chat layout. In the
-     Agentes layout the avatar is the persona, not the Lumina brand. */
+     Agentes layout the avatar is the persona, not the Zylara brand. */
   const showAssistantAvatar = layoutMode !== 'code';
   const assistantAvatar =
     layoutMode === 'agent' && conversationAgent ? (
@@ -242,7 +242,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   const isKeyError = message.status === 'error' && KEY_ERROR_PATTERN.test(message.content ?? '');
 
   const regenerate = () => {
-    window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
+    window.dispatchEvent(new CustomEvent('zylara:scroll-bottom'));
     void useChatStore.getState().regenerate();
   };
 

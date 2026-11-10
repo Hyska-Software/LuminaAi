@@ -124,18 +124,18 @@ describe('corpus de paridade GenUI v2', () => {
 });
 
 describe('ações interativas', () => {
-  it('prompt preenche o composer via evento lumina:suggest', async () => {
+  it('prompt preenche o composer via evento zylara:suggest', async () => {
     const received: string[] = [];
     const listener = (event: Event) => {
       received.push((event as CustomEvent<string>).detail);
     };
-    window.addEventListener('lumina:suggest', listener);
+    window.addEventListener('zylara:suggest', listener);
     try {
       const outcome = await runGenUIAction({ label: 'Ver', prompt: 'Detalhe a receita.' });
       expect(outcome.ok).toBe(true);
       expect(received).toEqual(['Detalhe a receita.']);
     } finally {
-      window.removeEventListener('lumina:suggest', listener);
+      window.removeEventListener('zylara:suggest', listener);
     }
   });
 

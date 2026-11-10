@@ -374,7 +374,7 @@ export const useAppStore = create<AppState>()(
       setError: (error) => set({ error }),
     }),
     {
-      name: 'lumina.app',
+      name: 'zylara.app',
       partialize: (state) => ({ selection: state.selection, favorites: state.favorites }),
     },
   ),

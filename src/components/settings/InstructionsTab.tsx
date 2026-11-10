@@ -71,7 +71,7 @@ export function InstructionsTab() {
     <div className="flex flex-col gap-6">
       <SettingsSection
         title="Instruções do sistema"
-        description="Um prompt personalizado anexado a todas as conversas, além das instruções padrão da Lumina."
+        description="Um prompt personalizado anexado a todas as conversas, além das instruções padrão da Zylara."
       >
         <SettingsBlock>
           <Textarea
@@ -81,7 +81,7 @@ export function InstructionsTab() {
             rows={12}
             aria-label="Instruções do sistema"
             placeholder={
-              'Ex.: “Responda em português brasileiro, com objetividade. Use tabelas quando fizer sentido e cite fontes ao usar a busca.”\n\nDeixe em branco para usar apenas as instruções padrão da Lumina (idioma, ferramentas, formato de UI generativa e segurança).'
+              'Ex.: “Responda em português brasileiro, com objetividade. Use tabelas quando fizer sentido e cite fontes ao usar a busca.”\n\nDeixe em branco para usar apenas as instruções padrão da Zylara (idioma, ferramentas, formato de UI generativa e segurança).'
             }
             className="min-h-[240px] resize-y font-normal"
           />

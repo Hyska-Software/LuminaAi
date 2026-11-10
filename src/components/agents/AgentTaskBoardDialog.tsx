@@ -92,8 +92,8 @@ export function AgentTaskBoardDialog({
     if (!open) return;
     void load();
     const reload = () => void load();
-    window.addEventListener('lumina:agent-task-updated', reload);
-    return () => window.removeEventListener('lumina:agent-task-updated', reload);
+    window.addEventListener('zylara:agent-task-updated', reload);
+    return () => window.removeEventListener('zylara:agent-task-updated', reload);
   }, [open, load]);
 
   const agentById = (id: string): Agent | undefined =>

@@ -304,7 +304,7 @@ pub fn routine_next_run_at(
 #[serde(rename_all = "camelCase")]
 pub struct AgentExportDocument {
     pub version: u32,
-    /// Always `lumina-agent`.
+    /// Always `zylara-agent`.
     pub kind: String,
     pub agent: AgentInput,
     #[serde(default)]
@@ -313,14 +313,14 @@ pub struct AgentExportDocument {
 
 pub const AGENT_EXPORT_VERSION: u32 = 2;
 
-/// Upgrades a version-1 `lumina-agent` document in place: the old `emoji`
+/// Upgrades a version-1 `zylara-agent` document in place: the old `emoji`
 /// field becomes an emoji avatar and the version moves to 2.
 pub fn upgrade_agent_export_v1(value: &mut serde_json::Value) -> Result<(), String> {
     let object = value
         .as_object_mut()
         .ok_or_else(|| "AGENT_IMPORT_INVALID: o documento precisa ser um objeto JSON.".to_string())?;
-    if object.get("kind").and_then(|value| value.as_str()) != Some("lumina-agent") {
-        return Err("AGENT_IMPORT_INVALID: o arquivo não é um agente do Lumina.".to_string());
+    if object.get("kind").and_then(|value| value.as_str()) != Some("zylara-agent") {
+        return Err("AGENT_IMPORT_INVALID: o arquivo não é um agente do Zylara.".to_string());
     }
     if object.get("version").and_then(|value| value.as_u64()) != Some(1) {
         return Err("AGENT_IMPORT_INVALID: versão de documento não suportada.".to_string());
@@ -347,7 +347,7 @@ impl AgentExportDocument {
     pub fn from_agent(agent: &Agent, memories: &[AgentMemory]) -> Self {
         Self {
             version: AGENT_EXPORT_VERSION,
-            kind: "lumina-agent".to_string(),
+            kind: "zylara-agent".to_string(),
             agent: AgentInput {
                 name: agent.name.clone(),
                 role: agent.role.clone(),
@@ -387,9 +387,9 @@ impl AgentExportDocument {
                 self.version
             ));
         }
-        if self.kind != "lumina-agent" {
+        if self.kind != "zylara-agent" {
             return Err(
-                "AGENT_IMPORT_INVALID: o arquivo não é um agente do Lumina.".to_string(),
+                "AGENT_IMPORT_INVALID: o arquivo não é um agente do Zylara.".to_string(),
             );
         }
         self.agent = normalize_input(self.agent)?;
@@ -1338,7 +1338,7 @@ pub fn prompt_fields_changed(current: &Agent, next: &AgentInput) -> bool {
 }
 
 /// The agent block is inserted before the global user instructions, after the
-/// base Lumina prompt. It is configuration, not a grant of authority.
+/// base Zylara prompt. It is configuration, not a grant of authority.
 pub fn prompt_section(agent: &Agent) -> String {
     // Kept as a standalone function so the harness builds the exact same text
     // in production and in the prompt-order tests.
@@ -1566,7 +1566,7 @@ mod tests {
     fn upgrades_a_v1_export_document_to_an_emoji_avatar() {
         let mut value = serde_json::json!({
             "version": 1,
-            "kind": "lumina-agent",
+            "kind": "zylara-agent",
             "agent": {
                 "name": "Irineu",
                 "role": "Engenheiro",

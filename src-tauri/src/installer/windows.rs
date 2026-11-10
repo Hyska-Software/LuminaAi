@@ -20,10 +20,10 @@ use super::{
     ExistingInstall, InstallOptions, InstallScope, InstallStep, InstallerEvent, InstallerState,
 };
 
-const APP_EXE: &str = "Lumina.exe";
-const APP_ID: &str = "app.lumina.chat";
-const INSTALL_MARKER: &str = ".lumina-install";
-const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Lumina";
+const APP_EXE: &str = "Zylara.exe";
+const APP_ID: &str = "app.zylara.chat";
+const INSTALL_MARKER: &str = ".zylara-install";
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Zylara";
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const WEBVIEW2_GUID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 
@@ -34,11 +34,11 @@ const WEBVIEW2_GUID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
 pub fn default_install_path(scope: InstallScope) -> String {
     let path = match scope {
         InstallScope::User => std::env::var("LOCALAPPDATA")
-            .map(|base| PathBuf::from(base).join("Programs").join("Lumina"))
-            .unwrap_or_else(|_| PathBuf::from(r"C:\Users\Public\Lumina")),
+            .map(|base| PathBuf::from(base).join("Programs").join("Zylara"))
+            .unwrap_or_else(|_| PathBuf::from(r"C:\Users\Public\Zylara")),
         InstallScope::Machine => std::env::var("ProgramFiles")
-            .map(|base| PathBuf::from(base).join("Lumina"))
-            .unwrap_or_else(|_| PathBuf::from(r"C:\Program Files\Lumina")),
+            .map(|base| PathBuf::from(base).join("Zylara"))
+            .unwrap_or_else(|_| PathBuf::from(r"C:\Program Files\Zylara")),
     };
     path.to_string_lossy().to_string()
 }
@@ -67,7 +67,7 @@ pub fn data_paths() -> Vec<String> {
 /// while the uninstaller UI is still running.
 pub fn setup_webview_data_dir() -> PathBuf {
     std::env::temp_dir()
-        .join("LuminaSetup")
+        .join("ZylaraSetup")
         .join(format!("WebView2-{}", std::process::id()))
 }
 
@@ -88,12 +88,12 @@ fn start_menu_dir(scope: InstallScope) -> Option<PathBuf> {
     match scope {
         InstallScope::User => appdata_dir().map(|base| {
             base.join(r"Microsoft\Windows\Start Menu\Programs")
-                .join("Lumina")
+                .join("Zylara")
         }),
         InstallScope::Machine => std::env::var("ProgramData").ok().map(|base| {
             PathBuf::from(base)
                 .join(r"Microsoft\Windows\Start Menu\Programs")
-                .join("Lumina")
+                .join("Zylara")
         }),
     }
 }
@@ -156,7 +156,7 @@ fn same_path(a: &Path, b: &Path) -> bool {
 
 pub fn new_log_path() -> PathBuf {
     let stamp = Local::now().format("%Y%m%d-%H%M%S");
-    std::env::temp_dir().join(format!("Lumina-Setup-{stamp}.log"))
+    std::env::temp_dir().join(format!("Zylara-Setup-{stamp}.log"))
 }
 
 pub fn write_log(state: &InstallerState, message: &str) {
@@ -259,9 +259,9 @@ fn register_uninstall(scope: InstallScope, install_path: &Path) -> Result<()> {
     let target = install_path.join(APP_EXE);
     let location = format!("\"{}\"", install_path.display());
     let quoted = format!("\"{}\"", target.display());
-    key.set_value("DisplayName", &"Lumina".to_string())?;
+    key.set_value("DisplayName", &"Zylara".to_string())?;
     key.set_value("DisplayVersion", &env!("CARGO_PKG_VERSION").to_string())?;
-    key.set_value("Publisher", &"Lumina".to_string())?;
+    key.set_value("Publisher", &"Zylara".to_string())?;
     key.set_value("InstallLocation", &location)?;
     key.set_value("DisplayIcon", &format!("{},0", quoted))?;
     key.set_value("UninstallString", &format!("{quoted} --uninstall"))?;
@@ -338,15 +338,15 @@ fn create_shortcut(
 
 fn remove_shortcuts(scope: InstallScope) {
     if let Some(programs) = start_menu_dir(scope) {
-        let _ = fs::remove_file(programs.join("Lumina.lnk"));
-        let _ = fs::remove_file(programs.join("Desinstalar Lumina.lnk"));
+        let _ = fs::remove_file(programs.join("Zylara.lnk"));
+        let _ = fs::remove_file(programs.join("Desinstalar Zylara.lnk"));
         let _ = fs::remove_dir(&programs);
     }
     if let Some(desktop) = desktop_dir(scope) {
-        let shortcut = desktop.join("Lumina.lnk");
+        let shortcut = desktop.join("Zylara.lnk");
         // Only remove a shortcut that points at the executable we installed.
         if shortcut_target(&shortcut)
-            .map(|target| target.to_ascii_lowercase().ends_with("lumina.exe"))
+            .map(|target| target.to_ascii_lowercase().ends_with("zylara.exe"))
             .unwrap_or(false)
         {
             let _ = fs::remove_file(shortcut);
@@ -384,7 +384,7 @@ fn shortcut_target(path: &Path) -> Option<String> {
 
 fn running_pids() -> Vec<u32> {
     let Ok(output) = Command::new("tasklist")
-        .args(["/FI", "IMAGENAME eq Lumina.exe", "/FO", "CSV", "/NH"])
+        .args(["/FI", "IMAGENAME eq Zylara.exe", "/FO", "CSV", "/NH"])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
     else {
@@ -402,7 +402,7 @@ fn running_pids() -> Vec<u32> {
         let Some(image) = fields.next() else {
             continue;
         };
-        if !image.trim_start_matches('"').eq_ignore_ascii_case("lumina.exe") {
+        if !image.trim_start_matches('"').eq_ignore_ascii_case("zylara.exe") {
             continue;
         }
         let Some(pid) = fields
@@ -442,7 +442,7 @@ pub fn close_running_app() -> Result<()> {
         }
         sleep(Duration::from_millis(250));
     }
-    bail!("O Lumina não fechou. Feche o aplicativo manualmente e tente novamente.")
+    bail!("O Zylara não fechou. Feche o aplicativo manualmente e tente novamente.")
 }
 
 /* ------------------------------------------------------------------ */
@@ -475,8 +475,8 @@ pub fn ensure_webview2(interactive: bool) -> Result<()> {
 
     if interactive {
         native_message(
-            "Lumina Setup",
-            "O Lumina usa o Microsoft Edge WebView2. O instalador vai baixar e instalar esse componente agora.",
+            "Zylara Setup",
+            "O Zylara usa o Microsoft Edge WebView2. O instalador vai baixar e instalar esse componente agora.",
             false,
         );
     }
@@ -612,13 +612,13 @@ pub fn schedule_self_delete(state: &InstallerState) {
     if let Ok(entries) = fs::read_dir(&temp) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("Lumina-cleanup-") && name.ends_with(".cmd") {
+            if name.starts_with("Zylara-cleanup-") && name.ends_with(".cmd") {
                 let _ = fs::remove_file(entry.path());
             }
         }
     }
     let cleanup = temp.join(format!(
-        "Lumina-cleanup-{}.cmd",
+        "Zylara-cleanup-{}.cmd",
         Local::now().format("%Y%m%d-%H%M%S")
     ));
     // A small .cmd file avoids cmd.exe quote parsing surprises when the temp
@@ -652,7 +652,7 @@ pub fn schedule_self_delete(state: &InstallerState) {
 pub fn relaunch_from_temp_uninstall() -> Result<()> {
     let exe = std::env::current_exe().context("não foi possível localizar o instalador")?;
     let stamp = Local::now().format("%Y%m%d-%H%M%S");
-    let temp = std::env::temp_dir().join(format!("Lumina-uninstall-{stamp}.exe"));
+    let temp = std::env::temp_dir().join(format!("Zylara-uninstall-{stamp}.exe"));
     fs::copy(&exe, &temp).context("falha ao preparar o desinstalador temporário")?;
 
     let original: Vec<String> = std::env::args().skip(1).collect();
@@ -714,13 +714,13 @@ fn validate_options(options: &InstallOptions, existing: Option<&ExistingInstall>
     }
     if let Some(windows_dir) = std::env::var("WINDIR").ok() {
         if lower.starts_with(&windows_dir.to_ascii_lowercase()) {
-            bail!("Não instale o Lumina dentro da pasta do Windows.");
+            bail!("Não instale o Zylara dentro da pasta do Windows.");
         }
     }
     if let Some(existing) = existing {
         if !same_path(Path::new(&existing.path), path_ref) {
             bail!(
-                "O Lumina já está instalado em {}. Use a mesma pasta ou desinstale antes de mover.",
+                "O Zylara já está instalado em {}. Use a mesma pasta ou desinstale antes de mover.",
                 existing.path
             );
         }
@@ -765,7 +765,7 @@ fn copy_payload(install_path: &Path) -> Result<()> {
         if replaced.is_err() {
             fs::remove_file(&target).with_context(|| {
                 format!(
-                    "o Lumina está aberto ou o arquivo está bloqueado: {}",
+                    "o Zylara está aberto ou o arquivo está bloqueado: {}",
                     target.display()
                 )
             })?;
@@ -813,7 +813,7 @@ fn validate_install_marker(install_path: &Path) -> Result<()> {
         return Ok(());
     }
     bail!(
-        "A pasta {} não parece uma instalação do Lumina (marcador ausente).",
+        "A pasta {} não parece uma instalação do Zylara (marcador ausente).",
         install_path.display()
     )
 }
@@ -840,7 +840,7 @@ fn install_inner(
         InstallScope::Machine => InstallScope::User,
     });
     if conflicting.is_some() {
-        bail!("Já existe uma instalação do Lumina em outro escopo. Remova-a antes de continuar.");
+        bail!("Já existe uma instalação do Zylara em outro escopo. Remova-a antes de continuar.");
     }
 
     step(emit, "prepare", "Validar destino e permissões", "running", None);
@@ -890,13 +890,13 @@ fn install_inner(
     step(emit, "prepare", "Validar destino e permissões", "done", None);
     cancel_before_copy(state)?;
 
-    step(emit, "closeApp", "Fechar o Lumina em execução", "running", None);
+    step(emit, "closeApp", "Fechar o Zylara em execução", "running", None);
     progress(emit, 16.0, "Verificando o aplicativo em execução…");
     if app_running() {
-        log_event(state, emit, "fechando o Lumina em execução");
+        log_event(state, emit, "fechando o Zylara em execução");
         close_running_app()?;
     }
-    step(emit, "closeApp", "Fechar o Lumina em execução", "done", None);
+    step(emit, "closeApp", "Fechar o Zylara em execução", "done", None);
     cancel_before_copy(state)?;
 
     step(emit, "copy", "Copiar arquivos do aplicativo", "running", None);
@@ -918,17 +918,17 @@ fn install_inner(
         if options.start_menu_shortcut {
             if let Some(programs) = start_menu_dir(options.scope) {
                 create_shortcut(
-                    &programs.join("Lumina.lnk"),
+                    &programs.join("Zylara.lnk"),
                     &target,
                     &install_path,
-                    "Lumina — chat desktop com agentes",
+                    "Zylara — chat desktop com agentes",
                     None,
                 )?;
                 create_shortcut(
-                    &programs.join("Desinstalar Lumina.lnk"),
+                    &programs.join("Desinstalar Zylara.lnk"),
                     &target,
                     &install_path,
-                    "Desinstalar o Lumina",
+                    "Desinstalar o Zylara",
                     Some("--uninstall"),
                 )?;
             }
@@ -936,10 +936,10 @@ fn install_inner(
         if options.desktop_shortcut {
             if let Some(desktop) = desktop_dir(options.scope) {
                 create_shortcut(
-                    &desktop.join("Lumina.lnk"),
+                    &desktop.join("Zylara.lnk"),
                     &target,
                     &install_path,
-                    "Lumina — chat desktop com agentes",
+                    "Zylara — chat desktop com agentes",
                     None,
                 )?;
             }
@@ -962,23 +962,23 @@ fn install_inner(
 
     let mut launched = false;
     if options.launch_after_install {
-        step(emit, "launch", "Iniciar o Lumina", "running", None);
-        progress(emit, 94.0, "Abrindo o Lumina…");
+        step(emit, "launch", "Iniciar o Zylara", "running", None);
+        progress(emit, 94.0, "Abrindo o Zylara…");
         if let Err(error) = launch_installed(&install_path.to_string_lossy()) {
             log_event(state, emit, format!("aviso ao abrir o app: {error:#}"));
             step(
                 emit,
                 "launch",
-                "Iniciar o Lumina",
+                "Iniciar o Zylara",
                 "error",
                 Some(format!("{error:#}")),
             );
         } else {
             launched = true;
-            step(emit, "launch", "Iniciar o Lumina", "done", None);
+            step(emit, "launch", "Iniciar o Zylara", "done", None);
         }
     } else {
-        step(emit, "launch", "Iniciar o Lumina", "skipped", None);
+        step(emit, "launch", "Iniciar o Zylara", "skipped", None);
     }
 
     progress(emit, 100.0, "Concluído");
@@ -1049,7 +1049,7 @@ fn uninstall_inner(
     emit: &dyn Fn(InstallerEvent),
 ) -> Result<String> {
     let existing = find_install()
-        .ok_or_else(|| anyhow!("O Lumina não está instalado para este usuário."))?;
+        .ok_or_else(|| anyhow!("O Zylara não está instalado para este usuário."))?;
     write_log(
         state,
         &format!(
@@ -1076,12 +1076,12 @@ fn uninstall_inner(
     step(emit, "prepare", "Validar a instalação", "done", None);
     check_cancel(state)?;
 
-    step(emit, "closeApp", "Fechar o Lumina em execução", "running", None);
+    step(emit, "closeApp", "Fechar o Zylara em execução", "running", None);
     progress(emit, 16.0, "Fechando o aplicativo…");
     if app_running() {
         close_running_app()?;
     }
-    step(emit, "closeApp", "Fechar o Lumina em execução", "done", None);
+    step(emit, "closeApp", "Fechar o Zylara em execução", "done", None);
     check_cancel(state)?;
 
     // Remove user data while the installation is still registered. If data
@@ -1104,7 +1104,7 @@ fn uninstall_inner(
     if install_path.exists() {
         fs::remove_dir_all(&install_path).with_context(|| {
             format!(
-                "falha ao remover {}; feche o Lumina e tente novamente",
+                "falha ao remover {}; feche o Zylara e tente novamente",
                 install_path.display()
             )
         })?;
@@ -1204,7 +1204,7 @@ mod tests {
 
     #[test]
     fn quote_arg_escapes_quotes() {
-        assert_eq!(quote_arg(r"C:\Program Files\Lumina"), r#""C:\Program Files\Lumina""#);
+        assert_eq!(quote_arg(r"C:\Program Files\Zylara"), r#""C:\Program Files\Zylara""#);
         assert_eq!(quote_arg(r#"a"b"#), r#""a\"b""#);
     }
 
@@ -1217,13 +1217,13 @@ mod tests {
     #[test]
     fn installer_events_use_camel_case_fields() {
         let done = serde_json::to_value(InstallerEvent::Done {
-            install_path: r"C:\Lumina".to_string(),
+            install_path: r"C:\Zylara".to_string(),
             launched: true,
             log_path: r"C:\Temp\setup.log".to_string(),
         })
         .unwrap();
         assert_eq!(done["kind"], "done");
-        assert_eq!(done["installPath"], r"C:\Lumina");
+        assert_eq!(done["installPath"], r"C:\Zylara");
         assert_eq!(done["logPath"], r"C:\Temp\setup.log");
 
         let error = serde_json::to_value(InstallerEvent::Error {
@@ -1238,7 +1238,7 @@ mod tests {
     #[test]
     fn options_deserialize_from_the_frontend_contract() {
         let options: InstallOptions = serde_json::from_str(
-            r#"{"scope":"machine","path":"C:\\Program Files\\Lumina","desktopShortcut":true,"startMenuShortcut":false,"launchAfterInstall":true}"#,
+            r#"{"scope":"machine","path":"C:\\Program Files\\Zylara","desktopShortcut":true,"startMenuShortcut":false,"launchAfterInstall":true}"#,
         )
         .unwrap();
         assert_eq!(options.scope, InstallScope::Machine);

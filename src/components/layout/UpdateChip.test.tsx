@@ -30,15 +30,15 @@ function releaseInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
     currentVersion: '0.1.0',
     latestVersion: '0.2.0',
     available: true,
-    releaseName: 'Lumina v0.2.0',
+    releaseName: 'Zylara v0.2.0',
     releasedAt: '2026-11-01T12:00:00Z',
-    htmlUrl: 'https://github.com/Hyska-Software/LuminaAi/releases/tag/v0.2.0',
+    htmlUrl: 'https://github.com/Hyska-Software/ZylaraAi/releases/tag/v0.2.0',
     asset: {
-      name: 'Lumina-Setup-0.2.0-windows-x64.exe',
+      name: 'Zylara-Setup-0.2.0-windows-x64.exe',
       size: 100,
       sha256: 'a'.repeat(64),
       downloadUrl:
-        'https://github.com/Hyska-Software/LuminaAi/releases/download/v0.2.0/Lumina-Setup-0.2.0-windows-x64.exe',
+        'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-Setup-0.2.0-windows-x64.exe',
       platformLabel: 'Windows x64',
       kind: 'setup',
     },
@@ -65,7 +65,7 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
 
 const downloaded: DownloadedUpdate = {
   version: '0.2.0',
-  path: 'C:\\Users\\ana\\AppData\\Roaming\\app.lumina.chat\\updates\\0.2.0\\setup.exe',
+  path: 'C:\\Users\\ana\\AppData\\Roaming\\app.zylara.chat\\updates\\0.2.0\\setup.exe',
   size: 100,
   sha256: 'a'.repeat(64),
 };
@@ -85,7 +85,7 @@ beforeEach(() => {
   mocks.getUpdateNotes.mockResolvedValue({
     notes: 'Correções e melhorias',
     releasedAt: '2026-11-01T12:00:00Z',
-    htmlUrl: 'https://github.com/Hyska-Software/LuminaAi/releases/tag/v0.2.0',
+    htmlUrl: 'https://github.com/Hyska-Software/ZylaraAi/releases/tag/v0.2.0',
   });
   mocks.skipUpdateVersion.mockResolvedValue(status());
 });
@@ -107,7 +107,7 @@ describe('UpdateChip', () => {
 
     await userEvent.click(trigger);
     expect(await screen.findByText('Nova versão disponível')).toBeTruthy();
-    expect(screen.getByText('Lumina v0.2.0 · publicada em 01 de nov. de 2026')).toBeTruthy();
+    expect(screen.getByText('Zylara v0.2.0 · publicada em 01 de nov. de 2026')).toBeTruthy();
     expect(mocks.getUpdateNotes).toHaveBeenCalledWith('0.2.0');
     expect(await screen.findByText(/Correções e melhorias/)).toBeTruthy();
   });

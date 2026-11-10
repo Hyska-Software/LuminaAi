@@ -107,7 +107,7 @@ pub fn desktop_enabled(settings: &Settings) -> bool {
 /// prefix so users can still find it, but two threads never share a desktop.
 pub fn container_for(settings: &Settings, conversation_id: &str) -> String {
     let base = settings.computer_docker_container.trim();
-    let base = if base.is_empty() { "lumina-computer" } else { base };
+    let base = if base.is_empty() { "zylara-computer" } else { base };
     let safe: String = conversation_id
         .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '-' })
@@ -253,7 +253,7 @@ pub async fn screenshot(
         }
         ComputerBackend::Docker => {
             ensure_container(settings, data_dir, conversation_id).await?;
-            let docker_path = format!("/tmp/lumina-shot-{}.png", uuid::Uuid::new_v4());
+            let docker_path = format!("/tmp/zylara-shot-{}.png", uuid::Uuid::new_v4());
             let shot = sh(
                 data_dir,
                 "docker",
@@ -345,8 +345,8 @@ pub async fn active_window_title(
         ComputerBackend::Local => {
             #[cfg(windows)]
             {
-                let script = "Add-Type @'\nusing System; using System.Runtime.InteropServices; using System.Text;\npublic class LuminaFg { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n); }\n'@; \
-                              $s=New-Object System.Text.StringBuilder 512; [void][LuminaFg]::GetWindowText([LuminaFg]::GetForegroundWindow(),$s,512); $s.ToString()";
+                let script = "Add-Type @'\nusing System; using System.Runtime.InteropServices; using System.Text;\npublic class ZylaraFg { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n); }\n'@; \
+                              $s=New-Object System.Text.StringBuilder 512; [void][ZylaraFg]::GetWindowText([ZylaraFg]::GetForegroundWindow(),$s,512); $s.ToString()";
                 let output = sh(
                     data_dir,
                     "powershell",
@@ -386,8 +386,8 @@ pub async fn active_window_app(
         ComputerBackend::Local => {
             #[cfg(windows)]
             {
-                let script = "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaApp { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); }\n'@; \
-                              $h=[LuminaApp]::GetForegroundWindow(); $pid=0; [void][LuminaApp]::GetWindowThreadProcessId($h,[ref]$pid); (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName";
+                let script = "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class ZylaraApp { [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); }\n'@; \
+                              $h=[ZylaraApp]::GetForegroundWindow(); $pid=0; [void][ZylaraApp]::GetWindowThreadProcessId($h,[ref]$pid); (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName";
                 let output = sh(
                     data_dir,
                     "powershell",
@@ -504,9 +504,9 @@ pub async fn click(
                 let up = if button == "right" { 0x0010 } else { 0x0004 };
                 let repeat = clicks.clamp(1, 3);
                 let script = format!(
-                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaMouse {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
-                     [LuminaMouse]::SetCursorPos({x},{y}); \
-                     1..{repeat} | ForEach-Object {{ [LuminaMouse]::mouse_event({down},0,0,0,[IntPtr]::Zero); [LuminaMouse]::mouse_event({up},0,0,0,[IntPtr]::Zero) }}"
+                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class ZylaraMouse {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
+                     [ZylaraMouse]::SetCursorPos({x},{y}); \
+                     1..{repeat} | ForEach-Object {{ [ZylaraMouse]::mouse_event({down},0,0,0,[IntPtr]::Zero); [ZylaraMouse]::mouse_event({up},0,0,0,[IntPtr]::Zero) }}"
                 );
                 let output = sh(
                     data_dir,
@@ -774,9 +774,9 @@ pub async fn drag(
                     (0x0002, 0x0004)
                 };
                 let script = format!(
-                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaDrag {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
-                     [LuminaDrag]::SetCursorPos({from_x},{from_y}); [LuminaDrag]::mouse_event({down},0,0,0,[IntPtr]::Zero); \
-                     [LuminaDrag]::SetCursorPos({to_x},{to_y}); [LuminaDrag]::mouse_event({up},0,0,0,[IntPtr]::Zero)"
+                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class ZylaraDrag {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
+                     [ZylaraDrag]::SetCursorPos({from_x},{from_y}); [ZylaraDrag]::mouse_event({down},0,0,0,[IntPtr]::Zero); \
+                     [ZylaraDrag]::SetCursorPos({to_x},{to_y}); [ZylaraDrag]::mouse_event({up},0,0,0,[IntPtr]::Zero)"
                 );
                 let output = sh(
                     data_dir,
@@ -831,8 +831,8 @@ pub async fn scroll(
             #[cfg(windows)]
             {
                 let script = format!(
-                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaScroll {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
-                     [LuminaScroll]::SetCursorPos({x},{y}); [LuminaScroll]::mouse_event(0x0800,0,0,{delta},[IntPtr]::Zero)"
+                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class ZylaraScroll {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,IntPtr e); }}\n'@; \
+                     [ZylaraScroll]::SetCursorPos({x},{y}); [ZylaraScroll]::mouse_event(0x0800,0,0,{delta},[IntPtr]::Zero)"
                 );
                 let output = sh(
                     data_dir,
@@ -883,7 +883,7 @@ pub async fn move_pointer(
             #[cfg(windows)]
             {
                 let script = format!(
-                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class LuminaMove {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); }}\n'@; [LuminaMove]::SetCursorPos({x},{y})"
+                    "Add-Type @'\nusing System; using System.Runtime.InteropServices;\npublic class ZylaraMove {{ [DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X,int Y); }}\n'@; [ZylaraMove]::SetCursorPos({x},{y})"
                 );
                 let output = sh(
                     data_dir,
@@ -1098,7 +1098,7 @@ pub async fn remove_container(
 }
 
 pub async fn verify_stream_support(settings: &Settings, data_dir: &Path, conversation_id: &str) -> anyhow::Result<()> {
-    let result = docker_exec(settings, data_dir, conversation_id, "command -v socat >/dev/null && test -x /usr/local/bin/lumina-clear-input && test -f /tmp/x11vnc-view.log && test -f /tmp/x11vnc-control.log").await?;
+    let result = docker_exec(settings, data_dir, conversation_id, "command -v socat >/dev/null && test -x /usr/local/bin/zylara-clear-input && test -f /tmp/x11vnc-view.log && test -f /tmp/x11vnc-control.log").await?;
     if result.exit_code != Some(0) {
         anyhow::bail!("COMPUTER_STREAM_IMAGE_OUTDATED: atualize a imagem do Desktop privado em Configurações → Agentes e reinicie a sessão");
     }
@@ -1183,7 +1183,7 @@ pub async fn ensure_container(
         "--security-opt".to_string(),
         "no-new-privileges".to_string(),
         "--label".to_string(),
-        "lumina.owner=lumina".to_string(),
+        "zylara.owner=zylara".to_string(),
         "--pids-limit".to_string(),
         "256".to_string(),
         "--memory".to_string(),
@@ -1272,7 +1272,7 @@ mod tests {
     #[test]
     fn screenshot_retention_removes_old_files_and_empty_dirs() {
         let root = std::env::temp_dir().join(format!(
-            "lumina-screenshot-prune-{}",
+            "zylara-screenshot-prune-{}",
             uuid::Uuid::new_v4()
         ));
         let nested = root.join("conv-1");
@@ -1340,13 +1340,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires Docker and the lumina/computer:test image"]
+    #[ignore = "requires Docker and the zylara/computer:test image"]
     async fn docker_graphical_backend_screenshot_and_click() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let container = format!("lumina-computer-it-{}", uuid::Uuid::new_v4().simple());
+        let container = format!("zylara-computer-it-{}", uuid::Uuid::new_v4().simple());
         let settings = Settings {
             execution_environment: "docker".to_string(),
-            computer_docker_image: "lumina/computer:test".to_string(),
+            computer_docker_image: "zylara/computer:test".to_string(),
             computer_docker_container: container.clone(),
             ..Settings::default()
         };

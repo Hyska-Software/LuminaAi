@@ -864,7 +864,7 @@ mod tests {
             settings: Settings::default(),
             cancel: CancellationToken::new(),
             agent_hooks: None,
-            data_dir: std::env::temp_dir().join("lumina-registry-test"),
+            data_dir: std::env::temp_dir().join("zylara-registry-test"),
             approval: None,
             observed: None,
             emit: None,

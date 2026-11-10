@@ -23,13 +23,13 @@ function decodeAnchorId(rawId: string): string {
 
 /**
  * Scrolls to an in-message anchor (`#user-content-fn-1`) without navigating the
- * window. Lookup is scoped to the `.lumina-prose` container so two messages
+ * window. Lookup is scoped to the `.zylara-prose` container so two messages
  * with footnotes do not fight over the same generated ids.
  */
 function scrollToAnchor(href: string, current: HTMLAnchorElement): void {
   const id = decodeAnchorId(href.slice(1));
   if (!id) return;
-  const scope: ParentNode = current.closest('.lumina-prose') ?? document;
+  const scope: ParentNode = current.closest('.zylara-prose') ?? document;
   const target = Array.from(scope.querySelectorAll<HTMLElement>('[id]')).find((element) => element.id === id);
   if (!target) return;
   target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

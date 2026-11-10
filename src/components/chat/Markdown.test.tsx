@@ -44,7 +44,7 @@ afterEach(() => {
 
 function renderMarkdown(content: string, props: Partial<MarkdownProps> = {}) {
   const view = render(<Markdown content={content} {...props} />);
-  return { ...view, prose: view.container.querySelector('.lumina-prose') as HTMLElement };
+  return { ...view, prose: view.container.querySelector('.zylara-prose') as HTMLElement };
 }
 
 describe('Markdown — blocos GFM', () => {
@@ -136,7 +136,7 @@ describe('Markdown — blocos GFM', () => {
   it('renders tables inside a scroll wrapper with GFM column alignment', () => {
     const { container } = renderMarkdown('| Nome | Idade |\n| :--- | ---: |\n| Ana | 30 |');
 
-    const wrapper = container.querySelector('.lumina-table-wrap');
+    const wrapper = container.querySelector('.zylara-table-wrap');
     expect(wrapper).toBeTruthy();
     expect(wrapper?.className).toContain('overflow-x-auto');
 
@@ -209,26 +209,26 @@ describe('Markdown — GitHub alerts', () => {
 describe('Markdown — links', () => {
   it('opens external http(s) links through the OS opener', async () => {
     const user = userEvent.setup();
-    renderMarkdown('[site do Lumina](https://lumina.dev/docs?x=1)');
+    renderMarkdown('[site do Zylara](https://zylara.dev/docs?x=1)');
 
-    const link = screen.getByRole('link', { name: 'site do Lumina' });
-    expect(link.getAttribute('href')).toBe('https://lumina.dev/docs?x=1');
+    const link = screen.getByRole('link', { name: 'site do Zylara' });
+    expect(link.getAttribute('href')).toBe('https://zylara.dev/docs?x=1');
     expect(link.getAttribute('target')).toBeNull();
 
     await user.click(link);
     expect(external.openExternalUrl).toHaveBeenCalledTimes(1);
-    expect(external.openExternalUrl).toHaveBeenCalledWith('https://lumina.dev/docs?x=1');
+    expect(external.openExternalUrl).toHaveBeenCalledWith('https://zylara.dev/docs?x=1');
   });
 
   it('opens mailto links without a target=_blank', async () => {
     const user = userEvent.setup();
-    renderMarkdown('[fale conosco](mailto:contato@lumina.dev)');
+    renderMarkdown('[fale conosco](mailto:contato@zylara.dev)');
 
     const link = screen.getByRole('link', { name: 'fale conosco' });
     expect(link.getAttribute('target')).toBeNull();
 
     await user.click(link);
-    expect(external.openExternalUrl).toHaveBeenCalledWith('mailto:contato@lumina.dev');
+    expect(external.openExternalUrl).toHaveBeenCalledWith('mailto:contato@zylara.dev');
   });
 
   it('scrolls to internal anchors instead of opening the browser', async () => {
@@ -252,12 +252,12 @@ describe('Markdown — links', () => {
   });
 
   it('renders GFM autolinks for URLs, www and e-mail', () => {
-    const { container } = renderMarkdown('veja https://lumina.dev, www.lumina.dev e contato@lumina.dev');
+    const { container } = renderMarkdown('veja https://zylara.dev, www.zylara.dev e contato@zylara.dev');
 
     const hrefs = Array.from(container.querySelectorAll('a')).map((anchor) => anchor.getAttribute('href'));
-    expect(hrefs).toContain('https://lumina.dev');
-    expect(hrefs).toContain('http://www.lumina.dev');
-    expect(hrefs).toContain('mailto:contato@lumina.dev');
+    expect(hrefs).toContain('https://zylara.dev');
+    expect(hrefs).toContain('http://www.zylara.dev');
+    expect(hrefs).toContain('mailto:contato@zylara.dev');
   });
 
   it('keeps hard line breaks', () => {
@@ -271,18 +271,18 @@ describe('Markdown — links', () => {
 
 describe('Markdown — imagens', () => {
   it('renders a lazy image with alt and title', () => {
-    const { container } = renderMarkdown('![Logo do Lumina](https://lumina.dev/logo.png "Logo")');
+    const { container } = renderMarkdown('![Logo do Zylara](https://zylara.dev/logo.png "Logo")');
 
     const image = container.querySelector('img');
     expect(image).toBeTruthy();
-    expect(image?.getAttribute('src')).toBe('https://lumina.dev/logo.png');
-    expect(image?.getAttribute('alt')).toBe('Logo do Lumina');
+    expect(image?.getAttribute('src')).toBe('https://zylara.dev/logo.png');
+    expect(image?.getAttribute('alt')).toBe('Logo do Zylara');
     expect(image?.getAttribute('title')).toBe('Logo');
     expect(image?.getAttribute('loading')).toBe('lazy');
   });
 
   it('shows an accessible fallback when an image fails to load', () => {
-    const { container } = renderMarkdown('![Ícone quebrado](https://lumina.dev/quebrada.png)');
+    const { container } = renderMarkdown('![Ícone quebrado](https://zylara.dev/quebrada.png)');
 
     fireEvent.error(container.querySelector('img') as HTMLImageElement);
 
@@ -481,7 +481,7 @@ describe('Markdown — notas de rodapé', () => {
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
     const { container } = renderMarkdown('Uma nota[^1] no texto.\n\n[^1]: Conteúdo da nota.');
 
-    const section = container.querySelector('section.lumina-footnotes');
+    const section = container.querySelector('section.zylara-footnotes');
     expect(section).toBeTruthy();
     expect(section?.hasAttribute('data-footnotes')).toBe(true);
 
@@ -547,11 +547,11 @@ describe('Markdown — HTML seguro e detalhes', () => {
 
   it('adds the streaming caret class only while streaming', () => {
     const streaming = renderMarkdown('Resposta parcial', { streaming: true });
-    expect(streaming.container.querySelector('.lumina-prose')?.className).toContain('lumina-prose--streaming');
+    expect(streaming.container.querySelector('.zylara-prose')?.className).toContain('zylara-prose--streaming');
     cleanup();
 
     const idle = renderMarkdown('Resposta completa');
-    expect(idle.container.querySelector('.lumina-prose')?.className).not.toContain('lumina-prose--streaming');
+    expect(idle.container.querySelector('.zylara-prose')?.className).not.toContain('zylara-prose--streaming');
   });
 });
 
@@ -563,21 +563,21 @@ describe('Markdown — variante thinking', () => {
   it('aplica a classe da variante e dispensa o tamanho da prosa da resposta', () => {
     const { prose } = renderThinking('Raciocínio em **Markdown**.');
 
-    expect(prose.classList.contains('lumina-prose--thinking')).toBe(true);
+    expect(prose.classList.contains('zylara-prose--thinking')).toBe(true);
     expect(prose.classList.contains('text-[15px]')).toBe(false);
   });
 
   it('mantém a variante default idêntica à prosa da resposta', () => {
     const { prose } = renderMarkdown('Resposta final');
 
-    expect(prose.className).toBe('lumina-prose text-[15px]');
-    expect(prose.classList.contains('lumina-prose--thinking')).toBe(false);
+    expect(prose.className).toBe('zylara-prose text-[15px]');
+    expect(prose.classList.contains('zylara-prose--thinking')).toBe(false);
   });
 
   it('mescla className extra com a classe da variante', () => {
     const { prose } = renderThinking('texto', { className: 'minha-classe-extra' });
 
-    expect(prose.classList.contains('lumina-prose--thinking')).toBe(true);
+    expect(prose.classList.contains('zylara-prose--thinking')).toBe(true);
     expect(prose.classList.contains('minha-classe-extra')).toBe(true);
   });
 
@@ -629,7 +629,7 @@ describe('Markdown — variante thinking', () => {
   it('renderiza tabela com alinhamento e wrapper de scroll', () => {
     const { container } = renderThinking('| Nome | Idade |\n| :--- | ---: |\n| Ana | 30 |');
 
-    const wrapper = container.querySelector('.lumina-table-wrap');
+    const wrapper = container.querySelector('.zylara-table-wrap');
     expect(wrapper).toBeTruthy();
     expect(wrapper?.className).toContain('overflow-x-auto');
 
@@ -683,7 +683,7 @@ describe('Markdown — variante thinking', () => {
   it('renderiza notas de rodapé localizadas', () => {
     const { container } = renderThinking('Uma nota[^1] no texto.\n\n[^1]: Conteúdo da nota.');
 
-    const section = container.querySelector('section.lumina-footnotes');
+    const section = container.querySelector('section.zylara-footnotes');
     expect(section).toBeTruthy();
 
     const title = container.querySelector('#footnote-label');
@@ -714,34 +714,34 @@ describe('Markdown — variante thinking', () => {
   });
 
   it('mantém quebra dura e autolinks GFM', () => {
-    const { container } = renderThinking('linha um  \nlinha dois e https://lumina.dev');
+    const { container } = renderThinking('linha um  \nlinha dois e https://zylara.dev');
 
     expect(container.querySelector('br')).toBeTruthy();
     expect(container.querySelector('p')?.textContent).toContain('linha um');
     expect(container.querySelector('p')?.textContent).toContain('linha dois');
 
     const hrefs = Array.from(container.querySelectorAll('a')).map((anchor) => anchor.getAttribute('href'));
-    expect(hrefs).toContain('https://lumina.dev');
+    expect(hrefs).toContain('https://zylara.dev');
   });
 
   it('renderiza imagem com alt e loading lazy', () => {
-    const { container } = renderThinking('![Logo do Lumina](https://lumina.dev/logo.png)');
+    const { container } = renderThinking('![Logo do Zylara](https://zylara.dev/logo.png)');
 
     const image = container.querySelector('img');
-    expect(image?.getAttribute('src')).toBe('https://lumina.dev/logo.png');
-    expect(image?.getAttribute('alt')).toBe('Logo do Lumina');
+    expect(image?.getAttribute('src')).toBe('https://zylara.dev/logo.png');
+    expect(image?.getAttribute('alt')).toBe('Logo do Zylara');
     expect(image?.getAttribute('loading')).toBe('lazy');
   });
 
   it('abre link externo pelo opener e mailto no app padrão', async () => {
     const user = userEvent.setup();
-    renderThinking('[site do Lumina](https://lumina.dev/docs) e [fale conosco](mailto:contato@lumina.dev)');
+    renderThinking('[site do Zylara](https://zylara.dev/docs) e [fale conosco](mailto:contato@zylara.dev)');
 
-    await user.click(screen.getByRole('link', { name: 'site do Lumina' }));
-    expect(external.openExternalUrl).toHaveBeenCalledWith('https://lumina.dev/docs');
+    await user.click(screen.getByRole('link', { name: 'site do Zylara' }));
+    expect(external.openExternalUrl).toHaveBeenCalledWith('https://zylara.dev/docs');
 
     await user.click(screen.getByRole('link', { name: 'fale conosco' }));
-    expect(external.openExternalUrl).toHaveBeenCalledWith('mailto:contato@lumina.dev');
+    expect(external.openExternalUrl).toHaveBeenCalledWith('mailto:contato@zylara.dev');
     expect(external.openExternalUrl).toHaveBeenCalledTimes(2);
   });
 
@@ -753,12 +753,12 @@ describe('Markdown — variante thinking', () => {
 
   it('aplica o caret de streaming junto da variante thinking', () => {
     const streaming = renderThinking('Raciocínio parcial', { streaming: true });
-    expect(streaming.prose.classList.contains('lumina-prose--thinking')).toBe(true);
-    expect(streaming.prose.classList.contains('lumina-prose--streaming')).toBe(true);
+    expect(streaming.prose.classList.contains('zylara-prose--thinking')).toBe(true);
+    expect(streaming.prose.classList.contains('zylara-prose--streaming')).toBe(true);
     cleanup();
 
     const idle = renderThinking('Raciocínio completo');
-    expect(idle.prose.classList.contains('lumina-prose--streaming')).toBe(false);
+    expect(idle.prose.classList.contains('zylara-prose--streaming')).toBe(false);
   });
 
   it('produz o mesmo DOM com o mesmo pipeline e overrides nas duas variantes', () => {
@@ -775,9 +775,9 @@ describe('Markdown — variante thinking', () => {
       '$$\na + b = c\n$$',
       '<kbd>Ctrl</kbd> <mark>marca</mark> <details open><summary>Mais</summary>conteúdo</details>',
       'linha um  \nlinha dois',
-      'veja https://lumina.dev',
-      '![Logo do Lumina](https://lumina.dev/logo.png)',
-      '[site do Lumina](https://lumina.dev/docs)',
+      'veja https://zylara.dev',
+      '![Logo do Zylara](https://zylara.dev/logo.png)',
+      '[site do Zylara](https://zylara.dev/docs)',
       'Uma nota[^1].',
       '[^1]: Conteúdo da nota.',
       '---',
@@ -801,9 +801,9 @@ describe('Markdown — CSS da variante thinking', () => {
   }
 
   it('vive em @layer components e só usa tokens', () => {
-    expect(css).toMatch(/@layer components\s*\{[\s\S]*?\.lumina-prose--thinking\s*\{/);
+    expect(css).toMatch(/@layer components\s*\{[\s\S]*?\.zylara-prose--thinking\s*\{/);
 
-    const block = ruleBlock('.lumina-prose--thinking {');
+    const block = ruleBlock('.zylara-prose--thinking {');
     expect(block).toContain('font-size: 0.8125rem');
     expect(block).toContain('line-height: 1.6');
     expect(block).toContain('color: var(--foreground-muted)');
@@ -812,33 +812,33 @@ describe('Markdown — CSS da variante thinking', () => {
   });
 
   it('escala títulos e aperta o ritmo de parágrafos e listas', () => {
-    expect(ruleBlock('.lumina-prose--thinking p {')).toContain('margin-block: 0.5em');
+    expect(ruleBlock('.zylara-prose--thinking p {')).toContain('margin-block: 0.5em');
 
-    expect(ruleBlock('.lumina-prose--thinking h1 {')).toContain('font-size: 1.15em');
-    expect(ruleBlock('.lumina-prose--thinking h6 {')).toContain('font-size: 0.95em');
-    const headings = ruleBlock('.lumina-prose--thinking h1,');
+    expect(ruleBlock('.zylara-prose--thinking h1 {')).toContain('font-size: 1.15em');
+    expect(ruleBlock('.zylara-prose--thinking h6 {')).toContain('font-size: 0.95em');
+    const headings = ruleBlock('.zylara-prose--thinking h1,');
     expect(headings).toContain('margin-block: 0.9em 0.35em');
 
-    const lists = ruleBlock('.lumina-prose--thinking ul,');
+    const lists = ruleBlock('.zylara-prose--thinking ul,');
     expect(lists).toContain('margin-block: 0.45em');
     expect(lists).toContain('padding-inline-start: 1.15em');
-    expect(ruleBlock('.lumina-prose--thinking li {')).toContain('margin-block: 0.15em');
+    expect(ruleBlock('.zylara-prose--thinking li {')).toContain('margin-block: 0.15em');
 
-    expect(ruleBlock('.lumina-prose--thinking hr {')).toContain('margin-block: 1em');
+    expect(ruleBlock('.zylara-prose--thinking hr {')).toContain('margin-block: 1em');
   });
 
   it('compacta tabelas, citações, alertas, notas e código inline', () => {
-    expect(ruleBlock('.lumina-prose--thinking table {')).toContain('font-size: 0.95em');
-    expect(ruleBlock('.lumina-prose--thinking th,')).toContain('padding: 0.35em 0.6em');
-    expect(ruleBlock('.lumina-prose--thinking blockquote {')).toContain('margin-block: 0.6em');
-    expect(ruleBlock('.lumina-prose--thinking .lumina-alert {')).toContain('margin-block: 0.65em');
-    expect(ruleBlock('.lumina-prose--thinking .lumina-footnotes {')).toContain('margin-top: 1.15em');
-    expect(ruleBlock('.lumina-prose--thinking details {')).toContain('margin-block: 0.65em');
-    expect(ruleBlock('.lumina-prose--thinking :not(pre) > code {')).toContain('font-size: 0.92em');
+    expect(ruleBlock('.zylara-prose--thinking table {')).toContain('font-size: 0.95em');
+    expect(ruleBlock('.zylara-prose--thinking th,')).toContain('padding: 0.35em 0.6em');
+    expect(ruleBlock('.zylara-prose--thinking blockquote {')).toContain('margin-block: 0.6em');
+    expect(ruleBlock('.zylara-prose--thinking .zylara-alert {')).toContain('margin-block: 0.65em');
+    expect(ruleBlock('.zylara-prose--thinking .zylara-footnotes {')).toContain('margin-top: 1.15em');
+    expect(ruleBlock('.zylara-prose--thinking details {')).toContain('margin-block: 0.65em');
+    expect(ruleBlock('.zylara-prose--thinking :not(pre) > code {')).toContain('font-size: 0.92em');
   });
 
   it('não altera a tipografia da prosa da resposta', () => {
-    const base = ruleBlock('.lumina-prose {');
+    const base = ruleBlock('.zylara-prose {');
     expect(base).toContain('font-size: 0.9375rem');
     expect(base).toContain('line-height: 1.7');
     expect(base).toContain('color: var(--foreground)');
@@ -856,12 +856,12 @@ describe('Markdown — bordas uniformes (regra de produto)', () => {
   }
 
   it('citações não usam borda unilateral', () => {
-    const block = ruleBlock('.lumina-prose blockquote {');
+    const block = ruleBlock('.zylara-prose blockquote {');
     expect(block).not.toMatch(/border-inline-start|border-left|border-right/);
   });
 
   it('alertas GitHub não são caixas com borda/fundo', () => {
-    const block = ruleBlock('.lumina-prose .lumina-alert {');
+    const block = ruleBlock('.zylara-prose .zylara-alert {');
     // Pode declarar `border: 0` (reset), nunca uma borda desenhada.
     expect(block).not.toMatch(/border-(inline|left|right|top|bottom)/);
     const borderValue = /border:\s*([^;]+);/.exec(block)?.[1]?.trim();
@@ -881,13 +881,13 @@ describe('Markdown — bordas uniformes (regra de produto)', () => {
   it('o prose do Markdown fica em @layer components e o GenUI tem resets próprios', () => {
     // Regressão: sem o layer, os seletores de elemento do Markdown (p, ol, li,
     // details) vazam para dentro da UI generativa e desalinham os blocos.
-    expect(css).toMatch(/@layer components\s*\{[\s\S]*?\.lumina-prose\s*\{/);
+    expect(css).toMatch(/@layer components\s*\{[\s\S]*?\.zylara-prose\s*\{/);
     for (const selector of [
-      '.lumina-prose .lumina-genui p',
-      '.lumina-prose .lumina-genui ol',
-      '.lumina-prose .lumina-genui li',
-      '.lumina-prose .lumina-genui details',
-      '.lumina-prose .lumina-genui details > :not(summary)',
+      '.zylara-prose .zylara-genui p',
+      '.zylara-prose .zylara-genui ol',
+      '.zylara-prose .zylara-genui li',
+      '.zylara-prose .zylara-genui details',
+      '.zylara-prose .zylara-genui details > :not(summary)',
     ]) {
       expect(css).toContain(selector);
     }

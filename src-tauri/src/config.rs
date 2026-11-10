@@ -81,7 +81,7 @@ pub const APPROVAL_TIMEOUT_MAX_SECS: u32 = 3_600;
 /// v1 é o default de fábrica antigo, não uma escolha do usuário — a migração de
 /// leitura o converte (ver [`parse_settings_json`]).
 ///
-/// v3 (computer use): a imagem gráfica passa de `lumina/computer:latest` (tag
+/// v3 (computer use): a imagem gráfica passa de `zylara/computer:latest` (tag
 /// de build local, nunca publicada) para a imagem publicada no GHCR. Um valor
 /// igual ao default antigo é migrado uma única vez; imagens customizadas são
 /// preservadas.
@@ -248,7 +248,7 @@ fn normalize_settings(mut settings: Settings) -> Settings {
 /// Também aplica as migrações de leitura:
 /// - v1 → v2: arquivos sem `settingsVersion` (ou v1) trocam o `"edit"` legado do
 ///   modo de permissão do Code pelo novo default `"autonomous"`;
-/// - v2 → v3: a tag local antiga do computer use (`lumina/computer:latest`) vira
+/// - v2 → v3: a tag local antiga do computer use (`zylara/computer:latest`) vira
 ///   a imagem publicada no GHCR. Valores customizados são preservados.
 fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
     let mut value: serde_json::Value = serde_json::from_str(raw)?;
@@ -273,7 +273,7 @@ fn parse_settings_json(raw: &str) -> Result<Settings, serde_json::Error> {
             let legacy_computer_image = object
                 .get("computerDockerImage")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|image| image.trim() == "lumina/computer:latest");
+                .is_some_and(|image| image.trim() == "zylara/computer:latest");
             if legacy_computer_image {
                 object.insert(
                     "computerDockerImage".to_string(),
@@ -938,7 +938,7 @@ fn opencode_auth_path() -> Option<PathBuf> {
     )
 }
 
-/// Maps a Lumina provider id to the entry id used by the OpenCode CLI.
+/// Maps a Zylara provider id to the entry id used by the OpenCode CLI.
 fn cli_entry_ids(provider_id: &str) -> &'static [&'static str] {
     match provider_id {
         "opencode-go" => &["opencode-go"],
@@ -1153,7 +1153,7 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let path =
-                std::env::temp_dir().join(format!("lumina-config-test-{}", uuid::Uuid::new_v4()));
+                std::env::temp_dir().join(format!("zylara-config-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&path).expect("criar pasta temporária");
             Self { path }
         }
@@ -1581,7 +1581,7 @@ mod tests {
         assert_eq!(default_auth_env("opencode-go"), "OPENCODE_API_KEY");
         assert_eq!(default_auth_env("opencode-zen"), "OPENCODE_API_KEY");
 
-        let name = "LUMINA_TEST_OPENAI_ENV_9F3C";
+        let name = "ZYLARA_TEST_OPENAI_ENV_9F3C";
         std::env::set_var(name, "  sk-test-openai  ");
         assert_eq!(
             api_key_from_env("openai", name).as_deref(),
@@ -1596,7 +1596,7 @@ mod tests {
 
         // The direct Anthropic provider has its own env var; it must never fall
         // back to the shared OpenCode key.
-        let name = "LUMINA_TEST_ANTHROPIC_ENV_4A1B";
+        let name = "ZYLARA_TEST_ANTHROPIC_ENV_4A1B";
         std::env::set_var(name, "  sk-ant-test-anthropic  ");
         assert_eq!(
             api_key_from_env("anthropic", name).as_deref(),
@@ -2079,7 +2079,7 @@ mod tests {
 
     #[test]
     fn settings_v2_migrates_the_legacy_local_computer_image() {
-        let raw = r#"{"settingsVersion":2,"computerDockerImage":"lumina/computer:latest"}"#;
+        let raw = r#"{"settingsVersion":2,"computerDockerImage":"zylara/computer:latest"}"#;
         let parsed = parse_settings_json(raw).expect("migrar imagem legada");
         assert_eq!(
             normalize_settings(parsed).computer_docker_image,
@@ -2101,11 +2101,11 @@ mod tests {
     fn settings_v3_preserves_an_explicit_legacy_local_tag() {
         // Depois da migração, a tag local pode ser uma escolha explícita de
         // desenvolvimento e não deve ser trocada silenciosamente.
-        let raw = r#"{"settingsVersion":3,"computerDockerImage":"lumina/computer:latest"}"#;
+        let raw = r#"{"settingsVersion":3,"computerDockerImage":"zylara/computer:latest"}"#;
         let parsed = parse_settings_json(raw).expect("parse v3");
         assert_eq!(
             normalize_settings(parsed).computer_docker_image,
-            "lumina/computer:latest"
+            "zylara/computer:latest"
         );
     }
 

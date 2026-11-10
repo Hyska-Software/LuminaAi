@@ -172,7 +172,7 @@ pub fn computer_control_status(
 pub(crate) fn emit_control_status(app: &AppHandle, state: &AppState, conversation_id: &str) {
     if let (Ok((paused, taken_over)), Ok(target)) = (state.db.computer_control(conversation_id), state.db.computer_control_target(conversation_id)) {
         let generation = if paused && taken_over && target == "browser" { crate::computer::control::gate(conversation_id).browser_generation() } else { None };
-        let _ = app.emit("lumina:computer-control", ComputerControlStatus { conversation_id: conversation_id.to_string(), paused, taken_over, target, generation });
+        let _ = app.emit("zylara:computer-control", ComputerControlStatus { conversation_id: conversation_id.to_string(), paused, taken_over, target, generation });
     }
 }
 

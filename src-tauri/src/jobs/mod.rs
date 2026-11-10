@@ -434,7 +434,7 @@ mod tests {
             program,
             args,
             cwd: std::env::temp_dir(),
-            env: sanitized_env(&[("LUMINA_AGENT", "1")]),
+            env: sanitized_env(&[("ZYLARA_AGENT", "1")]),
             timeout: Duration::ZERO,
             cancel: CancellationToken::new(),
             max_output_bytes: 1024 * 1024,

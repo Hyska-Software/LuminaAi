@@ -201,13 +201,13 @@ export function Composer() {
     const onFocusComposer = () => {
       textareaRef.current?.focus();
     };
-    window.addEventListener('lumina:suggest', onSuggest);
-    window.addEventListener('lumina:goal-intent', onGoalIntent);
-    window.addEventListener('lumina:focus-composer', onFocusComposer);
+    window.addEventListener('zylara:suggest', onSuggest);
+    window.addEventListener('zylara:goal-intent', onGoalIntent);
+    window.addEventListener('zylara:focus-composer', onFocusComposer);
     return () => {
-      window.removeEventListener('lumina:suggest', onSuggest);
-      window.removeEventListener('lumina:goal-intent', onGoalIntent);
-      window.removeEventListener('lumina:focus-composer', onFocusComposer);
+      window.removeEventListener('zylara:suggest', onSuggest);
+      window.removeEventListener('zylara:goal-intent', onGoalIntent);
+      window.removeEventListener('zylara:focus-composer', onFocusComposer);
     };
   }, [resizeTextarea]);
 
@@ -497,7 +497,7 @@ export function Composer() {
       setMenu(null);
       setGoalIntent(false);
       requestAnimationFrame(resizeTextarea);
-      window.dispatchEvent(new CustomEvent('lumina:scroll-bottom'));
+      window.dispatchEvent(new CustomEvent('zylara:scroll-bottom'));
     },
     [canQueue, canSend, goalIntent, mentioned, pendingAttachments.length, resizeTextarea, value],
   );
@@ -709,7 +709,7 @@ export function Composer() {
                     ? `Mensagem para ${activeAgent?.name ?? 'o agente'}`
                     : isCodeLayout
                       ? 'Tarefa para o agente'
-                      : 'Mensagem para o Lumina'
+                      : 'Mensagem para o Zylara'
                 }
                 aria-describedby={providerBlocked ? 'composer-credential-notice' : undefined}
                 aria-expanded={menu ? true : undefined}
@@ -883,7 +883,7 @@ export function Composer() {
       </div>
 
       <p className="mt-1.5 text-center text-[11px] leading-relaxed text-foreground-subtle">
-        Lumina pode cometer erros. Verifique informações importantes.
+        Zylara pode cometer erros. Verifique informações importantes.
       </p>
     </div>
   );

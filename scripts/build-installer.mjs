@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Builds the latest Lumina installer artifacts for the host platform.
+ * Builds the latest Zylara installer artifacts for the host platform.
  *
  * Manual use:
  *   pnpm installer
@@ -247,14 +247,14 @@ function tauriBuild(extra, env = {}, unset = []) {
   // build-installer already refreshed the catalog before the tests; do not
   // fetch the public sources a second time inside Tauri's beforeBuildCommand.
   run('pnpm', ['tauri', 'build', ...extra], {
-    env: { LUMINA_SKIP_CATALOG_SYNC: '1', ...env },
+    env: { ZYLARA_SKIP_CATALOG_SYNC: '1', ...env },
     unset,
   });
 }
 
 function buildWindows() {
   tauriBuild(['--no-bundle']);
-  const exe = path.join(root, 'src-tauri/target/release/lumina.exe');
+  const exe = path.join(root, 'src-tauri/target/release/zylara.exe');
   if (!existsSync(exe)) fail(`Executável não encontrado: ${exe}`);
   const label = platformLabel('win32', arch);
   const directory = cleanPlatformOut(label);
@@ -263,7 +263,7 @@ function buildWindows() {
 
   let signed = false;
   if (!values['no-sign']) {
-    const thumbprint = process.env.LUMINA_WINDOWS_CERT_THUMBPRINT ?? process.env.WINDOWS_CERT_THUMBPRINT;
+    const thumbprint = process.env.ZYLARA_WINDOWS_CERT_THUMBPRINT ?? process.env.WINDOWS_CERT_THUMBPRINT;
     if (thumbprint) {
       log('\n$ signtool sign (Authenticode)');
       const signArgs = [
@@ -271,7 +271,7 @@ function buildWindows() {
         '/sha1',
         thumbprint,
         '/tr',
-        process.env.LUMINA_TIMESTAMP_URL ?? 'http://timestamp.digicert.com',
+        process.env.ZYLARA_TIMESTAMP_URL ?? 'http://timestamp.digicert.com',
         '/td',
         'sha256',
         '/fd',
@@ -287,7 +287,7 @@ function buildWindows() {
       if (!signed) log('[installer] aviso: assinatura Authenticode falhou; o artefato continua unsigned.');
     } else {
       log(
-        '[installer] aviso: sem LUMINA_WINDOWS_CERT_THUMBPRINT; o instalador será unsigned e o SmartScreen pode avisar.',
+        '[installer] aviso: sem ZYLARA_WINDOWS_CERT_THUMBPRINT; o instalador será unsigned e o SmartScreen pode avisar.',
       );
     }
   }
@@ -326,7 +326,7 @@ function buildMacos() {
       : path.join(root, 'src-tauri/target/release/bundle');
   const dmgs = walk(path.join(bundleRoot, 'dmg')).filter((file) => file.endsWith('.dmg'));
   if (!dmgs.length) fail(`DMG não encontrado em ${bundleRoot}/dmg`);
-  const output = path.join(directory, `Lumina-${version}-macos-${arch}.dmg`);
+  const output = path.join(directory, `Zylara-${version}-macos-${arch}.dmg`);
   copyFileSync(dmgs[0], output);
   const signed = Boolean(process.env.APPLE_SIGNING_IDENTITY && process.env.APPLE_SIGNING_IDENTITY !== '-');
   return { directory, files: [output], signed, label, minOs: 'macOS 11+' };
@@ -343,17 +343,17 @@ function buildLinux() {
   if (!deb && !rpm && !appimage) fail(`Nenhum pacote Linux encontrado em ${bundleRoot}`);
   const files = [];
   if (deb) {
-    const output = path.join(directory, `Lumina-${version}-linux-${arch}.deb`);
+    const output = path.join(directory, `Zylara-${version}-linux-${arch}.deb`);
     copyFileSync(deb, output);
     files.push(output);
   }
   if (rpm) {
-    const output = path.join(directory, `Lumina-${version}-linux-${arch}.rpm`);
+    const output = path.join(directory, `Zylara-${version}-linux-${arch}.rpm`);
     copyFileSync(rpm, output);
     files.push(output);
   }
   if (appimage) {
-    const output = path.join(directory, `Lumina-${version}-linux-${arch}.AppImage`);
+    const output = path.join(directory, `Zylara-${version}-linux-${arch}.AppImage`);
     copyFileSync(appimage, output);
     files.push(output);
   }
@@ -421,7 +421,7 @@ function printPlan(versionValue, git) {
 }
 
 function main() {
-  log('Lumina installer build');
+  log('Zylara installer build');
   log(`host=${host} platform=${platform} arch=${arch}`);
 
   const nodeMajor = Number(process.versions.node.split('.')[0]);

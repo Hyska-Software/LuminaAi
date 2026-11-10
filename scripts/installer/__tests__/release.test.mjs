@@ -9,7 +9,7 @@ const root = path.resolve(import.meta.dirname, '../../..');
 const script = path.join(root, 'scripts/combine-release.mjs');
 
 test('combines unique artifacts and merges per-platform metadata', () => {
-  const source = mkdtempSync(path.join(tmpdir(), 'lumina-combine-'));
+  const source = mkdtempSync(path.join(tmpdir(), 'zylara-combine-'));
   const out = path.join(source, 'dist');
   for (const platform of ['windows-x64', 'linux-x64']) {
     const dir = path.join(source, '0.1.0', platform);
@@ -41,7 +41,7 @@ test('combines unique artifacts and merges per-platform metadata', () => {
 });
 
 test('fails when two platforms have the same artifact name', () => {
-  const source = mkdtempSync(path.join(tmpdir(), 'lumina-combine-dup-'));
+  const source = mkdtempSync(path.join(tmpdir(), 'zylara-combine-dup-'));
   for (const platform of ['a', 'b']) {
     const dir = path.join(source, platform);
     mkdirSync(dir, { recursive: true });

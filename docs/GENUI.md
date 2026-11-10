@@ -1,6 +1,6 @@
-# Lumina — UI generativa (interfaces que o agente cria no chat, no Code e nos Agentes)
+# Zylara — UI generativa (interfaces que o agente cria no chat, no Code e nos Agentes)
 
-> Documento normativo do sistema de **UI generativa/interativa** do Lumina.
+> Documento normativo do sistema de **UI generativa/interativa** do Zylara.
 > Fonte única de verdade em código: **`data/genui-contract.json`** (componentes,
 > props, limites, ícones, regras de design e semântica das ações). Este doc
 > explica o contrato em linguagem de produto; se os dois divergirem, o contrato
@@ -181,7 +181,7 @@ descartadas com aviso — use exatamente estes nomes.
 
 Semântica:
 
-- `prompt`: **preenche o composer** com o texto (evento `lumina:suggest`) para
+- `prompt`: **preenche o composer** com o texto (evento `zylara:suggest`) para
   o usuário revisar e enviar. Nunca envia sozinho; substitui o rascunho atual do
   composer, como as sugestões da tela inicial.
 - `copy`: copia o texto para a área de transferência (toast discreto).
@@ -377,7 +377,7 @@ legadas são **normalizadas** (`ui.legacy-shape`). O bloco só degrada quando h�
    renderer descrita no item 5.
 9. **Acessibilidade estrutural**: `alt`, `label` e `title` obrigatórios são
    erros do validador, não recomendações.
-10. **Isolamento visual**: `GenUIBlock` usa o escopo `.lumina-genui` e os estilos
+10. **Isolamento visual**: `GenUIBlock` usa o escopo `.zylara-genui` e os estilos
     de elemento do Markdown ficam em `@layer components` (utilitários Tailwind
     vencem). Assim, margens de `p`, *padding*/marcadores de listas e bordas de
     `details` do Markdown **não vazam** para a UI generativa — o alinhamento e

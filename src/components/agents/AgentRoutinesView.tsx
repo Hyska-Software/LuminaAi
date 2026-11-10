@@ -276,10 +276,10 @@ export function AgentRoutinesView() {
   useEffect(() => {
     void load();
     const reload = () => void load(true);
-    window.addEventListener('lumina:agent-routine-run', reload);
+    window.addEventListener('zylara:agent-routine-run', reload);
     window.addEventListener('focus', reload);
     return () => {
-      window.removeEventListener('lumina:agent-routine-run', reload);
+      window.removeEventListener('zylara:agent-routine-run', reload);
       window.removeEventListener('focus', reload);
     };
   }, [load]);

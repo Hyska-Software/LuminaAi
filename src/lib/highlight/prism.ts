@@ -1,5 +1,5 @@
 /**
- * Single shared Prism instance with the extra grammars used by Lumina.
+ * Single shared Prism instance with the extra grammars used by Zylara.
  *
  * `prism-react-renderer` embeds a Prism build (markup, css, clike, javascript,
  * jsx, typescript, tsx, json, yaml, markdown, python, rust, go, sql, c, cpp,

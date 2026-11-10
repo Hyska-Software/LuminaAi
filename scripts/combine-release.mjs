@@ -101,7 +101,7 @@ const platforms = manifests.map((manifest) => ({
 
 const release = {
   schemaVersion: 1,
-  product: 'Lumina',
+  product: 'Zylara',
   version,
   commit: manifests[0].commit,
   builtAt: new Date().toISOString(),

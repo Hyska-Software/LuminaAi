@@ -14,7 +14,7 @@ import type { SkillSummary } from '@/lib/types';
 /**
  * Skill repositories read by the app (FILES §7.2/§7.4).
  *
- * `user` is the Lumina data directory (the only wriable origin); the other
+ * `user` is the Zylara data directory (the only wriable origin); the other
  * external origins are the default skill folders of other agents, which the
  * app only reads — they can be disabled but never deleted.
  */
@@ -35,8 +35,8 @@ export interface SkillSourceMeta {
 export const SKILL_SOURCES: readonly SkillSourceMeta[] = [
   {
     key: 'user',
-    groupLabel: 'Lumina',
-    label: 'Do Lumina',
+    groupLabel: 'Zylara',
+    label: 'Do Zylara',
     tone: 'accent',
     icon: Sparkles,
     external: false,
@@ -138,8 +138,8 @@ export function groupSkillsBySource(skills: SkillSummary[]): SkillGroup[] {
 
 export interface SkillOriginCounts {
   total: number;
-  /** Skills from the Lumina data directory (`source === 'user'`). */
-  lumina: number;
+  /** Skills from the Zylara data directory (`source === 'user'`). */
+  zylara: number;
   /** Skills found in other agents' repositories (all read-only origins). */
   external: number;
   bundled: number;
@@ -148,10 +148,10 @@ export interface SkillOriginCounts {
 }
 
 export function countSkillsByOrigin(skills: SkillSummary[]): SkillOriginCounts {
-  const counts: SkillOriginCounts = { total: skills.length, lumina: 0, external: 0, bundled: 0, other: 0 };
+  const counts: SkillOriginCounts = { total: skills.length, zylara: 0, external: 0, bundled: 0, other: 0 };
   for (const skill of skills) {
     const meta = skillSourceMeta(skill.source);
-    if (meta.key === 'user') counts.lumina += 1;
+    if (meta.key === 'user') counts.zylara += 1;
     else if (meta.external) counts.external += 1;
     else if (meta.key === 'bundled') counts.bundled += 1;
     else counts.other += 1;

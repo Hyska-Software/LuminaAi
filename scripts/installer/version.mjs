@@ -1,5 +1,5 @@
 /**
- * Reads and rewrites every version source used by the Lumina app, updater and
+ * Reads and rewrites every version source used by the Zylara app, updater and
  * installer. All platforms share one version; there is no per-platform copy.
  *
  * Sources:
@@ -197,7 +197,7 @@ export function buildVersionUpdates(root, target) {
       lockFile,
       replaceOnce(
         lockFile.before,
-        /(\[\[package\]\]\r?\nname = "lumina"\r?\nversion = ")[^"]+(")/,
+        /(\[\[package\]\]\r?\nname = "zylara"\r?\nversion = ")[^"]+(")/,
         version,
         LOCK_FILE,
       ),

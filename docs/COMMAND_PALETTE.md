@@ -1,6 +1,6 @@
 # Paleta de comandos (⌘K) — auditoria e contrato de comportamento
 
-> Documento de referência da paleta de comandos do Lumina (DESIGN §10). Registra
+> Documento de referência da paleta de comandos do Zylara (DESIGN §10). Registra
 > a auditoria da implementação v1, os problemas encontrados, o contrato de
 > comportamento alvo e a arquitetura que o implementa. Plano de execução e
 > evidências ficam em `docs/goals/command-palette-v1/`.
@@ -111,7 +111,7 @@ e sem mudanças no backend.
    corrige os acentos que o `LIKE` do SQLite não dobra. Erro/ambiente sem
    Tauri ⇒ fallback local com `requireMatch`, sem quebrar a paleta.
 3. **Recentes** — ids de comandos executados, `localStorage`
-   (`lumina.palette.recents`, máx. 6, dedupe na frente), usados em “Sugestões” e
+   (`zylara.palette.recents`, máx. 6, dedupe na frente), usados em “Sugestões” e
    como desempate de ranking.
 
 ### 4.2 Arquitetura de informação
@@ -234,7 +234,7 @@ resultado é `null` (exceto ⌘K). Isso torna o bloqueio testável sem montar o 
 | `limpar-anexos` | Conversas | Limpar anexos | anexos pendentes | `chatStore.clearAttachments` |
 | `parar-resposta` | Conversas | Parar resposta | streaming | `chatStore.stop` |
 | `regenerar-resposta` | Conversas | Regenerar resposta | sem streaming e com resposta | `chatStore.regenerate` |
-| `focar-composer` | Navegação | Focar campo de mensagem | sempre (volta ao chat se preciso) | evento `lumina:focus-composer` |
+| `focar-composer` | Navegação | Focar campo de mensagem | sempre (volta ao chat se preciso) | evento `zylara:focus-composer` |
 | `alternar-sidebar` | Navegação | Alternar barra lateral | sempre | `uiStore.toggleSidebar` |
 | `abrir-artefatos` | Navegação | Abrir painel de artefatos | sempre (toast se vazio) | `uiStore.openArtifactList` |
 | `abrir-fontes` | Navegação | Abrir painel de fontes | sempre (toast se vazio) | `uiStore.openSourcesPanel` |

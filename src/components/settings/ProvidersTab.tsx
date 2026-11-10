@@ -55,7 +55,7 @@ const KEY_SOURCE_LABEL: Record<ProviderKeyStatus['source'], string> = {
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
 /** localStorage flag for the one-time "using your plan" notice. */
-const PLAN_NOTICE_KEY = 'lumina.openaiPlanNoticeShown';
+const PLAN_NOTICE_KEY = 'zylara.openaiPlanNoticeShown';
 
 function readPlanNoticeShown(): boolean {
   try {
@@ -583,7 +583,7 @@ export function ProvidersTab() {
               </p>
               <p className="mt-1 text-[11.5px] leading-relaxed text-foreground-muted">
                 Conclua o login no ChatGPT. Esta janela é atualizada automaticamente quando você
-                volta ao Lumina.
+                volta ao Zylara.
               </p>
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <Button
@@ -929,7 +929,7 @@ export function ProvidersTab() {
       )}
 
       <p className="text-[11px] leading-relaxed text-foreground-subtle">
-        O Lumina não envia suas credenciais para nenhum servidor próprio: as requisições vão direto
+        O Zylara não envia suas credenciais para nenhum servidor próprio: as requisições vão direto
         para o provedor escolhido. Ao remover uma chave salva nas configurações, a detecção por
         ambiente/CLI volta a valer, se existir. Sair do ChatGPT revoga o token de atualização e
         mantém apenas o registro da conta para a próxima conexão.

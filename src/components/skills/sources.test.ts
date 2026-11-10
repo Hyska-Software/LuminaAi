@@ -31,7 +31,7 @@ describe('skillSourceMeta', () => {
     ]);
 
     expect(SKILL_SOURCES.map((entry) => entry.groupLabel)).toEqual([
-      'Lumina',
+      'Zylara',
       'Agentes',
       'Codex',
       'Claude',
@@ -39,7 +39,7 @@ describe('skillSourceMeta', () => {
       'Embutidas',
     ]);
 
-    expect(skillSourceMeta('user')).toMatchObject({ label: 'Do Lumina', external: false });
+    expect(skillSourceMeta('user')).toMatchObject({ label: 'Do Zylara', external: false });
     expect(skillSourceMeta('agents')).toMatchObject({ label: 'Agentes', external: true });
     expect(skillSourceMeta('codex')).toMatchObject({ label: 'Codex', external: true });
     expect(skillSourceMeta('claude')).toMatchObject({ label: 'Claude', external: true });
@@ -86,7 +86,7 @@ describe('groupSkillsBySource', () => {
       'bundled',
     ]);
     expect(groups.every((group) => group.skills.length > 0)).toBe(true);
-    expect(groups[0]?.meta.groupLabel).toBe('Lumina');
+    expect(groups[0]?.meta.groupLabel).toBe('Zylara');
     expect(groups[5]?.meta.groupLabel).toBe('Embutidas');
   });
 
@@ -108,7 +108,7 @@ describe('groupSkillsBySource', () => {
 });
 
 describe('countSkillsByOrigin', () => {
-  it('conta Lumina, externas, embutidas e outras origens', () => {
+  it('conta Zylara, externas, embutidas e outras origens', () => {
     const counts = countSkillsByOrigin([
       skill('a', 'user'),
       skill('b', 'user'),
@@ -118,6 +118,6 @@ describe('countSkillsByOrigin', () => {
       skill('f', 'custom'),
     ]);
 
-    expect(counts).toEqual({ total: 6, lumina: 2, external: 2, bundled: 1, other: 1 });
+    expect(counts).toEqual({ total: 6, zylara: 2, external: 2, bundled: 1, other: 1 });
   });
 });

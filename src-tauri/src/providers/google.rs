@@ -418,7 +418,7 @@ mod tests {
                 api_key: "sk-test".to_string(),
                 model,
                 session_id: "session-1".to_string(),
-                user_agent: "Lumina/test".to_string(),
+                user_agent: "Zylara/test".to_string(),
                 endpoints: provider.endpoints.clone(),
                 request_profile: crate::catalog::RequestProfile::Standard,
                 auth_mode: crate::catalog::ProviderAuth::ApiKey,
@@ -426,7 +426,7 @@ mod tests {
             },
             protocols: vec![WireProtocol::Google],
             history: vec![HistoryMessage::user("oi")],
-            system_prompt: "Você é o Lumina.".to_string(),
+            system_prompt: "Você é o Zylara.".to_string(),
             tools: vec![crate::providers::ToolDefinition {
                 name: "echo".to_string(),
                 description: "Ecoa.".to_string(),

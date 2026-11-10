@@ -262,7 +262,7 @@ impl Drop for SubagentConversation {
         if self.retain {
             if let Err(error) = self.db.delete_usage_for_conversation(&self.id) {
                 eprintln!(
-                    "lumina: falha ao remover o usage_log do subagente {}: {error:#}",
+                    "zylara: falha ao remover o usage_log do subagente {}: {error:#}",
                     self.id
                 );
             }
@@ -273,7 +273,7 @@ impl Drop for SubagentConversation {
         }
         if let Err(error) = self.db.delete_conversation(&self.id) {
             eprintln!(
-                "lumina: falha ao apagar a conversa do subagente {}: {error:#}",
+                "zylara: falha ao apagar a conversa do subagente {}: {error:#}",
                 self.id
             );
         }
@@ -654,7 +654,7 @@ mod tests {
             )
             .expect("conversa pai");
         let data_dir =
-            std::env::temp_dir().join(format!("lumina-subagent-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("zylara-subagent-{}", uuid::Uuid::new_v4()));
         let deps = HarnessDeps {
             app: None,
             db: db.clone(),
@@ -722,7 +722,7 @@ mod tests {
             })
         });
         let data_dir =
-            std::env::temp_dir().join(format!("lumina-subagent-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("zylara-subagent-{}", uuid::Uuid::new_v4()));
         let deps = HarnessDeps {
             app: None,
             db: db.clone(),

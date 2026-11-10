@@ -297,7 +297,7 @@ function WorkspaceMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="danger" icon={<Trash2 className="size-4" />} onSelect={onRemove}>
-          Remover do Lumina
+          Remover do Zylara
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -514,7 +514,7 @@ function RenameWorkspaceDialog({
         <DialogHeader>
           <DialogTitle>Renomear workspace</DialogTitle>
           <DialogDescription>
-            O novo nome vale só no Lumina; a pasta no disco continua com o mesmo caminho.
+            O novo nome vale só no Zylara; a pasta no disco continua com o mesmo caminho.
           </DialogDescription>
         </DialogHeader>
         <div className="px-6 pb-4">
@@ -622,7 +622,7 @@ function RemoveWorkspaceDialog({ workspace, busy, onCancel, onConfirm }: RemoveW
     <Dialog open onOpenChange={(next) => (!next && !busy ? onCancel() : undefined)}>
       <DialogContent size="sm" className="gap-0">
         <DialogHeader>
-          <DialogTitle>Remover workspace do Lumina?</DialogTitle>
+          <DialogTitle>Remover workspace do Zylara?</DialogTitle>
           <DialogDescription>
             A pasta <span className="font-mono text-[11.5px]">{workspace.path}</span> não será apagada.
             As sessões continuam no histórico, mas deixam de aparecer agrupadas neste workspace.

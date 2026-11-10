@@ -45,7 +45,7 @@ function niceMax(value: number): number {
  * the `chart` primitive of the generative UI. Token-based colors, aria-labeled.
  */
 export function ChartSvg({ spec, className, height = 220 }: ChartSvgProps) {
-  const gradientId = `lumina-chart-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
+  const gradientId = `zylara-chart-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const data = useMemo(() => spec.data.filter((entry) => Number.isFinite(entry.value)), [spec.data]);
   const title = spec.title ?? `Gráfico de ${data.length} ${data.length === 1 ? 'item' : 'itens'}`;
 

@@ -16,7 +16,7 @@ const SECRET_MARKERS: &[&str] = &["API_KEY", "TOKEN", "SECRET", "PASSWORD"];
 /// Whether this variable must not reach the user's shell.
 pub(super) fn is_secret_or_internal(key: &OsStr) -> bool {
     let upper = key.to_string_lossy().to_ascii_uppercase();
-    upper.starts_with("LUMINA_") || SECRET_MARKERS.iter().any(|marker| upper.contains(marker))
+    upper.starts_with("ZYLARA_") || SECRET_MARKERS.iter().any(|marker| upper.contains(marker))
 }
 
 /// Builds the exact environment handed to the PTY shell.
@@ -200,7 +200,7 @@ mod tests {
             (os("OPENAI_API_KEY"), os("sk-1")),
             (os("GH_TOKEN"), os("ghp")),
             (os("DB_PASSWORD"), os("pw")),
-            (os("LUMINA_INTERNAL"), os("x")),
+            (os("ZYLARA_INTERNAL"), os("x")),
             (os("LD_LIBRARY_PATH"), os("/opt/conda/lib")),
             (os("DYLD_INSERT_LIBRARIES"), os("/tmp/inject.dylib")),
             (os("SHELLOPTS"), os("errexit:nounset")),
@@ -216,7 +216,7 @@ mod tests {
         assert!(!keys.iter().any(|key| key == "OPENAI_API_KEY"));
         assert!(!keys.iter().any(|key| key == "GH_TOKEN"));
         assert!(!keys.iter().any(|key| key == "DB_PASSWORD"));
-        assert!(!keys.iter().any(|key| key == "LUMINA_INTERNAL"));
+        assert!(!keys.iter().any(|key| key == "ZYLARA_INTERNAL"));
         assert!(!keys.iter().any(|key| key == "LD_LIBRARY_PATH"));
         assert!(!keys.iter().any(|key| key == "DYLD_INSERT_LIBRARIES"));
         assert!(!keys.iter().any(|key| key == "SHELLOPTS"));

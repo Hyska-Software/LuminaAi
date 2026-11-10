@@ -842,7 +842,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path sem pai"))?;
     std::fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(
-        ".lumina-revert-{}-{}",
+        ".zylara-revert-{}-{}",
         std::process::id(),
         crate::domain::now_ms()
     ));
@@ -1217,7 +1217,7 @@ fn rename_placeholder_title(db: &crate::db::Db, conversation: &Conversation, goa
         return;
     }
     if let Err(error) = db.rename_conversation(&conversation.id, &goal.title) {
-        eprintln!("lumina: falha ao renomear conversa: {error:#}");
+        eprintln!("zylara: falha ao renomear conversa: {error:#}");
     }
 }
 

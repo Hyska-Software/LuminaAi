@@ -196,7 +196,7 @@ pub async fn docker_validate_image(
     })
 }
 
-/// Removes every container labeled `lumina.owner=lumina`. Used by the
+/// Removes every container labeled `zylara.owner=zylara`. Used by the
 /// command and by the boot cleanup; active containers are only removed at boot.
 pub async fn cleanup_containers(state: &AppState) -> Result<u32, String> {
     let listed = docker(
@@ -205,7 +205,7 @@ pub async fn cleanup_containers(state: &AppState) -> Result<u32, String> {
             "ps".into(),
             "-aq".into(),
             "--filter".into(),
-            "label=lumina.owner=lumina".into(),
+            "label=zylara.owner=zylara".into(),
         ],
         Duration::from_secs(10),
     )

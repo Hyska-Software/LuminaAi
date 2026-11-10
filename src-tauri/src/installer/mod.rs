@@ -233,7 +233,7 @@ pub fn requested_mode() -> Option<InstallerMode> {
     if args.iter().any(|arg| arg == "--setup") {
         return Some(InstallerMode::Install);
     }
-    if std::env::var("LUMINA_SETUP").ok().as_deref() == Some("1") {
+    if std::env::var("ZYLARA_SETUP").ok().as_deref() == Some("1") {
         return Some(InstallerMode::Install);
     }
 
@@ -261,14 +261,14 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
         if let Some(existing) = windows::find_install() {
             if existing.scope == InstallScope::Machine && !windows::is_admin() && !cli.elevated {
                 if let Err(error) = windows::relaunch_self_elevated() {
-                    windows::fatal_message("Lumina", &format!("{error:#}"));
+                    windows::fatal_message("Zylara", &format!("{error:#}"));
                     std::process::exit(1);
                 }
                 std::process::exit(0);
             }
             if windows::is_current_exe_in(&existing.path) {
                 if let Err(error) = windows::relaunch_from_temp_uninstall() {
-                    windows::fatal_message("Lumina", &format!("{error:#}"));
+                    windows::fatal_message("Zylara", &format!("{error:#}"));
                     std::process::exit(1);
                 }
                 std::process::exit(0);
@@ -316,7 +316,7 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
 
     if mode == InstallerMode::Install {
         if let Err(error) = windows::ensure_webview2(true) {
-            windows::fatal_message("Lumina Setup", &format!("{error:#}"));
+            windows::fatal_message("Zylara Setup", &format!("{error:#}"));
             std::process::exit(1);
         }
     }
@@ -326,8 +326,8 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
     }
 
     let title = match mode {
-        InstallerMode::Install => "Lumina Setup",
-        InstallerMode::Uninstall => "Desinstalar Lumina",
+        InstallerMode::Install => "Zylara Setup",
+        InstallerMode::Uninstall => "Desinstalar Zylara",
     };
 
     let app = tauri::Builder::default()
@@ -386,7 +386,7 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
             Ok(())
         })
         .build(context)
-        .expect("error while building the Lumina installer");
+        .expect("error while building the Zylara installer");
 
     let from_temp = cli.from_temp;
     app.run(move |app_handle, event| {
@@ -399,7 +399,7 @@ pub fn run(mode: InstallerMode, mut context: tauri::Context<tauri::Wry>) {
 
 #[tauri::command]
 pub fn installer_context(state: State<'_, InstallerState>) -> Result<InstallerContext, String> {
-    eprintln!("[lumina-setup] installer_context invoked");
+    eprintln!("[zylara-setup] installer_context invoked");
     windows::write_log(&state, "contexto do instalador solicitado pela UI");
     context::build(&state).map_err(|error| format!("{error:#}"))
 }

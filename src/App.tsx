@@ -109,7 +109,7 @@ function runHotkey(command: HotkeyCommand, event: KeyboardEvent): void {
       void chat.stop();
       break;
     case 'focus-composer':
-      window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
+      window.dispatchEvent(new CustomEvent('zylara:focus-composer'));
       break;
     default:
       break;
@@ -195,7 +195,7 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<AgentRoutineRunEvent>('lumina:agent-routine-run', (event) => {
+    void listen<AgentRoutineRunEvent>('zylara:agent-routine-run', (event) => {
       if (disposed) return;
       const run = event.payload;
       if (run.status === 'ok') {
@@ -207,7 +207,7 @@ export default function App() {
           description: run.error ?? undefined,
         });
       }
-      window.dispatchEvent(new CustomEvent('lumina:agent-routine-run', { detail: run }));
+      window.dispatchEvent(new CustomEvent('zylara:agent-routine-run', { detail: run }));
       void useChatStore.getState().refreshConversations();
       void useAgentStore.getState().refresh();
       if (
@@ -247,10 +247,10 @@ export default function App() {
       'failed',
       'declined',
     ]);
-    void listen<AgentTaskUpdatedEvent>('lumina:agent-task-updated', (event) => {
+    void listen<AgentTaskUpdatedEvent>('zylara:agent-task-updated', (event) => {
       if (disposed) return;
       window.dispatchEvent(
-        new CustomEvent('lumina:agent-task-updated', { detail: event.payload }),
+        new CustomEvent('zylara:agent-task-updated', { detail: event.payload }),
       );
       if (event.payload.originConversationId) {
         void useChatStore
@@ -331,9 +331,9 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<{ agentId: string; name: string }>('lumina:agent-created', (event) => {
+    void listen<{ agentId: string; name: string }>('zylara:agent-created', (event) => {
       if (disposed) return;
-      window.dispatchEvent(new CustomEvent('lumina:agent-created', { detail: event.payload }));
+      window.dispatchEvent(new CustomEvent('zylara:agent-created', { detail: event.payload }));
       void useAgentStore.getState().refresh();
     })
       .then((fn) => {
@@ -343,10 +343,10 @@ export default function App() {
       .catch(() => {
         /* event bridge unavailable outside Tauri */
       });
-    void listen<{ channelId: string }>('lumina:agent-channel-updated', (event) => {
+    void listen<{ channelId: string }>('zylara:agent-channel-updated', (event) => {
       if (disposed) return;
       window.dispatchEvent(
-        new CustomEvent('lumina:agent-channel-updated', { detail: event.payload }),
+        new CustomEvent('zylara:agent-channel-updated', { detail: event.payload }),
       );
     })
       .then((fn) => {
@@ -357,11 +357,11 @@ export default function App() {
         /* event bridge unavailable outside Tauri */
       });
     void listen<{ channelId: string; recipientAgentId: string }>(
-      'lumina:agent-inbox-updated',
+      'zylara:agent-inbox-updated',
       (event) => {
         if (disposed) return;
         window.dispatchEvent(
-          new CustomEvent('lumina:agent-inbox-updated', { detail: event.payload }),
+          new CustomEvent('zylara:agent-inbox-updated', { detail: event.payload }),
         );
         void useAgentStore.getState().refresh();
       },
@@ -384,7 +384,7 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen<TurnEventBusPayload>('lumina:turn-event', (event) => {
+    void listen<TurnEventBusPayload>('zylara:turn-event', (event) => {
       if (disposed) return;
       void useChatStore.getState().applyExternalTurnEvent(event.payload);
     })
@@ -448,7 +448,7 @@ export default function App() {
     let disposed = false;
     let unlisten: (() => void) | null = null;
     const dispatchLibraryDrag = (active: boolean) => {
-      window.dispatchEvent(new CustomEvent('lumina:library-drag', { detail: { active } }));
+      window.dispatchEvent(new CustomEvent('zylara:library-drag', { detail: { active } }));
     };
     try {
       const webview = getCurrentWebview();
@@ -466,7 +466,7 @@ export default function App() {
               const paths = event.payload.paths ?? [];
               if (paths.length) {
                 window.dispatchEvent(
-                  new CustomEvent('lumina:library-drop', { detail: { paths } }),
+                  new CustomEvent('zylara:library-drop', { detail: { paths } }),
                 );
               }
             } else if (event.payload.type === 'enter' || event.payload.type === 'over') {
@@ -483,7 +483,7 @@ export default function App() {
                 // The channel composer owns its own attachments; the chat
                 // composer is not mounted in the Agentes layout.
                 window.dispatchEvent(
-                  new CustomEvent('lumina:channel-drop', { detail: { paths } }),
+                  new CustomEvent('zylara:channel-drop', { detail: { paths } }),
                 );
               } else {
                 void useChatStore.getState().addAttachments(paths);

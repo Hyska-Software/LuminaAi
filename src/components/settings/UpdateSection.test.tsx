@@ -30,15 +30,15 @@ function releaseInfo(): UpdateInfo {
     currentVersion: '0.1.0',
     latestVersion: '0.2.0',
     available: true,
-    releaseName: 'Lumina v0.2.0',
+    releaseName: 'Zylara v0.2.0',
     releasedAt: '2026-11-01T12:00:00Z',
-    htmlUrl: 'https://github.com/Hyska-Software/LuminaAi/releases/tag/v0.2.0',
+    htmlUrl: 'https://github.com/Hyska-Software/ZylaraAi/releases/tag/v0.2.0',
     asset: {
-      name: 'Lumina-Setup-0.2.0-windows-x64.exe',
+      name: 'Zylara-Setup-0.2.0-windows-x64.exe',
       size: 100,
       sha256: 'a'.repeat(64),
       downloadUrl:
-        'https://github.com/Hyska-Software/LuminaAi/releases/download/v0.2.0/Lumina-Setup-0.2.0-windows-x64.exe',
+        'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-Setup-0.2.0-windows-x64.exe',
       platformLabel: 'Windows x64',
       kind: 'setup',
     },
@@ -67,7 +67,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   useAppStore.setState({
     appInfo: {
-      name: 'Lumina',
+      name: 'Zylara',
       version: '0.1.0',
       tauriVersion: '2.12.4',
       platform: 'windows',

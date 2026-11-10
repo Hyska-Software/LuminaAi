@@ -89,7 +89,7 @@ describe('MessageItem — avatar do agente', () => {
     );
 
     expect(screen.getByText('🔎')).toBeTruthy();
-    expect(container.querySelector('img[src*="lumina-mark"]')).toBeNull();
+    expect(container.querySelector('img[src*="zylara-mark"]')).toBeNull();
   });
 
   it('anima o avatar do agente enquanto a mensagem está em streaming', () => {
@@ -220,7 +220,7 @@ describe('MessageItem — diferenças do layout Code', () => {
     const { container } = renderMessage(cited);
 
     expect(screen.getByText('Resposta com fontes.')).toBeTruthy();
-    expect(container.querySelector('img[src*="lumina-mark"]')).toBeNull();
+    expect(container.querySelector('img[src*="zylara-mark"]')).toBeNull();
     expect(screen.queryByText('tauri.app')).toBeNull();
   });
 
@@ -229,7 +229,7 @@ describe('MessageItem — diferenças do layout Code', () => {
 
     const { container } = renderMessage(cited);
 
-    expect(container.querySelector('img[src*="lumina-mark"]')).not.toBeNull();
+    expect(container.querySelector('img[src*="zylara-mark"]')).not.toBeNull();
     expect(screen.getByText('tauri.app')).toBeTruthy();
   });
 });

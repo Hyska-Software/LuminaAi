@@ -2361,7 +2361,7 @@ mod tests {
     impl TempWorkspace {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "lumina-preview-skills-{}",
+                "zylara-preview-skills-{}",
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&path).expect("criar diretório temporário");
@@ -2438,7 +2438,7 @@ mod tests {
         let docx_spec = r#"{
             "title": "Relatório de Integração",
             "subtitle": "Gerado pelo script embutido",
-            "footer": "Lumina · teste",
+            "footer": "Zylara · teste",
             "blocks": [
                 {"type": "heading", "level": 1, "text": "Introdução"},
                 {"type": "paragraph", "text": "Texto com acentuação: ação, coração, ção."},
@@ -2541,7 +2541,7 @@ mod tests {
         let pdf_spec = r#"{
             "title": "Relatório de Integração",
             "subtitle": "PDF gerado pelo helper",
-            "footer": "Lumina · teste",
+            "footer": "Zylara · teste",
             "blocks": [
                 {"type": "heading", "level": 1, "text": "Introdução"},
                 {"type": "paragraph", "text": "Texto com acentuação: ação, coração, ção."},

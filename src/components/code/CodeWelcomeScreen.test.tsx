@@ -28,12 +28,12 @@ import { CodeWelcomeScreen } from './CodeWelcomeScreen';
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
     id: 'ws-1',
-    name: 'lumina-core',
-    path: 'C:/dev/lumina',
+    name: 'zylara-core',
+    path: 'C:/dev/zylara',
     createdAt: 1,
     updatedAt: 2,
     trusted: true,
-    git: { root: 'C:/dev/lumina', branch: 'main', dirty: true },
+    git: { root: 'C:/dev/zylara', branch: 'main', dirty: true },
     ...overrides,
   };
 }
@@ -61,7 +61,7 @@ beforeEach(() => {
   mocks.listConversations.mockResolvedValue([]);
   mocks.listArtifacts.mockResolvedValue([]);
   mocks.createConversation.mockResolvedValue(conversation());
-  mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/lumina');
+  mocks.pickWorkspaceFolder.mockResolvedValue('C:/dev/zylara');
   mocks.addWorkspace.mockResolvedValue(workspace());
   mocks.setConversationWorkspace.mockImplementation(async (id: string, workspaceId: string | null) =>
     conversation({ id, workspaceId }),
@@ -98,7 +98,7 @@ describe('CodeWelcomeScreen — sem workspace', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Abrir pasta/ }));
 
     await waitFor(() => expect(mocks.pickWorkspaceFolder).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mocks.addWorkspace).toHaveBeenCalledWith('C:/dev/lumina', false));
+    await waitFor(() => expect(mocks.addWorkspace).toHaveBeenCalledWith('C:/dev/zylara', false));
     await waitFor(() => expect(useUiStore.getState().activeWorkspaceId).toBe('ws-1'));
   });
 
@@ -107,7 +107,7 @@ describe('CodeWelcomeScreen — sem workspace', () => {
     mocks.listWorkspaces.mockResolvedValue([ws]);
     render(<CodeWelcomeScreen />);
 
-    const recent = await screen.findByRole('button', { name: /lumina-core/ });
+    const recent = await screen.findByRole('button', { name: /zylara-core/ });
     const before = mocks.createConversation.mock.calls.length;
     fireEvent.click(recent);
 
@@ -137,8 +137,8 @@ describe('CodeWelcomeScreen — com workspace ativo', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Comece uma sessão do agente' }),
     ).toBeTruthy();
-    expect(screen.getByText('lumina-core')).toBeTruthy();
-    expect(screen.getAllByText('C:/dev/lumina').length).toBeGreaterThan(0);
+    expect(screen.getByText('zylara-core')).toBeTruthy();
+    expect(screen.getAllByText('C:/dev/zylara').length).toBeGreaterThan(0);
     expect(screen.getByText('main')).toBeTruthy();
     expect(screen.getByText('Alterações não commitadas')).toBeTruthy();
 
@@ -152,13 +152,13 @@ describe('CodeWelcomeScreen — com workspace ativo', () => {
     const listener = (event: Event) => {
       suggestions.push((event as CustomEvent<string>).detail);
     };
-    window.addEventListener('lumina:suggest', listener);
+    window.addEventListener('zylara:suggest', listener);
     render(<CodeWelcomeScreen />);
 
     fireEvent.click(await screen.findByRole('button', { name: /Escreva testes/ }));
 
     expect(suggestions).toHaveLength(1);
     expect(suggestions[0]).toContain('casos de borda');
-    window.removeEventListener('lumina:suggest', listener);
+    window.removeEventListener('zylara:suggest', listener);
   });
 });

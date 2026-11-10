@@ -158,13 +158,13 @@ export function LibraryView() {
       void pickFiles();
     };
 
-    window.addEventListener('lumina:library-drop', onDrop);
-    window.addEventListener('lumina:library-drag', onDrag);
-    window.addEventListener('lumina:library-import', onImport);
+    window.addEventListener('zylara:library-drop', onDrop);
+    window.addEventListener('zylara:library-drag', onDrag);
+    window.addEventListener('zylara:library-import', onImport);
     return () => {
-      window.removeEventListener('lumina:library-drop', onDrop);
-      window.removeEventListener('lumina:library-drag', onDrag);
-      window.removeEventListener('lumina:library-import', onImport);
+      window.removeEventListener('zylara:library-drop', onDrop);
+      window.removeEventListener('zylara:library-drag', onDrag);
+      window.removeEventListener('zylara:library-import', onImport);
     };
   }, [importFiles, pickFiles]);
 

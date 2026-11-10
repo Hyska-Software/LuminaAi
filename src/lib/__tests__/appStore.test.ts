@@ -94,7 +94,7 @@ const openaiProvider: ProviderInfo = {
   oauth: {
     issuer: 'https://auth.openai.com',
     registrationClientId: 'dynamic_agent_client',
-    agentNameHint: 'Lumina',
+    agentNameHint: 'Zylara',
     resource: 'https://api.openai.com/v1',
     scopes: ['openid', 'chatgpt.tokens.use.direct'],
     planUsageScope: 'chatgpt.tokens.use.direct',
@@ -180,7 +180,7 @@ beforeEach(() => {
   });
   mocks.api.getSettings.mockResolvedValue(settingsView());
   mocks.api.getCatalog.mockResolvedValue(catalogView());
-  mocks.api.appInfo.mockResolvedValue({ name: 'Lumina' });
+  mocks.api.appInfo.mockResolvedValue({ name: 'Zylara' });
 });
 
 describe('appStore — OpenAI plan usage', () => {

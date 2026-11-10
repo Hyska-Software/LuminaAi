@@ -266,7 +266,7 @@ fn provider_config(
         api_key: credential.token().to_string(),
         model: model.clone(),
         session_id: session_id.to_string(),
-        user_agent: format!("Lumina/{}", env!("CARGO_PKG_VERSION")),
+        user_agent: format!("Zylara/{}", env!("CARGO_PKG_VERSION")),
         endpoints: provider.endpoints.clone(),
         request_profile: provider.request_profile(credential.auth_mode()),
         auth_mode: credential.auth_mode(),
@@ -316,7 +316,7 @@ async fn resolve_credential(
                         if !expected_fallback {
                             // Never log tokens: the auth errors carry messages only.
                             eprintln!(
-                                "lumina: sessão OAuth indisponível para {}: {error:#}",
+                                "zylara: sessão OAuth indisponível para {}: {error:#}",
                                 provider.id
                             );
                         }
@@ -720,7 +720,7 @@ fn load_persisted_cache_state(db: &Db, conversation_id: &str) -> Option<CacheSta
     match db.get_cache_state(conversation_id) {
         Ok(record) => record,
         Err(error) => {
-            eprintln!("lumina: falha ao ler o estado de cache: {error:#}");
+            eprintln!("zylara: falha ao ler o estado de cache: {error:#}");
             None
         }
     }
@@ -840,7 +840,7 @@ fn persist_chat_watermark(
     state.chat_cut_seq = chat_cut_seq.filter(|seq| *seq > 1);
     state.updated_at = now_ms();
     if let Err(error) = db.upsert_cache_state(&state) {
-        eprintln!("lumina: falha ao gravar o watermark do histórico do Chat: {error:#}");
+        eprintln!("zylara: falha ao gravar o watermark do histórico do Chat: {error:#}");
     }
 }
 
@@ -891,7 +891,7 @@ fn record_cache_telemetry(
 ) {
     let prefix_hash = digest.map(cache::prefix_hash);
     if let Err(error) = db.insert_cache_sample(conversation_id, sample, prefix_hash.as_deref()) {
-        eprintln!("lumina: falha ao registrar a amostra de cache: {error:#}");
+        eprintln!("zylara: falha ao registrar a amostra de cache: {error:#}");
     }
     let totals = tracker.totals();
     let last_break = tracker.last_break();
@@ -919,7 +919,7 @@ fn record_cache_telemetry(
         updated_at: now_ms(),
     };
     if let Err(error) = db.upsert_cache_state(&state) {
-        eprintln!("lumina: falha ao gravar o estado de cache: {error:#}");
+        eprintln!("zylara: falha ao gravar o estado de cache: {error:#}");
     }
     *last_usage = Some(TurnUsageCache {
         epoch: sample.epoch,
@@ -957,7 +957,7 @@ fn log_cache_plan(protocol: &str, plan: &providers::cache::CachePlan) {
         .map(|key| format!("{}…", key.chars().take(8).collect::<String>()))
         .unwrap_or_else(|| "-".to_string());
     eprintln!(
-        "lumina: cache plan ({protocol}): mode={:?} ttl={:?} retention={:?} key={key} breakpoints={}",
+        "zylara: cache plan ({protocol}): mode={:?} ttl={:?} retention={:?} key={key} breakpoints={}",
         plan.mode,
         plan.ttl,
         plan.retention,
@@ -1036,12 +1036,12 @@ fn chat_prompt_snapshot(
                 };
             }
             eprintln!(
-                "lumina: tools_json inválido no snapshot de prompt da sessão {}; reconstruindo",
+                "zylara: tools_json inválido no snapshot de prompt da sessão {}; reconstruindo",
                 conversation.id
             );
         }
         Ok(_) => {}
-        Err(error) => eprintln!("lumina: falha ao ler o snapshot de prompt: {error:#}"),
+        Err(error) => eprintln!("zylara: falha ao ler o snapshot de prompt: {error:#}"),
     }
 
     // 3) Constrói uma única vez (data de sessão congelada) e persiste.
@@ -1077,7 +1077,7 @@ fn chat_prompt_snapshot(
         created_at: now_ms(),
         invalidated_at: None,
     }) {
-        eprintln!("lumina: falha ao gravar o snapshot de prompt: {error:#}");
+        eprintln!("zylara: falha ao gravar o snapshot de prompt: {error:#}");
     }
     FrozenPromptSnapshot {
         snapshot_key,
@@ -1147,12 +1147,12 @@ fn code_prompt_snapshot(
                 };
             }
             eprintln!(
-                "lumina: tools_json inválido no snapshot de código da sessão {}; reconstruindo",
+                "zylara: tools_json inválido no snapshot de código da sessão {}; reconstruindo",
                 conversation.id
             );
         }
         Ok(_) => {}
-        Err(error) => eprintln!("lumina: falha ao ler o snapshot de código: {error:#}"),
+        Err(error) => eprintln!("zylara: falha ao ler o snapshot de código: {error:#}"),
     }
 
     // Constrói uma única vez (data da sessão congelada; sem relógio) e persiste.
@@ -1209,7 +1209,7 @@ fn code_prompt_snapshot(
         created_at: now_ms(),
         invalidated_at: None,
     }) {
-        eprintln!("lumina: falha ao gravar o snapshot de código: {error:#}");
+        eprintln!("zylara: falha ao gravar o snapshot de código: {error:#}");
     }
     FrozenPromptSnapshot {
         snapshot_key,
@@ -1324,7 +1324,7 @@ fn insert_surface_item_kind(
         Ok(true) => Some(item),
         Ok(false) => None,
         Err(error) => {
-            eprintln!("lumina: falha ao inserir item de superfície `{kind}`: {error:#}");
+            eprintln!("zylara: falha ao inserir item de superfície `{kind}`: {error:#}");
             None
         }
     }
@@ -1409,7 +1409,7 @@ fn load_surface_items(db: &Db, conversation_id: &str) -> Vec<crate::db::SurfaceI
             items
         }
         Err(error) => {
-            eprintln!("lumina: falha ao ler a superfície da sessão: {error:#}");
+            eprintln!("zylara: falha ao ler a superfície da sessão: {error:#}");
             Vec::new()
         }
     }
@@ -1537,7 +1537,7 @@ fn emit_context_stats(
     stats: crate::domain::ContextStats,
 ) {
     if let Err(error) = code::session::save_context_stats(db, conversation_id, turn_id, &stats) {
-        eprintln!("lumina: falha ao salvar contexto da sessão: {error:#}");
+        eprintln!("zylara: falha ao salvar contexto da sessão: {error:#}");
     }
     emitter.emit(TurnEvent::ContextStats { stats });
 }
@@ -3379,7 +3379,7 @@ pub async fn run_turn(
                     diagnostic.path.as_str()
                 };
                 eprintln!(
-                    "lumina: bloco `ui` #{} com {severity} {} em {path}: {}",
+                    "zylara: bloco `ui` #{} com {severity} {} em {path}: {}",
                     index + 1,
                     diagnostic.code,
                     diagnostic.message
@@ -3388,7 +3388,7 @@ pub async fn run_turn(
         }
         if blocks.len() > contract.blocks.max_per_message {
             eprintln!(
-                "lumina: resposta com {} blocos `ui` (máximo {} por mensagem)",
+                "zylara: resposta com {} blocos `ui` (máximo {} por mensagem)",
                 blocks.len(),
                 contract.blocks.max_per_message
             );
@@ -3456,7 +3456,7 @@ pub async fn run_turn(
         &usage,
         &usage_cache,
     ) {
-        eprintln!("lumina: falha ao registrar usage: {error:#}");
+        eprintln!("zylara: falha ao registrar usage: {error:#}");
     }
 
     emit(
@@ -3491,7 +3491,7 @@ pub async fn run_turn(
         };
         if let Some(title) = derive_title(&source) {
             if let Err(error) = deps.db.rename_conversation(&conversation.id, &title) {
-                eprintln!("lumina: falha ao renomear conversa: {error:#}");
+                eprintln!("zylara: falha ao renomear conversa: {error:#}");
             } else {
                 emit(
                     &on_event,
@@ -3557,7 +3557,7 @@ pub async fn run_turn(
             code::session::KIND_TURN_ENDED,
             &serde_json::json!({ "status": turn_status, "usage": usage }),
         ) {
-            eprintln!("lumina: falha ao registrar fim do turno Code: {error:#}");
+            eprintln!("zylara: falha ao registrar fim do turno Code: {error:#}");
         }
         // Fecho da rodada do objetivo (PLAN §7.3): fecha `goal/round` com as
         // métricas do turno, agrega tokens/custo, detecta progresso/estol e
@@ -3575,7 +3575,7 @@ pub async fn run_turn(
                 Ok(Some(goal)) => emit(&on_event, TurnEvent::GoalUpdated { goal }),
                 Ok(None) => {}
                 Err(error) => {
-                    eprintln!("lumina: falha ao fechar a rodada do objetivo: {error:#}");
+                    eprintln!("zylara: falha ao fechar a rodada do objetivo: {error:#}");
                 }
             }
         }
@@ -3691,7 +3691,7 @@ impl StreamCheckpoint {
         message.tool_calls = tool_calls.to_vec();
         message.citations = citations.to_vec();
         if let Err(error) = self.db.checkpoint_message(&message) {
-            eprintln!("lumina: falha ao salvar checkpoint do turno: {error:#}");
+            eprintln!("zylara: falha ao salvar checkpoint do turno: {error:#}");
         }
     }
 
@@ -3873,7 +3873,7 @@ fn persist_tool_images(
     }
     let directory = data_dir.join("tool-images");
     if let Err(error) = std::fs::create_dir_all(&directory) {
-        eprintln!("lumina: falha ao criar diretório de imagens de tools: {error}");
+        eprintln!("zylara: falha ao criar diretório de imagens de tools: {error}");
         return Vec::new();
     }
     images
@@ -3979,7 +3979,7 @@ fn frozen_tool_result_prunes(db: &Db, message_id: &str) -> HashMap<String, Strin
         Ok(Some(decision)) => serde_json::from_str(&decision.payload).unwrap_or_default(),
         Ok(None) => HashMap::new(),
         Err(error) => {
-            eprintln!("lumina: falha ao ler tool results podados do replay: {error:#}");
+            eprintln!("zylara: falha ao ler tool results podados do replay: {error:#}");
             HashMap::new()
         }
     }
@@ -5151,7 +5151,7 @@ mod tests {
     #[test]
     fn tool_screenshots_are_persisted_as_paths_and_replayed_only_for_vision_models() {
         let directory = std::env::temp_dir().join(format!(
-            "lumina-tool-images-{}",
+            "zylara-tool-images-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).expect("temp dir");
@@ -5329,7 +5329,7 @@ mod agent_loop_tests {
     impl TempDb {
         fn new() -> Self {
             let path = std::env::temp_dir()
-                .join(format!("lumina-harness-test-{}.db", uuid::Uuid::new_v4()));
+                .join(format!("zylara-harness-test-{}.db", uuid::Uuid::new_v4()));
             let db = Arc::new(Db::open(&path).expect("open temp db"));
             Self { db, path }
         }
@@ -5417,12 +5417,12 @@ mod agent_loop_tests {
     /// Unique `<app-data>` directory for tests that run a full turn (skills are
     /// materialized by the catalog).
     fn test_data_dir() -> PathBuf {
-        std::env::temp_dir().join(format!("lumina-harness-data-{}", uuid::Uuid::new_v4()))
+        std::env::temp_dir().join(format!("zylara-harness-data-{}", uuid::Uuid::new_v4()))
     }
 
     /// Env var used by the OAuth test provider. It is intentionally not a real
     /// provider env var so credential resolution stays deterministic.
-    const OAUTH_TEST_ENV: &str = "LUMINA_HARNESS_TEST_OPENAI_KEY";
+    const OAUTH_TEST_ENV: &str = "ZYLARA_HARNESS_TEST_OPENAI_KEY";
 
     fn openai_model(id: &str) -> ModelInfo {
         ModelInfo {
@@ -5474,7 +5474,7 @@ mod agent_loop_tests {
                 issuer: "https://auth.openai.com".to_string(),
                 discovery_url: String::new(),
                 registration_client_id: "dynamic_agent_client".to_string(),
-                agent_name_hint: "Lumina".to_string(),
+                agent_name_hint: "Zylara".to_string(),
                 resource: "https://api.openai.com/v1".to_string(),
                 scopes: vec!["openid".to_string()],
                 plan_usage_scope: "chatgpt.tokens.use.direct".to_string(),
@@ -5571,7 +5571,7 @@ mod agent_loop_tests {
     /* ---------------------------------------------------------------- */
 
     /// Env var do fixture anthropic (não é a env real do provedor).
-    const ANTHROPIC_TEST_ENV: &str = "LUMINA_HARNESS_TEST_ANTHROPIC_KEY";
+    const ANTHROPIC_TEST_ENV: &str = "ZYLARA_HARNESS_TEST_ANTHROPIC_KEY";
 
     fn anthropic_model(id: &str) -> ModelInfo {
         ModelInfo {
@@ -6472,7 +6472,7 @@ mod agent_loop_tests {
     impl TempSkillRepo {
         fn new() -> Self {
             let path = std::env::temp_dir()
-                .join(format!("lumina-external-skills-{}", uuid::Uuid::new_v4()));
+                .join(format!("zylara-external-skills-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&path).expect("criar repositório externo");
             Self { path }
         }
@@ -8339,7 +8339,7 @@ mod agent_loop_tests {
     async fn code_profile_reads_workspace_through_the_tool_registry() {
         let temp = TempDb::new();
         let workspace_dir =
-            std::env::temp_dir().join(format!("lumina-code-workspace-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("zylara-code-workspace-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
         std::fs::write(
             workspace_dir.join("src/app.ts"),
@@ -8739,7 +8739,7 @@ mod agent_loop_tests {
     async fn plan_approval_unlocks_mutations_in_the_same_code_turn() {
         let temp = TempDb::new();
         let workspace_dir =
-            std::env::temp_dir().join(format!("lumina-code-plan-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("zylara-code-plan-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
         let workspace = temp
             .db
@@ -9274,7 +9274,7 @@ mod agent_loop_tests {
     async fn code_profile_emits_cache_stats_per_request() {
         let temp = TempDb::new();
         let workspace_dir = std::env::temp_dir().join(format!(
-            "lumina-cache-code-workspace-{}",
+            "zylara-cache-code-workspace-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
@@ -10303,7 +10303,7 @@ mod agent_loop_tests {
     /// Cria um workspace Code real de teste e a conversa vinculada.
     fn code_workspace(temp: &TempDb) -> (std::path::PathBuf, Conversation) {
         let workspace_dir =
-            std::env::temp_dir().join(format!("lumina-f3a-ws-{}", uuid::Uuid::new_v4()));
+            std::env::temp_dir().join(format!("zylara-f3a-ws-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
         std::fs::write(workspace_dir.join("src/app.ts"), "export const a = 1;\n")
             .expect("criar arquivo");
@@ -10965,7 +10965,7 @@ mod agent_loop_tests {
                 .into_iter()
                 .collect(),
             headers: Default::default(),
-            auth_env: "LUMINA_TEST_CACHE_PLAN_KEY".to_string(),
+            auth_env: "ZYLARA_TEST_CACHE_PLAN_KEY".to_string(),
             default_model_id: model_id.to_string(),
             auth: Default::default(),
             request_profiles: Default::default(),
@@ -12583,7 +12583,7 @@ mod agent_loop_tests {
     async fn goal_round_skips_auto_title_but_human_turns_still_title() {
         let temp = TempDb::new();
         let workspace_dir = std::env::temp_dir()
-            .join(format!("lumina-goal-title-{}", uuid::Uuid::new_v4()));
+            .join(format!("zylara-goal-title-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&workspace_dir).expect("workspace");
         let workspace = temp
             .db

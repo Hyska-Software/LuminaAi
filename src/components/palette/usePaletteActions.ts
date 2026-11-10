@@ -129,13 +129,13 @@ function focusComposer(): void {
   const hidden =
     ui.layoutMode === 'code' ? ui.codeView !== 'session' : ui.activeView !== 'chat';
   if (!hidden) {
-    window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
+    window.dispatchEvent(new CustomEvent('zylara:focus-composer'));
     return;
   }
   if (ui.layoutMode === 'code') ui.setCodeView('session');
   else ui.setActiveView('chat');
   window.setTimeout(() => {
-    window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
+    window.dispatchEvent(new CustomEvent('zylara:focus-composer'));
   }, 0);
 }
 
@@ -157,7 +157,7 @@ function openArtifacts(): void {
 /**
  * Biblioteca commands (PLAN §4.3): the view replaces the chat column, so the
  * palette closes, the view mounts and only then is the native picker requested
- * through the `lumina:library-import` event (one tick later, when the listener
+ * through the `zylara:library-import` event (one tick later, when the listener
  * is already attached).
  */
 function openLibrary(): void {
@@ -167,7 +167,7 @@ function openLibrary(): void {
 function importFilesToLibrary(): void {
   useUiStore.getState().setActiveView('library');
   window.setTimeout(() => {
-    window.dispatchEvent(new CustomEvent('lumina:library-import'));
+    window.dispatchEvent(new CustomEvent('zylara:library-import'));
   }, 0);
 }
 
@@ -658,7 +658,7 @@ export function usePaletteActions(): PaletteAction[] {
     id: 'abrir-pasta-dados',
     group: 'sistema',
     label: 'Abrir pasta de dados',
-    description: 'Banco, anexos e artefatos do Lumina',
+    description: 'Banco, anexos e artefatos do Zylara',
     icon: FolderOpen,
     keywords: 'dados database arquivos pasta',
     run: openDataDir,

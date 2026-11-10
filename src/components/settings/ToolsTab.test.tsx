@@ -246,7 +246,7 @@ describe('ToolsTab — ambiente de código', () => {
     expect(screen.getByText('pip install python-docx openpyxl')).toBeTruthy();
     // Skills: contagem total e por origem (incluindo externas) + rótulos.
     expect(screen.getByText('3 skills')).toBeTruthy();
-    expect(screen.getByText('1 do Lumina')).toBeTruthy();
+    expect(screen.getByText('1 do Zylara')).toBeTruthy();
     expect(screen.getByText('1 externa')).toBeTruthy();
     expect(screen.getByText('1 embutida')).toBeTruthy();
     expect(screen.getByText('office-docx')).toBeTruthy();

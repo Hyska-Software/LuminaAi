@@ -1,7 +1,7 @@
 //! In-app update system: GitHub release feed, verified download and install.
 //!
 //! The check is cheap (one small `release.json` request), the download is
-//! explicit and streams progress, and installing reuses the existing Lumina
+//! explicit and streams progress, and installing reuses the existing Zylara
 //! setup wizard on Windows. Nothing is installed silently.
 
 pub mod download;
@@ -364,14 +364,14 @@ mod tests {
             current_version: "0.1.0".into(),
             latest_version: version.into(),
             available: true,
-            release_name: format!("Lumina v{version}"),
+            release_name: format!("Zylara v{version}"),
             released_at: None,
-            html_url: "https://github.com/Hyska-Software/LuminaAi/releases".into(),
+            html_url: "https://github.com/Hyska-Software/ZylaraAi/releases".into(),
             asset: Some(UpdateAsset {
-                name: "Lumina-Setup-0.2.0-windows-x64.exe".into(),
+                name: "Zylara-Setup-0.2.0-windows-x64.exe".into(),
                 size: 3,
                 sha256: "a".repeat(64),
-                download_url: "https://github.com/Hyska-Software/LuminaAi/releases/download/v0.2.0/Lumina-Setup-0.2.0-windows-x64.exe".into(),
+                download_url: "https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-Setup-0.2.0-windows-x64.exe".into(),
                 platform_label: "Windows x64".into(),
                 kind: "setup".into(),
             }),
@@ -442,7 +442,7 @@ mod tests {
             .record_check("0.1.0", Some(info("0.2.0")))
             .expect("gravar");
         let path = state
-            .download_path("0.2.0", "Lumina-Setup-0.2.0-windows-x64.exe")
+            .download_path("0.2.0", "Zylara-Setup-0.2.0-windows-x64.exe")
             .expect("caminho");
         std::fs::create_dir_all(path.parent().expect("pai")).expect("pasta");
         std::fs::write(&path, b"abc").expect("gravar");
@@ -461,7 +461,7 @@ mod tests {
         let old = state.updates_root().join("0.1.0");
         std::fs::create_dir_all(&old).expect("pasta antiga");
         let pending = state
-            .download_path("0.2.0", "Lumina-Setup-0.2.0-windows-x64.exe")
+            .download_path("0.2.0", "Zylara-Setup-0.2.0-windows-x64.exe")
             .expect("caminho");
         std::fs::create_dir_all(pending.parent().expect("pai")).expect("pasta");
         std::fs::write(pending.with_extension("exe.partial"), b"parcial").expect("parcial");
@@ -478,7 +478,7 @@ mod tests {
         assert!(state.download_path("0.2.0", "../x.exe").is_none());
         assert!(state.download_path("0.2.0", "x/y.exe").is_none());
         assert!(state
-            .download_path("0.2.0-beta.1", "Lumina-Setup-0.2.0.exe")
+            .download_path("0.2.0-beta.1", "Zylara-Setup-0.2.0.exe")
             .is_some());
     }
 

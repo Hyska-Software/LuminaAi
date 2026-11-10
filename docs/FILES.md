@@ -314,12 +314,12 @@ comuns nas skills publicadas no ecossistema (Codex/OpenCode/Agent Skills).
 ### 7.2 Diretórios e precedência
 
 O catálogo lê automaticamente o **repositório padrão de skills** usado por
-agentes como Codex e OpenCode (além da pasta do Lumina e das embutidas),
+agentes como Codex e OpenCode (além da pasta do Zylara e das embutidas),
 sempre em modo somente leitura:
 
 | Origem | Caminho(s) padrão | `source` | Precedência |
 | --- | --- | --- | --- |
-| Lumina (usuário) | `<app-data>/skills/<nome>/SKILL.md` | `user` | 1 |
+| Zylara (usuário) | `<app-data>/skills/<nome>/SKILL.md` | `user` | 1 |
 | Agent Skills (compartilhado) | `~/.agents/skills/<nome>/SKILL.md` | `agents` | 2 |
 | Codex | `$CODEX_HOME/skills/<nome>/SKILL.md` ou `~/.codex/skills/<nome>/SKILL.md` | `codex` | 3 |
 | Claude Code | `$CLAUDE_CONFIG_DIR/skills/<nome>/SKILL.md` ou `~/.claude/skills/<nome>/SKILL.md` | `claude` | 4 |
@@ -331,13 +331,13 @@ Regras:
 - O app **nunca escreve** nos repositórios externos — só lê (como Codex/OpenCode
   fazem). Skills externas podem ser **desativadas** (ficam fora do prompt e das
   tools), mas não excluídas; exclusão só existe para `source == user`.
-- Dedupe por nome: a primeira origem vence (Lumina > `agents` > `codex` >
+- Dedupe por nome: a primeira origem vence (Zylara > `agents` > `codex` >
   `claude` > `opencode` > embutidas).
 - Varredura rasa (1 nível), determinística; diretórios ocultos (`.algo`) são
   ignorados, assim como `SKILL.md` inválido (sem quebrar o catálogo).
 - Variáveis de ambiente respeitadas: `CODEX_HOME`, `CLAUDE_CONFIG_DIR`,
   `XDG_CONFIG_HOME` (e `%APPDATA%` no Windows); home = `USERPROFILE`/`HOME`.
-- Não há diretórios de projeto: o Lumina lê apenas os repositórios de usuário.
+- Não há diretórios de projeto: o Zylara lê apenas os repositórios de usuário.
 
 ### 7.3 Catálogo embutido (v1)
 
@@ -396,18 +396,18 @@ Estado persistido (**Settings**, `settings.json`):
 
 Regras:
 
-- O catálogo continua deduplicado por nome (Lumina vence as externas, que vencem as embutidas); ativar/desativar é por nome.
+- O catálogo continua deduplicado por nome (Zylara vence as externas, que vencem as embutidas); ativar/desativar é por nome.
 - **Excluir** só vale para `source == user`: remove `<app-data>/skills/<nome>/` (validação de caminho: precisa ser filho direto de `skills/`, sem symlink) e limpa o nome de `disabled_skills`. Skills externas (Codex/OpenCode/Claude/Agentes) e embutidas não podem ser excluídas (podem ser desativadas); o erro explica isso e a UI não mostra o botão.
 - Mudanças valem a partir do próximo turno (o harness lê o catálogo por turno); não é preciso reiniciar o app.
 - Como os comandos gravam `disabled_skills` no backend, o renderer chama
   `useAppStore.reloadSettings()` depois de ativar/desativar/excluir — assim um
   `saveSettings` posterior não sobrescreve a lista com estado obsoleto.
 - A view lista **todas** as skills (inclusive desativadas) agrupadas pela origem
-  (Lumina, Agentes, Codex, Claude, OpenCode, Embutidas) com badge, switch por
-  skill e ação de excluir somente para as do Lumina; as externas levam a nota
+  (Zylara, Agentes, Codex, Claude, OpenCode, Embutidas) com badge, switch por
+  skill e ação de excluir somente para as do Zylara; as externas levam a nota
   “somente leitura” (desativar é permitido).
 - UI: item “Skills” logo **abaixo de “Novo chat”** na sidebar (oculto quando `skillsPanelEnabled = false`) e o botão “Gerenciar skills” em Configurações → Ferramentas levam à **`SkillsView`**, uma view principal que **substitui a coluna do chat** (o chat continua montado e volta intacto pelo botão “Voltar ao chat”, pelo “Novo chat” ou ao abrir uma conversa); o único modal da gestão é o de prévia do conteúdo de uma skill (abaixo).
-- **Prévia em Markdown**: cada linha tem o botão **“Visualizar skill &lt;nome&gt;”** (ícone de olho), disponível para todas as origens — inclusive skills externas e desativadas. Ele abre um **dialog** que busca o conteúdo no backend (`get_skill_content`, somente leitura, resolve o nome no mesmo catálogo da listagem) e renderiza o corpo do `SKILL.md` com o **mesmo pipeline do chat** (GFM + KaTeX + `.lumina-prose`), com alternância **Documento | Código** (fonte Markdown crua em `CodeBlock`), estados de carregando/erro com “Tentar novamente” e fechamento por X/Esc. O frontmatter do `SKILL.md` não é exibido.
+- **Prévia em Markdown**: cada linha tem o botão **“Visualizar skill &lt;nome&gt;”** (ícone de olho), disponível para todas as origens — inclusive skills externas e desativadas. Ele abre um **dialog** que busca o conteúdo no backend (`get_skill_content`, somente leitura, resolve o nome no mesmo catálogo da listagem) e renderiza o corpo do `SKILL.md` com o **mesmo pipeline do chat** (GFM + KaTeX + `.zylara-prose`), com alternância **Documento | Código** (fonte Markdown crua em `CodeBlock`), estados de carregando/erro com “Tentar novamente” e fechamento por X/Esc. O frontmatter do `SKILL.md` não é exibido.
 
 ## 8. Execução de código (`run_code`)
 
@@ -786,14 +786,14 @@ padrão de skills do usuário (§7.2): `~/.agents/skills`,
 `$CLAUDE_CONFIG_DIR/skills`/`~/.claude/skills` e
 `$XDG_CONFIG_HOME/opencode/skills`/`~/.config/opencode/skills` (e
 `%APPDATA%\opencode\skills` no Windows), em **modo somente leitura** e com
-precedência Lumina > agents > codex > claude > opencode > embutidas.
+precedência Zylara > agents > codex > claude > opencode > embutidas.
 
 - Frontmatter compatível com o ecossistema: **block scalars YAML** (`>`/`|`
   e variantes), `description` ≤ 1024 chars normalizada em uma linha e corpo
   ≤ 512 KB; a description no prompt é truncada em ~200 chars.
 - UI (`SkillsView`, `sources.ts`): grupos por origem com badges, nota de
   “somente leitura” nas externas e switch para desativar (exclusão só das do
-  Lumina).
+  Zylara).
 - Teste real estrito: na máquina de desenvolvimento **21/21** skills de
   `~/.agents/skills` foram parseadas (nomes iguais aos diretórios, `source`
   correto, 0 rejeições); máquinas sem esses diretórios pulam o teste.
@@ -921,7 +921,7 @@ Auditoria completa e contrato: `docs/COMMAND_PALETTE.md`; plano e evidências:
   (o IPC não devolve trecho de mensagem).
 - **Busca de comandos**: normalização NFD, multi-token, fuzzy com subsequência,
   ranking por campo (label > keywords > description > grupo) + recência,
-  destaque `<mark>` e recentes em `localStorage` (`lumina.palette.recents`).
+  destaque `<mark>` e recentes em `localStorage` (`zylara.palette.recents`).
 - **Catálogo único** em `src/components/palette/usePaletteActions.ts` (31
   comandos capability-aware: conversas, navegação, ferramentas, aparência,
   configurações com deep-link por aba, sistema). Grupos/ordem em
@@ -1084,7 +1084,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
   `height`); `api.listLibraryArtifacts/importLibraryFiles/renameArtifact/
   setArtifactFavorite/getArtifactThumbnail`. `MainView` ganha `'library'`;
   `HotkeySnapshot.libraryView` faz Esc voltar ao chat; drag & drop com a
-  Biblioteca aberta emite `lumina:library-drop` (o App não adiciona anexos ao
+  Biblioteca aberta emite `zylara:library-drop` (o App não adiciona anexos ao
   composer nesse caso).
 - **Agente**: `list_artifacts` lista também uploads (`conversationId` e
   `conversationTitle` nulos, `currentConversation: false`) e `read_artifact`
@@ -1191,7 +1191,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 ### 16.1 Workspace
 
 - `workspaces(id, name, path UNIQUE, …trusted)`; a pasta é do usuário (nada é copiado).
-- `conversations.workspace_id` (nulo = sem workspace), `agent_kind` (`lumina`),
+- `conversations.workspace_id` (nulo = sem workspace), `agent_kind` (`zylara`),
   `permission_mode` (`read_only` | `review` | `edit` | `autonomous`), além de
   `parent_conversation_id`/`subagent_task_call_id`/`subagent_type` para transcripts de subagente
   retidos (ocultos da sidebar e apagados em cascata). Sessões novas do Code nascem com
@@ -1281,7 +1281,7 @@ em `code_events`.
 
 ### 16.8 Hooks do projeto e allowlist de leitura
 
-- **Hooks** (`<workspace>/.lumina/hooks.json`): `{ "postWrite": ["npm run lint --fix", { "command": "npx prettier --write {path}" }] }`
+- **Hooks** (`<workspace>/.zylara/hooks.json`): `{ "postWrite": ["npm run lint --fix", { "command": "npx prettier --write {path}" }] }`
   roda até 4 comandos após cada escrita/edição bem-sucedida, no diretório do workspace, com env
   higienizado e timeout de 120 s; falha do hook **não** desfaz a edição — vira aviso no retorno da
   tool e evento de auditoria `hook/ran`. `{path}`/`{file}` são substituídos pelo caminho relativo.

@@ -151,8 +151,8 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
       atBottomRef.current = true;
       scrollToBottom(reduceMotion ? 'auto' : 'smooth');
     };
-    window.addEventListener('lumina:scroll-bottom', onScrollBottom);
-    return () => window.removeEventListener('lumina:scroll-bottom', onScrollBottom);
+    window.addEventListener('zylara:scroll-bottom', onScrollBottom);
+    return () => window.removeEventListener('zylara:scroll-bottom', onScrollBottom);
   }, [reduceMotion, scrollToBottom]);
 
   return (

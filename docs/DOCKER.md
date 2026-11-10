@@ -14,11 +14,11 @@
 - `dockerReadOnlyRoot` (default `true`; `/workspace` e `/tmp` continuam
   graváveis);
 - `computerDockerImage` / `computerDockerContainer`: computer use gráfico. O
-  default é a imagem publicada `ghcr.io/hyska-software/lumina-computer:latest`
+  default é a imagem publicada `ghcr.io/hyska-software/zylara-computer:latest`
   (publicada pelo workflow `computer-image.yml`). O app não faz pull
   automático: a UI oferece **Baixar imagem** em Configurações → Agentes e
   no estado de erro do painel Tela. Também aceita uma imagem local construída
-  com `docker build -t lumina/computer:latest docker/computer`. O nome
+  com `docker build -t zylara/computer:latest docker/computer`. O nome
   configurado é um **prefixo**; cada conversa usa
   `<nome>-<conversationId>`, sem porta gráfica publicada; a interface usa uma
   ponte local de uso único por `docker exec`;
@@ -39,7 +39,7 @@ Quando `executionEnvironment=docker`, `workspace::exec::docker_shell_for` monta:
 docker run --rm --init -i
   --cap-drop ALL
   --security-opt no-new-privileges
-  --label lumina.owner=lumina
+  --label zylara.owner=zylara
   --pids-limit <dockerPidsLimit>
   --memory <dockerMemoryMb>m
   --cpus <dockerCpus>
@@ -91,7 +91,7 @@ passando por timeout/cancelamento/spill do runner.
   build-essential) ou qualquer imagem com `sh`/`bash`; a imagem precisa existir
   no daemon.
 - `run_code`: Python precisa de uma imagem com `python`; JavaScript, `node`.
-- Computer use: `ghcr.io/hyska-software/lumina-computer:latest` (publicada
+- Computer use: `ghcr.io/hyska-software/zylara-computer:latest` (publicada
   pelo workflow `.github/workflows/computer-image.yml`, multi-arquitetura) ou
   `docker/computer/Dockerfile` (Xvfb + openbox + Chromium + xdotool + scrot +
   RFB) para build local. O pacote do GHCR precisa estar público para o pull
@@ -104,9 +104,9 @@ passando por timeout/cancelamento/spill do runner.
 - `docker_status` — daemon, versão, imagens;
 - `docker_pull_image` — pull explícito com timeout;
 - `docker_validate_image` — inspect + smoke run;
-- `docker_cleanup` — remove containers com label `lumina.owner=lumina`.
+- `docker_cleanup` — remove containers com label `zylara.owner=zylara`.
 - No boot, o app encerra sessões de computer use órfãs e remove containers
-  Lumina deixados pelo processo anterior. A limpeza não roda periodicamente para
+  Zylara deixados pelo processo anterior. A limpeza não roda periodicamente para
   não matar terminais/`run_code` legítimos em execução.
 
 ## Testes

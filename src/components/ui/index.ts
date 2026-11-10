@@ -1,5 +1,5 @@
 /**
- * Lumina UI primitives — public surface used by every feature layer.
+ * Zylara UI primitives — public surface used by every feature layer.
  *
  * Conventions:
  * - Tokens only (`bg-surface-raised`, `text-foreground-muted`, …), never raw colors.

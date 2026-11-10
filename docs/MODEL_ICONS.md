@@ -11,7 +11,7 @@
 Substituir as iniciais genéricas dos avatares de modelo ("DS", "GL", "DE") por
 **o ícone oficial de cada marca** no pill do composer, no popover do
 seletor, no dialog de modelos, na bolha de detalhes e no dialog de modelo
-bloqueado — mantendo a linguagem visual calma do Lumina (tokens, superfícies
+bloqueado — mantendo a linguagem visual calma do Zylara (tokens, superfícies
 neutras) e a legibilidade nos temas claro e escuro.
 
 ## 2. Análise da biblioteca

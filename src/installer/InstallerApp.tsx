@@ -127,7 +127,7 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
 
   if (loadError) {
     return (
-      <InstallerShell mode="install" title="Lumina Setup" onClose={closeWindow}>
+      <InstallerShell mode="install" title="Zylara Setup" onClose={closeWindow}>
         <div className="mx-auto max-w-lg rounded-2xl border border-danger/30 bg-danger-soft p-6">
           <AlertTriangle className="mb-3 size-6 text-danger" />
           <h1 className="text-lg font-semibold text-foreground">Não foi possível abrir o instalador</h1>
@@ -142,7 +142,7 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
 
   if (!state || !context) {
     return (
-      <InstallerShell mode="install" title="Lumina Setup" onClose={closeWindow}>
+      <InstallerShell mode="install" title="Zylara Setup" onClose={closeWindow}>
         <div className="flex items-center gap-3 text-sm text-foreground-muted">
           <Spinner label="Carregando instalador" />
           Preparando o instalador…
@@ -154,7 +154,7 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
   return (
     <InstallerShell
       mode={state.mode}
-      title={state.mode === 'uninstall' ? 'Desinstalar Lumina' : 'Lumina Setup'}
+      title={state.mode === 'uninstall' ? 'Desinstalar Zylara' : 'Zylara Setup'}
       version={context.version}
       context={context}
       state={state}
@@ -316,7 +316,7 @@ function InstallerShell({
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground">
       <header className="flex h-12 shrink-0 items-center justify-between bg-surface px-4">
         <div data-tauri-drag-region className="flex items-center gap-2.5">
-          <img src="/brand/lumina-mark.svg" alt="" className="size-5" draggable={false} />
+          <img src="/brand/zylara-mark.svg" alt="" className="size-5" draggable={false} />
           <span className="text-[13px] font-medium tracking-tight text-foreground">{title}</span>
           {version ? <Badge variant="outline">v{version}</Badge> : null}
         </div>
@@ -333,9 +333,9 @@ function InstallerShell({
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[264px] shrink-0 flex-col bg-surface px-5 pb-5 pt-7">
           <div className="flex items-center gap-3">
-            <img src="/brand/lumina-tile.svg" alt="Lumina" className="size-12 rounded-xl" draggable={false} />
+            <img src="/brand/zylara-tile.svg" alt="Zylara" className="size-12 rounded-xl" draggable={false} />
             <div>
-              <p className="text-[15px] font-semibold tracking-tight">Lumina</p>
+              <p className="text-[15px] font-semibold tracking-tight">Zylara</p>
               <p className="text-[11px] text-foreground-subtle">
                 {mode === 'uninstall' ? 'Desinstalação' : 'Instalador'}
               </p>
@@ -578,14 +578,14 @@ function WelcomeScreen({ context, onContinue }: { context: InstallerContext; onC
       <div className="mb-7 flex items-center gap-5">
         <div className="relative">
           <div className="absolute inset-0 rounded-2xl bg-accent/20 blur-xl" aria-hidden="true" />
-          <img src="/brand/lumina-tile.svg" alt="" className="relative size-16 rounded-2xl" draggable={false} />
+          <img src="/brand/zylara-tile.svg" alt="" className="relative size-16 rounded-2xl" draggable={false} />
         </div>
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">
             {update ? 'Atualização' : 'Bem-vindo'}
           </p>
           <h1 className="mt-1 text-[26px] font-semibold leading-tight tracking-tight">
-            {update ? 'Atualize o Lumina' : 'Instale o Lumina'}
+            {update ? 'Atualize o Zylara' : 'Instale o Zylara'}
           </h1>
           <p className="mt-1 text-sm text-foreground-muted">
             Chat desktop com agentes, documentos e código.
@@ -629,7 +629,7 @@ function WelcomeScreen({ context, onContinue }: { context: InstallerContext; onC
           Cancelar
         </Button>
         <Button variant="primary" onClick={onContinue} rightIcon={<ArrowRight className="size-4" />}>
-          {update ? 'Atualizar Lumina' : 'Continuar'}
+          {update ? 'Atualizar Zylara' : 'Continuar'}
         </Button>
       </Footer>
     </>
@@ -666,7 +666,7 @@ function ScopeScreen({
       <ScreenHeader
         eyebrow="Etapa 1 de 3"
         title="Para quem vamos instalar?"
-        description="Escolha o escopo. A opção por usuário não pede administrador; a opção para todos deixa o Lumina disponível para qualquer conta deste computador."
+        description="Escolha o escopo. A opção por usuário não pede administrador; a opção para todos deixa o Zylara disponível para qualquer conta deste computador."
       />
 
       <div role="radiogroup" aria-label="Escopo da instalação" className="space-y-3">
@@ -747,7 +747,7 @@ function LocationScreen({
       <ScreenHeader
         eyebrow="Etapa 2 de 3"
         title="Onde instalar?"
-        description="A pasta será criada se ainda não existir. O Lumina precisa de uma unidade local para o banco de dados e os checkpoints."
+        description="A pasta será criada se ainda não existir. O Zylara precisa de uma unidade local para o banco de dados e os checkpoints."
       />
 
       <div className="rounded-2xl border border-border bg-surface-raised p-5">
@@ -829,8 +829,8 @@ function OptionsScreen({
         title={update ? 'Confirme a atualização' : 'Ajuste os detalhes'}
         description={
           update
-            ? `O Lumina ${context.version} será instalado sobre a versão ${context.existing?.version}. Seus dados serão preservados.`
-            : 'Escolha como o Lumina deve aparecer no Windows. Você pode mudar os atalhos depois na pasta de instalação.'
+            ? `O Zylara ${context.version} será instalado sobre a versão ${context.existing?.version}. Seus dados serão preservados.`
+            : 'Escolha como o Zylara deve aparecer no Windows. Você pode mudar os atalhos depois na pasta de instalação.'
         }
       />
 
@@ -838,7 +838,7 @@ function OptionsScreen({
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="text-[12.5px] leading-relaxed text-foreground-muted">
-            <p className="font-medium text-danger">Existe outra instalação do Lumina.</p>
+            <p className="font-medium text-danger">Existe outra instalação do Zylara.</p>
             <p className="mt-0.5">
               {scopeLabel(context.conflicting.scope)} em {context.conflicting.path} (v
               {context.conflicting.version}). Remova essa instalação antes de continuar.
@@ -851,7 +851,7 @@ function OptionsScreen({
         <div className="mb-4 flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <div className="min-w-0 flex-1">
-            <p className="text-[12.5px] font-medium text-foreground">O Lumina está aberto</p>
+            <p className="text-[12.5px] font-medium text-foreground">O Zylara está aberto</p>
             <p className="mt-0.5 text-[12px] leading-relaxed text-foreground-muted">
               Feche o aplicativo antes de continuar para evitar arquivos bloqueados.
             </p>
@@ -867,18 +867,18 @@ function OptionsScreen({
           checked={state.draft.desktopShortcut}
           onChange={(value) => onOption('desktopShortcut', value)}
           title="Atalho na área de trabalho"
-          description="Cria um atalho para abrir o Lumina."
+          description="Cria um atalho para abrir o Zylara."
         />
         <OptionRow
           checked={state.draft.startMenuShortcut}
           onChange={(value) => onOption('startMenuShortcut', value)}
           title="Atalho no Menu Iniciar"
-          description="Adiciona o Lumina ao menu Iniciar e à pesquisa do Windows."
+          description="Adiciona o Zylara ao menu Iniciar e à pesquisa do Windows."
         />
         <OptionRow
           checked={state.draft.launchAfterInstall}
           onChange={(value) => onOption('launchAfterInstall', value)}
-          title="Abrir o Lumina ao concluir"
+          title="Abrir o Zylara ao concluir"
           description="Inicia o aplicativo assim que a instalação terminar."
         />
       </div>
@@ -913,7 +913,7 @@ function OptionsScreen({
           disabled={Boolean(context.conflicting)}
           leftIcon={<Download className="size-4" />}
         >
-          {update ? 'Atualizar agora' : 'Instalar Lumina'}
+          {update ? 'Atualizar agora' : 'Instalar Zylara'}
         </Button>
       </Footer>
     </>
@@ -934,7 +934,7 @@ function ProgressScreen({
     <>
       <ScreenHeader
         eyebrow={state.mode === 'uninstall' ? 'Removendo' : 'Instalando'}
-        title={state.mode === 'uninstall' ? 'Removendo o Lumina' : 'Instalando o Lumina'}
+        title={state.mode === 'uninstall' ? 'Removendo o Zylara' : 'Instalando o Zylara'}
         description="Mantenha esta janela aberta. O instalador está aplicando as alterações com segurança."
       />
 
@@ -1045,7 +1045,7 @@ function FinishScreen({
           <Check className="size-8" strokeWidth={2.2} />
         </div>
         <h1 className="mt-5 text-[24px] font-semibold tracking-tight">
-          {uninstall ? 'Lumina removido' : launched ? 'Tudo pronto' : 'Instalação concluída'}
+          {uninstall ? 'Zylara removido' : launched ? 'Tudo pronto' : 'Instalação concluída'}
         </h1>
         <p className="mt-2 max-w-[48ch] text-sm leading-relaxed text-foreground-muted">
           {uninstall
@@ -1053,8 +1053,8 @@ function FinishScreen({
               ? 'O aplicativo e os dados do usuário foram removidos deste computador.'
               : 'O aplicativo foi removido. Suas conversas, arquivos e configurações foram preservados.'
             : launched
-              ? 'O Lumina foi instalado e já está aberto. Bom trabalho!'
-              : 'O Lumina está pronto para usar. Você pode abri-lo agora ou pela área de trabalho.'}
+              ? 'O Zylara foi instalado e já está aberto. Bom trabalho!'
+              : 'O Zylara está pronto para usar. Você pode abri-lo agora ou pela área de trabalho.'}
         </p>
         {state.outcome?.installPath ? (
           <p className="mt-4 max-w-full break-all rounded-lg bg-surface px-3 py-2 font-mono text-[11px] text-foreground-subtle">
@@ -1066,7 +1066,7 @@ function FinishScreen({
       <div className="flex justify-center gap-2">
         {!uninstall ? (
           <Button variant="primary" onClick={() => void onLaunch()} leftIcon={<Sparkles className="size-4" />}>
-            {launched ? 'Abrir Lumina' : 'Abrir Lumina agora'}
+            {launched ? 'Abrir Zylara' : 'Abrir Zylara agora'}
           </Button>
         ) : null}
         {!uninstall ? (
@@ -1100,14 +1100,14 @@ function UninstallScreen({
     <>
       <ScreenHeader
         eyebrow="Desinstalação"
-        title="Remover o Lumina?"
+        title="Remover o Zylara?"
         description="O aplicativo será removido deste computador. Você pode escolher se as conversas, arquivos e configurações também devem ser apagados."
       />
 
       <div className="rounded-2xl border border-border bg-surface-raised p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-foreground">Lumina {context.existing?.version ?? context.version}</p>
+            <p className="text-sm font-medium text-foreground">Zylara {context.existing?.version ?? context.version}</p>
             <p className="mt-1 break-all text-[12px] text-foreground-muted">{context.existing?.path ?? state.draft.path}</p>
           </div>
           <Badge variant="outline" size="md">
@@ -1128,7 +1128,7 @@ function UninstallScreen({
           <div className="mt-2 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger-soft px-3.5 py-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
             <p className="text-[12px] leading-relaxed text-foreground-muted">
-              As chaves de API serão apagadas. Você precisará configurá-las novamente se reinstalar o Lumina.
+              As chaves de API serão apagadas. Você precisará configurá-las novamente se reinstalar o Zylara.
             </p>
           </div>
         ) : null}
@@ -1157,7 +1157,7 @@ function UninstallScreen({
           }}
           leftIcon={<RotateCcw className="size-4" />}
         >
-          {state.draft.purgeData && confirming ? 'Confirmar remoção' : 'Remover Lumina'}
+          {state.draft.purgeData && confirming ? 'Confirmar remoção' : 'Remover Zylara'}
         </Button>
       </Footer>
     </>

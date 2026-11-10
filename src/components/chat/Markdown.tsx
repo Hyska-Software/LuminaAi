@@ -118,7 +118,7 @@ function TaskListCheckbox({ checked }: ComponentPropsWithoutRef<'input'>) {
       disabled
       checked={done}
       aria-label={done ? 'Concluído' : 'Pendente'}
-      className="lumina-task-checkbox"
+      className="zylara-task-checkbox"
     />
   );
 }
@@ -127,7 +127,7 @@ function TaskListCheckbox({ checked }: ComponentPropsWithoutRef<'input'>) {
 function MarkdownFootnotesSection({ node, className, children, ...props }: ComponentPropsWithoutRef<'section'> & ExtraProps) {
   const isFootnotes = node?.properties?.dataFootnotes !== undefined;
   return (
-    <section {...props} className={cn(className, isFootnotes && 'lumina-footnotes')}>
+    <section {...props} className={cn(className, isFootnotes && 'zylara-footnotes')}>
       {children}
     </section>
   );
@@ -147,7 +147,7 @@ function MarkdownHeading2({ node, children, ...props }: ComponentPropsWithoutRef
 
 function MarkdownTable({ children }: ComponentPropsWithoutRef<'table'>) {
   return (
-    <div className="lumina-table-wrap my-3 w-full overflow-x-auto">
+    <div className="zylara-table-wrap my-3 w-full overflow-x-auto">
       <table>{children}</table>
     </div>
   );
@@ -177,7 +177,7 @@ export interface MarkdownProps {
   variant?: 'default' | 'thinking';
 }
 
-/** GFM + math markdown renderer tuned by the global `.lumina-prose` styles. */
+/** GFM + math markdown renderer tuned by the global `.zylara-prose` styles. */
 export const Markdown = memo(function Markdown({
   content,
   className,
@@ -191,9 +191,9 @@ export const Markdown = memo(function Markdown({
   return (
     <div
       className={cn(
-        'lumina-prose',
-        variant === 'thinking' ? 'lumina-prose--thinking' : 'text-[15px]',
-        streaming && 'lumina-prose--streaming',
+        'zylara-prose',
+        variant === 'thinking' ? 'zylara-prose--thinking' : 'text-[15px]',
+        streaming && 'zylara-prose--streaming',
         className,
       )}
     >

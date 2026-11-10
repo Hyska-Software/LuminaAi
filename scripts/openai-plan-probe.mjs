@@ -26,7 +26,7 @@ const AUTHORIZE = `${ISSUER}/api/accounts/authorize`;
 const TOKEN = `${ISSUER}/api/accounts/oauth/token`;
 const RESOURCE = 'https://api.openai.com/v1';
 const CLIENT_ID = 'dynamic_agent_client';
-const AGENT_NAME = 'Lumina';
+const AGENT_NAME = 'Zylara';
 const SCOPES = [
   'openid',
   'profile',
@@ -160,7 +160,7 @@ async function waitForCallback({ redirectUri, expectedState, timeoutMs = 10 * 60
       const params = Object.fromEntries(url.searchParams.entries());
       const finish = (message) => {
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(
-          `<!doctype html><meta charset="utf-8"><title>Lumina</title><body style="font-family:system-ui;padding:32px"><h1>${message}</h1><p>Você pode fechar esta aba e voltar ao terminal.</p></body>`,
+          `<!doctype html><meta charset="utf-8"><title>Zylara</title><body style="font-family:system-ui;padding:32px"><h1>${message}</h1><p>Você pode fechar esta aba e voltar ao terminal.</p></body>`,
         );
       };
       if (params.state !== expectedState) {

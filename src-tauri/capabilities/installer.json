@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "installer",
-  "description": "Minimal permissions for the Lumina setup window",
+  "description": "Minimal permissions for the Zylara setup window",
   "windows": ["setup"],
   "permissions": [
     "core:default",

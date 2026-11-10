@@ -191,7 +191,7 @@ export function ToolsTab() {
 
       <SettingsSection
         title="Cache de prompt"
-        description="Como o Lumina reaproveita o prefixo do prompt nos provedores que medem cache."
+        description="Como o Zylara reaproveita o prefixo do prompt nos provedores que medem cache."
       >
         <SettingRow
           label="Mostrar indicador"
@@ -732,8 +732,8 @@ export function ToolsTab() {
                 <Badge tone="muted">
                   {originCounts.total} {originCounts.total === 1 ? 'skill' : 'skills'}
                 </Badge>
-                {originCounts.lumina > 0 ? (
-                  <Badge tone="accent">{originCounts.lumina} do Lumina</Badge>
+                {originCounts.zylara > 0 ? (
+                  <Badge tone="accent">{originCounts.zylara} do Zylara</Badge>
                 ) : null}
                 {originCounts.external > 0 ? (
                   <Badge tone="muted">

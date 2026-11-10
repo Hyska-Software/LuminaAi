@@ -71,8 +71,8 @@ function terminalInfo(id = `term-${nextTerminal}`): TerminalInfo {
   return {
     id,
     conversationId: 'conv-1',
-    title: 'lumina',
-    cwd: 'C:/projetos/lumina',
+    title: 'zylara',
+    cwd: 'C:/projetos/zylara',
     cols: 100,
     rows: 24,
     running: true,
@@ -116,7 +116,7 @@ describe('TerminalPanel', () => {
       expect(apiMock.openTerminal).toHaveBeenCalledWith('conv-1', 100, 24, expect.any(Function));
     });
     expect(await screen.findByRole('tab', { name: 'Terminal 1' })).toBeTruthy();
-    expect(screen.getByText('C:/projetos/lumina')).toBeTruthy();
+    expect(screen.getByText('C:/projetos/zylara')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Fechar Terminal 1' }));
 

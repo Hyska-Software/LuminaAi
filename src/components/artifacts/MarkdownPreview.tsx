@@ -14,7 +14,7 @@ const VIEW_OPTIONS = [
 
 /**
  * Markdown artifact preview: rendered document by default (same GFM + KaTeX +
- * Lumina prose pipeline as the chat) with a "Código" tab that shows the raw
+ * Zylara prose pipeline as the chat) with a "Código" tab that shows the raw
  * source in a copyable code block.
  */
 export function MarkdownPreview({ content, className }: ArtifactViewProps) {

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 pub fn client() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent(concat!("Lumina/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Zylara/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
         .pool_idle_timeout(Duration::from_secs(60))
         .tcp_keepalive(Duration::from_secs(30))

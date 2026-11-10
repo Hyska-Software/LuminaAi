@@ -69,7 +69,7 @@ não há grant persistente. Sem canal de aprovação a tool falha fechada
 
 ### Docker
 
-- Imagem padrão publicada em `ghcr.io/hyska-software/lumina-computer:latest`
+- Imagem padrão publicada em `ghcr.io/hyska-software/zylara-computer:latest`
   (workflow `computer-image.yml`); também funciona uma imagem local de
   `docker/computer/` (Xvfb + openbox + Chromium + xdotool + scrot + RFB).
   O app oferece **Baixar imagem** em Configurações → Agentes → Desktop privado e
@@ -194,7 +194,7 @@ O container Docker é **por conversa**:
 ```
 
 Dois agentes/threads nunca compartilham o mesmo Xvfb, clipboard ou Chromium. Cada
-container tem label `lumina.owner=lumina`, não publica portas gráficas no host e é
+container tem label `zylara.owner=zylara`, não publica portas gráficas no host e é
 removido no Stop da sessão, no cleanup de boot e no `docker_cleanup`.
 
 ## Actions de desktop
@@ -284,7 +284,7 @@ registrar teclas, texto, clipboard ou frames.
   `cargo test --lib local_cdp_browser_navigates_snapshots_and_types -- --ignored`.
 - Integração real (ignorada por padrão):
   `cargo test --lib docker_graphical_backend_screenshot_and_click -- --ignored`
-  após `docker build -t lumina/computer:test docker/computer`. O teste sobe o
+  após `docker build -t zylara/computer:test docker/computer`. O teste sobe o
   container, captura 1440×900, clica e remove o container.
 - Ponte RFB e transferência real do backend (ignorado por padrão):
   `cargo test --lib rfb_input_is_cleared_on_disconnect_and_control_revocation -- --ignored --nocapture`.

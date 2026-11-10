@@ -52,7 +52,7 @@ export function ComputerControlBanner({
       </span>
       <div className="min-w-0 flex-1">
         <p className="text-[12px] font-medium text-foreground">
-          Lumina está controlando o computador
+          Zylara está controlando o computador
         </p>
         <p className="truncate text-[11px] text-foreground-muted">
           {agent?.name ?? 'Agente'} · {conversation?.title ?? session.conversationId} ·{' '}

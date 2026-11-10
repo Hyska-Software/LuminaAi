@@ -7,12 +7,12 @@ import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
   return {
     id: 'ws-1',
-    name: 'lumina-core',
-    path: 'C:/dev/lumina',
+    name: 'zylara-core',
+    path: 'C:/dev/zylara',
     createdAt: 1,
     updatedAt: 2,
     trusted: false,
-    git: { root: 'C:/dev/lumina', branch: 'feat/code-harness', dirty: true },
+    git: { root: 'C:/dev/zylara', branch: 'feat/code-harness', dirty: true },
     ...overrides,
   };
 }
@@ -35,7 +35,7 @@ describe('WorkspaceTrustDialog — confiança na pasta', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Confiar nesta pasta?' });
     expect(dialog).toBeTruthy();
-    expect(screen.getByText('C:/dev/lumina')).toBeTruthy();
+    expect(screen.getByText('C:/dev/zylara')).toBeTruthy();
     expect(screen.getByText(/AGENTS\.md/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Confiar' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Abrir em Leitura' })).toBeTruthy();

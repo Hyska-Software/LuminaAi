@@ -18,16 +18,16 @@ export interface BrandMarkProps {
 }
 
 const SOURCES: Record<BrandMarkVariant, string> = {
-  mark: '/brand/lumina-mark.svg',
-  tile: '/brand/lumina-tile.svg',
+  mark: '/brand/zylara-mark.svg',
+  tile: '/brand/zylara-tile.svg',
 };
 
 /**
- * Marca oficial da Lumina (DESIGN §2).
+ * Marca oficial da Zylara (DESIGN §2).
  *
  * Os vetores vivem em `public/brand/` e derivam do asset original:
- * `lumina-mark.svg` é o símbolo sem fundo (recortado à arte) e
- * `lumina-tile.svg` é o ícone completo com o tile grafite-claro. Renderizar
+ * `zylara-mark.svg` é o símbolo sem fundo (recortado à arte) e
+ * `zylara-tile.svg` é o ícone completo com o tile grafite-claro. Renderizar
  * como `<img>` mantém a arte fora do bundle JS e nítida em qualquer tamanho.
  */
 export function BrandMark({ size = 24, variant = 'mark', className, animated = false }: BrandMarkProps) {

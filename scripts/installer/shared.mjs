@@ -42,7 +42,7 @@ export function readVersionState(root) {
   const lock = existsSync(lockPath) ? readFileSync(lockPath, 'utf8') : '';
   const lockVersion =
     lock.match(
-      /\[\[package\]\]\r?\nname = "lumina"\r?\nversion = "([^"]+)"/,
+      /\[\[package\]\]\r?\nname = "zylara"\r?\nversion = "([^"]+)"/,
     )?.[1] ?? null;
 
   return {
@@ -85,7 +85,7 @@ export function sha256File(file) {
 
 export function artifactFileName(version, platform, arch, extension) {
   const suffix = extension.startsWith('.') ? extension : `.${extension}`;
-  return `Lumina-Setup-${version}-${platform}-${arch}${suffix}`;
+  return `Zylara-Setup-${version}-${platform}-${arch}${suffix}`;
 }
 
 export function platformLabel(host, arch) {
@@ -140,7 +140,7 @@ export function buildManifest({
   }));
   return {
     schemaVersion: 1,
-    product: 'Lumina',
+    product: 'Zylara',
     version,
     channel,
     commit,

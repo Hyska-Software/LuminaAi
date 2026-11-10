@@ -49,7 +49,7 @@ static MATERIALIZE_LOCK: once_cell::sync::Lazy<parking_lot::Mutex<()>> =
 pub enum SkillSource {
     /// `<app-data>/skills-bundled/` (materialized from `src-tauri/skills/`).
     Bundled,
-    /// `<app-data>/skills/` (managed by the user through the Lumina UI).
+    /// `<app-data>/skills/` (managed by the user through the Zylara UI).
     User,
     /// `~/.agents/skills/` (shared Agent Skills repository).
     Agents,
@@ -75,7 +75,7 @@ impl SkillSource {
     }
 
     /// External repositories are used by other agents (Codex/OpenCode/Claude);
-    /// Lumina only reads them.
+    /// Zylara only reads them.
     pub fn is_external(self) -> bool {
         matches!(
             self,
@@ -85,7 +85,7 @@ impl SkillSource {
 }
 
 /// A standard skills repository of another agent (Codex/OpenCode/Claude/Agent
-/// Skills). Read-only: Lumina never writes to these directories.
+/// Skills). Read-only: Zylara never writes to these directories.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalSkillRoot {
     pub source: SkillSource,
@@ -322,7 +322,7 @@ pub fn is_enabled(name: &str, disabled: &[String]) -> bool {
 }
 
 /// Deterministic catalog using the standard external repositories
-/// (`~/.agents/skills`, Codex, Claude Code, OpenCode). Precedence: Lumina user >
+/// (`~/.agents/skills`, Codex, Claude Code, OpenCode). Precedence: Zylara user >
 /// agents > codex > claude > opencode > bundled, dedupe by name (first source
 /// wins), sorted alphabetically.
 pub fn catalog(data_dir: &Path) -> anyhow::Result<Vec<Skill>> {
@@ -1091,7 +1091,7 @@ mod tests {
     impl TempDir {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "lumina-skills-test-{}",
+                "zylara-skills-test-{}",
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir_all(&path).expect("criar diretório temporário");
@@ -1697,7 +1697,7 @@ mod tests {
             },
         ];
 
-        // Lumina (user) vence o repositório externo de mesmo nome.
+        // Zylara (user) vence o repositório externo de mesmo nome.
         write_skill(&data_dir.join(USER_DIR), "compartilhada", "user", "corpo");
         write_skill(&agents_root, "compartilhada", "agents", "corpo");
         // A primeira origem externa (agents) vence a seguinte (codex).

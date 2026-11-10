@@ -11,7 +11,7 @@ function makeApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest
     toolCallId: 'call-1',
     tool: 'run_command',
     title: 'Executar comando?',
-    detail: { kind: 'command', command: 'npm test -- --run', workdir: 'lumina-core' },
+    detail: { kind: 'command', command: 'npm test -- --run', workdir: 'zylara-core' },
     risk: 'shell',
     preview: null,
     options: [],
@@ -32,7 +32,7 @@ describe('ApprovalCard', () => {
     const dialog = screen.getByRole('alertdialog', { name: 'Executar comando?' });
     expect(dialog).toBeTruthy();
     expect(within(dialog).getByText(/^cwd:/)).toBeTruthy();
-    expect(within(dialog).getByText('lumina-core')).toBeTruthy();
+    expect(within(dialog).getByText('zylara-core')).toBeTruthy();
     expect(within(dialog).getByLabelText(/Comando a executar/).textContent).toBe(
       'npm test -- --run',
     );

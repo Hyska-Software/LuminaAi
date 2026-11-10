@@ -16,7 +16,7 @@ describe('BrandMark', () => {
     render(<BrandMark size={24} />);
     const img = mark();
 
-    expect(img.getAttribute('src')).toBe('/brand/lumina-mark.svg');
+    expect(img.getAttribute('src')).toBe('/brand/zylara-mark.svg');
     expect(img.getAttribute('alt')).toBe('');
     expect(img.getAttribute('aria-hidden')).toBe('true');
     expect(img.getAttribute('draggable')).toBe('false');
@@ -29,7 +29,7 @@ describe('BrandMark', () => {
     render(<BrandMark variant="tile" size={40} />);
     const img = mark();
 
-    expect(img.getAttribute('src')).toBe('/brand/lumina-tile.svg');
+    expect(img.getAttribute('src')).toBe('/brand/zylara-tile.svg');
     expect(img.style.width).toBe('40px');
     expect(img.style.height).toBe('40px');
   });

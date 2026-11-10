@@ -49,7 +49,7 @@ const SUGGESTIONS: CodeSuggestion[] = [
 
 /** Fills the composer through the same event the Chat welcome screen uses. */
 function fillComposer(text: string): void {
-  window.dispatchEvent(new CustomEvent<string>('lumina:suggest', { detail: text }));
+  window.dispatchEvent(new CustomEvent<string>('zylara:suggest', { detail: text }));
 }
 
 function folderIcon(workspace: Workspace): LucideIcon {
@@ -143,7 +143,7 @@ export function CodeWelcomeScreen() {
     /* The composer stays mounted when switching Chat ↔ Code; focusing it keeps
        the Code welcome keyboard-first like the Chat one. */
     const frame = requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
+      window.dispatchEvent(new CustomEvent('zylara:focus-composer'));
     });
     return () => cancelAnimationFrame(frame);
   }, [activeWorkspace]);

@@ -279,7 +279,7 @@ export async function renameWorkspace(workspace: Workspace, name: string): Promi
 }
 
 /**
- * Remove o workspace do Lumina sem apagar a pasta. As sessões continuam no
+ * Remove o workspace do Zylara sem apagar a pasta. As sessões continuam no
  * histórico (o backend decide se ficam sem workspace); as abas são limpas.
  */
 export async function removeWorkspace(workspace: Workspace): Promise<void> {

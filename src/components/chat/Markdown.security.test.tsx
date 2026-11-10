@@ -161,18 +161,18 @@ describe.each(VARIANTS)('Markdown security — atributos e eventos (variante %s)
 
   it('strips on* attributes from media and links while keeping the element', () => {
     const container = renderMarkdown(
-      '<img src="https://lumina.dev/ok.png" onload="alert(1)" onerror="alert(2)">' +
-        '<a href="https://lumina.dev" onclick="alert(3)">ok</a>',
+      '<img src="https://zylara.dev/ok.png" onload="alert(1)" onerror="alert(2)">' +
+        '<a href="https://zylara.dev" onclick="alert(3)">ok</a>',
       variant,
     );
 
     const image = container.querySelector('img');
-    expect(image?.getAttribute('src')).toBe('https://lumina.dev/ok.png');
+    expect(image?.getAttribute('src')).toBe('https://zylara.dev/ok.png');
     expect(image?.getAttribute('onload')).toBeNull();
     expect(image?.getAttribute('onerror')).toBeNull();
 
     const link = container.querySelector('a');
-    expect(link?.getAttribute('href')).toBe('https://lumina.dev');
+    expect(link?.getAttribute('href')).toBe('https://zylara.dev');
     expect(link?.getAttribute('onclick')).toBeNull();
     expectNoEventHandlerAttributes(container);
   });
@@ -180,11 +180,11 @@ describe.each(VARIANTS)('Markdown security — atributos e eventos (variante %s)
   it('strips inline style, arbitrary data-*, target and srcset', () => {
     const container = renderMarkdown(
       '<div style="position:fixed;top:0" data-evil="1" class="evil" id="evil id" target="_blank">oi</div>' +
-        '<img src="https://lumina.dev/a.png" srcset="https://evil.test/b.png 2x" target="_blank">',
+        '<img src="https://zylara.dev/a.png" srcset="https://evil.test/b.png 2x" target="_blank">',
       variant,
     );
 
-    const div = container.querySelector('.lumina-prose > div');
+    const div = container.querySelector('.zylara-prose > div');
     expect(div?.textContent).toBe('oi');
     expect(div?.getAttribute('style')).toBeNull();
     expect(div?.getAttribute('data-evil')).toBeNull();
@@ -284,12 +284,12 @@ describe.each(VARIANTS)('Markdown security — URLs (variante %s)', (variant) =>
 
   it('keeps safe http(s), mailto and anchor links', () => {
     const container = renderMarkdown(
-      '[https](https://lumina.dev) [mail](mailto:a@lumina.dev) [âncora](#secao)',
+      '[https](https://zylara.dev) [mail](mailto:a@zylara.dev) [âncora](#secao)',
       variant,
     );
 
     const hrefs = Array.from(container.querySelectorAll('a')).map((anchor) => anchor.getAttribute('href'));
-    expect(hrefs).toEqual(['https://lumina.dev', 'mailto:a@lumina.dev', '#secao']);
+    expect(hrefs).toEqual(['https://zylara.dev', 'mailto:a@zylara.dev', '#secao']);
   });
 
   it('still renders user math (KaTeX) after sanitization', () => {
@@ -344,7 +344,7 @@ describe('Markdown security — paridade entre variantes', () => {
       '<script>alert(1)</script>',
       '<iframe src="https://evil.test"></iframe>',
       '<svg onload="alert(1)"></svg>',
-      '<img src="https://lumina.dev/x.png" onerror="alert(1)">',
+      '<img src="https://zylara.dev/x.png" onerror="alert(1)">',
       '<a href="javascript:alert(1)">perigo</a>',
       '<form action="https://evil.test"><input name="senha"></form>',
       '<meta http-equiv="refresh" content="0">',
@@ -355,8 +355,8 @@ describe('Markdown security — paridade entre variantes', () => {
     const resposta = render(<Markdown content={content} />);
     const raciocinio = render(<Markdown content={content} variant="thinking" />);
 
-    const respostaHtml = resposta.container.querySelector('.lumina-prose')?.innerHTML;
-    const raciocinioHtml = raciocinio.container.querySelector('.lumina-prose')?.innerHTML;
+    const respostaHtml = resposta.container.querySelector('.zylara-prose')?.innerHTML;
+    const raciocinioHtml = raciocinio.container.querySelector('.zylara-prose')?.innerHTML;
 
     expect(raciocinioHtml).toBe(respostaHtml);
     expect(raciocinioHtml).not.toContain('javascript:');

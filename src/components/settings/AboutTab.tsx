@@ -12,7 +12,7 @@ const OPENCODE_URL = 'https://opencode.ai';
 const CONSOLE_URL = 'https://opencode.ai/console';
 const CHATGPT_URL = 'https://chatgpt.com';
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
-const REPOSITORY_URL = 'https://github.com/Hyska-Software/LuminaAi';
+const REPOSITORY_URL = 'https://github.com/Hyska-Software/ZylaraAi';
 
 function formatGeneratedAt(value: string): string {
   const date = new Date(value);
@@ -26,7 +26,7 @@ export function AboutTab() {
   return (
     <div className="flex flex-col gap-6">
       <SettingsSection
-        title="Sobre o Lumina"
+        title="Sobre o Zylara"
         description="Chat desktop local-first com OpenCode Go, Zen, OpenAI (ChatGPT) e Anthropic."
       >
         <div className="flex items-center gap-3 py-3">
@@ -34,7 +34,7 @@ export function AboutTab() {
             <BrandMark size={24} />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-semibold tracking-tight text-foreground">Lumina</p>
+            <p className="text-[14px] font-semibold tracking-tight text-foreground">Zylara</p>
             <p className="text-[11px] text-foreground-muted">Tauri 2 · React 19 · Tailwind CSS 4</p>
           </div>
           <Badge tone="accent" size="md">
@@ -118,7 +118,7 @@ export function AboutTab() {
       </SettingsSection>
 
       <p className="text-[11px] leading-relaxed text-foreground-subtle">
-        Lumina pode cometer erros. Verifique informações importantes. As chaves de API ficam no backend
+        Zylara pode cometer erros. Verifique informações importantes. As chaves de API ficam no backend
         local e nunca são expostas à interface.
       </p>
     </div>

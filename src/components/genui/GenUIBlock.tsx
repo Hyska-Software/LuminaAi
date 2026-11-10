@@ -69,7 +69,7 @@ export function GenUIBlock({ source, className }: GenUIBlockProps) {
   useEffect(() => {
     if (!LOG_DEV_WARNINGS || warnings.length === 0) return;
     console.warn(
-      `[Lumina GenUI] UI normalizada com ${warnings.length} ${
+      `[Zylara GenUI] UI normalizada com ${warnings.length} ${
         warnings.length === 1 ? 'aviso de design' : 'avisos de design'
       }`,
       warnings.map((warning) => ({
@@ -94,7 +94,7 @@ export function GenUIBlock({ source, className }: GenUIBlockProps) {
   }
 
   return (
-    <div className={cn('lumina-genui my-3', className)}>
+    <div className={cn('zylara-genui my-3', className)}>
       <GenUIRenderer spec={spec} />
     </div>
   );

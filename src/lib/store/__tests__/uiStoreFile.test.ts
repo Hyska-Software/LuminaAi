@@ -143,7 +143,7 @@ describe('uiStore — quebra de linha global dos arquivos', () => {
   it('persiste a preferência no storage da UI', () => {
     useUiStore.getState().setCodeFileWrap(true);
 
-    const stored = JSON.parse(window.localStorage.getItem('lumina.ui') ?? '{}');
+    const stored = JSON.parse(window.localStorage.getItem('zylara.ui') ?? '{}');
     expect(stored.state?.codeFileWrap).toBe(true);
   });
 });

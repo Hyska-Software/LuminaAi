@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use super::version;
 use super::UpdateAsset;
 
-pub const WEB_BASE: &str = "https://github.com/Hyska-Software/LuminaAi";
-pub const API_BASE: &str = "https://api.github.com/repos/Hyska-Software/LuminaAi";
+pub const WEB_BASE: &str = "https://github.com/Hyska-Software/ZylaraAi";
+pub const API_BASE: &str = "https://api.github.com/repos/Hyska-Software/ZylaraAi";
 
 const MANIFEST_LIMIT: usize = 2 * 1024 * 1024;
 const NOTES_LIMIT: usize = 12_000;
@@ -103,11 +103,11 @@ pub struct UpdateNotes {
 }
 
 /// GitHub web base. Debug builds may point at a local fixture server
-/// (`LUMINA_UPDATE_BASE_URL=http://127.0.0.1:8787`); release builds always use
+/// (`ZYLARA_UPDATE_BASE_URL=http://127.0.0.1:8787`); release builds always use
 /// the public repository.
 pub fn web_base() -> String {
     #[cfg(debug_assertions)]
-    if let Ok(value) = std::env::var("LUMINA_UPDATE_BASE_URL") {
+    if let Ok(value) = std::env::var("ZYLARA_UPDATE_BASE_URL") {
         let trimmed = value.trim().trim_end_matches('/');
         if !trimmed.is_empty() {
             return trimmed.to_string();
@@ -365,7 +365,7 @@ pub fn select_asset_for(
 /// Parses the combined `release.json` (single artifact list for all platforms).
 pub fn candidate_from_manifest(raw: &str, base: &str) -> Result<ReleaseCandidate> {
     let manifest: ReleaseManifest = serde_json::from_str(raw).context("release.json inválido")?;
-    if !manifest.product.trim().is_empty() && !manifest.product.eq_ignore_ascii_case("Lumina") {
+    if !manifest.product.trim().is_empty() && !manifest.product.eq_ignore_ascii_case("Zylara") {
         bail!(
             "release.json pertence a outro produto: {}",
             manifest.product
@@ -383,7 +383,7 @@ pub fn candidate_from_manifest(raw: &str, base: &str) -> Result<ReleaseCandidate
         base,
     );
     Ok(ReleaseCandidate {
-        release_name: format!("Lumina v{version}"),
+        release_name: format!("Zylara v{version}"),
         released_at: manifest.built_at,
         html_url: release_page(base, &version),
         version,
@@ -418,7 +418,7 @@ pub fn candidate_from_api(raw: &str, base: &str) -> Result<Option<ReleaseCandida
         .collect();
     let html_url = release
         .html_url
-        .filter(|url| url.starts_with("https://github.com/Hyska-Software/LuminaAi/"))
+        .filter(|url| url.starts_with("https://github.com/Hyska-Software/ZylaraAi/"))
         .unwrap_or_else(|| release_page(base, &version));
     let asset = select_asset_for(
         std::env::consts::OS,
@@ -431,7 +431,7 @@ pub fn candidate_from_api(raw: &str, base: &str) -> Result<Option<ReleaseCandida
         release_name: release
             .name
             .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| format!("Lumina v{version}")),
+            .unwrap_or_else(|| format!("Zylara v{version}")),
         released_at: release.published_at,
         html_url,
         version,
@@ -539,7 +539,7 @@ pub async fn release_notes(client: &reqwest::Client, version: &str) -> Result<Up
         released_at: release.published_at,
         html_url: release
             .html_url
-            .filter(|url| url.starts_with("https://github.com/Hyska-Software/LuminaAi/"))
+            .filter(|url| url.starts_with("https://github.com/Hyska-Software/ZylaraAi/"))
             .unwrap_or(fallback.html_url),
     })
 }
@@ -580,7 +580,7 @@ mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
 
-    const BASE: &str = "https://github.com/Hyska-Software/LuminaAi";
+    const BASE: &str = "https://github.com/Hyska-Software/ZylaraAi";
 
     fn hash(value: &str) -> String {
         let digest = Sha256::digest(value.as_bytes());
@@ -590,14 +590,14 @@ mod tests {
     const MANIFEST: &str = r#"
     {
       "schemaVersion": 1,
-      "product": "Lumina",
+      "product": "Zylara",
       "version": "0.2.0",
       "builtAt": "2026-11-01T12:00:00.000Z",
       "artifacts": [
-        { "name": "Lumina-0.2.0-linux-x64.AppImage", "size": 100, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
-        { "name": "Lumina-0.2.0-linux-x64.deb", "size": 101, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
-        { "name": "Lumina-0.2.0-macos-universal.dmg", "size": 102, "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" },
-        { "name": "Lumina-Setup-0.2.0-windows-x64.exe", "size": 103, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" },
+        { "name": "Zylara-0.2.0-linux-x64.AppImage", "size": 100, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        { "name": "Zylara-0.2.0-linux-x64.deb", "size": 101, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+        { "name": "Zylara-0.2.0-macos-universal.dmg", "size": 102, "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" },
+        { "name": "Zylara-Setup-0.2.0-windows-x64.exe", "size": 103, "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" },
         { "name": "release.json", "size": 1, "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" }
       ]
     }
@@ -615,16 +615,16 @@ mod tests {
     fn selects_the_platform_asset() {
         let list = artifacts(MANIFEST);
         let windows = select_asset_for("windows", "x86_64", &list, "0.2.0", BASE).expect("Windows");
-        assert_eq!(windows.name, "Lumina-Setup-0.2.0-windows-x64.exe");
+        assert_eq!(windows.name, "Zylara-Setup-0.2.0-windows-x64.exe");
         assert_eq!(windows.kind, "setup");
         assert_eq!(windows.platform_label, "Windows x64");
 
         let macos = select_asset_for("macos", "aarch64", &list, "0.2.0", BASE).expect("macOS");
-        assert_eq!(macos.name, "Lumina-0.2.0-macos-universal.dmg");
+        assert_eq!(macos.name, "Zylara-0.2.0-macos-universal.dmg");
         assert_eq!(macos.platform_label, "macOS (universal)");
 
         let linux = select_asset_for("linux", "x86_64", &list, "0.2.0", BASE).expect("Linux");
-        assert_eq!(linux.name, "Lumina-0.2.0-linux-x64.AppImage");
+        assert_eq!(linux.name, "Zylara-0.2.0-linux-x64.AppImage");
         assert_eq!(linux.kind, "appimage");
     }
 
@@ -632,8 +632,8 @@ mod tests {
     fn picks_the_matching_architecture() {
         let list = artifacts(
             r#"[
-              {"name":"Lumina-Setup-0.2.0-windows-x64.exe","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-              {"name":"Lumina-Setup-0.2.0-windows-arm64.exe","size":1,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+              {"name":"Zylara-Setup-0.2.0-windows-x64.exe","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+              {"name":"Zylara-Setup-0.2.0-windows-arm64.exe","size":1,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
             ]"#,
         );
         let arm = select_asset_for("windows", "aarch64", &list, "0.2.0", BASE).expect("arm64");
@@ -646,11 +646,11 @@ mod tests {
     fn selects_the_apple_silicon_dmg_when_only_arm64_is_published() {
         let list = artifacts(
             r#"[
-              {"name":"Lumina-0.2.1-macos-arm64.dmg","size":102,"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+              {"name":"Zylara-0.2.1-macos-arm64.dmg","size":102,"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
             ]"#,
         );
         let macos = select_asset_for("macos", "aarch64", &list, "0.2.1", BASE).expect("arm64");
-        assert_eq!(macos.name, "Lumina-0.2.1-macos-arm64.dmg");
+        assert_eq!(macos.name, "Zylara-0.2.1-macos-arm64.dmg");
         assert_eq!(macos.platform_label, "macOS (Apple Silicon)");
         // Intel builds are no longer published, so they must get no asset
         // instead of being offered an arm64 package.
@@ -661,8 +661,8 @@ mod tests {
     fn rejects_unsafe_names_hashes_and_unknown_platforms() {
         let bad = artifacts(
             r#"[
-              {"name":"../Lumina-Setup-0.2.0-windows-x64.exe","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-              {"name":"Lumina-Setup-0.2.0-windows-x64.exe","size":1,"sha256":"not-a-hash"}
+              {"name":"../Zylara-Setup-0.2.0-windows-x64.exe","size":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+              {"name":"Zylara-Setup-0.2.0-windows-x64.exe","size":1,"sha256":"not-a-hash"}
             ]"#,
         );
         assert!(select_asset_for("windows", "x86_64", &bad, "0.2.0", BASE).is_none());
@@ -675,8 +675,8 @@ mod tests {
     fn selects_deb_when_appimage_is_missing() {
         let list = artifacts(
             r#"[
-              {"name":"Lumina-0.2.0-linux-x64.deb","size":10,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-              {"name":"Lumina-0.2.0-linux-x64.rpm","size":11,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+              {"name":"Zylara-0.2.0-linux-x64.deb","size":10,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+              {"name":"Zylara-0.2.0-linux-x64.rpm","size":11,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
             ]"#,
         );
         let asset = select_asset_for("linux", "x86_64", &list, "0.2.0", BASE).expect("deb");
@@ -687,10 +687,10 @@ mod tests {
     fn parses_the_combined_manifest() {
         let candidate = candidate_from_manifest(MANIFEST, BASE).expect("manifesto");
         assert_eq!(candidate.version, "0.2.0");
-        assert_eq!(candidate.release_name, "Lumina v0.2.0");
+        assert_eq!(candidate.release_name, "Zylara v0.2.0");
         assert_eq!(
             candidate.html_url,
-            "https://github.com/Hyska-Software/LuminaAi/releases/tag/v0.2.0"
+            "https://github.com/Hyska-Software/ZylaraAi/releases/tag/v0.2.0"
         );
         assert_eq!(
             candidate.released_at.as_deref(),
@@ -701,7 +701,7 @@ mod tests {
 
     #[test]
     fn rejects_manifests_from_other_products_and_invalid_versions() {
-        let other = MANIFEST.replace("\"Lumina\"", "\"OutroApp\"");
+        let other = MANIFEST.replace("\"Zylara\"", "\"OutroApp\"");
         assert!(candidate_from_manifest(&other, BASE).is_err());
         let invalid = MANIFEST.replace("\"0.2.0\"", "\"../0.2.0\"");
         assert!(candidate_from_manifest(&invalid, BASE).is_err());
@@ -713,13 +713,13 @@ mod tests {
         let raw = format!(
             r#"{{
               "tag_name": "v0.2.0",
-              "name": "Lumina v0.2.0",
+              "name": "Zylara v0.2.0",
               "draft": false,
               "prerelease": false,
               "published_at": "2026-11-01T12:00:00Z",
-              "html_url": "https://github.com/Hyska-Software/LuminaAi/releases/tag/v0.2.0",
+              "html_url": "https://github.com/Hyska-Software/ZylaraAi/releases/tag/v0.2.0",
               "assets": [
-                {{"name":"Lumina-Setup-0.2.0-windows-x64.exe","size":10,"digest":"sha256:{digest}","browser_download_url":"{BASE}/releases/download/v0.2.0/Lumina-Setup-0.2.0-windows-x64.exe"}}
+                {{"name":"Zylara-Setup-0.2.0-windows-x64.exe","size":10,"digest":"sha256:{digest}","browser_download_url":"{BASE}/releases/download/v0.2.0/Zylara-Setup-0.2.0-windows-x64.exe"}}
               ]
             }}"#
         );
@@ -740,7 +740,7 @@ mod tests {
     #[test]
     fn only_accepts_release_urls_from_the_configured_repository() {
         assert!(is_allowed_url(
-            "https://github.com/Hyska-Software/LuminaAi/releases/download/v0.2.0/x.exe",
+            "https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/x.exe",
             BASE
         ));
         assert!(!is_allowed_url(
@@ -748,7 +748,7 @@ mod tests {
             BASE
         ));
         assert!(!is_allowed_url(
-            "http://github.com/Hyska-Software/LuminaAi/releases/download/v0.2.0/x.exe",
+            "http://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/x.exe",
             BASE
         ));
         assert!(is_allowed_url(

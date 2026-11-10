@@ -112,7 +112,7 @@ beforeEach(() => {
   mocks.browserPressKey.mockResolvedValue(undefined);
   mocks.browserInsertText.mockResolvedValue(undefined);
   mocks.releaseComputerControl.mockResolvedValue(undefined);
-  mocks.dockerPullImage.mockResolvedValue('ghcr.io/hyska-software/lumina-computer:latest');
+  mocks.dockerPullImage.mockResolvedValue('ghcr.io/hyska-software/zylara-computer:latest');
   mocks.updateAgent.mockImplementation(async (_id: string, input: AgentInput) => ({
     ...agent,
     ...input,
@@ -180,7 +180,7 @@ describe('AgentPanel — Tela', () => {
       orderedIds: [dockerAgent.id],
     });
     mocks.computerPreview.mockRejectedValue(
-      'COMPUTER_DOCKER_FAILED: não foi possível iniciar `ghcr.io/hyska-software/lumina-computer:latest` — pull access denied',
+      'COMPUTER_DOCKER_FAILED: não foi possível iniciar `ghcr.io/hyska-software/zylara-computer:latest` — pull access denied',
     );
     useUiStore.setState({ settingsOpen: false, settingsTab: 'general' });
 
@@ -197,7 +197,7 @@ describe('AgentPanel — Tela', () => {
     expect(
       await screen.findByText('Imagem do Desktop privado não está disponível'),
     ).toBeTruthy();
-    expect(screen.getByText(/docker pull ghcr\.io\/hyska-software\/lumina-computer:latest/)).toBeTruthy();
+    expect(screen.getByText(/docker pull ghcr\.io\/hyska-software\/zylara-computer:latest/)).toBeTruthy();
     expect(
       (screen.getByRole('button', { name: 'Assumir o controle' }) as HTMLButtonElement).disabled,
     ).toBe(true);
@@ -209,7 +209,7 @@ describe('AgentPanel — Tela', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Baixar imagem' }));
     await waitFor(() =>
       expect(mocks.dockerPullImage).toHaveBeenCalledWith(
-        'ghcr.io/hyska-software/lumina-computer:latest',
+        'ghcr.io/hyska-software/zylara-computer:latest',
       ),
     );
   });

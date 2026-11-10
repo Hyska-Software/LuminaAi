@@ -115,12 +115,12 @@ export function AgentPanel() {
     void loadActivityCount();
     const interval = window.setInterval(() => void loadActivityCount(), 15_000);
     const reload = () => void loadActivityCount();
-    window.addEventListener('lumina:agent-task-updated', reload);
-    window.addEventListener('lumina:agent-routine-run', reload);
+    window.addEventListener('zylara:agent-task-updated', reload);
+    window.addEventListener('zylara:agent-routine-run', reload);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener('lumina:agent-task-updated', reload);
-      window.removeEventListener('lumina:agent-routine-run', reload);
+      window.removeEventListener('zylara:agent-task-updated', reload);
+      window.removeEventListener('zylara:agent-routine-run', reload);
     };
   }, [open, loadActivityCount]);
 

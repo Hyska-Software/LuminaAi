@@ -264,8 +264,8 @@ mod tests {
     fn computes_the_sha256_of_a_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("artifact.bin");
-        std::fs::write(&path, b"lumina").expect("gravar");
-        let expected = Sha256::digest(b"lumina")
+        std::fs::write(&path, b"zylara").expect("gravar");
+        let expected = Sha256::digest(b"zylara")
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
@@ -335,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn downloads_verifies_and_promotes_the_artifact() {
-        let payload = b"lumina-update-payload".to_vec();
+        let payload = b"zylara-update-payload".to_vec();
         let expected = hash(&payload);
         let (base, server) = serve_once(payload.clone(), None);
         let dir = tempfile::tempdir().expect("tempdir");

@@ -42,9 +42,9 @@ const SUGGESTIONS: Suggestion[] = [
   },
 ];
 
-/** Suggestions fill the composer through a `lumina:suggest` window event. */
+/** Suggestions fill the composer through a `zylara:suggest` window event. */
 function fillComposer(text: string) {
-  window.dispatchEvent(new CustomEvent<string>('lumina:suggest', { detail: text }));
+  window.dispatchEvent(new CustomEvent<string>('zylara:suggest', { detail: text }));
 }
 
 /** Empty-conversation hero (DESIGN §6.1). */
@@ -53,9 +53,9 @@ export function WelcomeScreen() {
 
   useEffect(() => {
     /* Keep the composer focused when the welcome screen mounts (after the
-       composer registered its `lumina:focus-composer` listener). */
+       composer registered its `zylara:focus-composer` listener). */
     const frame = requestAnimationFrame(() => {
-      window.dispatchEvent(new CustomEvent('lumina:focus-composer'));
+      window.dispatchEvent(new CustomEvent('zylara:focus-composer'));
     });
     return () => cancelAnimationFrame(frame);
   }, []);

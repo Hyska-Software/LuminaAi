@@ -780,7 +780,7 @@ export const useUiStore = create<UiState>()(
       },
     }),
     {
-      name: 'lumina.ui',
+      name: 'zylara.ui',
       partialize: (state) => ({
         theme: state.theme,
         layoutMode: state.layoutMode,

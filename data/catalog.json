@@ -6462,7 +6462,7 @@
     "issuer": "https://auth.openai.com",
     "discoveryUrl": "https://auth.openai.com/.well-known/openid-configuration",
     "registrationClientId": "dynamic_agent_client",
-    "agentNameHint": "Lumina",
+    "agentNameHint": "Zylara",
     "resource": "https://api.openai.com/v1",
     "scopes": [
      "openid",

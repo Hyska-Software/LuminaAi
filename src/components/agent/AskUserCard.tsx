@@ -123,7 +123,7 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
                     <input
                       id={inputId}
                       type={question.multi ? 'checkbox' : 'radio'}
-                      name={`lumina-question-${baseId}-${question.id}`}
+                      name={`zylara-question-${baseId}-${question.id}`}
                       className="mt-0.5 size-3.5 shrink-0 accent-accent"
                       checked={checked}
                       onChange={() => toggle(question, option.label)}

@@ -53,7 +53,7 @@ function readItems(props: Record<string, GenUIValue> | undefined): GenUIActionIt
 /**
  * Linha de ações sugeridas (1–4 botões).
  *
- * `prompt` apenas preenche o composer via evento global `lumina:suggest` —
+ * `prompt` apenas preenche o composer via evento global `zylara:suggest` —
  * nunca envia a mensagem. `copy` copia o texto e confirma com um toast.
  */
 export function GenUIActions({ props }: GenUIActionsProps) {

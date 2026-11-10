@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui';
 import { useIsDark } from './useIsDark';
 
-const HEIGHT_MESSAGE = 'lumina:html-preview:height';
+const HEIGHT_MESSAGE = 'zylara:html-preview:height';
 
 const TOKEN_NAMES = [
   '--background',

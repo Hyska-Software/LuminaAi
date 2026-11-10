@@ -416,8 +416,8 @@ describe('FilePreview — Markdown', () => {
     expect(screen.getByRole('region', { name: 'Prévia do Markdown' })).toBeTruthy();
     expect(screen.getByRole('heading', { level: 1, name: 'Título' })).toBeTruthy();
     expect(screen.getByText('forte').tagName).toBe('STRONG');
-    // O pipeline da conversa (prosa Lumina) é o mesmo.
-    expect(document.querySelector('.lumina-prose')).toBeTruthy();
+    // O pipeline da conversa (prosa Zylara) é o mesmo.
+    expect(document.querySelector('.zylara-prose')).toBeTruthy();
     // A fonte crua só existe no modo Código; e sem wrap no documento.
     expect(screen.queryByLabelText('Conteúdo de README.md')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Quebra de linha' })).toBeNull();

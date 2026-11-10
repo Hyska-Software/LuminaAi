@@ -8,7 +8,7 @@ use parking_lot::Mutex;
 use tokio::sync::{watch, Mutex as AsyncMutex};
 
 /// All local desktop automation shares one physical Windows desktop.
-pub const HOST_CONTROL: &str = "__lumina_host_desktop_control__";
+pub const HOST_CONTROL: &str = "__zylara_host_desktop_control__";
 
 pub fn request_host(db: &crate::db::Db, conversation_id: &str) -> Result<(), String> {
     let (paused, taken) = db

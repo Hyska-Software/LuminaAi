@@ -107,7 +107,7 @@ fn persist_tool_result_prune(
         created_at: now_ms(),
     };
     if let Err(error) = db.upsert_render_decision(&decision) {
-        eprintln!("lumina: falha ao congelar tool result podado: {error:#}");
+        eprintln!("zylara: falha ao congelar tool result podado: {error:#}");
     }
 }
 
@@ -325,7 +325,7 @@ fn prune_covered_surface_items(db: &Db, conversation_id: &str, covered_ids: &Has
             .is_some_and(|anchor| covered_ids.contains(anchor));
         if covered {
             if let Err(error) = db.delete_surface_item(conversation_id, &item.id) {
-                eprintln!("lumina: falha ao remover surface_item coberto: {error:#}");
+                eprintln!("zylara: falha ao remover surface_item coberto: {error:#}");
             }
         }
     }
@@ -392,11 +392,11 @@ pub async fn maybe_compact(
             match result {
                 Ok(Ok(text)) => text,
                 Ok(Err(error)) => {
-                    eprintln!("lumina: compactação falhou (provedor): {error:#}");
+                    eprintln!("zylara: compactação falhou (provedor): {error:#}");
                     return None;
                 }
                 Err(_) => {
-                    eprintln!("lumina: compactação excedeu o tempo limite");
+                    eprintln!("zylara: compactação excedeu o tempo limite");
                     return None;
                 }
             }
@@ -433,7 +433,7 @@ pub async fn maybe_compact(
         &summary,
         Some(before),
     ) {
-        eprintln!("lumina: falha ao persistir resumo de contexto: {error:#}");
+        eprintln!("zylara: falha ao persistir resumo de contexto: {error:#}");
     }
     // Evento próprio de compactação (`context/compacted`): o fold do medidor lê
     // só o total de mensagens cobertas daqui — reciclar `context/stats` com um
@@ -758,13 +758,13 @@ pub async fn summarize_manual_for_conversation(
     let Some(cut) =
         cut_index(&history).and_then(|candidate| align_cut(&history, &anchors, candidate))
     else {
-        eprintln!("lumina: /compact manual sem histórico suficiente para resumir");
+        eprintln!("zylara: /compact manual sem histórico suficiente para resumir");
         return Ok(None);
     };
     let covered_ordinal = anchors.get(cut).copied().unwrap_or(0);
     let covered = covered_ordinal.saturating_sub(1);
     if covered == 0 || covered >= messages.len() {
-        eprintln!("lumina: /compact manual com fronteira inválida ({covered})");
+        eprintln!("zylara: /compact manual com fronteira inválida ({covered})");
         return Ok(None);
     }
 

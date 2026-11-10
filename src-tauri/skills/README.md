@@ -1,4 +1,4 @@
-# Bundled Lumina skills
+# Bundled Zylara skills
 
 Each subfolder is a skill: a `SKILL.md` with frontmatter (`name`, `description`)
 and instructions for the agent. Folders may contain `scripts/` with ready-made
