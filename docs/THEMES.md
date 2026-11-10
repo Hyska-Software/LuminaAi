@@ -129,6 +129,80 @@ Tokens ausentes e opcionais preservam o valor embutido correspondente ao modo at
 
 `wallpaper.light` e `wallpaper.dark` são opcionais e aceitam `png`, `jpg`/`jpeg`, `webp` ou `gif` (até 8 MB e 8192 px por lado). A imagem é aplicada ao `body` como fundo fixo. As superfícies do app são opacas por padrão: para o papel de parede aparecer, use cores de superfície com alfa (`background`, `surface`, `surface-raised`, …, por exemplo `#0b1624cc`).
 
+## Desenvolvendo um tema
+
+### Estrutura inicial
+
+```
+meu-tema/
+  theme.json
+  fonts/        (opcional)
+  images/       (opcional)
+```
+
+O `theme.json` pode ficar na raiz do ZIP ou dentro de uma única pasta de primeiro nível. O nome da pasta em `<app-data>/themes/` **precisa ser exatamente o `id`** do manifesto.
+
+### Ponto de partida
+
+Copie o manifesto completo do exemplo acima. O mínimo necessário é:
+
+- `schemaVersion: 1`
+- `id` estável (minúsculo, `[a-z0-9._-]`, diferente de `zylara`)
+- `name`
+- `tokens.light` e `tokens.dark` com **todos os 23 tokens obrigatórios**
+
+`version` assume `1.0.0` quando omitido; `author`, `description`, `fonts` e `wallpaper` são opcionais. Mantenha o mesmo `id` entre versões: reinstalar substitui o tema atomicamente.
+
+### Ordem de trabalho recomendada
+
+1. Monte primeiro a paleta **claro** com todos os tokens obrigatórios.
+2. Derive a paleta **escura** e confira contraste de `foreground*` sobre `background`/`surface*`, de `accent-foreground` sobre `accent` e dos estados.
+3. Ajuste opcionais de contexto e do terminal (`terminal-ansi-*`) se quiser que o terminal combine com o tema.
+4. Ajuste os raios (`radius-xs`…`radius-3xl`) com valores `px`, `rem` ou `em`.
+5. Adicione fontes em `fonts.sans`/`fonts.mono`; prefira WOFF2 (variável para todos os pesos) e no máximo 4 MB por arquivo.
+6. Adicione wallpaper claro/escuro (até 8 MB, 8192 px por lado). Para ele aparecer, use `background`/`surface*` com alfa (`#rrggbbaa`).
+
+### Iteração local
+
+1. Abra **Configurações → Temas → Abrir pasta de temas**.
+2. Crie `<app-data>/themes/<id>/theme.json` e os assets referenciados.
+3. Clique em **Recarregar temas**. Se o tema não aparecer, o manifesto é inválido, o `id` não bate com a pasta ou um asset/arquivo tem problema.
+4. Para ver a mensagem de validação exata, instale o ZIP pelo botão **Instalar tema…**: os erros do backend aparecem no toast.
+5. Alterou arquivos? **Recarregar temas** reaplica o tema ativo.
+
+### Empacotamento
+
+Windows (PowerShell):
+
+```powershell
+Compress-Archive -Path .\meu-tema\* -DestinationPath .\meu-tema.zip -Force
+```
+
+macOS/Linux:
+
+```bash
+cd meu-tema
+zip -r ../meu-tema.zip .
+```
+
+O ZIP precisa ter `theme.json` na raiz **ou** uma única pasta contendo `theme.json` na raiz do ZIP. Evite incluir uma pasta pai com arquivos soltos.
+
+### Checklist antes de publicar
+
+- [ ] O ZIP instala sem erro e o card aparece em Temas.
+- [ ] **Usar** altera superfícies, texto, accent e raios.
+- [ ] Claro, Escuro e Sistema mostram as duas paletas corretamente.
+- [ ] Fontes e wallpaper aparecem quando configurados; sem eles, o tema continua legível.
+- [ ] Reiniciar o app mantém o tema ativo.
+- [ ] Reinstalar o mesmo `id` atualiza o tema.
+- [ ] Remover o tema ativo volta para o Zylara.
+- [ ] Um ZIP inválido é rejeitado com mensagem.
+- [ ] O terminal (se personalizado) continua legível.
+
+### Limitações de projeto
+
+Não há CSS, JavaScript ou HTML no pacote. Tudo que o tema consegue alterar está na lista de tokens, nas fontes e no wallpaper. Para um efeito que não existe na lista, é preciso primeiro adicionar o token ao app.
+
 ## Limites e segurança
 
 - ZIP: 24 MB, 256 entradas, manifesto de 256 KB.
@@ -137,11 +211,13 @@ Tokens ausentes e opcionais preservam o valor embutido correspondente ao modo at
 - Nenhum CSS, JavaScript, HTML ou expressão é executado. O renderer aplica somente tokens validados e data URLs de assets validados.
 - Reinstalar o mesmo `id` substitui o tema (atualização). Remover o tema ativo volta para o Zylara.
 
-## Fluxo de uso
+## Instalando e testando
 
 1. Gere o ZIP com `theme.json` na raiz (ou em uma pasta única).
 2. **Configurações → Temas → Instalar tema…** e selecione o arquivo.
 3. Clique em **Usar** no card do tema.
 4. Alterne Claro/Escuro/Sistema para conferir as duas paletas.
+5. Reinicie o app e confirme que o tema continua ativo.
+6. Remova o tema ativo para validar o retorno ao Zylara.
 
 O tema ativo é persistido em `settings.json` como `themeId`.
