@@ -86,7 +86,8 @@ export interface CodeSessionControlsProps {
 /**
  * Controles de sessão do composer no layout Code (WORKBENCH §6): chip do modo
  * de permissão (Leitura/Revisar/Editar/Autônomo), toggle do modo Plano e o
- * popover "Plano e tarefas" (estado do plano + progresso dos todos).
+ * popover "Plano e tarefas" (trigger somente ícone + indicadores; estado do
+ * plano + progresso dos todos + jobs em segundo plano).
  *
  * O snapshot da sessão vem do `codeStore` (o `chatStore` o carrega ao abrir a
  * conversa); a linha da conversa é o fallback enquanto ele não chegou.
@@ -226,15 +227,17 @@ export function CodeSessionControls({
         onToggleGoalIntent={onToggleGoalIntent}
       />
 
+      {/* Trigger somente ícone + indicadores (sem rótulo visível);
+          o nome acessível/tooltip carregam o texto completo. */}
       <Popover open={planOpen} onOpenChange={setPlanOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             aria-label="Plano, tarefas e trabalhos em segundo plano"
-            className={cn(PILL_CLASS_NAME, 'bg-transparent')}
+            title="Plano, tarefas e trabalhos em segundo plano"
+            className={cn(PILL_CLASS_NAME, 'justify-center bg-transparent px-2')}
           >
             <ListTodo aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-            <span className="truncate">Plano e tarefas</span>
             {todos.length > 0 ? (
               <span className="text-[11px] tabular-nums text-foreground-muted">
                 {todos.filter((todo) => todo.status === 'completed').length}/{todos.length}

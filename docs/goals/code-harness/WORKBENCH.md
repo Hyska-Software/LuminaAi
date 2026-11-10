@@ -279,7 +279,9 @@ Reaproveita o `Composer` atual (draft, anexos, model picker, envio/parada) com:
    atualização otimista com rollback), **Plano** (toggle somente ícone com `aria-pressed`; quando
    ativo o campo mostra um badge accent com o ícone e o rótulo “Plano” — `aria-label="Desativar
    modo Plano"` — na área de chips, ao lado do `/goal`, que desativa o modo ao clique) e o **popover de
-   plano/tarefas** (estado do plano, markdown e status dos itens). Tudo com `aria-label` e navegável.
+   plano/tarefas** (trigger somente ícone + indicadores: progresso `N/M` das tarefas e contador de
+   jobs quando existirem; estado do plano, markdown e status dos itens no popover). Tudo com
+   `aria-label`/tooltip e navegável.
 4. **Placeholder por estado**: com workspace → "Descreva a tarefa… @ para arquivos, / para comandos";
    sem workspace → "Abra uma pasta para trabalhar com código".
 5. **Atalhos**: `Ctrl/Cmd+L` foca o composer (como o Paseo), `Ctrl+Enter` envia,
@@ -369,9 +371,9 @@ helper/SSH. PR continua fora do escopo desta fase.
 ### 7.4 Jobs (no composer)
 
 Jobs pertencem à sessão e ficam no **popover "Plano e tarefas"** do composer, junto de plano/tarefas
-(seção "Trabalhos em segundo plano": status, comando truncado, tempo e ações ver/parar). O pill
-mostra um contador de jobs quando existe algum; não há mais faixa acima do composer. Saída ao vivo
-continua acessível pelo job/terminal no painel.
+(seção "Trabalhos em segundo plano": status, comando truncado, tempo e ações ver/parar). O pill é
+**somente ícone + indicadores** (progresso `N/M` das tarefas e contador de jobs quando existem); não
+há mais faixa acima do composer. Saída ao vivo continua acessível pelo job/terminal no painel.
 
 ## 8. Fluxos principais
 

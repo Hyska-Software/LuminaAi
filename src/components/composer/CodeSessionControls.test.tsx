@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { CodeSessionState, Conversation, GoalView, JobView, PermissionMode } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
@@ -272,6 +272,25 @@ describe('CodeSessionControls — modo Plano', () => {
 });
 
 describe('CodeSessionControls — popover de plano e tarefas', () => {
+  it('o trigger é somente ícone + indicadores, sem rótulo visível', () => {
+    seedSession({
+      todos: [
+        { content: 'Ler o código', status: 'completed' },
+        { content: 'Rodar os testes', status: 'pending' },
+      ],
+      jobs: [job()],
+    });
+    render(<CodeSessionControls conversationId="c-1" />);
+
+    const trigger = planTasksTrigger();
+    // Indicadores: progresso das tarefas e contador de jobs.
+    expect(within(trigger).getByText('1/2')).toBeTruthy();
+    expect(within(trigger).getByText('1')).toBeTruthy();
+    // Sem texto: o nome acessível/tooltip continuam descritivos.
+    expect(within(trigger).queryByText('Plano e tarefas')).toBeNull();
+    expect(trigger.getAttribute('title')).toBe('Plano, tarefas e trabalhos em segundo plano');
+  });
+
   it('mostra estado/markdown/feedback do plano e o progresso das tarefas', async () => {
     seedSession({
       plan: {
