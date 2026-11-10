@@ -567,6 +567,8 @@
   "themes.errors.unsafeEntry": "O pacote contém um caminho inseguro: {path}.",
   "themes.errors.unsupportedAsset": "Recurso não suportado: {asset}.",
   "themes.errors.unsupportedSchema": "Versão de schema do tema não suportada: {version}.",
+  "tray.quit": "Sair do Zylara",
+  "tray.show": "Mostrar Zylara",
   "update.errors.checkInProgress": "Já existe uma verificação de atualizações em andamento.",
   "update.errors.downloadFailed": "falha ao baixar a atualização",
   "update.errors.downloadInProgress": "Já existe um download em andamento.",

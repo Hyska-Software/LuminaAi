@@ -58,6 +58,7 @@ pub fn save_settings(
     settings: Settings,
 ) -> Result<SettingsView, String> {
     config::save_settings(&app, &settings).map_err(to_error)?;
+    crate::tray::sync(&app, &settings);
     Ok(settings_view(&app, &state))
 }
 

@@ -50,7 +50,18 @@
       "label": "Raciocínio recolhido por padrão",
       "description": "O bloco de raciocínio e passos do agente começa fechado e não abre sozinho durante o streaming. Você pode expandi-lo a qualquer momento.",
       "aria": "Raciocínio recolhido por padrão"
+    },
+    "keepInTray": {
+      "label": "Continuar em segundo plano na bandeja do sistema",
+      "description": "Fechar a janela oculta o Zylara em vez de encerrar, então turnos dos agentes, rotinas e tarefas continuam rodando. Reabra ou saia pelo ícone da bandeja.",
+      "aria": "Continuar em segundo plano na bandeja do sistema ao fechar a janela"
     }
+  },
+  "trayPrompt": {
+    "title": "Manter o Zylara rodando em segundo plano?",
+    "description": "Ao fechar a janela, o Zylara pode continuar na bandeja do sistema para que os trabalhos dos agentes sigam em segundo plano. Você pode mudar isso depois em Configurações → Geral.",
+    "enable": "Continuar em segundo plano",
+    "disable": "Encerrar ao fechar a janela"
   },
   "themes": {
     "mode": {

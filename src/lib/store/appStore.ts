@@ -55,6 +55,8 @@ const DEFAULT_SETTINGS: Settings = {
   disabledSkills: [],
   // Padrão do produto para novas sessões do Code (Configurações → Ferramentas).
   codeDefaultPermissionMode: 'autonomous',
+  closeToTray: true,
+  closeToTrayPrompted: false,
 };
 
 interface AppState {

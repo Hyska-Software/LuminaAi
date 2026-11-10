@@ -1956,6 +1956,10 @@ export interface Settings {
   notificationsTasks?: boolean;
   /** Não perturbe: mantém só os avisos in-app da Atividade. */
   notificationsDnd?: boolean;
+  /** Keep running in the system tray when the window is closed. */
+  closeToTray?: boolean;
+  /** False until the one-time first-run prompt has been answered. */
+  closeToTrayPrompted?: boolean;
   /** Modo de permissão inicial de novas sessões do Code (padrão: Autônomo). */
   codeDefaultPermissionMode?: PermissionMode;
   /** Confia automaticamente em workspaces abertos antes. */

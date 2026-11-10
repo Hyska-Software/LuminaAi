@@ -50,7 +50,18 @@
       "label": "Reasoning collapsed by default",
       "description": "The reasoning and agent-step block starts closed and does not open by itself while streaming. You can expand it at any time.",
       "aria": "Reasoning collapsed by default"
+    },
+    "keepInTray": {
+      "label": "Keep running in the system tray",
+      "description": "Closing the window hides Zylara instead of quitting, so agent turns, routines and tasks keep running. Open it again or quit from the tray icon.",
+      "aria": "Keep running in the system tray when the window is closed"
     }
+  },
+  "trayPrompt": {
+    "title": "Keep Zylara running in the background?",
+    "description": "When you close the window, Zylara can stay in the system tray so background agent work keeps going. You can change this later in Settings → General.",
+    "enable": "Keep running in the background",
+    "disable": "Quit when I close the window"
   },
   "themes": {
     "mode": {

@@ -50,7 +50,18 @@
       "label": "Razonamiento contraído por defecto",
       "description": "El bloque de razonamiento y pasos del agente empieza cerrado y no se abre solo durante la transmisión. Puedes expandirlo en cualquier momento.",
       "aria": "Razonamiento contraído por defecto"
+    },
+    "keepInTray": {
+      "label": "Seguir en segundo plano en la bandeja del sistema",
+      "description": "Cerrar la ventana oculta Zylara en vez de salir, así que los turnos de los agentes, las rutinas y las tareas siguen ejecutándose. Vuelve a abrirlo o sal desde el icono de la bandeja.",
+      "aria": "Seguir en segundo plano en la bandeja del sistema al cerrar la ventana"
     }
+  },
+  "trayPrompt": {
+    "title": "¿Mantener Zylara en segundo plano?",
+    "description": "Al cerrar la ventana, Zylara puede permanecer en la bandeja del sistema para que el trabajo de los agentes siga en segundo plano. Puedes cambiarlo más tarde en Ajustes → General.",
+    "enable": "Seguir en segundo plano",
+    "disable": "Salir al cerrar la ventana"
   },
   "themes": {
     "mode": {

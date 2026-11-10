@@ -1828,6 +1828,40 @@ mod tests {
     }
 
     #[test]
+    fn tray_settings_default_to_background_mode() {
+        let defaults = Settings::default();
+        assert!(defaults.close_to_tray);
+        assert!(!defaults.close_to_tray_prompted);
+    }
+
+    #[test]
+    fn legacy_settings_file_without_tray_fields_uses_defaults() {
+        let raw = r#"{"theme":"dark"}"#;
+        let parsed: Settings = serde_json::from_str(raw).expect("deserialize legacy settings");
+        let normalized = normalize_settings(parsed);
+        assert!(normalized.close_to_tray);
+        assert!(!normalized.close_to_tray_prompted);
+    }
+
+    #[test]
+    fn tray_settings_round_trip_with_camel_case_keys() {
+        // IPC contract: camelCase keys, plain booleans, no normalization.
+        let parsed: Settings =
+            serde_json::from_str(r#"{"closeToTray":false,"closeToTrayPrompted":true}"#)
+                .expect("deserialize renderer settings");
+        assert!(!parsed.close_to_tray);
+        assert!(parsed.close_to_tray_prompted);
+        let normalized = normalize_settings(parsed);
+        assert!(!normalized.close_to_tray);
+        assert!(normalized.close_to_tray_prompted);
+
+        let value = serde_json::to_value(&normalized).expect("serialize settings");
+        assert_eq!(value["closeToTray"], false);
+        assert_eq!(value["closeToTrayPrompted"], true);
+        assert!(value.get("close_to_tray").is_none());
+    }
+
+    #[test]
     fn thinking_settings_default_to_safe_values() {
         // Default: o bloco de raciocínio/passos abre durante o streaming.
         assert!(!Settings::default().thinking_collapsed_by_default);

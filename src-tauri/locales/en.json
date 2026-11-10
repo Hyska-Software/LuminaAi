@@ -567,6 +567,8 @@
   "themes.errors.unsafeEntry": "The package contains an unsafe path: {path}.",
   "themes.errors.unsupportedAsset": "Unsupported asset {asset}.",
   "themes.errors.unsupportedSchema": "Unsupported theme schema version: {version}.",
+  "tray.quit": "Quit Zylara",
+  "tray.show": "Show Zylara",
   "update.errors.checkInProgress": "An update check is already in progress.",
   "update.errors.downloadFailed": "failed to download the update",
   "update.errors.downloadInProgress": "A download is already in progress.",

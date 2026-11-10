@@ -6,7 +6,7 @@
 //! arbitrary URL.
 
 use tauri::ipc::Channel;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::domain::now_ms;
 use crate::state::AppState;
@@ -134,7 +134,17 @@ pub fn install_update(
         .asset
         .clone()
         .ok_or_else(|| crate::i18n::t("update.errors.noInstallerForPlatform"))?;
-    install::install(&app, &state, &version, &asset).map_err(to_error)
+    // The Windows setup wizard closes the running app with WM_CLOSE; with
+    // close-to-tray that close must quit instead of hiding.
+    #[cfg(windows)]
+    if asset.kind == "setup" {
+        app.state::<AppState>().allow_exit_on_close();
+    }
+    let result = install::install(&app, &state, &version, &asset);
+    if result.is_err() {
+        app.state::<AppState>().take_exit_on_close();
+    }
+    result.map_err(to_error)
 }
 
 #[tauri::command]

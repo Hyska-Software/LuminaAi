@@ -9,6 +9,7 @@ import { AgentSidebar } from '@/components/agents/AgentSidebar';
 import { AgentPanel } from '@/components/agents/AgentPanel';
 import { CodePanel, CodeSidebar } from '@/components/code';
 import { SettingsDialog } from '@/components/settings/SettingsDialog';
+import { TrayPromptDialog } from '@/components/settings/TrayPromptDialog';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { ArtifactPanel } from '@/components/artifacts/ArtifactPanel';
 import { SourcesPanel } from '@/components/chat/SourcesPanel';
@@ -560,6 +561,7 @@ export default function App() {
         >
           <WorkspaceCenter />
         </AppShell>
+        <TrayPromptDialog />
         <SettingsDialog />
         <ModelPickerDialog />
         <CommandPalette />

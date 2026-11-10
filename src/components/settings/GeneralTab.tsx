@@ -160,6 +160,17 @@ export function GeneralTab() {
             aria-label={t('general.thinkingCollapsed.aria')}
           />
         </SettingRow>
+
+        <SettingRow
+          label={t('general.keepInTray.label')}
+          description={t('general.keepInTray.description')}
+        >
+          <Switch
+            checked={settings.closeToTray !== false}
+            onCheckedChange={(checked) => void saveSettings({ closeToTray: checked })}
+            aria-label={t('general.keepInTray.aria')}
+          />
+        </SettingRow>
       </SettingsSection>
     </div>
   );

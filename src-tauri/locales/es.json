@@ -567,6 +567,8 @@
   "themes.errors.unsafeEntry": "El paquete contiene una ruta insegura: {path}.",
   "themes.errors.unsupportedAsset": "Recurso no compatible: {asset}.",
   "themes.errors.unsupportedSchema": "Versión de esquema del tema no compatible: {version}.",
+  "tray.quit": "Salir de Zylara",
+  "tray.show": "Mostrar Zylara",
   "update.errors.checkInProgress": "Ya hay una comprobación de actualizaciones en curso.",
   "update.errors.downloadFailed": "no se pudo descargar la actualización",
   "update.errors.downloadInProgress": "Ya hay una descarga en curso.",

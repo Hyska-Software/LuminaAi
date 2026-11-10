@@ -174,3 +174,25 @@ describe('GeneralTab — interface language', () => {
     expect(document.documentElement.lang).toBe('es');
   });
 });
+
+describe('GeneralTab — bandeja do sistema', () => {
+  it('comes enabled and saves closeToTray when turned off', async () => {
+    useAppStore.setState({ settings: settings({ closeToTray: true }) });
+
+    render(<GeneralTab />);
+
+    const control = screen.getByRole('switch', {
+      name: 'Continuar em segundo plano na bandeja do sistema ao fechar a janela',
+    });
+    expect(control.getAttribute('aria-checked')).toBe('true');
+
+    fireEvent.click(control);
+
+    await waitFor(() => {
+      expect(mocks.saveSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ closeToTray: false }),
+      );
+    });
+    expect(useAppStore.getState().settings.closeToTray).toBe(false);
+  });
+});

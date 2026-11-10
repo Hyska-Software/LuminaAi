@@ -33,6 +33,23 @@ struct TurnEntry {
     started_at: i64,
 }
 
+/// One-shot "the next close must quit" intent. The updater setup asks the
+/// running app to close with WM_CLOSE while replacing files.
+#[derive(Default)]
+pub struct CloseIntent {
+    exit_on_close: AtomicBool,
+}
+
+impl CloseIntent {
+    pub fn allow_exit(&self) {
+        self.exit_on_close.store(true, Ordering::SeqCst);
+    }
+
+    pub fn take_exit(&self) -> bool {
+        self.exit_on_close.swap(false, Ordering::SeqCst)
+    }
+}
+
 /// Registro de turnos ativos (testável sem Tauri). `AppState` delega para ele.
 #[derive(Default)]
 pub struct TurnRegistry {
@@ -225,6 +242,7 @@ pub struct AppState {
     pub governor: Arc<crate::concurrency::ConcurrencyGovernor>,
     dynamic_models: RwLock<HashMap<String, DynamicModels>>,
     turns: TurnRegistry,
+    close_intent: CloseIntent,
 }
 
 impl AppState {
@@ -253,6 +271,7 @@ impl AppState {
             jobs: Arc::new(crate::jobs::JobRegistry::new()),
             dynamic_models: RwLock::new(HashMap::new()),
             turns: TurnRegistry::new(),
+            close_intent: CloseIntent::default(),
         };
         state.restore_models_cache();
         Ok(state)
@@ -434,6 +453,17 @@ impl AppState {
         self.turns.begin_shutdown()
     }
 
+    /// Marks the next window close as a real quit (used by the updater setup,
+    /// which asks the running app to close before replacing files).
+    pub fn allow_exit_on_close(&self) {
+        self.close_intent.allow_exit();
+    }
+
+    /// Consumes the one-shot quit flag.
+    pub fn take_exit_on_close(&self) -> bool {
+        self.close_intent.take_exit()
+    }
+
     pub fn cancel_conversation(&self, conversation_id: &str) -> usize {
         self.turns.cancel_conversation(conversation_id)
     }
@@ -497,7 +527,16 @@ pub fn ensure_dirs(app: &AppHandle) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::TurnRegistry;
+    use super::{CloseIntent, TurnRegistry};
+
+    #[test]
+    fn close_intent_is_consumed_once() {
+        let intent = CloseIntent::default();
+        assert!(!intent.take_exit());
+        intent.allow_exit();
+        assert!(intent.take_exit());
+        assert!(!intent.take_exit());
+    }
 
     #[test]
     fn turn_registry_tracks_active_turns_per_conversation() {

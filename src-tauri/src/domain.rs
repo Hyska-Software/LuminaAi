@@ -1406,6 +1406,12 @@ pub struct Settings {
     /// Do not disturb: keep notifications in the in-app list only.
     #[serde(default)]
     pub notifications_dnd: bool,
+    /// Keep the process alive with the window hidden when the user closes it.
+    #[serde(default = "default_true")]
+    pub close_to_tray: bool,
+    /// False until the renderer's first-run prompt has been answered.
+    #[serde(default)]
+    pub close_to_tray_prompted: bool,
     /// Modo de permissão inicial de novas sessões do Code (padrão: Autônomo),
     /// configurável em Configurações → Ferramentas. O Chat ignora os modos.
     pub code_default_permission_mode: PermissionMode,
@@ -1479,6 +1485,8 @@ impl Default for Settings {
             notifications_completions: true,
             notifications_tasks: true,
             notifications_dnd: false,
+            close_to_tray: true,
+            close_to_tray_prompted: false,
             // Padrão do produto: o Code nasce Autônomo (o usuário troca em
             // Configurações → Ferramentas e por sessão no chip do composer).
             code_default_permission_mode: PermissionMode::Autonomous,

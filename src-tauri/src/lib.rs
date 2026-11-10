@@ -36,6 +36,7 @@ mod state;
 mod terminal;
 mod themes;
 mod tools;
+mod tray;
 mod update;
 mod workspace;
 
@@ -53,25 +54,72 @@ pub fn run() {
     run_app(context);
 }
 
+/// Starts the app shutdown: cancel active turns, give them a short window to
+/// persist partial state, then exit. Shared by window close and the tray menu.
+fn begin_graceful_exit(app_handle: &tauri::AppHandle) {
+    if app_handle.try_state::<state::AppState>().is_none() {
+        return;
+    }
+    let app_handle = app_handle.clone();
+    tauri::async_runtime::spawn(async move {
+        let app_state = app_handle.state::<state::AppState>();
+        app_state.begin_shutdown();
+        crate::state::wait_until_idle(
+            || app_state.active_turns().is_empty(),
+            std::time::Duration::from_millis(2_000),
+        )
+        .await;
+        app_handle.exit(0);
+    });
+}
+
 fn run_app(context: tauri::Context<tauri::Wry>) {
     let app = tauri::Builder::default()
         // Must be the first plugin: a second instance focuses the existing
         // window instead of racing the rotating OAuth refresh token and the
         // secrets file.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focus();
-            }
+            // A hidden window has no taskbar entry: bring it back instead of
+            // only focusing it.
+            crate::tray::show_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
+                let app = window.app_handle();
+                let Some(state) = app.try_state::<state::AppState>() else {
+                    return;
+                };
+                // The updater setup asks the running app to close with a real
+                // WM_CLOSE; that close must quit, not hide.
+                if state.take_exit_on_close() {
+                    return;
+                }
+                if crate::config::load_settings(app).close_to_tray {
+                    api.prevent_close();
+                    if let Err(error) = window.hide() {
+                        eprintln!("zylara: failed to hide the main window: {error}");
+                    }
+                }
+            }
+        })
         .setup(|app| {
             crate::state::ensure_dirs(app.handle()).expect("failed to create app dirs");
             let state = crate::state::AppState::init(app.handle())
                 .expect("failed to initialize Zylara state");
             app.manage(state);
+            let settings = crate::config::load_settings(app.handle());
+            if let Err(error) = crate::tray::init(app.handle(), &settings) {
+                // A missing notification area must not prevent the app from
+                // booting; a second launch restores a hidden window.
+                eprintln!("zylara: system tray unavailable: {error}");
+            }
             let data_dir = crate::config::data_dir(app.handle())
                 .expect("failed to resolve the app data directory");
             app.manage(crate::update::UpdateState::new(data_dir));
@@ -395,23 +443,16 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { code: None, api, .. } => {
             // User close (X/Alt+F4/Cmd+Q). Keep the process alive just long
-            // enough for cancelled turns to persist their partial state.
+            // enough for cancelled turns to persist their partial state. The
+            // close-to-tray path prevents the close before reaching here.
             if app_handle.try_state::<state::AppState>().is_none() {
                 return;
             }
             api.prevent_exit();
-            let app_handle = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                let app_state = app_handle.state::<state::AppState>();
-                app_state.begin_shutdown();
-                crate::state::wait_until_idle(
-                    || app_state.active_turns().is_empty(),
-                    std::time::Duration::from_millis(2_000),
-                )
-                .await;
-                app_handle.exit(0);
-            });
+            begin_graceful_exit(app_handle);
         }
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => crate::tray::show_main_window(app_handle),
         tauri::RunEvent::Exit => {
             // PTYs use ConPTY and have no OS-level job object: kill the process
             // trees explicitly so no `npm run dev`/build survives the app.

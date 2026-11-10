@@ -1,4 +1,5 @@
 export { SettingsDialog } from './SettingsDialog';
+export { TrayPromptDialog } from './TrayPromptDialog';
 export { GeneralTab } from './GeneralTab';
 export { ThemesTab } from './ThemesTab';
 export { ProvidersTab } from './ProvidersTab';
