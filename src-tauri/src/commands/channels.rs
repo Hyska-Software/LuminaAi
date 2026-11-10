@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::agents::{Agent, AgentChannel, AgentChannelInput, AgentChannelMessage};
 use crate::commands::attachments::resolve_attachments;
-use crate::domain::{TurnKind, TurnOptions, TurnPayload, TurnProfile};
+use crate::domain::{MessageStatus, TurnKind, TurnOptions, TurnPayload, TurnProfile};
 use crate::events::TurnEvent;
 use crate::harness::{self, EventEmitter, HarnessDeps};
 use crate::state::AppState;
@@ -469,6 +469,15 @@ pub async fn post_agent_channel_message(
         )
         .await
         {
+            Ok(result) if result.assistant_message.status == MessageStatus::Cancelled => {
+                errors.push(format!("{} foi interrompido.", agent.name));
+                let _ = app.emit(
+                    "lumina:agent-channel-updated",
+                    AgentChannelUpdatedEvent {
+                        channel_id: channel.id.clone(),
+                    },
+                );
+            }
             Ok(result) => {
                 let reply = result.assistant_message.content.trim().to_string();
                 if reply.is_empty() {

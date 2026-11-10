@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
@@ -56,6 +56,9 @@ const MAX_EVENT_TOOL_RESULT_CHARS: usize = 8_000;
 /// Tool result text sent to the model — keeps the context window sane when a
 /// fetched page or spreadsheet is huge.
 const MAX_MODEL_TOOL_RESULT_CHARS: usize = 24_000;
+/// Minimum interval between partial snapshots of the streaming assistant row.
+/// A kill/crash loses at most this window of already-rendered text.
+const STREAM_CHECKPOINT_INTERVAL: Duration = Duration::from_millis(500);
 /// Transient wrap-up instruction appended **only** to the forced final request
 /// (F2b, PLAN §4.3/§4.8): system prompt and tool catalog stay identical to the
 /// rest of the turn, so the forced request is an append-only extension of the
@@ -536,7 +539,9 @@ enum AttemptOutcome {
     /// The stream ended; the attempt may contain text, reasoning and tool calls.
     Completed(StepAttempt),
     /// The turn was cancelled while streaming (the stream task was aborted).
-    Cancelled,
+    /// The attempt is kept so the partial text/reasoning survives a Stop or an
+    /// app close instead of being thrown away.
+    Cancelled(StepAttempt),
     /// The provider/stream failed (`ProviderError` when typed).
     Failed {
         attempt: StepAttempt,
@@ -551,6 +556,7 @@ async fn run_stream_attempt(
     request: CompletionRequest,
     on_event: &Arc<dyn EventEmitter>,
     cancel: &CancellationToken,
+    on_partial: &(dyn Fn(&StepAttempt) + Send + Sync),
 ) -> AttemptOutcome {
     let started = std::time::Instant::now();
     let mut attempt = StepAttempt::default();
@@ -562,6 +568,8 @@ async fn run_stream_attempt(
     };
 
     let mut cancelled = false;
+    let mut last_checkpoint: Option<Instant> = None;
+    let mut dirty = false;
     loop {
         tokio::select! {
             biased;
@@ -576,12 +584,14 @@ async fn run_stream_attempt(
                         if !delta.is_empty() {
                             attempt.reasoning.push_str(&delta);
                             emit(on_event, TurnEvent::ReasoningDelta { delta });
+                            dirty = true;
                         }
                     }
                     ProviderEvent::TextDelta(delta) => {
                         if !delta.is_empty() {
                             attempt.text.push_str(&delta);
                             emit(on_event, TurnEvent::TextDelta { delta });
+                            dirty = true;
                         }
                     }
                     ProviderEvent::ToolCallStart { index, id, name } => {
@@ -600,6 +610,7 @@ async fn run_stream_attempt(
                                 tool_call: ToolCallRecord::running(id, name),
                             },
                         );
+                        dirty = true;
                     }
                     ProviderEvent::ToolCallArgsDelta { index, delta } => {
                         if let Some(call) = attempt.tool_calls.get_mut(index) {
@@ -611,6 +622,7 @@ async fn run_stream_attempt(
                                     delta,
                                 },
                             );
+                            dirty = true;
                         }
                     }
                     ProviderEvent::ToolCallDone { index, arguments } => {
@@ -618,6 +630,7 @@ async fn run_stream_attempt(
                             if !arguments.is_empty() {
                                 call.arguments = arguments;
                             }
+                            dirty = true;
                         }
                     }
                     ProviderEvent::Usage(usage) => attempt.usage = Some(usage),
@@ -625,6 +638,17 @@ async fn run_stream_attempt(
                     ProviderEvent::CacheDigest(digest) => attempt.digest = Some(digest),
                     ProviderEvent::ProviderState(state) => attempt.state = Some(state),
                     ProviderEvent::Done => {}
+                }
+                if dirty {
+                    let due = match last_checkpoint {
+                        None => true,
+                        Some(last) => last.elapsed() >= STREAM_CHECKPOINT_INTERVAL,
+                    };
+                    if due {
+                        last_checkpoint = Some(Instant::now());
+                        dirty = false;
+                        on_partial(&attempt);
+                    }
                 }
             }
         }
@@ -635,7 +659,7 @@ async fn run_stream_attempt(
 
     if cancelled {
         stream_task.abort();
-        return AttemptOutcome::Cancelled;
+        return AttemptOutcome::Cancelled(attempt);
     }
     match stream_task.await {
         Ok(Ok(())) => AttemptOutcome::Completed(attempt),
@@ -1847,6 +1871,9 @@ pub async fn run_turn(
     } else {
         prepare_new_turn(&deps, &payload, &provider, &model)?
     };
+    // Partial snapshots are written while the turn streams so a closed window,
+    // Stop or crash cannot discard what was already rendered.
+    let checkpoint = StreamCheckpoint::new(deps.db.clone(), assistant_message.clone());
 
     emit(
         &on_event,
@@ -2826,7 +2853,17 @@ pub async fn run_turn(
                     cache_plan_logged = true;
                 }
             }
-            let outcome = run_stream_attempt(&deps, request, &on_event, &cancel).await;
+            let on_partial = |attempt: &StepAttempt| {
+                checkpoint.write_attempt(
+                    attempt,
+                    &full_reasoning,
+                    &trace,
+                    &all_tool_calls,
+                    &citations,
+                );
+            };
+            let outcome =
+                run_stream_attempt(&deps, request, &on_event, &cancel, &on_partial).await;
             let retry = match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
                     error
@@ -2863,7 +2900,15 @@ pub async fn run_turn(
             streaming_calls,
             failure,
         ) = match outcome {
-            AttemptOutcome::Cancelled => {
+            AttemptOutcome::Cancelled(attempt) => {
+                if let Some(step) = merge_cancelled_attempt(
+                    &mut full_text,
+                    &mut full_reasoning,
+                    &mut trace,
+                    &attempt,
+                ) {
+                    replay_steps.push(step);
+                }
                 cancelled = true;
                 break;
             }
@@ -3012,6 +3057,11 @@ pub async fn run_turn(
             step_calls.len(),
         );
 
+        // Keep the requested cards even if the process dies during a long tool.
+        let mut pending_calls = all_tool_calls.clone();
+        pending_calls.extend(step_calls.iter().cloned());
+        checkpoint.write(&full_text, &full_reasoning, &trace, &pending_calls, &citations);
+
         // Tools requested on the last allowed step still run: artifacts and other
         // deliverables must never be lost. A forced final-answer pass (below)
         // then summarizes what was collected.
@@ -3108,6 +3158,13 @@ pub async fn run_turn(
             state: step_state.clone(),
             call_ids: step_call_ids,
         });
+        checkpoint.write(
+            &full_text,
+            &full_reasoning,
+            &trace,
+            &all_tool_calls,
+            &citations,
+        );
 
         if step_number >= options.max_steps {
             // Force the final-answer pass below instead of ending the turn with
@@ -3165,7 +3222,17 @@ pub async fn run_turn(
                 &forced_request,
                 &settings.cache,
             );
-            let outcome = run_stream_attempt(&deps, forced_request, &on_event, &cancel).await;
+            let on_partial = |attempt: &StepAttempt| {
+                checkpoint.write_attempt(
+                    attempt,
+                    &full_reasoning,
+                    &trace,
+                    &all_tool_calls,
+                    &citations,
+                );
+            };
+            let outcome =
+                run_stream_attempt(&deps, forced_request, &on_event, &cancel, &on_partial).await;
             let retry = match &outcome {
                 AttemptOutcome::Failed { error, .. } => {
                     error
@@ -3194,7 +3261,17 @@ pub async fn run_turn(
         let mut forced_attempt = StepAttempt::default();
         let mut forced_failure: Option<TurnFailure> = None;
         match outcome {
-            AttemptOutcome::Cancelled => cancelled = true,
+            AttemptOutcome::Cancelled(attempt) => {
+                if let Some(step) = merge_cancelled_attempt(
+                    &mut full_text,
+                    &mut full_reasoning,
+                    &mut trace,
+                    &attempt,
+                ) {
+                    replay_steps.push(step);
+                }
+                cancelled = true;
+            }
             AttemptOutcome::Completed(attempt) => forced_attempt = attempt,
             AttemptOutcome::Failed { attempt, error } => {
                 forced_attempt = attempt;
@@ -3581,6 +3658,79 @@ fn prepare_regenerate(
     deps.db.insert_message(&assistant_message)?;
 
     Ok((user_message, assistant_message))
+}
+
+/// Best-effort snapshot of the assistant row while the turn streams. A failed
+/// write never fails the turn; the next checkpoint/finalization overwrites it.
+struct StreamCheckpoint {
+    db: Arc<Db>,
+    base: ChatMessage,
+}
+
+impl StreamCheckpoint {
+    fn new(db: Arc<Db>, base: ChatMessage) -> Self {
+        Self { db, base }
+    }
+
+    fn write(
+        &self,
+        content: &str,
+        reasoning: &str,
+        trace: &[TraceStep],
+        tool_calls: &[ToolCallRecord],
+        citations: &[Citation],
+    ) {
+        let mut message = self.base.clone();
+        message.content = content.trim_end().to_string();
+        message.reasoning =
+            (!reasoning.trim().is_empty()).then(|| reasoning.trim_end().to_string());
+        message.status = MessageStatus::Streaming;
+        message.trace = trace.to_vec();
+        message.tool_calls = tool_calls.to_vec();
+        message.citations = citations.to_vec();
+        if let Err(error) = self.db.checkpoint_message(&message) {
+            eprintln!("lumina: falha ao salvar checkpoint do turno: {error:#}");
+        }
+    }
+
+    /// Snapshot of an in-flight provider stream. Calls that are still streaming
+    /// are kept as `running` so a kill during the request leaves the cards
+    /// visible; they are settled as errors on the next boot if never executed.
+    fn write_attempt(
+        &self,
+        attempt: &StepAttempt,
+        full_reasoning: &str,
+        trace: &[TraceStep],
+        all_tool_calls: &[ToolCallRecord],
+        citations: &[Citation],
+    ) {
+        let calls: Vec<ToolCallRecord> = attempt
+            .tool_calls
+            .iter()
+            .filter(|call| !call.id.is_empty())
+            .cloned()
+            .map(tool_call_record)
+            .collect();
+        let has_calls = !calls.is_empty();
+        let reasoning = joined_reasoning(full_reasoning, &attempt.reasoning);
+        let mut partial_trace = trace.to_vec();
+        push_trace_step(
+            &mut partial_trace,
+            &attempt.reasoning,
+            if has_calls { attempt.text.as_str() } else { "" },
+            attempt.duration_ms,
+            calls.len(),
+        );
+        let mut tool_calls = all_tool_calls.to_vec();
+        tool_calls.extend(calls);
+        self.write(
+            if has_calls { "" } else { attempt.text.as_str() },
+            &reasoning,
+            &partial_trace,
+            &tool_calls,
+            citations,
+        );
+    }
 }
 
 fn resolve_attachment_infos(db: &Db, ids: &[String]) -> Vec<AttachmentInfo> {
@@ -4248,7 +4398,7 @@ fn attachment_image_mime(attachment: &StoredAttachment, bytes: &[u8]) -> String 
 /* Tools                                                               */
 /* ------------------------------------------------------------------ */
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct StreamingToolCall {
     id: String,
     name: String,
@@ -4472,6 +4622,58 @@ fn push_trace_step(
         duration_ms,
         tool_calls: u32::try_from(tool_calls).unwrap_or(u32::MAX),
     });
+}
+
+/// Joins step reasoning the same way the loop does (`\n\n` between steps).
+fn joined_reasoning(base: &str, delta: &str) -> String {
+    let delta = delta.trim();
+    if delta.is_empty() {
+        return base.to_string();
+    }
+    if base.trim().is_empty() {
+        delta.to_string()
+    } else {
+        format!("{base}\n\n{delta}")
+    }
+}
+
+/// Keeps what the user already saw when a turn is cancelled mid-stream.
+/// `full_text` is empty on this path because the loop exits as soon as a final
+/// answer exists. Returns a text-only replay step when the cancelled attempt
+/// produced the answer text, so the v2 replay (`replay_steps_history`, which
+/// reads `provider_state` instead of `content`) also sees it.
+fn merge_cancelled_attempt(
+    full_text: &mut String,
+    full_reasoning: &mut String,
+    trace: &mut Vec<TraceStep>,
+    attempt: &StepAttempt,
+) -> Option<ReplayStep> {
+    let call_count = attempt
+        .tool_calls
+        .iter()
+        .filter(|call| !call.id.is_empty())
+        .count();
+    let has_calls = call_count > 0;
+    let reasoning = attempt.reasoning.trim();
+    let text = attempt.text.trim();
+    *full_reasoning = joined_reasoning(full_reasoning.as_str(), reasoning);
+    if has_calls {
+        // Narration of a tool-calling step belongs to the thinking trace, not
+        // to the final answer text.
+        push_trace_step(trace, reasoning, text, attempt.duration_ms, call_count);
+        None
+    } else if !text.is_empty() {
+        *full_text = text.to_string();
+        push_trace_step(trace, reasoning, "", attempt.duration_ms, 0);
+        Some(ReplayStep {
+            text: text.to_string(),
+            state: None,
+            call_ids: Vec::new(),
+        })
+    } else {
+        push_trace_step(trace, reasoning, "", attempt.duration_ms, 0);
+        None
+    }
 }
 
 async fn execute_tools(runtime: &ToolRuntime, calls: &[ToolCallRecord]) -> Vec<ToolOutcome> {
@@ -6426,7 +6628,15 @@ mod agent_loop_tests {
             .await
         });
 
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        // Wait for the delta to be applied so the partial is deterministic.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while !has_event(&events, "text_delta") && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            has_event(&events, "text_delta"),
+            "the stream should deliver the partial text"
+        );
         cancel_handle.cancel();
         let result = tokio::time::timeout(Duration::from_secs(3), handle)
             .await
@@ -6435,8 +6645,81 @@ mod agent_loop_tests {
             .expect("turn resolves");
 
         assert_eq!(result.assistant_message.status, MessageStatus::Cancelled);
+        assert_eq!(result.assistant_message.content, "conteúdo parcial");
+        // The v2 replay reads provider_state, not content: the partial must be
+        // a text-only step or the next turn would not see it.
+        let provider_state = result
+            .assistant_message
+            .provider_state
+            .as_ref()
+            .expect("provider_state with the partial step");
+        assert!(provider_state.to_string().contains("conteúdo parcial"));
         assert!(has_event(&events, "cancelled"));
         assert!(!has_event(&events, "done"));
+    }
+
+    #[tokio::test]
+    async fn streaming_checkpoints_persist_partial_text_before_the_turn_ends() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let streamer: ProviderStreamer = Arc::new(|_request, sink| {
+            Box::pin(async move {
+                let _ = sink.send(ProviderEvent::TextDelta("conteúdo parcial".to_string()));
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                Ok(())
+            })
+        });
+
+        let (channel, _events) = channel();
+        let cancel = CancellationToken::new();
+        let cancel_handle = cancel.clone();
+        let db = temp.db.clone();
+        let conversation_id = conversation.id.clone();
+        let handle = tokio::spawn(async move {
+            run_turn(
+                deps(db, streamer),
+                payload(&conversation, 3),
+                Settings::default(),
+                channel,
+                cancel,
+            )
+            .await
+        });
+
+        // The first dirty delta writes immediately; wait for the row instead of
+        // sampling a fixed sleep so the test is not timing-flaky.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let mut stored = None;
+        while tokio::time::Instant::now() < deadline {
+            let messages = temp
+                .db
+                .list_messages(&conversation_id)
+                .expect("messages");
+            if let Some(assistant) = messages
+                .iter()
+                .find(|message| message.role == MessageRole::Assistant)
+            {
+                if assistant.content == "conteúdo parcial" {
+                    stored = Some(assistant.clone());
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let stored = stored.expect("checkpoint persisted before the turn ended");
+        assert_eq!(stored.status, MessageStatus::Streaming);
+        assert_eq!(stored.content, "conteúdo parcial");
+
+        cancel_handle.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(3), handle)
+            .await
+            .expect("cancellation should not hang")
+            .expect("join")
+            .expect("turn resolves");
     }
 
     /// Garante o invariante que os provedores exigem no replay: nenhum tool

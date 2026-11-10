@@ -384,8 +384,27 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
         .build(context)
         .expect("error while building Lumina");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::Exit = event {
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+            // User close (X/Alt+F4/Cmd+Q). Keep the process alive just long
+            // enough for cancelled turns to persist their partial state.
+            if app_handle.try_state::<state::AppState>().is_none() {
+                return;
+            }
+            api.prevent_exit();
+            let app_handle = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                let app_state = app_handle.state::<state::AppState>();
+                app_state.begin_shutdown();
+                crate::state::wait_until_idle(
+                    || app_state.active_turns().is_empty(),
+                    std::time::Duration::from_millis(2_000),
+                )
+                .await;
+                app_handle.exit(0);
+            });
+        }
+        tauri::RunEvent::Exit => {
             // PTYs use ConPTY and have no OS-level job object: kill the process
             // trees explicitly so no `npm run dev`/build survives the app.
             if let Some(state) = app_handle.try_state::<state::AppState>() {
@@ -393,5 +412,6 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             }
             crate::computer::browser::global().map(|browser| browser.close_all());
         }
+        _ => {}
     });
 }

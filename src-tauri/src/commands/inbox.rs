@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::agents::{AgentInboxCount, AgentInboxItem};
 use crate::commands::channels::build_channel_context;
-use crate::domain::{TurnKind, TurnOptions, TurnPayload, TurnProfile};
+use crate::domain::{MessageStatus, TurnKind, TurnOptions, TurnPayload, TurnProfile};
 use crate::events::TurnEvent;
 use crate::harness::{self, EventEmitter, HarnessDeps};
 use crate::state::AppState;
@@ -156,6 +156,17 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
     };
     let result = harness::run_turn(deps, payload, settings, Arc::new(SilentEmitter), cancel).await;
     match result {
+        Ok(result) if result.assistant_message.status == MessageStatus::Cancelled => {
+            // Shutdown/global Stop: the DM stays pending and is retried later.
+            let _ = db.requeue_agent_inbox(&item.id);
+            let _ = app.emit(
+                "lumina:agent-inbox-updated",
+                InboxUpdatedEvent {
+                    channel_id: channel.id.clone(),
+                    recipient_agent_id: agent.id.clone(),
+                },
+            );
+        }
         Ok(result) if result.error.is_none() => {
             let reply = result.assistant_message.content.trim().to_string();
             if !reply.is_empty() {

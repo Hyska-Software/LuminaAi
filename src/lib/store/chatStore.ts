@@ -2731,7 +2731,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         };
         setStream(conversationId, stream);
         const list = get().messagesByConversation[conversationId] ?? [];
-        if (!list.some((message) => message.id === event.assistantMessageId)) {
+        const existing = list.find((message) => message.id === event.assistantMessageId);
+        if (!existing) {
           pushMessage(conversationId, {
             id: event.assistantMessageId,
             conversationId,
@@ -2747,6 +2748,20 @@ export const useChatStore = create<ChatState>()((set, get) => {
             providerId: conversation?.providerId ?? '',
             createdAt: Date.now(),
           });
+        } else if (existing.status === 'streaming') {
+          // The DB row may already carry a mid-stream checkpoint (crash
+          // safety). Replaying the persisted event log from seq 1 must start
+          // from an empty snapshot, or the deltas would be appended twice.
+          patchMessage(conversationId, event.assistantMessageId, (message) => ({
+            ...message,
+            content: '',
+            reasoning: null,
+            toolCalls: [],
+            citations: [],
+            trace: [],
+            usage: null,
+            status: 'streaming',
+          }));
         }
         return;
       }

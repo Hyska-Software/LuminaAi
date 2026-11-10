@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
@@ -36,6 +37,7 @@ struct TurnEntry {
 #[derive(Default)]
 pub struct TurnRegistry {
     turns: Mutex<HashMap<String, TurnEntry>>,
+    shutting_down: AtomicBool,
 }
 
 impl TurnRegistry {
@@ -66,6 +68,9 @@ impl TurnRegistry {
         conversation_id: &str,
     ) -> Option<CancellationToken> {
         let mut turns = self.turns.lock();
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return None;
+        }
         if turns
             .values()
             .any(|entry| entry.conversation_id == conversation_id)
@@ -106,7 +111,19 @@ impl TurnRegistry {
         turns.len()
     }
 
-    /// Há algum turno ativo para esta conversa?
+    /// Sticky shutdown: new turns are rejected and every active turn is
+    /// cancelled. Unlike `cancel_all`, the flag survives so a scheduler cannot
+    /// start another turn while the process is finalizing its exit.
+    pub fn begin_shutdown(&self) -> usize {
+        let turns = self.turns.lock();
+        self.shutting_down.store(true, Ordering::SeqCst);
+        for entry in turns.values() {
+            entry.cancel.cancel();
+        }
+        turns.len()
+    }
+
+    /// Há algum turno ativo para esta conversa? Usado pelo preflight de objetivos
     pub fn has_active_for(&self, conversation_id: &str) -> bool {
         self.turns
             .lock()
@@ -411,6 +428,10 @@ impl AppState {
         self.turns.cancel_all()
     }
 
+    pub fn begin_shutdown(&self) -> usize {
+        self.turns.begin_shutdown()
+    }
+
     pub fn cancel_conversation(&self, conversation_id: &str) -> usize {
         self.turns.cancel_conversation(conversation_id)
     }
@@ -428,6 +449,26 @@ impl AppState {
     pub fn has_active_turn_for(&self, conversation_id: &str) -> bool {
         self.turns.has_active_for(conversation_id)
     }
+}
+
+/// Waits until `idle()` is true or `timeout` elapses. Returns the final state.
+/// Used on shutdown to give cancelled turns time to persist their partial
+/// state before the process exits.
+pub(crate) async fn wait_until_idle(
+    idle: impl Fn() -> bool,
+    timeout: std::time::Duration,
+) -> bool {
+    if idle() {
+        return true;
+    }
+    let deadline = tokio::time::Instant::now() + timeout;
+    while tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        if idle() {
+            return true;
+        }
+    }
+    idle()
 }
 
 /// Ensure transient directories exist.
@@ -496,5 +537,39 @@ mod tests {
 
         registry.cancel_all();
         assert!(second.is_cancelled());
+    }
+
+    #[test]
+    fn begin_shutdown_cancels_turns_and_rejects_new_ones() {
+        let registry = TurnRegistry::new();
+        let token = registry.register("turn-1", "conv-1");
+        assert_eq!(registry.begin_shutdown(), 1);
+        assert!(token.is_cancelled());
+        assert!(registry.register_if_idle("turn-2", "conv-2").is_none());
+        registry.finish("turn-1");
+        assert!(registry.active_turns().is_empty());
+    }
+
+    #[tokio::test]
+    async fn wait_until_idle_stops_when_predicate_flips_or_times_out() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let writer = flag.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            writer.store(true, Ordering::SeqCst);
+        });
+        assert!(
+            super::wait_until_idle(
+                || flag.load(Ordering::SeqCst),
+                std::time::Duration::from_millis(500)
+            )
+            .await
+        );
+        assert!(
+            !super::wait_until_idle(|| false, std::time::Duration::from_millis(50)).await
+        );
     }
 }

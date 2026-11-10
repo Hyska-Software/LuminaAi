@@ -2321,6 +2321,69 @@ describe('chatStore — reattach de turnos', () => {  it('reconstrói um turno a
     expect(useChatStore.getState().streaming).toBeNull();
   });
 
+  it('não duplica o checkpoint já salvo ao reaplicar os eventos do turno', async () => {
+    const activeConversation = conversation({
+      id: 'conv-checkpoint',
+      title: 'Checkpoint',
+      messageCount: 2,
+    });
+    mocks.api.listActiveTurns.mockResolvedValue([
+      { turnId: 'turn-checkpoint', conversationId: 'conv-checkpoint', startedAt: 1 },
+    ]);
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: activeConversation,
+      messages: [
+        userMessage({ id: 'user-checkpoint', conversationId: 'conv-checkpoint' }),
+        assistantMessage({
+          id: 'assistant-checkpoint',
+          conversationId: 'conv-checkpoint',
+          content: 'Texto já salvo',
+          reasoning: 'Raciocínio antigo',
+          status: 'streaming',
+        }),
+      ],
+    });
+    mocks.api.listTurnEvents.mockResolvedValue([
+      {
+        turnId: 'turn-checkpoint',
+        seq: 1,
+        event: {
+          type: 'turn_started',
+          turnId: 'turn-checkpoint',
+          userMessageId: 'user-checkpoint',
+          assistantMessageId: 'assistant-checkpoint',
+        },
+      },
+      {
+        turnId: 'turn-checkpoint',
+        seq: 2,
+        event: { type: 'reasoning_delta', delta: 'Raciocínio ' },
+      },
+      {
+        turnId: 'turn-checkpoint',
+        seq: 3,
+        event: { type: 'text_delta', delta: 'Resposta completa' },
+      },
+    ]);
+    useChatStore.setState({
+      conversations: [activeConversation],
+      activeId: 'conv-checkpoint',
+      messagesByConversation: {},
+      streamsByConversation: {},
+      streaming: null,
+    });
+
+    await useChatStore.getState().reattachTurns();
+
+    const messages = useChatStore.getState().messagesByConversation['conv-checkpoint'] ?? [];
+    const assistant = messages.find((message) => message.id === 'assistant-checkpoint');
+    expect(assistant?.content).toBe('Resposta completa');
+    expect(assistant?.reasoning).toBe('Raciocínio ');
+    expect(
+      useChatStore.getState().streamsByConversation['conv-checkpoint']?.turnId,
+    ).toBe('turn-checkpoint');
+  });
+
   it('loads pending session state when opening an agent thread without a selected workspace', async () => {
     const thread = conversation({ id: 'agent-thread', mode: 'agent', agentId: 'agent-1', workspaceId: null });
     mocks.api.getConversation.mockResolvedValue({ conversation: thread, messages: [] });

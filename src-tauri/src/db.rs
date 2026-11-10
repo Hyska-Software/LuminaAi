@@ -28,8 +28,8 @@ use crate::domain::{
     conversation_mode_or_default, now_ms, ApprovalDecision, ApprovalRule, ApprovalScope, Artifact,
     ArtifactKind, AttachmentInfo, CacheBreakReason, CacheSample, CacheState, ChatMessage,
     Conversation, ConversationDetail, FileChangeKind, LibraryArtifact, MessageRole, MessageStatus,
-    PermissionMode, SegmentDigest, TurnKind, UsageInfo, Workspace, CONVERSATION_MODE_AGENT,
-    CONVERSATION_MODE_CHAT, CONVERSATION_MODE_CODE,
+    PermissionMode, SegmentDigest, ToolCallRecord, ToolCallStatus, TurnKind, UsageInfo, Workspace,
+    CONVERSATION_MODE_AGENT, CONVERSATION_MODE_CHAT, CONVERSATION_MODE_CODE,
 };
 
 /* ------------------------------------------------------------------ */
@@ -2671,6 +2671,39 @@ impl Db {
         })
     }
 
+    /// A `streaming` row can only be live inside one process; `init_connection`
+    /// runs before any turn, so every leftover row is an interrupted turn. Keep
+    /// the partial content, settle running tool calls and mark the message
+    /// cancelled.
+    fn recover_interrupted_messages(conn: &Connection) -> Result<()> {
+        let mut stmt =
+            conn.prepare("SELECT id, tool_calls FROM messages WHERE status = 'streaming'")?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let now = now_ms();
+        for (id, raw) in rows {
+            let mut tool_calls: Vec<ToolCallRecord> = decode_json(&raw);
+            let mut changed = false;
+            for call in &mut tool_calls {
+                if call.status == ToolCallStatus::Running {
+                    call.status = ToolCallStatus::Error;
+                    call.result = Some("Interrompida: o aplicativo foi fechado.".to_string());
+                    call.finished_at = Some(now);
+                    changed = true;
+                }
+            }
+            let raw = if changed { encode_json(&tool_calls)? } else { raw };
+            conn.execute(
+                "UPDATE messages SET status = 'cancelled', tool_calls = ?2 WHERE id = ?1",
+                params![id, raw],
+            )
+            .context("falha ao reconciliar mensagem interrompida")?;
+        }
+        Ok(())
+    }
+
     fn init_connection(conn: &Connection) -> Result<()> {
         conn.execute_batch(PRAGMAS)
             .context("falha ao configurar o SQLite (WAL/foreign keys)")?;
@@ -2699,6 +2732,11 @@ impl Db {
         migrate_usage_log_schema(conn)?;
         // Watermark do histórico do Chat: coluna aditiva em `cache_state` (F2b).
         migrate_cache_state_schema(conn)?;
+        // Mensagens `streaming` de um processo morto: preserva o parcial e
+        // fecha como canceladas (best-effort: falha não impede o boot).
+        if let Err(error) = Self::recover_interrupted_messages(conn) {
+            eprintln!("lumina: falha ao reconciliar mensagens interrompidas: {error:#}");
+        }
         Ok(())
     }
 
@@ -7062,6 +7100,30 @@ impl Db {
         }
         refresh_conversation_stats(&tx, &message.conversation_id)?;
         tx.commit()?;
+        Ok(())
+    }
+
+    /// Lightweight progress write while a turn streams: only the mutable message
+    /// columns, without `refresh_conversation_stats`/`updated_at` churn.
+    pub fn checkpoint_message(&self, message: &ChatMessage) -> anyhow::Result<()> {
+        let tool_calls = encode_json(&message.tool_calls)?;
+        let citations = encode_json(&message.citations)?;
+        let trace = encode_json(&message.trace)?;
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE messages SET content = ?2, reasoning = ?3, status = ?4, tool_calls = ?5, \
+             citations = ?6, trace = ?7 WHERE id = ?1",
+            params![
+                &message.id,
+                &message.content,
+                &message.reasoning,
+                status_to_str(message.status),
+                &tool_calls,
+                &citations,
+                &trace,
+            ],
+        )
+        .context("falha ao salvar checkpoint da mensagem")?;
         Ok(())
     }
 
@@ -13013,5 +13075,37 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn interrupted_streaming_messages_are_settled_on_open() {
+        let dir = TempDir::new("lumina-interrupted-messages");
+        let path = dir.path.join("test.db");
+        let message_id = {
+            let db = Db::open(&path).expect("open");
+            let conversation = db
+                .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+                .expect("conversation");
+            let mut message = ChatMessage::assistant(&conversation.id);
+            message.content = "parcial".to_string();
+            message.tool_calls = vec![ToolCallRecord::running("call-1", "run_command")];
+            db.insert_message(&message).expect("insert message");
+            message.id
+        };
+
+        let reopened = Db::open(&path).expect("reopen");
+        let stored = reopened
+            .get_message(&message_id)
+            .expect("read message")
+            .expect("stored message");
+        assert_eq!(stored.status, MessageStatus::Cancelled);
+        assert_eq!(stored.content, "parcial");
+        assert_eq!(stored.tool_calls.len(), 1);
+        assert_eq!(stored.tool_calls[0].status, ToolCallStatus::Error);
+        assert_eq!(
+            stored.tool_calls[0].result.as_deref(),
+            Some("Interrompida: o aplicativo foi fechado.")
+        );
+        assert!(stored.tool_calls[0].finished_at.is_some());
     }
 }

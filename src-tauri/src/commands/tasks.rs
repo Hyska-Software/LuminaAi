@@ -567,6 +567,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
     let mut last_text = String::new();
     let mut budget_error: Option<String> = None;
     let mut worker_error: Option<String> = None;
+    let mut interrupted = false;
     let mut turns_run = 0u32;
     for index in 0..max_turns {
         if cancel.is_cancelled() {
@@ -656,6 +657,22 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         .await
         {
             Ok(result) => {
+                if result.assistant_message.status == MessageStatus::Cancelled {
+                    // Leave a task interrupted by shutdown/global Stop in
+                    // `running`; the existing lease sweep requeues it after the
+                    // lease expires. A user-cancelled task keeps its own path
+                    // below (status is already cancelled/declined).
+                    if state
+                        .db
+                        .get_agent_task(&task.id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|task| task.status == "running")
+                    {
+                        interrupted = true;
+                    }
+                    break;
+                }
                 if result.error.is_some() || result.assistant_message.status == MessageStatus::Error
                 {
                     worker_error = result.error.or_else(|| {
@@ -717,6 +734,13 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
         }
     }
     heartbeat.abort();
+
+    if interrupted {
+        if let Ok(Some(latest)) = state.db.get_agent_task(&task.id) {
+            emit_updated(app, &latest);
+        }
+        return Ok(());
+    }
 
     let latest = state.db.get_agent_task(&task.id).ok().flatten();
     let Some(mut current) = latest else {
