@@ -79,6 +79,73 @@ describe('FilePreview', () => {
     expect(screen.getByText(/3 linhas/)).toBeTruthy();
   });
 
+  it('renderiza marcas inline de alteração e a seta de remoção sem o texto antigo', () => {
+    const diff = [
+      '@@ -1,2 +1,2 @@',
+      ' const total = 1;',
+      '-const total = 2;',
+      '+const total = 3;',
+    ].join('\n');
+    render(
+      <FilePreview
+        content={content({ text: 'const total = 1;\nconst total = 3;\n' })}
+        diff={diff}
+      />,
+    );
+
+    const pre = screen.getByLabelText('Conteúdo de src/app.ts');
+    expect(pre.querySelector('[data-diff-tone="modified"]')?.textContent).toContain(
+      'const total = 3',
+    );
+    expect(pre.querySelector('[data-diff-tone="added"]')).toBeNull();
+    expect(screen.queryByText('const total = 2;')).toBeNull();
+    expect(screen.getByRole('note', { name: '1 linha removida aqui' })).toBeTruthy();
+    expect(screen.getByLabelText('Adições: 1, remoções: 1')).toBeTruthy();
+    expect(screen.getByText('+1')).toBeTruthy();
+  });
+
+  it('mostra adição pura em verde sem seta de remoção', () => {
+    render(
+      <FilePreview
+        content={content({ text: 'a\nnovo\n' })}
+        diff={'@@ -1,0 +2,1 @@\n+novo'}
+      />,
+    );
+
+    const pre = screen.getByLabelText('Conteúdo de src/app.ts');
+    expect(pre.querySelector('[data-diff-tone="added"]')?.textContent).toContain('novo');
+    expect(pre.querySelector('[data-diff-tone="modified"]')).toBeNull();
+    expect(screen.queryByRole('note', { name: /linha removida/ })).toBeNull();
+  });
+
+  it('mostra o resumo mas não posiciona marcas em prévia truncada', () => {
+    const diff =
+      '@@ -1,2 +1,2 @@\n const total = 1;\n-const total = 2;\n+const total = 3;';
+    render(
+      <FilePreview
+        content={content({
+          truncated: true,
+          text: 'const total = 1;\nconst total = 3;\n',
+        })}
+        diff={diff}
+      />,
+    );
+
+    const pre = screen.getByLabelText('Conteúdo de src/app.ts');
+    expect(pre.querySelector('[data-diff-tone]')).toBeNull();
+    expect(pre.querySelector('[data-diff-deleted]')).toBeNull();
+    expect(screen.getByLabelText('Adições: 1, remoções: 1')).toBeTruthy();
+  });
+
+  it('mostra o aviso quando o diff falha, mantendo o conteúdo legível', () => {
+    render(<FilePreview content={content()} diffError="git diff falhou." />);
+
+    expect(screen.getByLabelText('Conteúdo de src/app.ts')).toBeTruthy();
+    expect(
+      screen.getByRole('img', { name: 'Não foi possível carregar as alterações' }),
+    ).toBeTruthy();
+  });
+
   it('shows the file-type icon before the path in the header', () => {
     render(<FilePreview content={content()} />);
     const pathLabel = screen.getByText('src/app.ts');
@@ -442,6 +509,23 @@ describe('FilePreview — Markdown', () => {
     expect(screen.getByRole('radio', { name: 'Documento' }).getAttribute('aria-checked')).toBe(
       'true',
     );
+  });
+
+  it('mostra as marcas de diff apenas no modo Código', () => {
+    const diff = '@@ -1,2 +1,2 @@\n # Título\n-antigo\n+novo';
+    render(
+      <FilePreview
+        content={markdownContent({ text: '# Título\nnovo\n' })}
+        diff={diff}
+      />,
+    );
+
+    expect(document.querySelector('[data-diff-tone]')).toBeNull();
+    expect(screen.getByText('+1')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Código' }));
+    const pre = screen.getByLabelText('Conteúdo de README.md');
+    expect(pre.querySelector('[data-diff-tone="modified"]')?.textContent).toContain('novo');
   });
 
   it('reconhece .md, .markdown e .mdx', () => {

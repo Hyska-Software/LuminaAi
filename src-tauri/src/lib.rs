@@ -349,6 +349,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::code::delete_approval_rule,
             commands::code::get_workspace_changes,
             commands::code::get_file_diff,
+            commands::code::get_file_diff_head,
             commands::code::get_file_diff_at,
             commands::code::revert_file,
             commands::code::revert_turn,

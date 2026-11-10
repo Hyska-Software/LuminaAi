@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CircleAlert, Copy, FileExclamationPoint } from 'lucide-react';
 import { Highlight } from 'prism-react-renderer';
 import { Spinner } from '@/components/ui';
+import { parseUnifiedDiff, type DiffLine, type DiffLineKind } from '@/lib/diff';
 import { prism, SYNTAX_THEME } from '@/lib/highlight';
 import { cn, copyText } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -20,28 +21,6 @@ export interface DiffViewProps {
   className?: string;
 }
 
-type DiffLineKind = 'context' | 'add' | 'remove' | 'meta' | 'note';
-
-interface DiffLine {
-  kind: DiffLineKind;
-  text: string;
-  oldNumber?: number;
-  newNumber?: number;
-}
-
-interface DiffHunk {
-  header: string;
-  lines: DiffLine[];
-}
-
-interface ParsedDiff {
-  meta: DiffLine[];
-  hunks: DiffHunk[];
-  added: number;
-  removed: number;
-  binary: boolean;
-}
-
 /** Hunks above this size start collapsed (WORKBENCH §7.2/§15). */
 export const BIG_HUNK_THRESHOLD = 200;
 /** Number of lines visible when a big hunk is collapsed. */
@@ -51,76 +30,6 @@ export const COLLAPSED_HUNK_LINES = 40;
  * em texto puro (evita tokenizar milhares de linhas ao expandir um hunk).
  */
 export const SYNTAX_HIGHLIGHT_LINE_LIMIT = 4_000;
-
-const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
-
-function parseDiff(raw: string): ParsedDiff {
-  const parsed: ParsedDiff = { meta: [], hunks: [], added: 0, removed: 0, binary: false };
-  let current: DiffHunk | null = null;
-  let oldNumber: number | undefined;
-  let newNumber: number | undefined;
-
-  for (const text of raw.replace(/\r\n?/g, '\n').split('\n')) {
-    if (/^Binary files .* differ$/.test(text) || text.startsWith('GIT binary patch')) {
-      parsed.binary = true;
-      parsed.meta.push({ kind: 'meta', text });
-      continue;
-    }
-
-    const hunkMatch = HUNK_HEADER.exec(text);
-    if (hunkMatch) {
-      oldNumber = Number.parseInt(hunkMatch[1], 10);
-      newNumber = Number.parseInt(hunkMatch[3], 10);
-      current = { header: text, lines: [] };
-      parsed.hunks.push(current);
-      continue;
-    }
-
-    if (
-      text.startsWith('diff --git ') ||
-      text.startsWith('index ') ||
-      text.startsWith('--- ') ||
-      text.startsWith('+++ ') ||
-      text.startsWith('new file mode') ||
-      text.startsWith('deleted file mode') ||
-      text.startsWith('old mode') ||
-      text.startsWith('new mode') ||
-      text.startsWith('similarity index') ||
-      text.startsWith('rename from') ||
-      text.startsWith('rename to')
-    ) {
-      parsed.meta.push({ kind: 'meta', text });
-      continue;
-    }
-
-    if (!current) continue;
-
-    if (text.startsWith('\\')) {
-      current.lines.push({ kind: 'note', text });
-      continue;
-    }
-
-    if (text.startsWith('+')) {
-      current.lines.push({ kind: 'add', text: text.slice(1), newNumber });
-      parsed.added += 1;
-      if (newNumber !== undefined) newNumber += 1;
-      continue;
-    }
-
-    if (text.startsWith('-')) {
-      current.lines.push({ kind: 'remove', text: text.slice(1), oldNumber });
-      parsed.removed += 1;
-      if (oldNumber !== undefined) oldNumber += 1;
-      continue;
-    }
-
-    current.lines.push({ kind: 'context', text: text.startsWith(' ') ? text.slice(1) : text, oldNumber, newNumber });
-    if (oldNumber !== undefined) oldNumber += 1;
-    if (newNumber !== undefined) newNumber += 1;
-  }
-
-  return parsed;
-}
 
 /**
  * Unified diff viewer for the Code panel (WORKBENCH §7.2/§15).
@@ -136,7 +45,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
   const [expandedHunks, setExpandedHunks] = useState<ReadonlySet<number>>(() => new Set());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const parsed = useMemo(() => parseDiff(diff ?? ''), [diff]);
+  const parsed = useMemo(() => parseUnifiedDiff(diff ?? ''), [diff]);
   const isBinary = binary || parsed.binary;
   const hasChanges = parsed.hunks.length > 0;
   const language = useMemo(() => {

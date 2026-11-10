@@ -823,6 +823,26 @@ pub async fn get_file_diff(
     diff_file(&state, &workspace_id, &path, staged, None).await
 }
 
+/// Diff do arquivo no working tree contra HEAD (marcas inline da aba de arquivo).
+#[tauri::command]
+pub async fn get_file_diff_head(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    path: String,
+) -> Result<String, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    let resolved = crate::workspace::safe_path::resolve(
+        &root,
+        &path,
+        crate::workspace::safe_path::Access::Read,
+    )
+    .map_err(map_err)?;
+    let relative = crate::workspace::safe_path::to_relative(&root, &resolved);
+    crate::workspace::git::worktree_diff(&root, &relative, 200_000)
+        .await
+        .map_err(|error| format!("{}: {}", error.code, error.message))
+}
+
 /// Diff de um arquivo contra uma ref (merge-base da branch selecionada).
 #[tauri::command]
 pub async fn get_file_diff_at(

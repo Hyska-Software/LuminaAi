@@ -718,6 +718,15 @@
       "code": "Código",
       "modeAria": "Modo de visualización de Markdown"
     },
+    "diff": {
+      "loading": "Cargando cambios",
+      "error": "No se pudieron cargar los cambios",
+      "summaryAria": "Adiciones: {{added}}, eliminaciones: {{removed}}",
+      "removed_one": "{{count}} línea eliminada aquí",
+      "removed_other": "{{count}} líneas eliminadas aquí",
+      "addedLine": "Línea añadida",
+      "modifiedLine": "Línea modificada"
+    },
     "copyError": "No se pudo copiar la ruta",
     "loading": "Cargando archivo",
     "errorTitle": "No se pudo abrir el archivo",

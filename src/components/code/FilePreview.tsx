@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  ArrowRight,
   CircleAlert,
   Copy,
   ExternalLink,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { Badge, Button, IconButton, SegmentedControl, Spinner, Tooltip } from '@/components/ui';
 import { Markdown } from '@/components/chat/Markdown';
+import { buildInlineDiff, type InlineDiff } from '@/lib/diff';
 import { languageLabel, normalizeLanguage, prism, SYNTAX_THEME } from '@/lib/highlight';
 import { useUiStore } from '@/lib/store';
 import { cn, copyText, formatBytes } from '@/lib/utils';
@@ -27,6 +29,12 @@ export interface FilePreviewProps {
   content?: WorkspaceFileContent | null;
   loading?: boolean;
   error?: string | null;
+  /** Unified diff of the working tree against HEAD; rendered as inline marks. */
+  diff?: string | null;
+  /** True while the diff is being loaded (header indicator). */
+  diffLoading?: boolean;
+  /** Diff load failure; the file content still renders. */
+  diffError?: string | null;
   /** Opens the file in the user's external editor (container owns the action). */
   onOpenExternal?: (path: string) => void;
   /** Re-reads the file from the backend (reload button in the header / retry). */
@@ -36,6 +44,11 @@ export interface FilePreviewProps {
 
 /** Modo do ramo Markdown: documento renderizado (padrão) ou fonte. */
 type MarkdownViewMode = 'document' | 'code';
+
+const INLINE_TONE_BG = {
+  added: 'bg-success-soft',
+  modified: 'bg-warning-soft',
+} as const;
 
 /** Maps a path extension to a Prism language id. */
 export function languageForPath(path: string): string {
@@ -63,6 +76,9 @@ export function FilePreview({
   content,
   loading,
   error,
+  diff,
+  diffLoading,
+  diffError,
   onOpenExternal,
   onReload,
   className,
@@ -101,6 +117,10 @@ export function FilePreview({
     const text = content?.text ?? '';
     return text.length ? text.replace(/\r\n?/g, '\n').split('\n') : [];
   }, [content?.text]);
+  const inline = useMemo(
+    () => (diff ? buildInlineDiff(diff, lines.length) : null),
+    [diff, lines.length],
+  );
 
   const handleCopyPath = async () => {
     if (!path) return;
@@ -198,6 +218,10 @@ export function FilePreview({
      alternar entre o documento renderizado e a fonte; o padrão é Documento. */
   const isMarkdown = language === 'markdown';
   const showMarkdownDocument = isMarkdown && mdView === 'document';
+  /* Marks need the source lines: the rendered document has none, and a
+     truncated preview can end before the diff's line numbers. The summary
+     still shows in both cases. */
+  const inlineMarks = !showMarkdownDocument && !content.truncated ? inline : null;
 
   /* Imagem com payload: o visualizador real (xadrez, zoom, fit/1:1). */
   if (isImage && payload) {
@@ -294,6 +318,7 @@ export function FilePreview({
             </span>
           </>
         )}
+        <DiffSummary inline={inline} loading={diffLoading} error={diffError} />
         {showMarkdownDocument ? headerActions : textHeaderActions}
       </PreviewHeader>
 
@@ -353,39 +378,76 @@ export function FilePreview({
               >
                 {tokens.map((line, lineIndex) => {
                   const lineProps = getLineProps({ line });
+                  const lineNumber = lineIndex + 1;
+                  const tone = inlineMarks?.lineTones.get(lineNumber);
+                  const toneClass = tone ? INLINE_TONE_BG[tone] : undefined;
+                  const removedCount = inlineMarks?.deletions.get(lineNumber);
+                  const toneLabel =
+                    tone === 'added'
+                      ? t('code:preview.diff.addedLine')
+                      : tone === 'modified'
+                        ? t('code:preview.diff.modifiedLine')
+                        : undefined;
                   return (
-                    <div
-                      key={lineIndex}
-                      {...lineProps}
-                      className={cn(lineProps.className, 'flex min-h-[20px] items-start')}
-                    >
-                      <span
-                        aria-hidden
+                    <Fragment key={lineIndex}>
+                      {removedCount ? <DeletedLines count={removedCount} /> : null}
+                      <div
+                        {...lineProps}
+                        data-diff-tone={tone}
                         className={cn(
-                          'sticky left-0 w-10 shrink-0 select-none pr-3 text-right text-[11px] tabular-nums text-foreground-subtle',
-                          /* Mesmo fundo do código: sem faixa mais clara no gutter. */
-                          'bg-background',
+                          lineProps.className,
+                          'flex min-h-[20px] items-start',
+                          toneClass,
                         )}
                       >
-                        {lineIndex + 1}
-                      </span>
-                      <span
-                        className={cn(
-                          'min-w-0 pr-4',
-                          /* Wrap global: a linha quebra dentro do espaço (sem
-                             rolagem horizontal); desligado mantém `pre`. */
-                          codeFileWrap
-                            ? 'flex-1 whitespace-pre-wrap break-words'
-                            : 'whitespace-pre',
-                        )}
-                      >
-                        {line.map((token, tokenIndex) => (
-                          <span key={tokenIndex} {...getTokenProps({ token })} />
-                        ))}
-                      </span>
-                    </div>
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'sticky left-0 flex w-14 shrink-0 select-none items-center',
+                            /* Mesmo fundo da linha para o gutter não cortar a faixa. */
+                            toneClass ?? 'bg-background',
+                          )}
+                        >
+                          <span
+                            title={toneLabel}
+                            className={cn(
+                              'flex w-4 shrink-0 justify-center text-[11px] font-semibold',
+                              tone === 'added'
+                                ? 'text-success'
+                                : tone === 'modified'
+                                  ? 'text-warning'
+                                  : undefined,
+                            )}
+                          >
+                            {tone === 'added' ? '+' : tone === 'modified' ? '~' : ''}
+                          </span>
+                          <span className="w-10 shrink-0 pr-3 text-right text-[11px] tabular-nums text-foreground-subtle">
+                            {lineNumber}
+                          </span>
+                        </span>
+                        <span
+                          className={cn(
+                            'min-w-0 pr-4',
+                            /* Wrap global: a linha quebra dentro do espaço (sem
+                               rolagem horizontal); desligado mantém `pre`. */
+                            codeFileWrap
+                              ? 'flex-1 whitespace-pre-wrap break-words'
+                              : 'whitespace-pre',
+                          )}
+                        >
+                          {line.map((token, tokenIndex) => (
+                            <span key={tokenIndex} {...getTokenProps({ token })} />
+                          ))}
+                        </span>
+                      </div>
+                    </Fragment>
                   );
                 })}
+                {inlineMarks?.deletions.get(lines.length + 1) ? (
+                  <DeletedLines
+                    count={inlineMarks.deletions.get(lines.length + 1) ?? 0}
+                  />
+                ) : null}
               </pre>
             )}
           </Highlight>
@@ -412,6 +474,65 @@ function PreviewNotice({
       </span>
       <p className="text-[12.5px] font-medium text-foreground">{title}</p>
       <p className="max-w-64 text-[12px] leading-relaxed text-foreground-muted">{description}</p>
+    </div>
+  );
+}
+
+/** Header indicator for the inline diff: loading, failure or +N/−M. */
+function DiffSummary({
+  inline,
+  loading,
+  error,
+}: {
+  inline: InlineDiff | null;
+  loading?: boolean;
+  error?: string | null;
+}) {
+  const { t } = useTranslation('code');
+  if (loading) return <Spinner size="xs" label={t('code:preview.diff.loading')} />;
+  if (error) {
+    return (
+      <span
+        role="img"
+        aria-label={t('code:preview.diff.error')}
+        title={error}
+        className="inline-flex shrink-0 items-center text-warning"
+      >
+        <CircleAlert aria-hidden className="size-3.5" strokeWidth={1.75} />
+      </span>
+    );
+  }
+  if (!inline || inline.added + inline.removed === 0) return null;
+  return (
+    <span
+      aria-label={t('code:preview.diff.summaryAria', {
+        added: inline.added,
+        removed: inline.removed,
+      })}
+      className="shrink-0 text-[11.5px] tabular-nums"
+    >
+      <span aria-hidden className="text-success">+{inline.added}</span>{' '}
+      <span aria-hidden className="text-danger">−{inline.removed}</span>
+    </span>
+  );
+}
+
+/** A red arrow at a deletion point; the removed text is never rendered. */
+function DeletedLines({ count }: { count: number }) {
+  const { t } = useTranslation('code');
+  return (
+    <div
+      role="note"
+      aria-label={t('code:preview.diff.removed', { count })}
+      data-diff-deleted={count}
+      className="flex min-h-[18px] items-center bg-danger-soft text-danger"
+    >
+      <span aria-hidden className="sticky left-0 flex w-14 shrink-0 items-center bg-danger-soft">
+        <span className="flex w-4 shrink-0 justify-center">
+          <ArrowRight className="size-3.5" strokeWidth={2} />
+        </span>
+        <span className="w-10 shrink-0 pr-3 text-right text-[10.5px] tabular-nums">−{count}</span>
+      </span>
     </div>
   );
 }

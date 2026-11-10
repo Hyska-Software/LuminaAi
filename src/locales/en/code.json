@@ -718,6 +718,15 @@
       "code": "Code",
       "modeAria": "Markdown view mode"
     },
+    "diff": {
+      "loading": "Loading changes",
+      "error": "Could not load the changes",
+      "summaryAria": "Additions: {{added}}, removals: {{removed}}",
+      "removed_one": "{{count}} removed line here",
+      "removed_other": "{{count}} removed lines here",
+      "addedLine": "Added line",
+      "modifiedLine": "Changed line"
+    },
     "copyError": "Could not copy the path",
     "loading": "Loading file",
     "errorTitle": "Could not open the file",

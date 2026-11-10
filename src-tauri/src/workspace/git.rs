@@ -93,6 +93,22 @@ pub async fn detect(root: &Path) -> GitStatus {
     status
 }
 
+/// `true` quando `root` está dentro de um repositório git.
+pub async fn is_repo(root: &Path) -> bool {
+    matches!(
+        run_git_capture(root, &["rev-parse", "--show-toplevel"], TEXT_CAP).await,
+        Ok(output) if output.exit_code == Some(0)
+    )
+}
+
+/// `true` quando o repositório já tem um commit (`HEAD` resolvível).
+pub async fn has_head(root: &Path) -> bool {
+    matches!(
+        run_git_capture(root, &["rev-parse", "--verify", "--quiet", "HEAD"], TEXT_CAP).await,
+        Ok(output) if output.exit_code == Some(0)
+    )
+}
+
 /// `true` quando o caminho está no índice (arquivo rastreado pelo git).
 pub async fn is_tracked(root: &Path, relative: &str) -> bool {
     match run_git_capture(
@@ -507,6 +523,40 @@ pub async fn diff_ref(
     if output.truncated {
         text.push_str("\n[diff truncado pelo limite de saída]\n");
     }
+    Ok(text)
+}
+
+/// Unified diff of one path against `HEAD` (index + working tree), including
+/// untracked files as synthetic additions. Returns an empty string outside a
+/// git repository or when the file has no changes.
+///
+/// The new side of the patch is always the **working tree**, so its line
+/// numbers match the content returned by `read_workspace_file`; this is what
+/// the inline decorations of the file tab rely on.
+pub async fn worktree_diff(
+    root: &Path,
+    relative: &str,
+    max_bytes: usize,
+) -> Result<String, ExecError> {
+    if !is_repo(root).await {
+        return Ok(String::new());
+    }
+
+    // No commit yet: every file is new relative to the empty tree. A file that
+    // no longer exists has no content to show; treat it as "no diff".
+    if !has_head(root).await {
+        return Ok(untracked_diff(root, relative, max_bytes).unwrap_or_default());
+    }
+
+    let paths = [relative.to_string()];
+    let text = diff_ref(root, "HEAD", &paths, 3, max_bytes).await?;
+
+    // `git diff HEAD` ignores untracked files; synthesize the new-file patch
+    // exactly like `diff_file` does for the Changes tab.
+    if text.trim().is_empty() && !is_tracked(root, relative).await {
+        return untracked_diff(root, relative, max_bytes);
+    }
+
     Ok(text)
 }
 
@@ -1266,7 +1316,7 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use super::test_support::{git_stdout, run_git, setup_repo};
+    use super::test_support::{git_available, git_stdout, run_git, setup_repo};
     use super::*;
     use std::fs;
 
@@ -1298,6 +1348,67 @@ mod tests {
         );
         assert!(status.staged.is_empty());
         assert!(status.conflicted.is_empty());
+    }
+
+    #[tokio::test]
+    async fn worktree_diff_compares_head_and_handles_staged_and_untracked() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+
+        assert!(
+            worktree_diff(temp.path(), "a.txt", 0)
+                .await
+                .expect("diff")
+                .is_empty()
+        );
+
+        fs::write(temp.path().join("a.txt"), "linha1\nlinha2\n").expect("modificar a");
+        let unstaged = worktree_diff(temp.path(), "a.txt", 0)
+            .await
+            .expect("diff unstaged");
+        assert!(unstaged.contains("+linha2"), "unstaged: {unstaged}");
+
+        // `git diff HEAD` includes staged changes as well.
+        stage(temp.path(), &["a.txt".to_string()])
+            .await
+            .expect("stage");
+        let staged = worktree_diff(temp.path(), "a.txt", 0)
+            .await
+            .expect("diff staged");
+        assert!(staged.contains("+linha2"), "staged: {staged}");
+
+        fs::write(temp.path().join("novo.txt"), "novo\n").expect("criar novo");
+        let untracked = worktree_diff(temp.path(), "novo.txt", 0)
+            .await
+            .expect("diff untracked");
+        assert!(untracked.contains("@@ -0,0 +1,1 @@"), "untracked: {untracked}");
+        assert!(untracked.contains("+novo"), "untracked: {untracked}");
+
+        let plain = tempfile::tempdir().expect("tempdir");
+        fs::write(plain.path().join("a.txt"), "x\n").expect("criar a");
+        assert!(
+            worktree_diff(plain.path(), "a.txt", 0)
+                .await
+                .expect("diff fora de repo")
+                .is_empty()
+        );
+
+        if !git_available() {
+            return;
+        }
+        let unborn = tempfile::tempdir().expect("tempdir");
+        assert!(
+            run_git(unborn.path(), &["init", "-b", "main"])
+                || run_git(unborn.path(), &["init"])
+        );
+        fs::write(unborn.path().join("a.txt"), "x\n").expect("criar a");
+        let unborn_diff = worktree_diff(unborn.path(), "a.txt", 0)
+            .await
+            .expect("diff unborn");
+        assert!(unborn_diff.contains("@@ -0,0 +1,1 @@"), "unborn: {unborn_diff}");
+        assert!(unborn_diff.contains("+x"), "unborn: {unborn_diff}");
     }
 
     #[tokio::test]

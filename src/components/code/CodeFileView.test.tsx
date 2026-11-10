@@ -5,6 +5,7 @@ import type { WorkspaceFileContent } from '@/lib/types';
 
 const mocks = vi.hoisted(() => ({
   readWorkspaceFile: vi.fn(),
+  getFileDiffHead: vi.fn(),
   openWorkspaceInExplorer: vi.fn(),
   decodeBase64: vi.fn(),
   loadPdf: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/api', () => ({
   api: {
     readWorkspaceFile: mocks.readWorkspaceFile,
+    getFileDiffHead: mocks.getFileDiffHead,
     openWorkspaceInExplorer: mocks.openWorkspaceInExplorer,
   },
 }));
@@ -72,6 +74,7 @@ beforeEach(() => {
   mocks.readWorkspaceFile.mockImplementation(async (_workspaceId: string, path: string) =>
     fileContent({ path }),
   );
+  mocks.getFileDiffHead.mockResolvedValue('');
   mocks.openWorkspaceInExplorer.mockResolvedValue(undefined);
   mocks.decodeBase64.mockReturnValue(new Uint8Array([0x25, 0x50, 0x44, 0x46]));
   mocks.loadPdf.mockResolvedValue(pdfHandle());
@@ -88,6 +91,56 @@ describe('CodeFileView', () => {
     expect(mocks.readWorkspaceFile).toHaveBeenCalledWith('ws-1', 'src/app.ts');
     expect(screen.getByText('src/app.ts')).toBeTruthy();
     expect(screen.getByText('TypeScript')).toBeTruthy();
+  });
+
+  it('carrega o diff contra HEAD e renderiza as marcas inline', async () => {
+    mocks.readWorkspaceFile.mockResolvedValue(
+      fileContent({ path: 'src/app.ts', text: 'a\nc\n' }),
+    );
+    mocks.getFileDiffHead.mockResolvedValue('@@ -1,2 +1,2 @@\n a\n-b\n+c');
+
+    render(<CodeFileView target={{ workspaceId: 'ws-1', path: 'src/app.ts' }} />);
+
+    expect(await screen.findByLabelText('Conteúdo de src/app.ts')).toBeTruthy();
+    expect(mocks.getFileDiffHead).toHaveBeenCalledWith('ws-1', 'src/app.ts');
+    expect(await screen.findByLabelText('Adições: 1, remoções: 1')).toBeTruthy();
+
+    const pre = screen.getByLabelText('Conteúdo de src/app.ts');
+    expect(pre.querySelector('[data-diff-tone="modified"]')?.textContent).toContain('c');
+    expect(screen.getByRole('note', { name: '1 linha removida aqui' })).toBeTruthy();
+  });
+
+  it('mantém o conteúdo quando o diff falha e mostra o aviso', async () => {
+    mocks.getFileDiffHead.mockRejectedValueOnce('EXEC_FAILED: git falhou');
+
+    render(<CodeFileView target={{ workspaceId: 'ws-1', path: 'src/app.ts' }} />);
+
+    expect(await screen.findByLabelText('Conteúdo de src/app.ts')).toBeTruthy();
+    expect(
+      await screen.findByRole('img', { name: 'Não foi possível carregar as alterações' }),
+    ).toBeTruthy();
+  });
+
+  it('descarta a resposta velha do diff quando o alvo muda', async () => {
+    const pending = deferred<string>();
+    mocks.getFileDiffHead
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce('');
+
+    const { rerender } = render(
+      <CodeFileView target={{ workspaceId: 'ws-1', path: 'src/velho.ts' }} />,
+    );
+    rerender(<CodeFileView target={{ workspaceId: 'ws-1', path: 'src/novo.ts' }} />);
+
+    expect(await screen.findByLabelText('Conteúdo de src/novo.ts')).toBeTruthy();
+
+    await act(async () => {
+      pending.resolve('@@ -1 +1 @@\n-a\n+b');
+      await pending.promise;
+    });
+
+    expect(screen.queryByText('+1')).toBeNull();
+    expect(screen.getByLabelText('Conteúdo de src/novo.ts')).toBeTruthy();
   });
 
   it('mostra erro de leitura e tenta novamente', async () => {
@@ -110,6 +163,7 @@ describe('CodeFileView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Recarregar arquivo' }));
 
     await waitFor(() => expect(mocks.readWorkspaceFile).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.getFileDiffHead).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(screen.getByLabelText('Conteúdo de src/app.ts')).toBeTruthy(),
     );

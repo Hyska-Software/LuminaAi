@@ -546,6 +546,8 @@ export const api = {
     invoke<FileChange[]>('get_workspace_changes', { conversationId }),
   getFileDiff: (workspaceId: string, path: string, staged = false) =>
     invoke<string>('get_file_diff', { workspaceId, path, staged }),
+  getFileDiffHead: (workspaceId: string, path: string) =>
+    invoke<string>('get_file_diff_head', { workspaceId, path }),
   getFileDiffAt: (workspaceId: string, path: string, base: string) =>
     invoke<string>('get_file_diff_at', { workspaceId, path, base }),
   revertFile: (conversationId: string, path: string) =>
