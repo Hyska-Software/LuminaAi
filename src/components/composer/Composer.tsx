@@ -763,7 +763,7 @@ export function Composer() {
           </PopoverContent>
         </Popover>
 
-        <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+        <div className="@container flex items-center gap-1 px-2 pb-2 pt-1">
           <IconButton
             label="Anexar arquivos"
             size="sm"

@@ -145,6 +145,20 @@ describe('CodeSessionControls — fallback e snapshot da sessão', () => {
     expect(planToggle().getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('em container estreito o seletor de permissão fica somente ícone', () => {
+    seedSession({ permissionMode: 'review' });
+    render(<CodeSessionControls conversationId="c-1" />);
+
+    const trigger = permissionTrigger();
+    expect(trigger.querySelector('span')?.className).toContain('@max-[42rem]:hidden');
+    expect(trigger.className).toContain('@max-[42rem]:w-8');
+    // The full label stays available without visible text.
+    expect(trigger.getAttribute('aria-label')).toBe('Modo de permissão: Revisar');
+    expect(trigger.getAttribute('title')).toBe(
+      'O agente pode propor edições, mas cada escrita pede aprovação.',
+    );
+  });
+
   it('sem linha nem snapshot cai no modo padrão do Code', () => {
     render(<CodeSessionControls conversationId="c-1" />);
 

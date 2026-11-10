@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generatedAt": "2026-11-09T21:51:43.882Z",
+ "generatedAt": "2026-11-10T01:57:10.687Z",
  "sources": {
   "docs": [
    "https://opencode.ai/v2/docs/console/go/",
@@ -1190,7 +1190,7 @@
      "releaseDate": "2026-10-23",
      "knowledge": null,
      "openWeights": true,
-     "description": "Multimodal Kimi model with 1M context and always-on reasoning for coding, 3D creation, financial research, and agentic work",
+     "description": "Multimodal Kimi model with a 1M-token context window and always-on reasoning, for coding, 3D creation and financial research",
      "tags": [
       "open-weights",
       "reasoning",
@@ -2161,6 +2161,55 @@
       "cache_write": 12.5
      },
      "releaseDate": "2026-09-01",
+     "knowledge": "2026-06",
+     "openWeights": false,
+     "description": "Claude model for demanding reasoning and long-horizon agentic work",
+     "tags": [
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
+    },
+    {
+     "id": "claude-fable-5-2",
+     "name": "Claude Fable 5.2",
+     "family": "claude",
+     "protocols": [
+      "anthropic"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1000000,
+     "maxOutput": 128000,
+     "cost": {
+      "input": 8,
+      "output": 40,
+      "cache_read": 0.2,
+      "cache_write": 10
+     },
+     "releaseDate": "2026-11-09",
      "knowledge": "2026-06",
      "openWeights": false,
      "description": "Claude model for demanding reasoning and long-horizon agentic work",
@@ -3445,10 +3494,10 @@
      "contextWindow": 1048576,
      "maxOutput": 65536,
      "cost": {
-      "input": 1.5,
-      "output": 7.5,
-      "cache_read": 0.15,
-      "input_audio": 1.5
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "input_audio": 0.75
      },
      "releaseDate": "2026-07-21",
      "knowledge": "2026-03",
@@ -3495,10 +3544,10 @@
      "contextWindow": 1048576,
      "maxOutput": 65536,
      "cost": {
-      "input": 1.5,
-      "output": 7.5,
-      "cache_read": 0.15,
-      "input_audio": 1.5
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "input_audio": 0.75
      },
      "releaseDate": "2026-08-13",
      "knowledge": "2026-03",
@@ -3545,10 +3594,10 @@
      "contextWindow": 1048576,
      "maxOutput": 65536,
      "cost": {
-      "input": 1.5,
-      "output": 7.5,
-      "cache_read": 0.15,
-      "input_audio": 1.5
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "input_audio": 0.75
      },
      "releaseDate": "2026-09-02",
      "knowledge": null,

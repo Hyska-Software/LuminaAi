@@ -212,6 +212,27 @@ describe('ModelPill (closed state)', () => {
     expect(html).toContain('Alto');
   });
 
+  it('caps the model/effort labels and collapses them in narrow containers', () => {
+    renderPill(
+      <ModelPill
+        providerId={GO}
+        modelId={CURRENT_MODEL}
+        reasoning={{ mode: 'effort', effort: 'max' }}
+      />,
+    );
+
+    // Visible names have a hard cap and leave the pill in narrow composers;
+    // the full text stays in the accessible name and native title.
+    const nameSpan = screen.getByText('DeepSeek V4.1 Flash');
+    expect(nameSpan.className).toContain('max-w-36');
+    expect(nameSpan.className).toContain('@max-[42rem]:hidden');
+    const effortSpan = screen.getByText('Máximo');
+    expect(effortSpan.className).toContain('max-w-32');
+    expect(effortSpan.className).toContain('@max-[42rem]:hidden');
+    expect(modelTrigger().getAttribute('title')).toBe('DeepSeek V4.1 Flash');
+    expect(thinkingTrigger().getAttribute('title')).toBe('Máximo');
+  });
+
   it('renders only the trigger when closed (no popover content)', () => {
     const html = closedMarkup(<ModelPill providerId={GO} modelId={CURRENT_MODEL} />);
 

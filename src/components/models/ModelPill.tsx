@@ -707,7 +707,7 @@ export function ModelPill({
             aria-expanded={locked ? undefined : open && stage === 'model'}
             aria-disabled={locked || undefined}
             aria-label={lockAriaLabel ?? `Selecionar modelo. Atual: ${name}`}
-            title={locked ? lockCopy?.description : undefined}
+            title={locked ? lockCopy?.description : name}
             onClick={handleModelSegment}
             className={cn(
               'flex min-w-0 items-center gap-1.5 rounded-l-full pl-1 pr-1.5',
@@ -730,6 +730,9 @@ export function ModelPill({
               className={cn(
                 'truncate',
                 compact ? 'max-w-24' : 'max-w-36',
+                // Narrow composer: keep only the model icon; the full name
+                // stays in the segment's aria-label and title.
+                '@max-[42rem]:hidden',
                 locked && 'text-foreground-subtle',
               )}
               title={locked ? lockCopy?.description : name}
@@ -752,10 +755,10 @@ export function ModelPill({
             aria-haspopup="dialog"
             aria-expanded={open && stage === 'thinking'}
             aria-label={`Selecionar modo de pensamento. Atual: ${effortText}`}
-            title={reasoningSupported ? undefined : NO_REASONING_HINT}
+            title={reasoningSupported ? effortText : NO_REASONING_HINT}
             onClick={handleThinkingSegment}
             className={cn(
-              'flex items-center gap-1 rounded-r-full px-1.5',
+              'flex min-w-0 items-center gap-1 rounded-r-full px-1.5',
               'transition-colors duration-150 hover:bg-surface-hover focus-visible:outline-none',
               'motion-reduce:transition-none disabled:cursor-not-allowed disabled:hover:bg-transparent',
               compact && 'px-1',
@@ -771,9 +774,12 @@ export function ModelPill({
             />
             <span
               className={cn(
-                'truncate text-[12px] font-normal',
+                'max-w-32 truncate text-[12px] font-normal',
                 reasoningSupported ? 'text-foreground-muted' : 'text-foreground-subtle',
                 compact && 'hidden',
+                // Narrow composer: keep only the ✦ icon (effort stays in the
+                // segment's aria-label/title).
+                '@max-[42rem]:hidden',
               )}
             >
               {effortText}

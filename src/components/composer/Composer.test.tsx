@@ -387,6 +387,15 @@ describe('Composer — variant por layoutMode (Chat | Code)', () => {
     expect(screen.queryByRole('button', { name: 'Modo Plano' })).toBeNull();
   });
 
+  it('marca a fileira de controles como container de consulta (colapso responsivo)', () => {
+    render(<Composer />);
+
+    // The pill/permission labels collapse with container variants, so the row
+    // must be the query container for them to react to the chat width.
+    const row = screen.getByRole('button', { name: 'Anexar arquivos' }).parentElement;
+    expect(row?.className).toContain('@container');
+  });
+
   it('no modo Agentes mostra o seletor com a rota da persona na home', () => {
     useAgentStore.setState({
       agentsById: {

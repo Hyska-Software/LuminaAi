@@ -164,10 +164,17 @@ export function CodeSessionControls({
             aria-label={`Modo de permissão: ${PERMISSION_LABELS[permissionMode]}`}
             title={PERMISSION_DESCRIPTIONS[permissionMode]}
             disabled={permissionBusy}
-            className={cn(PILL_CLASS_NAME, 'bg-transparent')}
+            className={cn(
+              PILL_CLASS_NAME,
+              'bg-transparent',
+              // Narrow composer: icon-only chip, like the Plano/goal toggles.
+              '@max-[42rem]:w-8 @max-[42rem]:justify-center @max-[42rem]:px-0',
+            )}
           >
             <PermissionIcon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-            <span className="truncate">{PERMISSION_LABELS[permissionMode]}</span>
+            <span className="truncate @max-[42rem]:hidden">
+              {PERMISSION_LABELS[permissionMode]}
+            </span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-64">
