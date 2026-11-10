@@ -1793,6 +1793,25 @@ export const useChatStore = create<ChatState>()((set, get) => {
         syncCodeSession(get().conversations.find((conversation) => conversation.id === id));
         return;
       }
+      // A conversation with a live turn keeps its in-memory messages: the
+      // stream is the freshest source of reasoning/tool steps, while the DB
+      // row is only a periodic checkpoint (and may still be the empty
+      // placeholder). Replacing it here erased the agent execution details
+      // from the chat when the user switched threads and came back.
+      const cachedMessages = get().messagesByConversation[id];
+      const liveStream = selectConversationStream(get(), id);
+      if (cachedMessages && liveStream) {
+        set({ activeId: id, loadingConversationId: null, streaming: liveStream });
+        rememberActive(id);
+        useUiStore.getState().setArtifacts([]);
+        if (targetConversation) {
+          syncSelectionToConversation(targetConversation, cachedMessages.length);
+        }
+        syncCodeSession(targetConversation);
+        await syncArtifacts(id);
+        void syncCacheStats(id);
+        return;
+      }
       set({
         activeId: id,
         loadingConversationId: id,
@@ -1802,14 +1821,35 @@ export const useChatStore = create<ChatState>()((set, get) => {
       // Never show the previous conversation's artifacts while the new one
       // loads (the panel may be open on the list).
       useUiStore.getState().setArtifacts([]);
+      // Snapshot the cache at request time: a local turn may start/finish (or a
+      // replay may land) while `get_conversation` is in flight. Its messages are
+      // newer than the fetched snapshot and must not be replaced by it.
+      const previousMessages = get().messagesByConversation[id];
       try {
         const detail = await api.getConversation(id);
         if (detail) {
-          set((state) => ({
-            messagesByConversation: { ...state.messagesByConversation, [id]: detail.messages },
-            conversations: state.conversations.map((c) => (c.id === id ? detail.conversation : c)),
-            loadingConversationId: null,
-          }));
+          set((state) => {
+            const cachedNow = state.messagesByConversation[id];
+            // Keep the cache only when it exists and moved past the snapshot
+            // taken before the request (live events/replay). A missing cache
+            // still applies the fetched messages even if a stream appeared.
+            const keepCached =
+              cachedNow !== undefined &&
+              (cachedNow !== previousMessages ||
+                selectConversationStream(state, id) !== null);
+            return {
+              ...(keepCached
+                ? {}
+                : {
+                    messagesByConversation: {
+                      ...state.messagesByConversation,
+                      [id]: detail.messages,
+                    },
+                  }),
+              conversations: state.conversations.map((c) => (c.id === id ? detail.conversation : c)),
+              loadingConversationId: null,
+            };
+          });
           // The conversation's model is locked in once it has messages; mirror
           // it in the composer so the locked pill shows the right model.
           syncSelectionToConversation(detail.conversation, detail.messages.length);

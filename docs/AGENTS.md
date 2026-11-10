@@ -239,7 +239,12 @@ com erro — o fallback é de rota, não um retry infinito.
 
 - `chatStore.streamsByConversation` guarda **um stream por conversa** (turno
   ativo). `streaming` é só a fatia visível de `activeId`; trocar de thread
-  reata o stream daquela conversa e nunca apaga o de outra.
+  reata o stream daquela conversa e nunca apaga o de outra. Enquanto existe
+  stream local, as mensagens em memória são a fonte da verdade ao reabrir a
+  thread: o checkpoint do banco pode estar defasado (ou ser ainda o placeholder
+  vazio), então `openConversation` não relê `get_conversation` nesse caso — os
+  detalhes de execução (raciocínio/passos/ferramentas) não desaparecem ao trocar
+  de conversa.
 - Várias threads de agente rodam ao mesmo tempo. O backend aceita **um turno
   por conversa** (`register_if_idle`); o renderer enfileira só a thread ocupada.
 - `messageQueueStore` persiste a fila em `localStorage` (`lumina.agent-queue.v1`,

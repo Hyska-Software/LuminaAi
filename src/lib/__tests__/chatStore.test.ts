@@ -741,6 +741,146 @@ describe('chatStore other actions', () => {
     expect(useUiStore.getState().artifacts[0].name).toBe('relatorio.md');
   });
 
+  it('keeps the live agent execution details when reopening a streaming conversation', async () => {
+    const liveConversation = conversation({
+      id: 'conv-1',
+      mode: 'agent',
+      agentId: 'agent-1',
+      messageCount: 2,
+    });
+    const otherConversation = conversation({ id: 'conv-2', title: 'Outra thread' });
+    const liveAssistant = assistantMessage({
+      id: 'assistant-live',
+      conversationId: 'conv-1',
+      content: '',
+      reasoning: 'Vou ler o arquivo.',
+      status: 'streaming',
+      trace: [{ reasoning: 'Vou ler o arquivo.', toolCalls: 1 }],
+      toolCalls: [
+        {
+          id: 'call-1',
+          name: 'read_file',
+          arguments: '{"path":"src/app.ts"}',
+          result: null,
+          status: 'running',
+          startedAt: 1,
+          finishedAt: null,
+        },
+      ],
+    });
+    const liveStream = {
+      turnId: 'turn-live',
+      conversationId: 'conv-1',
+      assistantId: 'assistant-live',
+      userMessageId: 'user-live',
+      phase: 'tool' as const,
+      step: 1,
+      startedAt: 1,
+      turnKind: 'user' as const,
+      subagents: {},
+    };
+    useChatStore.setState({
+      conversations: [liveConversation, otherConversation],
+      activeId: 'conv-2',
+      activeIdByLayout: { chat: null, code: null, agent: 'conv-2' },
+      messagesByConversation: {
+        'conv-1': [userMessage({ id: 'user-live', conversationId: 'conv-1' }), liveAssistant],
+        'conv-2': [userMessage({ id: 'user-other', conversationId: 'conv-2' })],
+      },
+      streamsByConversation: { 'conv-1': liveStream },
+      streaming: null,
+    });
+    useUiStore.setState({ layoutMode: 'agent' });
+    // The persisted row is still the empty checkpoint placeholder: reloading it
+    // would erase reasoning/tool steps that only exist in the live stream.
+    mocks.api.getConversation.mockResolvedValue({
+      conversation: liveConversation,
+      messages: [
+        userMessage({ id: 'user-live', conversationId: 'conv-1' }),
+        assistantMessage({
+          id: 'assistant-live',
+          conversationId: 'conv-1',
+          content: '',
+          reasoning: null,
+          status: 'streaming',
+          trace: [],
+        }),
+      ],
+    });
+
+    await useChatStore.getState().openConversation('conv-1');
+
+    expect(mocks.api.getConversation).not.toHaveBeenCalled();
+    expect(useChatStore.getState().activeId).toBe('conv-1');
+    expect(useChatStore.getState().streaming?.turnId).toBe('turn-live');
+    const assistant = useChatStore
+      .getState()
+      .messagesByConversation['conv-1'].find((message) => message.id === 'assistant-live');
+    expect(assistant?.trace).toEqual([{ reasoning: 'Vou ler o arquivo.', toolCalls: 1 }]);
+    expect(assistant?.toolCalls).toHaveLength(1);
+  });
+
+  it('does not overwrite messages persisted while the conversation was reloading', async () => {
+    const loadingConversation = conversation({ id: 'conv-1', messageCount: 2 });
+    const staleAssistant = assistantMessage({
+      id: 'assistant-live',
+      conversationId: 'conv-1',
+      content: '',
+      reasoning: null,
+      status: 'streaming',
+      trace: [],
+    });
+    const finalAssistant = assistantMessage({
+      id: 'assistant-live',
+      conversationId: 'conv-1',
+      content: 'Resposta final',
+      reasoning: 'Pensei no problema.',
+      status: 'complete',
+      trace: [{ reasoning: 'Pensei no problema.', toolCalls: 1 }],
+    });
+    useChatStore.setState({
+      conversations: [loadingConversation, conversation({ id: 'conv-2' })],
+      activeId: 'conv-2',
+      messagesByConversation: {
+        'conv-2': [userMessage({ id: 'user-2', conversationId: 'conv-2' })],
+      },
+    });
+    let resolveDetail!: (value: ConversationDetail) => void;
+    mocks.api.getConversation.mockReturnValue(
+      new Promise<ConversationDetail>((resolve) => {
+        resolveDetail = resolve;
+      }),
+    );
+
+    const opening = useChatStore.getState().openConversation('conv-1');
+    // The turn finishes (and persists its trace) before the fetch resolves.
+    useChatStore.setState((state) => ({
+      messagesByConversation: {
+        ...state.messagesByConversation,
+        'conv-1': [
+          userMessage({ id: 'user-live', conversationId: 'conv-1' }),
+          finalAssistant,
+        ],
+      },
+    }));
+    resolveDetail?.({
+      conversation: loadingConversation,
+      messages: [
+        userMessage({ id: 'user-live', conversationId: 'conv-1' }),
+        staleAssistant,
+      ],
+    });
+    await opening;
+
+    const messages = useChatStore.getState().messagesByConversation['conv-1'];
+    expect(messages.find((message) => message.id === 'assistant-live')?.content).toBe(
+      'Resposta final',
+    );
+    expect(messages.find((message) => message.id === 'assistant-live')?.trace).toEqual([
+      { reasoning: 'Pensei no problema.', toolCalls: 1 },
+    ]);
+  });
+
   it('deleteConversation removes the conversation and clears its messages', async () => {
     useChatStore.setState({
       conversations: [conversation()],
