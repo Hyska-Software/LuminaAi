@@ -13,6 +13,7 @@
     "location": "Destino",
     "options": "Opções",
     "progress": "Instalação",
+    "progressUninstall": "Desinstalação",
     "finish": "Concluído",
     "confirmUninstall": "Remover",
     "error": "Erro"
@@ -176,12 +177,32 @@
       "description": "Apaga conversas, anexos, artefatos, configurações e chaves de API salvas neste computador. Esta ação não pode ser desfeita."
     },
     "purgeWarning": "As chaves de API serão apagadas. Você precisará configurá-las novamente se reinstalar o Zylara.",
+    "dataTitle": "Dados neste computador",
+    "dataKept": "mantidos",
+    "dataRemoved": "apagados",
+    "runningNote": "O Zylara está aberto. O desinstalador fecha o aplicativo antes de remover os arquivos, para não deixar nada bloqueado.",
     "infoConfirm": "Confirme novamente para apagar o aplicativo e todos os dados do usuário atual. Esta ação é definitiva.",
     "infoNext": "No próximo passo você confirma a remoção dos dados. Seus arquivos ainda estão protegidos até lá.",
     "infoDefault": "Suas conversas, arquivos e configurações serão mantidos por padrão.",
     "hint": "A remoção do aplicativo não afeta outras contas deste computador.",
     "confirm": "Confirmar remoção",
     "remove": "Remover Zylara"
+  },
+  "uninstallIntro": {
+    "eyebrow": "Desinstalador",
+    "title": "Desinstalar o Zylara",
+    "description": "Remova o aplicativo deste computador. Suas conversas e arquivos ficam, a menos que você peça para apagá-los.",
+    "version": "Zylara {{version}}",
+    "size": "Em disco",
+    "location": "Instalado para",
+    "keepsTitle": "Mantido por padrão",
+    "keepsItem": "Conversas, anexos, artefatos, configurações e chaves de API.",
+    "keepsKeys": "Reinstalar o Zylara depois restaura tudo exatamente como está agora.",
+    "removesTitle": "Sempre removido",
+    "removesApp": "Os arquivos do aplicativo na pasta de instalação.",
+    "removesRegistry": "Os atalhos do Menu Iniciar e da área de trabalho, além da entrada em Aplicativos e recursos.",
+    "hint": "Nada é apagado antes de você confirmar na próxima tela.",
+    "continue": "Continuar"
   },
   "errorScreen": {
     "eyebrow": "Algo deu errado",

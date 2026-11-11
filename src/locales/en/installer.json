@@ -13,6 +13,7 @@
     "location": "Destination",
     "options": "Options",
     "progress": "Installation",
+    "progressUninstall": "Uninstallation",
     "finish": "Done",
     "confirmUninstall": "Remove",
     "error": "Error"
@@ -176,12 +177,32 @@
       "description": "Deletes conversations, attachments, artifacts, settings and API keys saved on this computer. This action cannot be undone."
     },
     "purgeWarning": "API keys will be deleted. You will need to configure them again if you reinstall Zylara.",
+    "dataTitle": "Data on this computer",
+    "dataKept": "kept",
+    "dataRemoved": "deleted",
+    "runningNote": "Zylara is open. The uninstaller closes it before removing the files, so nothing is left locked.",
     "infoConfirm": "Confirm again to delete the application and all data for the current user. This action is permanent.",
     "infoNext": "In the next step you confirm the data removal. Your files are still protected until then.",
     "infoDefault": "Your conversations, files and settings are kept by default.",
     "hint": "Removing the application does not affect other accounts on this computer.",
     "confirm": "Confirm removal",
     "remove": "Remove Zylara"
+  },
+  "uninstallIntro": {
+    "eyebrow": "Uninstaller",
+    "title": "Uninstall Zylara",
+    "description": "Remove the application from this computer. Your conversations and files stay unless you ask to delete them.",
+    "version": "Zylara {{version}}",
+    "size": "On disk",
+    "location": "Installed for",
+    "keepsTitle": "Kept by default",
+    "keepsItem": "Conversations, attachments, artifacts, settings and API keys.",
+    "keepsKeys": "Reinstalling Zylara later restores everything exactly as it is now.",
+    "removesTitle": "Always removed",
+    "removesApp": "The application files in the installation folder.",
+    "removesRegistry": "The Start menu and desktop shortcuts, plus the Apps & features entry.",
+    "hint": "Nothing is deleted until you confirm on the next screen.",
+    "continue": "Continue"
   },
   "errorScreen": {
     "eyebrow": "Something went wrong",

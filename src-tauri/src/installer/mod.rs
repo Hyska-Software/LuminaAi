@@ -62,6 +62,8 @@ pub struct InstallerContext {
     pub webview2_installed: bool,
     pub free_bytes: Option<u64>,
     pub required_bytes: u64,
+    /// Bytes currently installed in the destination folder (0 when absent).
+    pub installed_bytes: u64,
     pub log_path: String,
     pub data_paths: Vec<String>,
     pub can_elevate: bool,
@@ -239,8 +241,16 @@ pub fn requested_mode() -> Option<InstallerMode> {
 
     let name = std::env::current_exe()
         .ok()
-        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_lowercase()))
+        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().to_string()))
         .unwrap_or_default();
+    mode_from_name(&name)
+}
+
+/// File-name based detection: the shipped `Uninstall Zylara.exe` and the
+/// `Zylara-Setup-<version>-<platform>-<arch>.exe` artifact select their mode
+/// without any flag, so both can be double-clicked from Explorer.
+fn mode_from_name(name: &str) -> Option<InstallerMode> {
+    let name = name.to_ascii_lowercase();
     if name.contains("uninstall") {
         return Some(InstallerMode::Uninstall);
     }
@@ -574,4 +584,34 @@ pub fn installer_open_folder(app: AppHandle) -> Result<(), String> {
                 &[("error", &error.to_string())],
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_the_mode_from_the_file_name() {
+        assert_eq!(
+            mode_from_name("Uninstall Zylara.exe"),
+            Some(InstallerMode::Uninstall)
+        );
+        assert_eq!(
+            mode_from_name("uninstall.exe"),
+            Some(InstallerMode::Uninstall)
+        );
+        assert_eq!(
+            mode_from_name("Zylara-Setup-0.7.0-windows-x64.exe"),
+            Some(InstallerMode::Install)
+        );
+        assert_eq!(mode_from_name("Zylara.exe"), None);
+    }
+
+    #[test]
+    fn uninstall_wins_over_setup_when_both_appear() {
+        assert_eq!(
+            mode_from_name("Zylara-Setup-Uninstall.exe"),
+            Some(InstallerMode::Uninstall)
+        );
+    }
 }

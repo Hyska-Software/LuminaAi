@@ -21,6 +21,12 @@ use super::{
 };
 
 const APP_EXE: &str = "Zylara.exe";
+/// Dedicated uninstaller copied next to the app. It is the same binary: the
+/// file name alone puts it in uninstall mode, so no second build is needed.
+const UNINSTALLER_EXE: &str = "Uninstall Zylara.exe";
+/// Setup used to point the shortcut and the registry at `Zylara.exe
+/// --uninstall`; older shortcuts are removed on the next install/update.
+const LEGACY_UNINSTALL_SHORTCUT: &str = "Desinstalar Zylara.lnk";
 const APP_ID: &str = "app.zylara.chat";
 const INSTALL_MARKER: &str = ".zylara-install";
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Zylara";
@@ -104,6 +110,11 @@ pub fn payload_size() -> u64 {
         .and_then(|path| fs::metadata(path).ok())
         .map(|meta| meta.len())
         .unwrap_or(25 * 1024 * 1024)
+}
+
+/// Bytes an installation occupies: the app payload plus the uninstaller copy.
+pub fn installed_size(payload: u64) -> u64 {
+    payload.saturating_mul(2)
 }
 
 pub fn free_bytes(path: &Path) -> Option<u64> {
@@ -259,21 +270,29 @@ fn register_uninstall(scope: InstallScope, install_path: &Path) -> Result<()> {
     let target = install_path.join(APP_EXE);
     let location = format!("\"{}\"", install_path.display());
     let quoted = format!("\"{}\"", target.display());
+    let (uninstall_string, quiet_uninstall_string) = uninstall_strings(install_path);
     key.set_value("DisplayName", &"Zylara".to_string())?;
     key.set_value("DisplayVersion", &env!("CARGO_PKG_VERSION").to_string())?;
     key.set_value("Publisher", &"Zylara".to_string())?;
     key.set_value("InstallLocation", &location)?;
     key.set_value("DisplayIcon", &format!("{},0", quoted))?;
-    key.set_value("UninstallString", &format!("{quoted} --uninstall"))?;
-    key.set_value(
-        "QuietUninstallString",
-        &format!("{quoted} --uninstall --silent"),
-    )?;
+    key.set_value("UninstallString", &uninstall_string)?;
+    key.set_value("QuietUninstallString", &quiet_uninstall_string)?;
     key.set_value("NoModify", &1u32)?;
     key.set_value("NoRepair", &1u32)?;
-    let size_kb = payload_size().div_ceil(1024).min(u32::MAX as u64) as u32;
+    let size_kb = installed_size(payload_size())
+        .div_ceil(1024)
+        .min(u32::MAX as u64) as u32;
     key.set_value("EstimatedSize", &size_kb)?;
     Ok(())
+}
+
+/// Apps & features runs the dedicated uninstaller shipped inside the install
+/// folder. Older builds pointed at `Zylara.exe --uninstall`, which still works.
+fn uninstall_strings(install_path: &Path) -> (String, String) {
+    let exe = install_path.join(UNINSTALLER_EXE);
+    let quoted = format!("\"{}\"", exe.display());
+    (quoted.clone(), format!("{quoted} --silent"))
 }
 
 fn unregister(scope: InstallScope) -> Result<()> {
@@ -339,7 +358,8 @@ fn create_shortcut(
 fn remove_shortcuts(scope: InstallScope) {
     if let Some(programs) = start_menu_dir(scope) {
         let _ = fs::remove_file(programs.join("Zylara.lnk"));
-        let _ = fs::remove_file(programs.join("Desinstalar Zylara.lnk"));
+        let _ = fs::remove_file(programs.join("Uninstall Zylara.lnk"));
+        let _ = fs::remove_file(programs.join(LEGACY_UNINSTALL_SHORTCUT));
         let _ = fs::remove_dir(&programs);
     }
     if let Some(desktop) = desktop_dir(scope) {
@@ -738,17 +758,42 @@ fn validate_options(options: &InstallOptions, existing: Option<&ExistingInstall>
 fn copy_payload(install_path: &Path) -> Result<()> {
     let current = std::env::current_exe().context(crate::i18n::t("installer.errors.executableNotFound"))?;
     let target = install_path.join(APP_EXE);
-    if same_path(&current, &target) {
-        return Ok(());
+    if !same_path(&current, &target) {
+        fs::create_dir_all(install_path).with_context(|| {
+            crate::i18n::t_args(
+                "installer.errors.createFolder",
+                &[("path", &install_path.display().to_string())],
+            )
+        })?;
+        copy_file_atomic(&current, &target)?;
     }
-    fs::create_dir_all(install_path).with_context(|| {
-        crate::i18n::t_args(
-            "installer.errors.createFolder",
-            &[("path", &install_path.display().to_string())],
-        )
-    })?;
-    let temporary = install_path.join(format!("{APP_EXE}.new"));
-    fs::copy(&current, &temporary).with_context(|| {
+    // The uninstaller is the same binary under its own name: the file name alone
+    // selects uninstall mode, so the installation ships a self-contained
+    // `Uninstall Zylara.exe` without a second build or a separate download.
+    let uninstaller = install_path.join(UNINSTALLER_EXE);
+    if !same_path(&current, &uninstaller) {
+        copy_file_atomic(&current, &uninstaller)?;
+    }
+    Ok(())
+}
+
+/// Copies `source` over `target` through `<name>.new` + `ReplaceFileW`, so a
+/// failure never leaves a half-written executable behind.
+fn copy_file_atomic(source: &Path, target: &Path) -> Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            crate::i18n::t_args(
+                "installer.errors.createFolder",
+                &[("path", &parent.display().to_string())],
+            )
+        })?;
+    }
+    let name = target
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let temporary = target.with_file_name(format!("{name}.new"));
+    fs::copy(source, &temporary).with_context(|| {
         crate::i18n::t_args(
             "installer.errors.copyApp",
             &[("path", &temporary.display().to_string())],
@@ -767,23 +812,23 @@ fn copy_payload(install_path: &Path) -> Result<()> {
             )
         };
         if replaced.is_err() {
-            fs::remove_file(&target).with_context(|| {
+            fs::remove_file(target).with_context(|| {
                 crate::i18n::t_args(
                     "installer.errors.fileLocked",
                     &[("path", &target.display().to_string())],
                 )
             })?;
-            fs::rename(&temporary, &target)?;
+            fs::rename(&temporary, target)?;
         }
     } else {
-        fs::rename(&temporary, &target).with_context(|| {
+        fs::rename(&temporary, target).with_context(|| {
             crate::i18n::t_args(
                 "installer.errors.finalizeFile",
                 &[("path", &target.display().to_string())],
             )
         })?;
     }
-    remove_zone_identifier(&target);
+    remove_zone_identifier(target);
     Ok(())
 }
 
@@ -875,7 +920,7 @@ fn install_inner(
         bail!(crate::i18n::t("installer.errors.pathIsFile"));
     }
     if let Some(free) = free_bytes(&install_path) {
-        let required = payload_size().saturating_add(16 * 1024 * 1024);
+        let required = installed_size(payload_size()).saturating_add(16 * 1024 * 1024);
         if free < required {
             bail!(crate::i18n::t_args(
                 "installer.errors.insufficientSpace",
@@ -920,13 +965,14 @@ fn install_inner(
         "copy",
         &crate::i18n::t("installer.steps.copyFiles"),
         "done",
-        Some(APP_EXE.to_string()),
+        Some(format!("{APP_EXE}, {UNINSTALLER_EXE}")),
     );
 
     step(emit, "shortcuts", &crate::i18n::t("installer.steps.createShortcuts"), "running", None);
     progress(emit, 62.0, &crate::i18n::t("installer.progress.creatingShortcuts"));
     if options.desktop_shortcut || options.start_menu_shortcut {
         let target = install_path.join(APP_EXE);
+        let uninstaller = install_path.join(UNINSTALLER_EXE);
         if options.start_menu_shortcut {
             if let Some(programs) = start_menu_dir(options.scope) {
                 create_shortcut(
@@ -937,12 +983,15 @@ fn install_inner(
                     None,
                 )?;
                 create_shortcut(
-                    &programs.join("Desinstalar Zylara.lnk"),
-                    &target,
+                    &programs.join("Uninstall Zylara.lnk"),
+                    &uninstaller,
                     &install_path,
                     &crate::i18n::t("installer.shortcut.uninstallDescription"),
-                    Some("--uninstall"),
+                    None,
                 )?;
+                // Upgrades replace the legacy `Desinstalar Zylara.lnk`, which
+                // pointed at `Zylara.exe --uninstall`.
+                let _ = fs::remove_file(programs.join(LEGACY_UNINSTALL_SHORTCUT));
             }
         }
         if options.desktop_shortcut {
@@ -1209,6 +1258,23 @@ fn human_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quotes_the_dedicated_uninstaller_in_the_registry() {
+        let path = Path::new(r"C:\Program Files\Zylara");
+        let (uninstall, quiet) = uninstall_strings(path);
+        assert_eq!(uninstall, r#""C:\Program Files\Zylara\Uninstall Zylara.exe""#);
+        assert_eq!(
+            quiet,
+            r#""C:\Program Files\Zylara\Uninstall Zylara.exe" --silent"#
+        );
+    }
+
+    #[test]
+    fn installation_size_counts_the_uninstaller_copy() {
+        assert_eq!(installed_size(1000), 2000);
+        assert_eq!(installed_size(u64::MAX), u64::MAX);
+    }
 
     #[test]
     fn compares_versions_numerically() {

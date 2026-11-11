@@ -66,9 +66,9 @@ export const INSTALL_STEPS: InstallerStepDefinition[] = [
 export const UNINSTALL_STEPS: InstallerStepDefinition[] = [
   { id: 'prepare', labelKey: 'installer:steps.uninstall.prepare' },
   { id: 'closeApp', labelKey: 'installer:steps.uninstall.closeApp' },
+  { id: 'removeData', labelKey: 'installer:steps.uninstall.removeData' },
   { id: 'removeFiles', labelKey: 'installer:steps.uninstall.removeFiles' },
   { id: 'removeRegistry', labelKey: 'installer:steps.uninstall.removeRegistry' },
-  { id: 'removeData', labelKey: 'installer:steps.uninstall.removeData' },
   { id: 'cleanup', labelKey: 'installer:steps.uninstall.cleanup' },
 ];
 
@@ -99,7 +99,7 @@ export function createInitialState(context: InstallerContext): InstallerUiState 
     screen: missingInstall
       ? 'error'
       : mode === 'uninstall'
-        ? 'confirmUninstall'
+        ? 'welcome'
         : pending
           ? 'options'
           : 'welcome',
@@ -236,7 +236,9 @@ export function pathError(path: string): string | null {
 }
 
 export function screenOrder(context: InstallerContext): InstallerScreen[] {
-  if (context.mode === 'uninstall') return ['confirmUninstall', 'progress', 'finish'];
+  if (context.mode === 'uninstall') {
+    return ['welcome', 'confirmUninstall', 'progress', 'finish'];
+  }
   if (context.existing) return ['welcome', 'options', 'progress', 'finish'];
   return ['welcome', 'scope', 'location', 'options', 'progress', 'finish'];
 }

@@ -25,6 +25,8 @@ export interface InstallerContext {
   freeBytes: number | null;
   /** Estimated installed size in bytes. */
   requiredBytes: number;
+  /** Bytes currently on disk for the existing installation (0 when absent). */
+  installedBytes: number;
   logPath: string;
   dataPaths: string[];
   canElevate: boolean;

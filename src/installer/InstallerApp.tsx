@@ -18,6 +18,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Trash2,
   User,
   Users,
   X,
@@ -39,6 +40,7 @@ import {
   pathError,
   previousScreen,
   scopeLabel,
+  screenOrder,
   type InstallerScreen,
   type InstallerUiState,
 } from './state';
@@ -198,7 +200,15 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
       onClose={closeWindow}
     >
       {state.screen === 'welcome' ? (
-        <WelcomeScreen context={context} onContinue={() => update({ type: 'screen', screen: nextScreen(context, 'welcome') ?? 'options' })} />
+        state.mode === 'uninstall' ? (
+          <UninstallIntroScreen
+            context={context}
+            onContinue={() => update({ type: 'screen', screen: 'confirmUninstall' })}
+            onClose={closeWindow}
+          />
+        ) : (
+          <WelcomeScreen context={context} onContinue={() => update({ type: 'screen', screen: nextScreen(context, 'welcome') ?? 'options' })} />
+        )
       ) : null}
 
       {state.screen === 'scope' ? (
@@ -299,7 +309,7 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
       {state.screen === 'error' ? (
         <ErrorScreen
           state={state}
-          onRetry={() => update({ type: 'screen', screen: state.mode === 'uninstall' ? 'confirmUninstall' : 'options' })}
+          onRetry={() => update({ type: 'screen', screen: state.mode === 'uninstall' ? 'welcome' : 'options' })}
           onOpenLog={() => void api.openLog()}
           onClose={closeWindow}
         />
@@ -323,10 +333,10 @@ const SCREEN_LABEL_KEYS: Record<InstallerScreen, string> = {
   error: 'screens.error',
 };
 
-function flowScreens(context: InstallerContext): InstallerScreen[] {
-  if (context.mode === 'uninstall') return ['confirmUninstall', 'progress', 'finish'];
-  if (context.existing) return ['welcome', 'options', 'progress', 'finish'];
-  return ['welcome', 'scope', 'location', 'options', 'progress', 'finish'];
+/** The step list is shared by both modes; the progress step is named per mode. */
+function screenLabelKey(screen: InstallerScreen, mode: InstallerMode): string {
+  if (screen === 'progress' && mode === 'uninstall') return 'screens.progressUninstall';
+  return SCREEN_LABEL_KEYS[screen];
 }
 
 function InstallerShell({
@@ -351,7 +361,7 @@ function InstallerShell({
   children: React.ReactNode;
 }) {
   const { t } = useTranslation('installer');
-  const screens = context ? flowScreens(context) : [];
+  const screens = context ? screenOrder(context) : [];
   const currentIndex = state ? screens.indexOf(state.screen === 'error' ? 'progress' : state.screen) : 0;
 
   return (
@@ -422,7 +432,7 @@ function InstallerShell({
                         active ? 'font-medium text-foreground' : 'text-foreground-muted',
                       )}
                     >
-                      {t(SCREEN_LABEL_KEYS[screen])}
+                      {t(screenLabelKey(screen, mode))}
                     </span>
                   </li>
                 );
@@ -1178,6 +1188,119 @@ function FinishScreen({
   );
 }
 
+function UninstallIntroScreen({
+  context,
+  onContinue,
+  onClose,
+}: {
+  context: InstallerContext;
+  onContinue: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation('installer');
+  return (
+    <>
+      <div className="mb-7 flex items-center gap-5">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-2xl bg-accent/20 blur-xl" aria-hidden="true" />
+          <img src="/brand/zylara-tile.svg" alt="" className="relative size-16 rounded-2xl" draggable={false} />
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">
+            {t('uninstallIntro.eyebrow')}
+          </p>
+          <h1 className="mt-1 text-[26px] font-semibold leading-tight tracking-tight">
+            {t('uninstallIntro.title')}
+          </h1>
+          <p className="mt-1 text-sm text-foreground-muted">{t('uninstallIntro.description')}</p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-border bg-surface-raised p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">
+              {t('uninstallIntro.version', { version: context.existing?.version ?? context.version })}
+            </p>
+            <p className="mt-1 break-all text-[12px] text-foreground-muted">
+              {context.existing?.path ?? ''}
+            </p>
+          </div>
+          <Badge variant="outline" size="md">
+            {scopeLabel(context.existing?.scope ?? 'user')}
+          </Badge>
+        </div>
+
+        <Separator className="my-4" />
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-lg bg-surface px-3 py-2.5">
+            <p className="text-[11px] text-foreground-subtle">{t('uninstallIntro.size')}</p>
+            <p className="mt-0.5 text-[12.5px] font-medium text-foreground">
+              {formatBytes(context.installedBytes)}
+            </p>
+          </div>
+          <div className="rounded-lg bg-surface px-3 py-2.5">
+            <p className="text-[11px] text-foreground-subtle">{t('uninstallIntro.location')}</p>
+            <p className="mt-0.5 text-[12.5px] font-medium text-foreground">
+              {scopeLabel(context.existing?.scope ?? 'user')}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2.5">
+          <div className="flex items-start gap-2.5 rounded-lg border border-success/25 bg-success-soft px-3.5 py-3">
+            <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" strokeWidth={1.9} />
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-medium text-foreground">{t('uninstallIntro.keepsTitle')}</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-foreground-muted">
+                {t('uninstallIntro.keepsItem')}
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-foreground-muted">
+                {t('uninstallIntro.keepsKeys')}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-3">
+            <Trash2 className="mt-0.5 size-4 shrink-0 text-foreground-subtle" strokeWidth={1.9} />
+            <div className="min-w-0">
+              <p className="text-[12.5px] font-medium text-foreground">{t('uninstallIntro.removesTitle')}</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-foreground-muted">
+                {t('uninstallIntro.removesApp')}
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-foreground-muted">
+                {t('uninstallIntro.removesRegistry')}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {context.dataPaths.length ? (
+        <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3">
+          <p className="text-[12px] font-medium text-foreground">{t('uninstall.dataTitle')}</p>
+          <ul className="mt-1.5 space-y-1">
+            {context.dataPaths.map((path) => (
+              <li key={path} className="break-all font-mono text-[11px] leading-relaxed text-foreground-muted">
+                {path}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <Footer hint={t('uninstallIntro.hint')}>
+        <Button variant="ghost" onClick={onClose}>
+          {t('common.cancel')}
+        </Button>
+        <Button variant="primary" onClick={onContinue} rightIcon={<ArrowRight className="size-4" />}>
+          {t('uninstallIntro.continue')}
+        </Button>
+      </Footer>
+    </>
+  );
+}
+
 function UninstallScreen({
   context,
   state,
@@ -1193,6 +1316,7 @@ function UninstallScreen({
 }) {
   const [confirming, setConfirming] = React.useState(false);
   const { t } = useTranslation('installer');
+  const installPath = context.existing?.path ?? state.draft.path;
   return (
     <>
       <ScreenHeader
@@ -1205,7 +1329,7 @@ function UninstallScreen({
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-foreground">Zylara {context.existing?.version ?? context.version}</p>
-            <p className="mt-1 break-all text-[12px] text-foreground-muted">{context.existing?.path ?? state.draft.path}</p>
+            <p className="mt-1 break-all text-[12px] text-foreground-muted">{installPath}</p>
           </div>
           <Badge variant="outline" size="md">
             {scopeLabel(context.existing?.scope ?? state.draft.scope)}
@@ -1230,6 +1354,38 @@ function UninstallScreen({
           </div>
         ) : null}
       </div>
+
+      {context.appRunning ? (
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <p className="text-[12px] leading-relaxed text-foreground-muted">{t('uninstall.runningNote')}</p>
+        </div>
+      ) : null}
+
+      {context.dataPaths.length ? (
+        <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3">
+          <p className="text-[12px] font-medium text-foreground">{t('uninstall.dataTitle')}</p>
+          <ul className="mt-1.5 space-y-1">
+            {context.dataPaths.map((path) => (
+              <li key={path} className="flex items-start gap-2 text-[11px] leading-relaxed">
+                <span
+                  className={cn(
+                    'mt-1 size-1.5 shrink-0 rounded-full',
+                    state.draft.purgeData ? 'bg-danger' : 'bg-success',
+                  )}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0">
+                  <span className="break-all font-mono text-foreground-muted">{path}</span>
+                  <span className="ml-2 text-foreground-subtle">
+                    {state.draft.purgeData ? t('uninstall.dataRemoved') : t('uninstall.dataKept')}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-[12px] leading-relaxed text-foreground-muted">
         {state.draft.purgeData
