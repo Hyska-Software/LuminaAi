@@ -52,6 +52,26 @@ vi.mock('@/components/code', () => ({
       </button>
     </div>
   ),
+  TerminalPanel: ({
+    conversationId,
+    surface,
+    showTabStrip,
+    className,
+  }: {
+    conversationId: string;
+    surface?: string;
+    showTabStrip?: boolean;
+    className?: string;
+  }) => (
+    <div
+      data-testid="terminal-panel"
+      data-surface={surface}
+      data-tabstrip={String(showTabStrip)}
+      className={className}
+    >
+      {conversationId}
+    </div>
+  ),
 }));
 
 vi.mock('@/components/agent/SubagentChatView', () => ({
@@ -188,6 +208,24 @@ describe('WorkspaceCenter — modo Code', () => {
       'hidden',
     );
   });
+  it('mostra o terminal central sem desmontar o chat', () => {
+    useUiStore.setState({ layoutMode: 'code', codeView: 'terminal' });
+    useChatStore.setState({ activeId: 'c-1' });
+
+    render(<WorkspaceCenter />);
+
+    const terminal = screen.getByTestId('terminal-panel');
+    expect(terminal.getAttribute('data-surface')).toBe('center');
+    expect(terminal.getAttribute('data-tabstrip')).toBe('false');
+    expect(terminal.textContent).toBe('c-1');
+    // Same contract as the other center views: header visible, chat mounted hidden.
+    expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    expect(screen.getByTestId('code-session-header').parentElement?.className).not.toContain(
+      'hidden',
+    );
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+  });
+
   it('keeps the same chat instance when switching layouts', () => {
     render(<WorkspaceCenter />);
     const chat = screen.getByTestId('chat-view');

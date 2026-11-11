@@ -14,6 +14,9 @@ export { CodeSessionHeader } from './CodeSessionHeader';
 
 export { CodePanel } from './CodePanel';
 
+export { TerminalPanel } from './TerminalPanel';
+export type { TerminalPanelProps } from './TerminalPanel';
+
 export { CodeWelcomeScreen } from './CodeWelcomeScreen';
 
 export { CodeDiffView } from './CodeDiffView';

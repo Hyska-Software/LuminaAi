@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import type { TerminalEvent, TerminalInfo } from '@/lib/types';
 
@@ -282,6 +282,45 @@ describe('TerminalPanel', () => {
     // Clamps at the end instead of overscrolling.
     fireEvent.wheel(strip, { deltaY: 5000 });
     expect(strip.scrollLeft).toBe(600);
+  });
+
+  it('separa os terminais do painel e do centro na mesma conversa', async () => {
+    render(
+      <>
+        <section data-testid="panel-surface">
+          <TerminalPanel conversationId="conv-1" />
+        </section>
+        <section data-testid="center-surface">
+          <TerminalPanel conversationId="conv-1" surface="center" showTabStrip={false} autoFocus />
+        </section>
+      </>,
+    );
+
+    const panel = within(screen.getByTestId('panel-surface'));
+    const center = within(screen.getByTestId('center-surface'));
+
+    fireEvent.click(panel.getByRole('button', { name: 'Abrir terminal' }));
+    await waitFor(() => expect(apiMock.openTerminal).toHaveBeenCalledTimes(1));
+    fireEvent.click(center.getByRole('button', { name: 'Abrir terminal' }));
+    await waitFor(() => expect(apiMock.openTerminal).toHaveBeenCalledTimes(2));
+
+    // Each surface lists only its own terminals; the center never renders an
+    // inner tab strip (the central strip owns those tabs).
+    expect(panel.getByRole('tab', { name: 'Terminal 1' })).toBeTruthy();
+    expect(center.queryByRole('tab')).toBeNull();
+    expect(panel.queryByText('Terminal 2')).toBeNull();
+
+    const [panelHost, centerHost] = hosts();
+    expect(panelHost.dataset.terminalId).toBe('term-1');
+    expect(centerHost.dataset.terminalId).toBe('term-2');
+    expect(panelHost.hidden).toBe(false);
+    expect(centerHost.hidden).toBe(false);
+
+    // Closing the panel PTY does not touch the center one.
+    fireEvent.click(panel.getByRole('button', { name: 'Fechar Terminal 1' }));
+    await waitFor(() => expect(apiMock.closeTerminal).toHaveBeenCalledWith('term-1'));
+    expect(centerHost.isConnected).toBe(true);
+    expect(hosts().map((host) => host.dataset.terminalId)).toEqual(['term-2']);
   });
 
   it('degrada com erro amigável e sem retry inútil no limite', async () => {

@@ -7,16 +7,20 @@
  * never steals a keystroke from an editable field.
  */
 
+import type { LayoutMode } from '@/lib/store';
+
 export interface HotkeyEvent {
   key: string;
   metaKey: boolean;
   ctrlKey: boolean;
+  shiftKey: boolean;
   defaultPrevented: boolean;
   target: EventTarget | null;
 }
 
 /** Minimal UI snapshot the resolver needs; built from the zustand stores. */
 export interface HotkeySnapshot {
+  layoutMode: LayoutMode;
   commandPaletteOpen: boolean;
   modelPickerOpen: boolean;
   settingsOpen: boolean;
@@ -34,6 +38,8 @@ export type HotkeyCommand =
   | 'toggle-command-palette'
   | 'toggle-sidebar'
   | 'new-conversation'
+  | 'new-code-session'
+  | 'open-center-terminal'
   | 'open-settings'
   | 'close-overlays'
   | 'return-to-chat'
@@ -83,6 +89,13 @@ export function resolveHotkey(event: HotkeyEvent, snapshot: HotkeySnapshot): Hot
 
   if (mod && key === 'k') return 'toggle-command-palette';
   if (snapshot.commandPaletteOpen) return null;
+
+  if (snapshot.layoutMode === 'code' && mod && event.shiftKey && key === 'a') {
+    return 'new-code-session';
+  }
+  if (snapshot.layoutMode === 'code' && mod && event.shiftKey && key === 't') {
+    return 'open-center-terminal';
+  }
 
   if (mod && key === 'b') return 'toggle-sidebar';
   if (mod && key === 'n') return 'new-conversation';

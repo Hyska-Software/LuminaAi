@@ -82,6 +82,12 @@ function runHotkey(command: HotkeyCommand, event: KeyboardEvent): void {
         void chat.startNewConversation();
       }
       break;
+    case 'new-code-session':
+      window.dispatchEvent(new CustomEvent('zylara:code-new-session'));
+      break;
+    case 'open-center-terminal':
+      window.dispatchEvent(new CustomEvent('zylara:code-new-terminal'));
+      break;
     case 'open-settings':
       ui.openSettings();
       break;
@@ -429,6 +435,7 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       const ui = useUiStore.getState();
       const command = resolveHotkey(event, {
+        layoutMode: ui.layoutMode,
         commandPaletteOpen: ui.commandPaletteOpen,
         modelPickerOpen: ui.modelPickerOpen,
         settingsOpen: ui.settingsOpen,

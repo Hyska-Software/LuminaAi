@@ -26,24 +26,31 @@ import {
   Tooltip,
 } from '@/components/ui';
 import { THEME_APPLIED_EVENT } from '@/lib/theme/apply';
-import type { TerminalTabInfo } from './terminalManager';
-import { terminalManager } from './terminalManager';
+import type { TerminalSurface, TerminalTabInfo } from './terminalManager';
+import { terminalManager, terminalTabLabel } from './terminalManager';
 import { useHorizontalWheelScroll } from './useHorizontalWheelScroll';
 import { t } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-interface TerminalPanelProps {
+export interface TerminalPanelProps {
   conversationId: string;
   className?: string;
-}
-
-function tabDisplayName(tab: TerminalTabInfo): string {
-  if (tab.running) return tab.title;
-  return t('code:terminal.tabClosed', { title: tab.title });
+  /** Which independent terminal set this view hosts (default: the right panel). */
+  surface?: TerminalSurface;
+  /** Hide the inner tab strip when the caller already owns the tab list. */
+  showTabStrip?: boolean;
+  /** Focus the xterm as soon as the hosts attach (central surface). */
+  autoFocus?: boolean;
 }
 
 /** Aba "Terminal" do painel direito: abas de terminais, xterm e foco. */
-export function TerminalPanel({ conversationId, className }: TerminalPanelProps) {
+export function TerminalPanel({
+  conversationId,
+  className,
+  surface = 'panel',
+  showTabStrip = true,
+  autoFocus = false,
+}: TerminalPanelProps) {
   const { t } = useTranslation('code');
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
@@ -53,26 +60,29 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
   useHorizontalWheelScroll(tabStripRef);
   const snapshot = useSyncExternalStore(
     terminalManager.subscribe,
-    () => terminalManager.getSnapshot(conversationId),
-    () => terminalManager.getSnapshot(conversationId),
+    () => terminalManager.getSnapshot(conversationId, surface),
+    () => terminalManager.getSnapshot(conversationId, surface),
   );
 
-  const { tabs, activeId, loading, error, limit } = snapshot;
+  const { tabs, activeId, loading, error, limit, used } = snapshot;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
-  const atLimit = tabs.length >= limit;
+  const atLimit = used >= limit;
   const blocked = atLimit;
+  const outputId = surface === 'center' ? 'terminal-output-center' : 'terminal-output';
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     // Focus the terminal when the user explicitly opened the Terminal tab;
-    // switching sessions from the sidebar must keep focus where it was.
+    // switching sessions from the sidebar must keep focus where it was. The
+    // central surface always focuses on mount (it is the active center view).
     const activeElement = document.activeElement;
     const focusTerminal =
-      activeElement instanceof HTMLElement && activeElement.id === 'code-panel-tab-terminal';
-    terminalManager.attach(conversationId, container, { focus: focusTerminal });
-    return () => terminalManager.detach(conversationId, container);
-  }, [conversationId]);
+      autoFocus ||
+      (activeElement instanceof HTMLElement && activeElement.id === 'code-panel-tab-terminal');
+    terminalManager.attach(conversationId, container, { surface, focus: focusTerminal });
+    return () => terminalManager.detach(conversationId, container, surface);
+  }, [conversationId, surface, autoFocus]);
 
   useEffect(() => {
     if (typeof MutationObserver === 'undefined') return;
@@ -161,7 +171,8 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
 
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col bg-surface', className)}>
-      <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
+      {showTabStrip ? (
+        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-2">
         <div
           ref={tabStripRef}
           role="tablist"
@@ -199,9 +210,9 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                   role="tab"
                   id={`terminal-tab-${tab.id}`}
                   aria-selected={selected}
-                  aria-controls="terminal-output"
+                  aria-controls={outputId}
                   tabIndex={selected ? 0 : -1}
-                  title={tab.cwd ? t('code:terminal.tabTitleWithCwd', { title: tabDisplayName(tab), cwd: tab.cwd }) : tabDisplayName(tab)}
+                  title={tab.cwd ? t('code:terminal.tabTitleWithCwd', { title: terminalTabLabel(tab), cwd: tab.cwd }) : terminalTabLabel(tab)}
                   onClick={() => selectTab(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
                   className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
@@ -292,7 +303,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
                 className="size-7"
                 loading={loading}
                 disabled={blocked}
-                onClick={() => void terminalManager.open(conversationId)}
+                onClick={() => void terminalManager.open(conversationId, surface)}
               >
                 <Plus aria-hidden className="size-4" strokeWidth={1.75} />
               </IconButton>
@@ -300,6 +311,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
           </Tooltip>
         </div>
       </div>
+      ) : null}
 
       {error ? (
         <div
@@ -314,7 +326,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
               size="sm"
               className="h-6 shrink-0 px-2 text-[11px]"
               leftIcon={<RotateCcw aria-hidden className="size-3" strokeWidth={1.75} />}
-              onClick={() => void terminalManager.open(conversationId)}
+              onClick={() => void terminalManager.open(conversationId, surface)}
             >
               {t('common:actions.retry')}
             </Button>
@@ -324,7 +336,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
 
       <div
         role="tabpanel"
-        id="terminal-output"
+        id={outputId}
         aria-labelledby={active ? `terminal-tab-${active.id}` : undefined}
         aria-busy={loading || undefined}
         className="relative min-h-0 flex-1 overflow-hidden bg-surface"
@@ -342,7 +354,8 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
               size="sm"
               className="mt-1"
               disabled={loading || blocked}
-              onClick={() => void terminalManager.open(conversationId)}
+              title={atLimit ? t('code:terminal.limitHint', { limit }) : undefined}
+              onClick={() => void terminalManager.open(conversationId, surface)}
             >
               {t('code:terminal.open')}
             </Button>
@@ -388,7 +401,7 @@ export function TerminalPanel({ conversationId, className }: TerminalPanelProps)
             )
           ) : null}
           <span className="text-foreground-muted">
-            {tabs.length}/{limit}
+            {used}/{limit}
           </span>
         </span>
       </div>

@@ -605,7 +605,9 @@
       "hide": "Ocultar painel de arquivos",
       "widen": "Aumente a janela para ver o painel de arquivos"
     },
-    "sessionsTablist": "Sessões abertas",
+    "addTab": "Nova aba",
+    "terminal": "Terminal",
+    "tabsTablist": "Abas abertas",
     "closeTab": "Fechar {{title}}",
     "subagent": {
       "explore": "exploração",

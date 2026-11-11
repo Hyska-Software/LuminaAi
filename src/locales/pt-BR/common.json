@@ -221,6 +221,7 @@
       "diffRegion": "Diff de {{path}}",
       "fileRegion": "Arquivo {{path}}",
       "planRegion": "Plano aprovado da sessão",
+      "terminalRegion": "Terminal",
       "backToSession": "Voltar à sessão",
       "backToChat": "Voltar ao chat"
     },

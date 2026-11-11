@@ -8,6 +8,7 @@ import {
 
 function snapshot(overrides: Partial<HotkeySnapshot> = {}): HotkeySnapshot {
   return {
+    layoutMode: 'chat',
     commandPaletteOpen: false,
     modelPickerOpen: false,
     settingsOpen: false,
@@ -24,6 +25,7 @@ function event(overrides: Partial<HotkeyEvent> = {}): HotkeyEvent {
     key: 'k',
     metaKey: false,
     ctrlKey: false,
+    shiftKey: false,
     defaultPrevented: false,
     target: null,
     ...overrides,
@@ -65,6 +67,26 @@ describe('resolveHotkey', () => {
     expect(resolveHotkey(event({ key: 'b', metaKey: true }), snapshot())).toBe('toggle-sidebar');
     expect(resolveHotkey(event({ key: 'n', ctrlKey: true }), snapshot())).toBe('new-conversation');
     expect(resolveHotkey(event({ key: ',', metaKey: true }), snapshot())).toBe('open-settings');
+  });
+
+  it('opens a Code session or central terminal with Shift+A/Shift+T', () => {
+    const code = snapshot({ layoutMode: 'code' });
+    expect(resolveHotkey(event({ key: 'A', ctrlKey: true, shiftKey: true }), code)).toBe(
+      'new-code-session',
+    );
+    expect(resolveHotkey(event({ key: 't', ctrlKey: true, shiftKey: true }), code)).toBe(
+      'open-center-terminal',
+    );
+    // Same chords outside the Code layout stay inert.
+    expect(resolveHotkey(event({ key: 'a', ctrlKey: true, shiftKey: true }), snapshot())).toBeNull();
+    expect(resolveHotkey(event({ key: 't', metaKey: true, shiftKey: true }), snapshot())).toBeNull();
+    // The Shift modifier is required; plain select-all must not create a tab.
+    expect(resolveHotkey(event({ key: 'a', ctrlKey: true }), code)).toBeNull();
+    expect(resolveHotkey(event({ key: 't', ctrlKey: true }), code)).toBeNull();
+    // The command palette owns the keyboard while open.
+    const palette = snapshot({ layoutMode: 'code', commandPaletteOpen: true });
+    expect(resolveHotkey(event({ key: 'a', ctrlKey: true, shiftKey: true }), palette)).toBeNull();
+    expect(resolveHotkey(event({ key: 't', ctrlKey: true, shiftKey: true }), palette)).toBeNull();
   });
 
   it('resolves Escape in priority order: overlays, views, streaming', () => {

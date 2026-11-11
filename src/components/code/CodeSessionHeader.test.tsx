@@ -30,6 +30,81 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
 
+const terminalMock = vi.hoisted(() => {
+  type TerminalTab = {
+    id: string;
+    title: string;
+    cwd: string;
+    cols: number;
+    rows: number;
+    running: boolean;
+    exitCode: number | null;
+    killing: boolean;
+  };
+  type Snapshot = {
+    tabs: TerminalTab[];
+    activeId: string | null;
+    loading: boolean;
+    error: { code: string; message: string; detail: string; canRetry: boolean } | null;
+    limit: number;
+    used: number;
+  };
+  const empty = (): Snapshot => ({
+    tabs: [],
+    activeId: null,
+    loading: false,
+    error: null,
+    limit: 4,
+    used: 0,
+  });
+  let snapshot = empty();
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of listeners) listener();
+  };
+  const manager = {
+    subscribe: vi.fn((listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }),
+    getSnapshot: vi.fn(() => snapshot),
+    open: vi.fn(async () => 'term-1' as string | null),
+    activate: vi.fn(),
+    close: vi.fn(async () => undefined),
+  };
+  return {
+    manager,
+    emit(next: Partial<Snapshot>): void {
+      snapshot = { ...snapshot, ...next };
+      notify();
+    },
+    reset(): void {
+      snapshot = empty();
+      listeners.clear();
+    },
+    tab(overrides: Partial<TerminalTab> = {}): TerminalTab {
+      return {
+        id: 'term-1',
+        title: 'Terminal 1',
+        cwd: 'C:/projetos/zylara',
+        cols: 100,
+        rows: 24,
+        running: true,
+        exitCode: null,
+        killing: false,
+        ...overrides,
+      };
+    },
+  };
+});
+
+vi.mock('./terminalManager', () => ({
+  terminalManager: terminalMock.manager,
+  terminalTabLabel: (tab: { title: string; running: boolean }) =>
+    tab.running ? tab.title : `${tab.title} (fechado)`,
+  TERMINAL_TAB_LIMIT: 4,
+}));
+
 // Imported after the API mock.
 import { emptyCodeSession, useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { __resetWorkspacesForTests } from './useWorkspaces';
@@ -135,8 +210,15 @@ function openMenu(trigger: HTMLElement): void {
   fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
 }
 
+/** Opens the "+" menu and activates one of its items. */
+async function chooseMenuItem(name: RegExp): Promise<void> {
+  openMenu(screen.getByRole('button', { name: 'Nova aba' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  terminalMock.reset();
   __resetWorkspacesForTests();
   window.matchMedia = matchMediaReturning(false);
   setViewport(1440);
@@ -192,14 +274,18 @@ afterEach(() => {
 });
 
 describe('CodeSessionHeader — cabeçalho da sessão', () => {
-  it('mostra "Nova sessão" e uma aba ativa quando não há conversa', () => {
+  it('mostra "Nova sessão", a aba ativa e o menu do + quando não há conversa', async () => {
     render(<CodeSessionHeader />);
 
     expect(screen.getByRole('heading', { name: 'Nova sessão' })).toBeTruthy();
     expect(screen.getByText('Sem workspace')).toBeTruthy();
-    expect(screen.getByRole('tablist', { name: 'Sessões abertas' })).toBeTruthy();
+    expect(screen.getByRole('tablist', { name: 'Abas abertas' })).toBeTruthy();
     expect(tab('Nova sessão').getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Nova sessão' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Nova aba' })).toBeTruthy();
+
+    openMenu(screen.getByRole('button', { name: 'Nova aba' }));
+    expect(await screen.findByRole('menuitem', { name: /Nova sessão/ })).toBeTruthy();
+    expect(await screen.findByRole('menuitem', { name: /Terminal/ })).toBeTruthy();
   });
 
   it('mostra o título da conversa ativa e a transforma em aba', async () => {
@@ -258,7 +344,7 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
     });
     await waitFor(() => expect(tab('Terceira sessão')).toBeTruthy());
 
-    const strip = screen.getByRole('tablist', { name: 'Sessões abertas' });
+    const strip = screen.getByRole('tablist', { name: 'Abas abertas' });
     expect(strip.className).toContain('scrollbar-none');
     // jsdom has no layout: declare an overflowing strip and scroll from the start.
     Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 900 });
@@ -343,7 +429,7 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
   it('+ cria uma nova sessão real no namespace Code', async () => {
     render(<CodeSessionHeader />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Nova sessão' }));
+    await chooseMenuItem(/Nova sessão/);
 
     await waitFor(() => expect(mocks.createConversation).toHaveBeenCalledTimes(1));
     expect(mocks.createConversation.mock.calls[0]?.[3]).toBe('code');
@@ -364,7 +450,7 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
     });
 
     render(<CodeSessionHeader />);
-    fireEvent.click(screen.getByRole('button', { name: 'Nova sessão' }));
+    await chooseMenuItem(/Nova sessão/);
 
     await waitFor(() =>
       expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1'),
@@ -379,7 +465,7 @@ describe('CodeSessionHeader — cabeçalho da sessão', () => {
     useUiStore.setState({ activeWorkspaceId: 'ws-1' });
 
     render(<CodeSessionHeader />);
-    fireEvent.click(screen.getByRole('button', { name: 'Nova sessão' }));
+    await chooseMenuItem(/Nova sessão/);
 
     await waitFor(() =>
       expect(mocks.setConversationWorkspace).toHaveBeenCalledWith('c-new', 'ws-1'),
@@ -614,7 +700,7 @@ describe('CodeSessionHeader — fechar abas', () => {
     fireEvent.keyDown(tab('Única sessão'), { key: 'Delete' });
 
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Nova sessão' })),
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Nova aba' })),
     );
   });
 });
@@ -1304,5 +1390,93 @@ describe('CodeSessionHeader — aba central do objetivo', () => {
     expect(useUiStore.getState().codeGoalOpen).toBe(false);
     expect(useUiStore.getState().codeView).toBe('session');
     expect(screen.queryByRole('tab', { name: 'Objetivo da sessão' })).toBeNull();
+  });
+});
+
+describe('CodeSessionHeader — terminais nas abas', () => {
+  function activeSession(): void {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Sessão', workspaceId: 'ws-1' })],
+      activeId: 'c-1',
+    });
+  }
+
+  it('o menu + abre um terminal novo na superfície central, separado do painel', async () => {
+    activeSession();
+    terminalMock.manager.open.mockImplementationOnce(async () => {
+      const terminalTab = terminalMock.tab();
+      terminalMock.emit({ tabs: [terminalTab], activeId: terminalTab.id, used: 1 });
+      return terminalTab.id;
+    });
+
+    render(<CodeSessionHeader />);
+    openMenu(screen.getByRole('button', { name: 'Nova aba' }));
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Terminal/ }));
+
+    await waitFor(() =>
+      expect(terminalMock.manager.open).toHaveBeenCalledWith('c-1', 'center'),
+    );
+    expect(useUiStore.getState().codeView).toBe('terminal');
+    // The right panel's Terminal tab is independent and stays where it was.
+    expect(useUiStore.getState().codePanelTab).toBe('changes');
+    expect(await screen.findByRole('tab', { name: 'Terminal 1' })).toBeTruthy();
+  });
+
+  it('mostra a aba do terminal central e fecha a última voltando à sessão', async () => {
+    activeSession();
+    const terminalTab = terminalMock.tab();
+    terminalMock.emit({ tabs: [terminalTab], activeId: terminalTab.id, used: 1 });
+    useUiStore.setState({ codeView: 'terminal' });
+
+    render(<CodeSessionHeader />);
+    const terminalTabButton = await screen.findByRole('tab', { name: 'Terminal 1' });
+    expect(terminalTabButton.getAttribute('aria-selected')).toBe('true');
+    expect(terminalTabButton.getAttribute('aria-controls')).toBe('code-terminal-panel');
+    expect(terminalTabButton.getAttribute('id')).toBe('terminal-tab-term-1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar Terminal 1' }));
+
+    await waitFor(() =>
+      expect(terminalMock.manager.close).toHaveBeenCalledWith('c-1', 'term-1'),
+    );
+    expect(useUiStore.getState().codeView).toBe('session');
+  });
+
+  it('clicar na aba do terminal ativa o xterm e o centro', async () => {
+    activeSession();
+    const terminalTab = terminalMock.tab();
+    terminalMock.emit({ tabs: [terminalTab], activeId: terminalTab.id, used: 1 });
+    useUiStore.setState({ codeView: 'session' });
+
+    render(<CodeSessionHeader />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Terminal 1' }));
+
+    expect(terminalMock.manager.activate).toHaveBeenCalledWith('c-1', 'term-1', {
+      focusTerminal: true,
+    });
+    expect(useUiStore.getState().codeView).toBe('terminal');
+  });
+
+  it('os eventos dos atalhos disparam as mesmas ações do menu', async () => {
+    activeSession();
+    terminalMock.manager.open.mockImplementationOnce(async () => {
+      const terminalTab = terminalMock.tab();
+      terminalMock.emit({ tabs: [terminalTab], activeId: terminalTab.id, used: 1 });
+      return terminalTab.id;
+    });
+
+    render(<CodeSessionHeader />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent('zylara:code-new-terminal'));
+    });
+    await waitFor(() =>
+      expect(terminalMock.manager.open).toHaveBeenCalledWith('c-1', 'center'),
+    );
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('zylara:code-new-session'));
+    });
+    await waitFor(() => expect(mocks.createConversation).toHaveBeenCalledTimes(1));
   });
 });

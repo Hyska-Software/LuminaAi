@@ -605,7 +605,9 @@
       "hide": "Ocultar panel de archivos",
       "widen": "Amplía la ventana para ver el panel de archivos"
     },
-    "sessionsTablist": "Sesiones abiertas",
+    "addTab": "Nueva pestaña",
+    "terminal": "Terminal",
+    "tabsTablist": "Pestañas abiertas",
     "closeTab": "Cerrar {{title}}",
     "subagent": {
       "explore": "exploración",

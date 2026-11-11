@@ -56,7 +56,8 @@ export type CodeView =
   | 'file'
   | 'plan'
   | 'goal'
-  | 'subagent';
+  | 'subagent'
+  | 'terminal';
 
 /** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
 export interface CodeDiffTab {
@@ -520,8 +521,10 @@ export const useUiStore = create<UiState>()(
                       ? 'plan'
                       : codeView === 'goal'
                         ? 'goal'
-                        : codeView === 'subagent'
-                          ? 'subagent'
+                      : codeView === 'subagent'
+                        ? 'subagent'
+                        : codeView === 'terminal'
+                          ? 'terminal'
                           : 'session',
         }),
       openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),

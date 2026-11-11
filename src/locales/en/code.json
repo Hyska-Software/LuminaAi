@@ -605,7 +605,9 @@
       "hide": "Hide file panel",
       "widen": "Widen the window to see the file panel"
     },
-    "sessionsTablist": "Open sessions",
+    "addTab": "New tab",
+    "terminal": "Terminal",
+    "tabsTablist": "Open tabs",
     "closeTab": "Close {{title}}",
     "subagent": {
       "explore": "exploration",

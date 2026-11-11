@@ -28,6 +28,9 @@ export const TERMINAL_TAB_LIMIT = 4;
 
 const TERMINAL_FONT_SIZE = 12;
 
+/** Two independent terminal surfaces share one PTY registry per conversation. */
+export type TerminalSurface = 'panel' | 'center';
+
 export interface TerminalErrorState {
   code: string;
   /** Friendly message shown to the user (pt-BR). */
@@ -54,11 +57,14 @@ export interface TerminalSnapshot {
   loading: boolean;
   error: TerminalErrorState | null;
   limit: number;
+  /** Total terminals in the conversation (both surfaces share the backend cap). */
+  used: number;
 }
 
 interface TerminalInstance {
   id: string;
   conversationId: string;
+  surface: TerminalSurface;
   title: string;
   cwd: string;
   cols: number;
@@ -80,12 +86,12 @@ interface ConversationRuntime {
   conversationId: string;
   instances: Map<string, TerminalInstance>;
   order: string[];
-  activeId: string | null;
-  loading: boolean;
-  error: TerminalErrorState | null;
-  container: HTMLElement | null;
+  activeIds: Record<TerminalSurface, string | null>;
+  loadingBySurface: Record<TerminalSurface, boolean>;
+  errors: Record<TerminalSurface, TerminalErrorState | null>;
+  containers: Record<TerminalSurface, HTMLElement | null>;
   nextIndex: number;
-  snapshot: TerminalSnapshot;
+  snapshots: Record<TerminalSurface, TerminalSnapshot>;
   reconciled: boolean;
   reconcile: Promise<void> | null;
 }
@@ -96,7 +102,13 @@ const EMPTY_SNAPSHOT: TerminalSnapshot = {
   loading: false,
   error: null,
   limit: TERMINAL_TAB_LIMIT,
+  used: 0,
 };
+
+/** Label shared by the right-panel tabs and the central terminal tabs. */
+export function terminalTabLabel(tab: TerminalTabInfo): string {
+  return tab.running ? tab.title : t('code:terminal.tabClosed', { title: tab.title });
+}
 
 /** Human copy for the stable `TERMINAL_*` error codes, resolved at call time. */
 function terminalErrorMessage(code: string): string {
@@ -210,65 +222,82 @@ class TerminalManager {
     return () => this.listeners.delete(listener);
   };
 
-  getSnapshot(conversationId: string | null): TerminalSnapshot {
+  getSnapshot(
+    conversationId: string | null,
+    surface: TerminalSurface = 'panel',
+  ): TerminalSnapshot {
     if (!conversationId) return EMPTY_SNAPSHOT;
-    return this.runtimes.get(conversationId)?.snapshot ?? EMPTY_SNAPSHOT;
+    return this.runtimes.get(conversationId)?.snapshots[surface] ?? EMPTY_SNAPSHOT;
   }
 
-  /** Appends the conversation hosts to the visible panel container. */
+  /** Appends the conversation hosts of one surface to its visible container. */
   attach(
     conversationId: string,
     container: HTMLElement,
-    options: { focus?: boolean } = {},
+    options: { surface?: TerminalSurface; focus?: boolean } = {},
   ): void {
+    const surface = options.surface ?? 'panel';
     const runtime = this.ensureRuntime(conversationId);
-    if (runtime.container === container) return;
-    if (runtime.container) this.detachHosts(runtime);
-    runtime.container = container;
-    // The container belongs exclusively to the terminal hosts; clearing it
+    if (runtime.containers[surface] === container) return;
+    if (runtime.containers[surface]) this.detachHosts(runtime, surface);
+    runtime.containers[surface] = container;
+    // The container belongs exclusively to this surface's hosts; clearing it
     // protects against stale hosts from a previous implementation/HMR.
     container.replaceChildren();
     for (const id of runtime.order) {
       const instance = runtime.instances.get(id);
-      if (instance) container.appendChild(instance.host);
+      if (instance?.surface === surface) container.appendChild(instance.host);
     }
     this.applyTheme();
     this.syncVisibility(runtime);
     const focus = options.focus === true;
     schedule(() => {
-      if (focus) this.focusActive(runtime);
-      else this.fitActive(runtime);
+      if (focus) this.focusActive(runtime, surface);
+      else this.fitActive(runtime, surface);
     });
     void this.reconcile(conversationId);
   }
 
   /** Detaches the hosts without destroying the PTY or the xterm buffer. */
-  detach(conversationId: string, container?: HTMLElement): void {
+  detach(
+    conversationId: string,
+    container?: HTMLElement,
+    surface: TerminalSurface = 'panel',
+  ): void {
     const runtime = this.runtimes.get(conversationId);
     if (!runtime) return;
-    if (container && runtime.container && runtime.container !== container) return;
-    this.detachHosts(runtime);
-    runtime.container = null;
+    if (container && runtime.containers[surface] && runtime.containers[surface] !== container) {
+      return;
+    }
+    this.detachHosts(runtime, surface);
+    runtime.containers[surface] = null;
   }
 
-  async open(conversationId: string): Promise<void> {
+  async open(
+    conversationId: string,
+    surface: TerminalSurface = 'panel',
+  ): Promise<string | null> {
     const runtime = this.ensureRuntime(conversationId);
-    if (runtime.loading) return;
+    if (runtime.loadingBySurface[surface]) return null;
     if (runtime.instances.size >= TERMINAL_TAB_LIMIT) {
-      runtime.error = toTerminalError(`TERMINAL_LIMIT: máximo de ${TERMINAL_TAB_LIMIT}`);
+      runtime.errors[surface] = toTerminalError(
+        `TERMINAL_LIMIT: máximo de ${TERMINAL_TAB_LIMIT}`,
+      );
       this.notify(runtime);
-      return;
+      return null;
     }
     await this.reconcile(conversationId);
-    if (runtime.loading) return;
+    if (runtime.loadingBySurface[surface]) return null;
     if (runtime.instances.size >= TERMINAL_TAB_LIMIT) {
-      runtime.error = toTerminalError(`TERMINAL_LIMIT: máximo de ${TERMINAL_TAB_LIMIT}`);
+      runtime.errors[surface] = toTerminalError(
+        `TERMINAL_LIMIT: máximo de ${TERMINAL_TAB_LIMIT}`,
+      );
       this.notify(runtime);
-      return;
+      return null;
     }
 
-    runtime.loading = true;
-    runtime.error = null;
+    runtime.loadingBySurface[surface] = true;
+    runtime.errors[surface] = null;
     this.notify(runtime);
 
     await loadTerminalFont();
@@ -280,6 +309,7 @@ class TerminalManager {
     const instance: TerminalInstance = {
       id: '',
       conversationId,
+      surface,
       title: '',
       cwd: '',
       cols: term.cols || 80,
@@ -298,7 +328,7 @@ class TerminalManager {
     };
 
     try {
-      const parent = this.hostParent(runtime);
+      const parent = this.hostParent(runtime, surface);
       parent.appendChild(host);
       term.open(host);
       try {
@@ -318,7 +348,7 @@ class TerminalManager {
 
       if (instance.disposed) {
         void api.closeTerminal(info.id).catch(() => undefined);
-        return;
+        return null;
       }
 
       instance.id = info.id;
@@ -339,10 +369,11 @@ class TerminalManager {
 
       runtime.instances.set(instance.id, instance);
       runtime.order.push(instance.id);
-      runtime.activeId = instance.id;
+      runtime.activeIds[surface] = instance.id;
 
-      if (runtime.container) {
-        runtime.container.appendChild(instance.host);
+      const container = runtime.containers[surface];
+      if (container) {
+        container.appendChild(instance.host);
       } else {
         instance.host.remove();
       }
@@ -369,7 +400,7 @@ class TerminalManager {
       this.notify(runtime);
       schedule(() => {
         this.fitInstance(runtime, instance);
-        if (runtime.activeId === instance.id) instance.term.focus();
+        if (runtime.activeIds[surface] === instance.id) instance.term.focus();
       });
     } catch (openError) {
       instance.disposed = true;
@@ -378,16 +409,17 @@ class TerminalManager {
       instance.host.remove();
       term.dispose();
       const parsed = toTerminalError(openError);
-      runtime.error = parsed;
+      runtime.errors[surface] = parsed;
       if (parsed.code === 'TERMINAL_LIMIT' && runtime.instances.size < TERMINAL_TAB_LIMIT) {
         // The backend may still hold orphans from a previous webview: allow
         // the next attempt to reconcile instead of leaving the panel stuck.
         runtime.reconciled = false;
       }
     } finally {
-      runtime.loading = false;
+      runtime.loadingBySurface[surface] = false;
       this.notify(runtime);
     }
+    return instance.disposed ? null : instance.id;
   }
 
   activate(
@@ -398,7 +430,7 @@ class TerminalManager {
     const runtime = this.runtimes.get(conversationId);
     const instance = runtime?.instances.get(id);
     if (!runtime || !instance) return;
-    runtime.activeId = id;
+    runtime.activeIds[instance.surface] = id;
     this.syncVisibility(runtime);
     this.notify(runtime);
     schedule(() => {
@@ -411,22 +443,26 @@ class TerminalManager {
     const runtime = this.runtimes.get(conversationId);
     const instance = runtime?.instances.get(id);
     if (!runtime || !instance) return;
-    const index = runtime.order.indexOf(id);
+    const surface = instance.surface;
+    const surfaceOrder = runtime.order.filter(
+      (terminalId) => runtime.instances.get(terminalId)?.surface === surface,
+    );
+    const index = surfaceOrder.indexOf(id);
     this.removeInstance(runtime, instance);
-    if (runtime.activeId === id) {
-      runtime.activeId = runtime.order[index] ?? runtime.order[index - 1] ?? null;
+    if (runtime.activeIds[surface] === id) {
+      runtime.activeIds[surface] = surfaceOrder[index + 1] ?? surfaceOrder[index - 1] ?? null;
     }
-    if (runtime.order.length === 0) runtime.nextIndex = 1;
+    if (runtime.instances.size === 0) runtime.nextIndex = 1;
     this.syncVisibility(runtime);
     this.notify(runtime);
-    schedule(() => this.focusActive(runtime));
+    schedule(() => this.focusActive(runtime, surface));
 
     try {
       await api.closeTerminal(id);
-      runtime.error = null;
+      runtime.errors[surface] = null;
       this.notify(runtime);
     } catch (closeError) {
-      runtime.error = {
+      runtime.errors[surface] = {
         ...toTerminalError(closeError),
         code: 'TERMINAL_CLOSE',
         message: terminalErrorMessage('TERMINAL_CLOSE'),
@@ -440,14 +476,15 @@ class TerminalManager {
     const runtime = this.runtimes.get(conversationId);
     const instance = runtime?.instances.get(id);
     if (!runtime || !instance || !instance.running || instance.killing) return;
+    const surface = instance.surface;
     instance.killing = true;
-    runtime.error = null;
+    runtime.errors[surface] = null;
     this.notify(runtime);
     try {
       await api.killTerminal(id);
     } catch (killError) {
       instance.killing = false;
-      runtime.error = {
+      runtime.errors[surface] = {
         ...toTerminalError(killError),
         code: 'TERMINAL_KILL',
         message: terminalErrorMessage('TERMINAL_KILL'),
@@ -466,13 +503,15 @@ class TerminalManager {
 
   async restart(conversationId: string, id: string): Promise<void> {
     const runtime = this.runtimes.get(conversationId);
-    if (!runtime?.instances.has(id)) return;
-    const wasActive = runtime.activeId === id;
+    const instance = runtime?.instances.get(id);
+    if (!runtime || !instance) return;
+    const surface = instance.surface;
+    const wasActive = runtime.activeIds[surface] === id;
     await this.close(conversationId, id);
-    await this.open(conversationId);
+    await this.open(conversationId, surface);
     // Restart is only offered for the active terminal; the new terminal is
     // already active. No extra focus dance is needed.
-    if (!wasActive) schedule(() => this.focusActive(runtime));
+    if (!wasActive) schedule(() => this.focusActive(runtime, surface));
   }
 
   /** Closes every terminal of a conversation (session deletion/shutdown). */
@@ -481,7 +520,8 @@ class TerminalManager {
     if (!runtime) return;
     const ids = [...runtime.order];
     await Promise.all(ids.map((id) => this.close(conversationId, id)));
-    runtime.error = null;
+    runtime.errors.panel = null;
+    runtime.errors.center = null;
     this.notify(runtime);
   }
 
@@ -534,25 +574,31 @@ class TerminalManager {
       conversationId,
       instances: new Map(),
       order: [],
-      activeId: null,
-      loading: false,
-      error: null,
-      container: null,
+      activeIds: { panel: null, center: null },
+      loadingBySurface: { panel: false, center: false },
+      errors: { panel: null, center: null },
+      containers: { panel: null, center: null },
       nextIndex: 1,
-      snapshot: EMPTY_SNAPSHOT,
+      snapshots: { panel: EMPTY_SNAPSHOT, center: EMPTY_SNAPSHOT },
       reconciled: false,
       reconcile: null,
     };
-    runtime.snapshot = this.buildSnapshot(runtime);
+    runtime.snapshots = {
+      panel: this.buildSnapshot(runtime, 'panel'),
+      center: this.buildSnapshot(runtime, 'center'),
+    };
     this.runtimes.set(conversationId, runtime);
     return runtime;
   }
 
-  private buildSnapshot(runtime: ConversationRuntime): TerminalSnapshot {
+  private buildSnapshot(
+    runtime: ConversationRuntime,
+    surface: TerminalSurface,
+  ): TerminalSnapshot {
     const tabs: TerminalTabInfo[] = [];
     for (const id of runtime.order) {
       const instance = runtime.instances.get(id);
-      if (!instance) continue;
+      if (!instance || instance.surface !== surface) continue;
       tabs.push({
         id: instance.id,
         title: instance.title,
@@ -566,15 +612,19 @@ class TerminalManager {
     }
     return {
       tabs,
-      activeId: runtime.activeId,
-      loading: runtime.loading,
-      error: runtime.error,
+      activeId: runtime.activeIds[surface],
+      loading: runtime.loadingBySurface[surface],
+      error: runtime.errors[surface],
       limit: TERMINAL_TAB_LIMIT,
+      used: runtime.instances.size,
     };
   }
 
   private notify(runtime: ConversationRuntime): void {
-    runtime.snapshot = this.buildSnapshot(runtime);
+    runtime.snapshots = {
+      panel: this.buildSnapshot(runtime, 'panel'),
+      center: this.buildSnapshot(runtime, 'center'),
+    };
     for (const listener of this.listeners) listener();
   }
 
@@ -589,15 +639,15 @@ class TerminalManager {
     instance.term.dispose();
   }
 
-  private detachHosts(runtime: ConversationRuntime): void {
-    const container = runtime.container;
+  private detachHosts(runtime: ConversationRuntime, surface: TerminalSurface): void {
+    const container = runtime.containers[surface];
     if (!container) return;
     container.replaceChildren();
   }
 
   private syncVisibility(runtime: ConversationRuntime): void {
     for (const [id, instance] of runtime.instances) {
-      const active = id === runtime.activeId;
+      const active = id === runtime.activeIds[instance.surface];
       instance.host.hidden = !active;
       instance.host.style.opacity = active ? '' : '0';
       if (active) instance.host.removeAttribute('aria-hidden');
@@ -607,8 +657,8 @@ class TerminalManager {
 
   private fitInstance(runtime: ConversationRuntime, instance: TerminalInstance): void {
     if (instance.disposed) return;
-    if (!runtime.container || !instance.host.isConnected) return;
-    if (runtime.activeId !== instance.id) return;
+    if (!runtime.containers[instance.surface] || !instance.host.isConnected) return;
+    if (runtime.activeIds[instance.surface] !== instance.id) return;
     try {
       instance.fit.fit();
     } catch {
@@ -624,17 +674,20 @@ class TerminalManager {
     this.notify(runtime);
   }
 
-  private focusActive(runtime: ConversationRuntime): void {
-    if (!runtime.container) return;
-    const instance = runtime.activeId ? runtime.instances.get(runtime.activeId) : null;
+  private focusActive(runtime: ConversationRuntime, surface: TerminalSurface): void {
+    if (!runtime.containers[surface]) return;
+    const activeId = runtime.activeIds[surface];
+    const instance = activeId ? runtime.instances.get(activeId) : null;
     if (!instance || instance.disposed) return;
     this.fitInstance(runtime, instance);
     instance.term.focus();
   }
 
-  private fitActive(runtime: ConversationRuntime): void {
-    if (!runtime.container || !runtime.activeId) return;
-    const instance = runtime.instances.get(runtime.activeId);
+  private fitActive(runtime: ConversationRuntime, surface: TerminalSurface): void {
+    if (!runtime.containers[surface]) return;
+    const activeId = runtime.activeIds[surface];
+    if (!activeId) return;
+    const instance = runtime.instances.get(activeId);
     if (!instance || instance.disposed) return;
     this.fitInstance(runtime, instance);
   }
@@ -644,8 +697,9 @@ class TerminalManager {
    * flight. The staging container is off-screen and only used for measuring;
    * the host is moved to the real container as soon as it is attached again.
    */
-  private hostParent(runtime: ConversationRuntime): HTMLElement {
-    if (runtime.container) return runtime.container;
+  private hostParent(runtime: ConversationRuntime, surface: TerminalSurface): HTMLElement {
+    const container = runtime.containers[surface];
+    if (container) return container;
     if (!this.staging) {
       const staging = document.createElement('div');
       staging.style.position = 'fixed';

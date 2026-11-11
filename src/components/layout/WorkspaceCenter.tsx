@@ -12,6 +12,7 @@ import {
   CodeWelcomeScreen,
   GoalDialog,
   GoalPanel,
+  TerminalPanel,
 } from '@/components/code';
 import { LibraryView } from '@/components/library';
 import { SkillsView } from '@/components/skills';
@@ -66,6 +67,7 @@ export function WorkspaceCenter() {
   const showGoal = isCode && codeView === 'goal' && activeId !== null;
   const showCommits = isCode && codeView === 'commits' && codeCommitsTab !== null;
   const showSubagent = isCode && codeView === 'subagent' && codeSubagentTab !== null;
+  const showTerminal = isCode && codeView === 'terminal' && activeId !== null;
   const showChat =
     !showSkills &&
     !showLibrary &&
@@ -74,7 +76,8 @@ export function WorkspaceCenter() {
     !showFile &&
     !showPlan &&
     !showGoal &&
-    !showSubagent;
+    !showSubagent &&
+    !showTerminal;
   const showHeader =
     isCode &&
     (showChat ||
@@ -83,7 +86,8 @@ export function WorkspaceCenter() {
       showFile ||
       showPlan ||
       showGoal ||
-      showSubagent);
+      showSubagent ||
+      showTerminal);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -108,6 +112,23 @@ export function WorkspaceCenter() {
       >
         <ChatView welcome={isCode ? <CodeWelcomeScreen /> : undefined} />
       </div>
+
+      {showTerminal && activeId ? (
+        <div
+          id="code-terminal-panel"
+          role="region"
+          aria-label={t('shell.workspace.terminalRegion')}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <TerminalPanel
+            conversationId={activeId}
+            surface="center"
+            showTabStrip={false}
+            autoFocus
+            className="min-h-0 flex-1"
+          />
+        </div>
+      ) : null}
 
       {showSubagent && codeSubagentTab ? (
         <div

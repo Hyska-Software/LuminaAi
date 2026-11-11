@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
@@ -21,6 +22,8 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  SquarePen,
+  SquareTerminal,
   Target,
   X,
 } from 'lucide-react';
@@ -56,6 +59,7 @@ import { cn, copyText } from '@/lib/utils';
 import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 import { CodeContextMeterChip } from './CodeAgentWidgets';
 import { FileIcon } from './FileIcon';
+import { terminalManager, terminalTabLabel } from './terminalManager';
 import { useHorizontalWheelScroll } from './useHorizontalWheelScroll';
 import { NO_WORKSPACE_KEY, openFolder, useWorkspaces } from './useWorkspaces';
 
@@ -451,11 +455,24 @@ export function CodeSessionHeader() {
      always has exactly one selected tab. */
   const showNewSessionTab = activeConversation === undefined;
 
+  // The central terminal set is independent from the right panel's terminals;
+  // the active terminal is owned by the manager, not duplicated in the store.
+  const centerTerminals = useSyncExternalStore(
+    terminalManager.subscribe,
+    () => terminalManager.getSnapshot(activeId, 'center'),
+    () => terminalManager.getSnapshot(activeId, 'center'),
+  );
+
   const workspace = activeConversation?.workspaceId
     ? (workspaces.find((entry) => entry.id === activeConversation.workspaceId) ?? null)
     : null;
 
   const selectTab = (id: string) => {
+    if (activeId && centerTerminals.tabs.some((tab) => tab.id === id)) {
+      terminalManager.activate(activeId, id, { focusTerminal: true });
+      useUiStore.getState().setCodeView('terminal');
+      return;
+    }
     if (id.startsWith(CODE_FILE_TAB_PREFIX)) {
       /* Ativar a aba de arquivo (sem duplicar: `openCodeFile` só ativa se já
          estiver aberto) e mostrar o arquivo no centro. */
@@ -495,6 +512,21 @@ export function CodeSessionHeader() {
 
   const closeTab = (id: string) => {
     if (id === NEW_SESSION_ID) return;
+    if (activeId && centerTerminals.tabs.some((tab) => tab.id === id)) {
+      const wasActive = codeView === 'terminal' && centerTerminals.activeId === id;
+      const last = centerTerminals.tabs.length === 1;
+      // `close` removes the instance and notifies synchronously before the IPC
+      // await, so the snapshot below already reflects the selected neighbor.
+      void terminalManager.close(activeId, id);
+      if (wasActive && last) {
+        useUiStore.getState().setCodeView('session');
+        focusTab(activeId);
+        return;
+      }
+      const next = terminalManager.getSnapshot(activeId, 'center').activeId;
+      focusTab(next ?? activeId);
+      return;
+    }
     if (id.startsWith(CODE_FILE_TAB_PREFIX)) {
       const fileTarget = findCodeFileTab(id);
       if (!fileTarget) return;
@@ -580,6 +612,56 @@ export function CodeSessionHeader() {
     if (workspaceId) useUiStore.getState().setActiveWorkspace(workspaceId);
     void startSession(workspaceId);
   };
+
+  /**
+   * Opens a terminal in the central strip. It is a separate terminal set from
+   * the right panel's Terminal tab; with no active session the workspace
+   * selected in the sidebar seeds a new session first.
+   */
+  const openCenterTerminal = async () => {
+    let conversationId = activeConversation?.id ?? null;
+    if (!conversationId) {
+      const workspaceId = useUiStore.getState().activeWorkspaceId;
+      if (!workspaceId) {
+        toast.error(t('code:terminal.error.noWorkspace'));
+        return;
+      }
+      useUiStore.getState().setActiveWorkspace(workspaceId);
+      conversationId = await startSession(workspaceId);
+      if (!conversationId) return;
+    }
+    const terminalId = await terminalManager.open(conversationId, 'center');
+    if (terminalId) {
+      useUiStore.getState().setCodeView('terminal');
+      return;
+    }
+    const error = terminalManager.getSnapshot(conversationId, 'center').error;
+    if (error) toast.error(error.message, { description: error.detail });
+  };
+
+  /* A stale terminal view (deleted session, layout switch, last tab closed by
+     another path) falls back to the conversation. Errors stay visible so the
+     center surface can show the inline retry after a failed CTA. */
+  useEffect(() => {
+    if (codeView !== 'terminal') return;
+    if (centerTerminals.loading || centerTerminals.error) return;
+    if (centerTerminals.tabs.length === 0) useUiStore.getState().setCodeView('session');
+  }, [codeView, centerTerminals.loading, centerTerminals.error, centerTerminals.tabs.length]);
+
+  /* Global shortcuts resolve to custom events so the menu actions stay in one
+     place (this header) instead of being duplicated in App.tsx. */
+  const actionsRef = useRef({ createSession, openCenterTerminal });
+  actionsRef.current = { createSession, openCenterTerminal };
+  useEffect(() => {
+    const onNewSession = () => actionsRef.current.createSession();
+    const onTerminal = () => void actionsRef.current.openCenterTerminal();
+    window.addEventListener('zylara:code-new-session', onNewSession);
+    window.addEventListener('zylara:code-new-terminal', onTerminal);
+    return () => {
+      window.removeEventListener('zylara:code-new-session', onNewSession);
+      window.removeEventListener('zylara:code-new-terminal', onTerminal);
+    };
+  }, []);
 
   const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLElement>, id: string) => {
     const tablist = event.currentTarget.closest('[role="tablist"]');
@@ -768,7 +850,7 @@ export function CodeSessionHeader() {
         <div
           ref={tabStripRef}
           role="tablist"
-          aria-label={t('code:header.sessionsTablist')}
+          aria-label={t('code:header.tabsTablist')}
           onMouseDown={(event) => {
             // Suppress WebView2 autoscroll on middle click.
             if (event.button === 1) event.preventDefault();
@@ -841,6 +923,78 @@ export function CodeSessionHeader() {
               );
             })
           )}
+          {centerTerminals.tabs.map((terminalTab) => {
+            const label = terminalTabLabel(terminalTab);
+            const selected =
+              codeView === 'terminal' && centerTerminals.activeId === terminalTab.id;
+            return (
+              <div
+                key={terminalTab.id}
+                role="presentation"
+                {...middleClickClose(terminalTab.id)}
+                className={cn(
+                  'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                  selected
+                    ? 'bg-surface-active text-foreground'
+                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                )}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  id={`terminal-tab-${terminalTab.id}`}
+                  aria-label={label}
+                  aria-selected={selected}
+                  aria-controls="code-terminal-panel"
+                  title={
+                    terminalTab.cwd
+                      ? t('code:terminal.tabTitleWithCwd', {
+                          title: label,
+                          cwd: terminalTab.cwd,
+                        })
+                      : label
+                  }
+                  tabIndex={selected ? 0 : -1}
+                  ref={addTabRef(terminalTab.id)}
+                  onClick={() => selectTab(terminalTab.id)}
+                  onKeyDown={(event) => handleTabKeyDown(event, terminalTab.id)}
+                  className={cn(
+                    'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <SquareTerminal
+                    aria-hidden
+                    className={cn(
+                      'size-3.5 shrink-0',
+                      terminalTab.running ? 'text-foreground-subtle' : 'text-warning',
+                    )}
+                    strokeWidth={1.75}
+                  />
+                  <span className="truncate">{label}</span>
+                  {!terminalTab.running ? (
+                    <span
+                      aria-hidden
+                      className="ml-0.5 inline-flex size-1.5 shrink-0 rounded-full bg-warning"
+                    />
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  aria-label={t('code:header.closeTab', { title: label })}
+                  tabIndex={-1}
+                  onClick={() => closeTab(terminalTab.id)}
+                  className={cn(
+                    'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                    'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <X aria-hidden className="size-3.5" />
+                </button>
+              </div>
+            );
+          })}
           {codeSubagentTabs.map((subagentTab) => {
             const id = codeSubagentTabDomId(subagentTab);
             const selected =
@@ -1150,11 +1304,32 @@ export function CodeSessionHeader() {
           ) : null}
         </div>
 
-        <Tooltip content={t('code:header.newSession')} side="bottom">
-          <IconButton ref={plusRef} label={t('code:header.newSession')} size="sm" onClick={createSession}>
-            <Plus className="size-4" />
-          </IconButton>
-        </Tooltip>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              ref={plusRef}
+              label={t('code:header.addTab')}
+              title={t('code:header.addTab')}
+              size="sm"
+            >
+              <Plus className="size-4" />
+            </IconButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-52">
+            <DropdownMenuItem
+              icon={<SquarePen className="size-4" />}
+              onSelect={createSession}
+            >
+              {t('code:header.newSession')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              icon={<SquareTerminal className="size-4" />}
+              onSelect={() => void openCenterTerminal()}
+            >
+              {t('code:header.terminal')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* O diálogo de confiança vive aqui: o cabeçalho é o único chrome do Code
