@@ -267,6 +267,7 @@
   "conversations.status.cancelled": "cancelled",
   "conversations.status.complete": "complete",
   "conversations.status.error": "error",
+  "conversations.status.incomplete": "incomplete",
   "conversations.status.streaming": "in progress",
   "conversations.toolStatus.done": "done",
   "conversations.toolStatus.error": "error",

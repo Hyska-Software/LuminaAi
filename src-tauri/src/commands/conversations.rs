@@ -407,6 +407,7 @@ fn status_label(status: MessageStatus) -> String {
         MessageStatus::Complete => crate::i18n::t("conversations.status.complete"),
         MessageStatus::Error => crate::i18n::t("conversations.status.error"),
         MessageStatus::Cancelled => crate::i18n::t("conversations.status.cancelled"),
+        MessageStatus::Incomplete => crate::i18n::t("conversations.status.incomplete"),
     }
 }
 

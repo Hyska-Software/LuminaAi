@@ -49,6 +49,7 @@
     "useful": "Resposta útil",
     "notUseful": "Resposta não útil",
     "cancelled": "Cancelado",
+    "incomplete": "Parou com trabalho pendente",
     "tokens": "{{tokens}} tokens",
     "tokensAndDuration": "{{tokens}} tokens · {{duration}}"
   },

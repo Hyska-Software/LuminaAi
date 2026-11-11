@@ -26,7 +26,7 @@ use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
-pub const PROMPT_VERSION: u32 = 7;
+pub const PROMPT_VERSION: u32 = 8;
 
 /// Orientação de uma ferramenta habilitada no turno (gerada pelo registry).
 #[derive(Debug, Clone, Copy)]
@@ -180,6 +180,26 @@ fn permission_section(ctx: &CodeContext) -> &'static str {
        explicit need from the task.\n"
 }
 
+/// Completion contract of a top-level Code turn (stable system prompt).
+///
+/// The runtime enforces the same rules at stop time (`harness::completion`);
+/// this section tells the model what the gate expects before it gets there.
+fn autonomy_section() -> &'static str {
+    "# Autonomy and completion\n\n\
+     - Own the request end to end: inspect, implement, verify, then answer. Do not stop at \
+       analysis, at a plan, after a partial edit, after a commit, or to report progress.\n\
+     - End the turn only when one of these is true:\n\
+       1. everything the user asked for is implemented and verified;\n\
+       2. a decision only the user can make blocks the work — ask with `ask_user`;\n\
+       3. a hard failure blocks progress after you tried the reasonable fixes — state exactly \
+          what is missing and what you attempted.\n\
+     - A status update is not a final answer. If executable work remains and nothing blocks it, \
+       continue.\n\
+     - Never claim a command, test or build passed unless you ran it in this turn and saw the \
+       exit code.\n\
+     - Leave the workspace consistent: do not stop with code that you know does not compile.\n"
+}
+
 /// Nome curto do modo de permissão (contexto volátil do turno).
 fn permission_mode_name(mode: PermissionMode) -> &'static str {
     match mode {
@@ -317,8 +337,11 @@ fn planning_section(ctx: &CodeContext, has_todo_write: bool) -> String {
     } else if has_todo_write {
         // Subagentes não têm `todo_write` no catálogo: não os instrua a usá-lo.
         out.push_str(
-            "For tasks with 3+ steps, keep a list with `todo_write` and update the status as \
-             you go (one `in_progress` task at a time); send `[]` to clear it when done.\n",
+            "Before the first edit or command of a task with more than one step, call \
+             `todo_write` with the full step list (at most one `in_progress`); update it as you \
+             go and mark tasks completed only after you verify them. The turn is not complete \
+             while any task is pending or in progress. Send `[]` only when the task is \
+             finished.\n",
         );
     }
     out
@@ -539,9 +562,11 @@ fn editing_section() -> &'static str {
        using `replace_all` blindly.\n\
      - **Verify**: run the project's test/lint/build command when it exists and read the exit \
        code; do not claim something works without evidence (`[exit code: 0]`, green tests).\n\
-     - When done, summarize what changed per file (with `path:line` when useful) and what is \
-       still pending. Do not paste entire diffs in the response: the user sees the Changes \
-       panel.\n\
+     - **Finish the job**: implement, then run the project's verification (`run_checks` when \
+       available, or the detected check command) and fix what it reports. Summarize what \
+       changed per file (`path:line` when useful) and list remaining work only when the user \
+       or an external blocker must act. Do not paste entire diffs in the response: the user \
+       sees the Changes panel.\n\
      - Long-running commands (dev server, large suite) can run in the background \
        (`run_in_background`); collect the output with `job_output`.\n"
 }
@@ -655,6 +680,10 @@ pub fn build_system_prompt(
     ));
     out.push_str(permission_section(ctx));
     out.push('\n');
+    if !ctx.subagent {
+        out.push_str(autonomy_section());
+        out.push('\n');
+    }
     out.push_str(&tool_list_section(tools, ctx.subagent));
     if !ctx.subagent {
         out.push_str(editing_section());
@@ -815,6 +844,7 @@ mod tests {
         for needle in [
             "# Environment",
             "# Permission policy",
+            "# Autonomy and completion",
             "# Available tools",
             "## `read_file`",
             "# How to edit and verify",
@@ -843,6 +873,22 @@ mod tests {
                 "estado volátil `{volatile}` vazou para o system prompt"
             );
         }
+    }
+
+    #[test]
+    fn autonomy_section_is_only_in_the_top_level_prompt() {
+        let top = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27", "pt-BR");
+        assert!(top.contains("# Autonomy and completion"), "{top}");
+        assert!(
+            top.contains("do not stop with code that you know does not compile"),
+            "{top}"
+        );
+
+        let mut subagent = ctx();
+        subagent.subagent = true;
+        let child =
+            build_system_prompt(&model(), &subagent, &[], "Windows", "2026-10-27", "pt-BR");
+        assert!(!child.contains("# Autonomy and completion"), "{child}");
     }
 
     #[test]
@@ -960,17 +1006,20 @@ mod tests {
         assert!(runtime.contains("Session plan: planning"), "{runtime}");
         assert!(runtime.contains("inclua testes de erro"), "{runtime}");
         assert!(
-            !runtime.contains("keep a list with `todo_write`"),
+            !runtime.contains("call `todo_write` with the full step list"),
             "{runtime}"
         );
 
         // Com a tool no catálogo: orientação presente.
         let runtime = build_runtime_context(&context, true);
         assert!(
-            runtime.contains("keep a list with `todo_write`"),
+            runtime.contains("call `todo_write` with the full step list"),
             "{runtime}"
         );
-        assert!(runtime.contains("send `[]` to clear"), "{runtime}");
+        assert!(
+            runtime.contains("Send `[]` only when the task is finished"),
+            "{runtime}"
+        );
     }
 
     #[test]

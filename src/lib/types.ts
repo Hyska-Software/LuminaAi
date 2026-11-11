@@ -147,7 +147,7 @@ export interface CatalogFile {
 /* ------------------------------------------------------------------ */
 
 export type MessageRole = 'user' | 'assistant' | 'system';
-export type MessageStatus = 'streaming' | 'complete' | 'error' | 'cancelled';
+export type MessageStatus = 'streaming' | 'complete' | 'error' | 'cancelled' | 'incomplete';
 export type ToolCallStatus = 'running' | 'done' | 'error';
 
 export interface ToolImageRef {

@@ -552,7 +552,9 @@ async fn run_child(
         anyhow::bail!("subagente falhou: {error}");
     }
     match result.assistant_message.status {
-        MessageStatus::Complete => {}
+        // Subagents do not run the completion gate; a usable report stays a
+        // successful child result.
+        MessageStatus::Complete | MessageStatus::Incomplete => {}
         MessageStatus::Cancelled => {
             emit_finished(
                 &progress,

@@ -49,6 +49,7 @@
     "useful": "Helpful response",
     "notUseful": "Not helpful",
     "cancelled": "Cancelled",
+    "incomplete": "Stopped with pending work",
     "tokens": "{{tokens}} tokens",
     "tokensAndDuration": "{{tokens}} tokens · {{duration}}"
   },

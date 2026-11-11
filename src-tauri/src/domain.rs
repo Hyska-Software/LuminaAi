@@ -116,6 +116,9 @@ pub enum MessageStatus {
     Complete,
     Error,
     Cancelled,
+    /// The turn stopped with executable work still open (completion gate cap
+    /// or step budget exhausted).
+    Incomplete,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -31,6 +31,7 @@ pub(crate) mod agent_workspace;
 pub mod batch;
 pub mod cache;
 pub mod code;
+pub mod completion;
 pub mod compaction;
 pub mod prompt;
 pub mod render;
@@ -2616,6 +2617,22 @@ pub async fn run_turn(
         .as_ref()
         .map(|context| context.permission_mode)
         .unwrap_or(conversation.permission_mode);
+    // Completion gate (see `harness::completion`): only top-level Code turns
+    // are gated. Chat answers, subagents and `/goal` rounds keep their own
+    // stop semantics.
+    let stop_guard = profile == TurnProfile::Code
+        && options.delegation_depth == 0
+        && payload.turn_kind == TurnKind::User;
+    let project_has_checks = code_context
+        .as_ref()
+        .and_then(|context| context.project.as_ref())
+        .is_some_and(|project| !project.checks.is_empty());
+    let todo_tool_available = tool_definitions
+        .iter()
+        .any(|tool| tool.name == "todo_write");
+    let mut stop_progress = completion::TurnProgress::default();
+    let mut stop_continuations = 0u32;
+    let mut stop_incomplete: Option<completion::ContinueReason> = None;
     // Telemetria de cache de prompt (F1.1, PLAN §4.7): restaura o estado
     // persistido da conversa (epoch/prefixo/totais) e emite+persiste uma
     // `CacheSample` por request de wire (abaixo), nos dois perfis. O watermark
@@ -2773,6 +2790,17 @@ pub async fn run_turn(
         }
         step_number += 1;
         emit(&on_event, TurnEvent::StepStarted { step: step_number });
+
+        // Budget awareness: one transient note near the end of the step budget
+        // so the model checkpoints instead of being cut off mid-task.
+        if profile == TurnProfile::Code
+            && options.delegation_depth == 0
+            && todo_tool_available
+        {
+            if let Some(note) = completion::budget_notice(step_number, options.max_steps) {
+                history.push(HistoryMessage::user(note));
+            }
+        }
 
         // Revalida o estado de modo a cada passo: a aprovação do plano (ou o
         // chip de permissões) pode ter mudado o modo no meio do turno. A
@@ -3056,6 +3084,40 @@ pub async fn run_turn(
         if step_calls.is_empty() {
             // The model produced a final answer. Intermediate narration from
             // tool-calling steps is intentionally not part of the final message.
+            if stop_guard {
+                let todos =
+                    code::session::todos(&deps.db, &conversation.id).unwrap_or_default();
+                let decision = completion::decide(completion::StopEvidence {
+                    todos: &todos,
+                    progress: &stop_progress,
+                    project_has_checks,
+                    todo_tool_available,
+                    plan_mode: observed_plan_mode,
+                });
+                if let completion::StopDecision::Continue(reason) = decision {
+                    if step_number < options.max_steps
+                        && stop_continuations < completion::MAX_STOP_CONTINUATIONS
+                    {
+                        stop_continuations += 1;
+                        // Keep the rejected status update in the in-turn history so the model
+                        // sees what it said, but never in the final message or replay.
+                        if !step_text.trim().is_empty() {
+                            history.push(HistoryMessage::assistant(step_text.clone()));
+                        }
+                        history.push(HistoryMessage::user(completion::continuation_prompt(
+                            reason,
+                            &todos,
+                            &stop_progress,
+                            stop_continuations,
+                        )));
+                        push_trace_step(&mut trace, &step_reasoning, "", step_duration, 0);
+                        continue;
+                    }
+                    // No budget or the cap was reached: accept the stop, but mark the
+                    // message as incomplete instead of pretending the work is done.
+                    stop_incomplete = Some(reason);
+                }
+            }
             push_trace_step(&mut trace, &step_reasoning, "", step_duration, 0);
             full_text = step_text.trim().to_string();
             replay_steps.push(ReplayStep {
@@ -3108,6 +3170,9 @@ pub async fn run_turn(
             };
             tool_images_this_turn += refs.len();
             call.images = refs;
+
+            // Completion gate receipts (mutations, checks, plan, question).
+            stop_progress.observe(&call.name, &call.arguments, &outcome);
 
             emit(
                 &on_event,
@@ -3433,6 +3498,8 @@ pub async fn run_turn(
         } else {
             MessageStatus::Complete
         }
+    } else if stop_incomplete.is_some() {
+        MessageStatus::Incomplete
     } else {
         MessageStatus::Complete
     };
@@ -3562,6 +3629,8 @@ pub async fn run_turn(
             "cancelled"
         } else if turn_failure.is_some() {
             "error"
+        } else if stop_incomplete.is_some() {
+            "incomplete"
         } else {
             "done"
         };
@@ -5761,6 +5830,33 @@ mod agent_loop_tests {
             ProviderEvent::ToolCallDone {
                 index: 0,
                 arguments: "{}".to_string(),
+            },
+        );
+        emit(sink, ProviderEvent::Done);
+    }
+
+    /// Streams one tool call with explicit JSON arguments.
+    fn tool_call_json_stream(sink: &EventSink, id: &str, name: &str, arguments: &str) {
+        emit(
+            sink,
+            ProviderEvent::ToolCallStart {
+                index: 0,
+                id: id.to_string(),
+                name: name.to_string(),
+            },
+        );
+        emit(
+            sink,
+            ProviderEvent::ToolCallArgsDelta {
+                index: 0,
+                delta: arguments.to_string(),
+            },
+        );
+        emit(
+            sink,
+            ProviderEvent::ToolCallDone {
+                index: 0,
+                arguments: arguments.to_string(),
             },
         );
         emit(sink, ProviderEvent::Done);
@@ -8537,6 +8633,217 @@ mod agent_loop_tests {
         let _ = workspace_dir;
     }
 
+    /// Completion gate: a prose stop with pending todos is rejected and the
+    /// harness sends a continuation prompt instead of ending the turn.
+    #[tokio::test]
+    async fn code_turn_continues_when_the_model_stops_with_pending_todos() {
+        let temp = TempDb::new();
+        let workspace_dir =
+            std::env::temp_dir().join(format!("zylara-completion-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+
+        let pending = serde_json::json!({
+            "todos": [{ "content": "Implementar backend", "status": "pending" }]
+        })
+        .to_string();
+        let completed = serde_json::json!({
+            "todos": [{ "content": "Implementar backend", "status": "completed" }]
+        })
+        .to_string();
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let pending = pending.clone();
+                let completed = completed.clone();
+                Box::pin(async move {
+                    match current {
+                        0 => tool_call_json_stream(&sink, "call-todo-1", "todo_write", &pending),
+                        1 => text_stream(&sink, "Backend parcial."),
+                        2 => {
+                            tool_call_json_stream(&sink, "call-todo-2", "todo_write", &completed)
+                        }
+                        _ => text_stream(&sink, "Pronto."),
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.observed = Some(Arc::new(code::observed::ObservedFiles::new()));
+        let (channel, _events) = channel();
+        let mut payload = payload(&conversation, 5);
+        payload.profile = TurnProfile::Code;
+        payload.options.max_steps_override = Some(5);
+        payload.content = "Implemente o backend.".to_string();
+
+        let result = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code completo");
+
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(
+            requests.len(),
+            4,
+            "todo → stop rejeitado → todo concluído → resposta final"
+        );
+        let rejected = requests[2]
+            .history
+            .iter()
+            .position(|message| {
+                message.role == HistoryRole::Assistant && message.text == "Backend parcial."
+            })
+            .expect("status rejeitado no histórico do request seguinte");
+        let note = &requests[2].history[rejected + 1];
+        assert_eq!(note.role, HistoryRole::User);
+        assert!(note.text.starts_with("[completion-gate]"), "{}", note.text);
+        assert!(note.text.contains("Implementar backend"), "{}", note.text);
+        assert!(
+            requests[3].history.iter().any(|message| {
+                message.role == HistoryRole::User && message.text.starts_with("[budget]")
+            }),
+            "aviso de orçamento no passo 4 de 5"
+        );
+        assert_eq!(result.assistant_message.content, "Pronto.");
+        assert_eq!(result.assistant_message.status, MessageStatus::Complete);
+        assert!(result.error.is_none());
+
+        let _ = workspace_dir;
+    }
+
+    /// The gate cap is bounded: after `MAX_STOP_CONTINUATIONS` rejected stops
+    /// the turn ends as `incomplete` instead of looping forever.
+    #[tokio::test]
+    async fn code_turn_marks_the_message_incomplete_after_the_continuation_cap() {
+        let temp = TempDb::new();
+        let workspace_dir =
+            std::env::temp_dir().join(format!("zylara-completion-cap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+
+        let pending = serde_json::json!({
+            "todos": [{ "content": "Implementar backend", "status": "pending" }]
+        })
+        .to_string();
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let pending = pending.clone();
+                Box::pin(async move {
+                    if current == 0 {
+                        tool_call_json_stream(&sink, "call-todo", "todo_write", &pending);
+                    } else {
+                        text_stream(&sink, &format!("Ainda trabalhando {current}"));
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.observed = Some(Arc::new(code::observed::ObservedFiles::new()));
+        let (channel, _events) = channel();
+        let mut payload = payload(&conversation, 8);
+        payload.profile = TurnProfile::Code;
+        payload.options.max_steps_override = Some(8);
+        payload.content = "Implemente o backend.".to_string();
+
+        let result = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code completo");
+
+        assert_eq!(
+            requests.lock().expect("requests lock").len(),
+            6,
+            "todo + 5 tentativas de parada (4 continuações + cap)"
+        );
+        assert_eq!(result.assistant_message.status, MessageStatus::Incomplete);
+        assert_eq!(
+            result.assistant_message.content,
+            "Ainda trabalhando 5"
+        );
+        assert!(result.error.is_none());
+        let ended = code::session::latest_event(
+            &temp.db,
+            &conversation.id,
+            code::session::KIND_TURN_ENDED,
+        )
+        .expect("evento do turno")
+        .expect("turn/ended persistido");
+        assert!(
+            ended.payload.contains("\"status\":\"incomplete\""),
+            "{}",
+            ended.payload
+        );
+
+        let _ = workspace_dir;
+    }
+
     /// Generative UI no perfil Code: `validate_ui` entra no wire, executa pelo
     /// registry e o bloco `ui` da resposta final é persistido no transcript.
     #[tokio::test]
@@ -8874,33 +9181,40 @@ mod agent_loop_tests {
                         }
                         1 => {
                             let arguments = serde_json::json!({
+                                "todos": [{ "content": "Criar src/novo.ts", "status": "pending" }]
+                            })
+                            .to_string();
+                            tool_call_json_stream(
+                                &sink,
+                                "call-todo-1",
+                                "todo_write",
+                                &arguments,
+                            );
+                        }
+                        2 => {
+                            let arguments = serde_json::json!({
                                 "path": "src/novo.ts",
                                 "content": "export const a = 1;\n"
                             })
                             .to_string();
-                            emit(
+                            tool_call_json_stream(
                                 &sink,
-                                ProviderEvent::ToolCallStart {
-                                    index: 0,
-                                    id: "call-write".to_string(),
-                                    name: "write_file".to_string(),
-                                },
+                                "call-write",
+                                "write_file",
+                                &arguments,
                             );
-                            emit(
+                        }
+                        3 => {
+                            let arguments = serde_json::json!({
+                                "todos": [{ "content": "Criar src/novo.ts", "status": "completed" }]
+                            })
+                            .to_string();
+                            tool_call_json_stream(
                                 &sink,
-                                ProviderEvent::ToolCallArgsDelta {
-                                    index: 0,
-                                    delta: arguments.clone(),
-                                },
+                                "call-todo-2",
+                                "todo_write",
+                                &arguments,
                             );
-                            emit(
-                                &sink,
-                                ProviderEvent::ToolCallDone {
-                                    index: 0,
-                                    arguments,
-                                },
-                            );
-                            emit(&sink, ProviderEvent::Done);
                         }
                         _ => text_stream(&sink, "Plano executado e arquivo criado."),
                     }
@@ -8948,8 +9262,8 @@ mod agent_loop_tests {
         let requests = requests.lock().expect("requests lock").clone();
         assert_eq!(
             requests.len(),
-            3,
-            "submit_plan → write_file → resposta final"
+            5,
+            "submit_plan → todo → write_file → todo concluído → resposta final"
         );
         for request in &requests[1..] {
             assert_eq!(
@@ -8983,7 +9297,7 @@ mod agent_loop_tests {
             .any(|item| item.kind == "mode" && item.text.contains("disabled Plan mode")));
         // O tracker não vê quebra de prefixo: a nota de modo é só cauda nova.
         let samples = cache_samples(&events);
-        assert_eq!(samples.len(), 3, "um cache_stats por request de wire");
+        assert_eq!(samples.len(), 5, "um cache_stats por request de wire");
         assert_eq!(
             samples[1].break_reason, None,
             "mode_notes não pode quebrar o system prompt (F3b)"

@@ -338,6 +338,12 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           </div>
         ) : null}
 
+        {message.status === 'incomplete' ? (
+          <div className="mt-2">
+            <Badge tone="warning">{t('message.incomplete')}</Badge>
+          </div>
+        ) : null}
+
         {/* Fecho do turno (DESIGN §6.3): só no layout Code e com o turno
             encerrado — durante o streaming as edições ainda estão chegando.
             Turnos cancelados/erro também mostram o resumo: as edições

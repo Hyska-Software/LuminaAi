@@ -197,6 +197,16 @@ describe('MessageList — fecho do turno (somente no layout Code)', () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it('mostra o selo de turno incompleto com trabalho pendente', () => {
+    useUiStore.setState({ layoutMode: 'code' });
+
+    render(<MessageList messages={turn({ status: 'incomplete' })} streaming={null} />);
+
+    expect(screen.getByText('Parou com trabalho pendente')).toBeTruthy();
+    // O resumo continua: as edições parciais já são reais.
+    expect(summaryCard()).toBeTruthy();
+  });
+
   it('mantém o resumo em turno com erro (edições parciais são reais)', () => {
     useUiStore.setState({ layoutMode: 'code' });
 

@@ -22,7 +22,7 @@ pub static TODO_WRITE_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Keep the task list up to date with `todo_write` (it replaces the whole list): at most one `in_progress` task, short and concrete items, mark `completed` as soon as you finish and send `[]` to clear the list.",
+    guidance: "Create the task list before the first edit of a multi-step task, keep exactly one `in_progress`, mark a task completed only after verifying it, and send `[]` only when the task is finished.",
 };
 
 pub static SUBMIT_PLAN_SPEC: ToolSpec = ToolSpec {

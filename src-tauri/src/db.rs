@@ -1571,6 +1571,7 @@ fn status_to_str(status: MessageStatus) -> &'static str {
         MessageStatus::Complete => "complete",
         MessageStatus::Error => "error",
         MessageStatus::Cancelled => "cancelled",
+        MessageStatus::Incomplete => "incomplete",
     }
 }
 
@@ -1579,6 +1580,7 @@ fn status_from_str(raw: &str) -> MessageStatus {
         "streaming" => MessageStatus::Streaming,
         "error" => MessageStatus::Error,
         "cancelled" => MessageStatus::Cancelled,
+        "incomplete" => MessageStatus::Incomplete,
         _ => MessageStatus::Complete,
     }
 }
@@ -9714,6 +9716,14 @@ mod tests {
         assert_eq!(stored.content, "Tudo ótimo! (editado)");
         assert_eq!(stored.status, MessageStatus::Cancelled);
         assert_eq!(stored.citations.len(), 0);
+
+        assistant.status = MessageStatus::Incomplete;
+        db.update_message(&assistant).expect("update incomplete");
+        let stored = db
+            .get_message(&assistant.id)
+            .expect("get message")
+            .expect("present");
+        assert_eq!(stored.status, MessageStatus::Incomplete);
         assert_eq!(stored.provider_state, assistant.provider_state);
         assert_eq!(stored.trace, assistant.trace, "trace survives updates");
 
