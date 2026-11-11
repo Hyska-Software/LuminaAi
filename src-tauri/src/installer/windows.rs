@@ -699,8 +699,13 @@ pub fn relaunch_from_temp_uninstall() -> Result<()> {
 
 pub fn launch_installed(install_path: &str) -> Result<()> {
     let exe = Path::new(install_path).join(APP_EXE);
-    Command::new(&exe)
-        .current_dir(install_path)
+    // The setup runs elevated (Program Files), so `Command::new` would hand the
+    // app an administrator token. An elevated instance can be neither restored
+    // by a normal launch (Windows blocks window messages across integrity
+    // levels) nor dropped files onto. Explorer already runs as the user, so it
+    // starts the app unelevated.
+    Command::new("explorer.exe")
+        .arg(&exe)
         .spawn()
         .with_context(|| format!("falha ao abrir {}", exe.display()))?;
     Ok(())

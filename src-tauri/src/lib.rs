@@ -51,6 +51,17 @@ pub fn run() {
         return;
     }
 
+    // A second launch never starts another app: it wakes the running instance,
+    // which is the only way back while the window is hidden in the tray.
+    if crate::tray::another_instance_running() {
+        if crate::tray::request_activation() {
+            return;
+        }
+        // Never leave the user with nothing: boot a window instead. The
+        // single-instance plugin still forwards and exits when it can.
+        eprintln!("zylara: another instance is running but could not be signalled");
+    }
+
     run_app(context);
 }
 
@@ -101,8 +112,12 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                 if state.take_exit_on_close() {
                     return;
                 }
-                if crate::config::load_settings(app).close_to_tray {
+                if crate::config::load_settings(app).close_to_tray
+                    && crate::tray::is_available(app)
+                {
                     api.prevent_close();
+                    // Without a tray icon the hidden window would be unreachable;
+                    // the close proceeds and ExitRequested quits the app.
                     if let Err(error) = window.hide() {
                         eprintln!("zylara: failed to hide the main window: {error}");
                     }
@@ -120,6 +135,9 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
                 // booting; a second launch restores a hidden window.
                 eprintln!("zylara: system tray unavailable: {error}");
             }
+            // Independent of the tray icon and of the single-instance plugin's
+            // window messages: a launch rewrites the marker and we show again.
+            crate::tray::watch_activation(app.handle().clone());
             let data_dir = crate::config::data_dir(app.handle())
                 .expect("failed to resolve the app data directory");
             app.manage(crate::update::UpdateState::new(data_dir));
