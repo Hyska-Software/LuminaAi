@@ -500,6 +500,7 @@
       "sharedAria": "{{title}}, sessão compartilhada do Chat",
       "sharedTitle": "Sessão compartilhada do Chat",
       "fromChat": "Do Chat",
+      "running": "Executando",
       "options": "Opções de {{title}}",
       "unpin": "Desafixar",
       "pin": "Fixar",

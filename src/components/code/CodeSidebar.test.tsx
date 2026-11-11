@@ -31,6 +31,7 @@ vi.mock('@/lib/api', () => ({ api: mocks }));
 
 // Imported after the API mock.
 import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import type { StreamingState } from '@/lib/store';
 import { __resetWorkspacesForTests } from './useWorkspaces';
 import { CodeSidebar } from './CodeSidebar';
 
@@ -110,6 +111,20 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
   };
 }
 
+function streamingState(overrides: Partial<StreamingState> = {}): StreamingState {
+  return {
+    turnId: 'turn-1',
+    conversationId: 'c-2',
+    assistantId: 'assistant-1',
+    userMessageId: 'user-1',
+    phase: 'text',
+    step: 1,
+    startedAt: 1,
+    turnKind: 'user',
+    ...overrides,
+  };
+}
+
 function appInfo(): AppInfo {
   return {
     name: 'Zylara',
@@ -166,6 +181,8 @@ beforeEach(() => {
     conversationsLoading: false,
     activeId: null,
     activeIdByLayout: { chat: null, code: null, agent: null },
+    streamsByConversation: {},
+    streaming: null,
   });
   useUiStore.setState({
     layoutMode: 'code',
@@ -384,25 +401,28 @@ describe('CodeSidebar — Workspaces reais', () => {
     expect(screen.getByRole('button', { name: 'Corrigir o build' })).toBeTruthy();
   });
 
-  it('mostra a bolinha apenas na sessão ativa', async () => {
+  it('mostra o spinner de execução na sessão em andamento', async () => {
     mocks.listWorkspaces.mockResolvedValue([workspace()]);
     useChatStore.setState({
       conversations: [
         conversation({ id: 'c-1', title: 'Sessão ativa', workspaceId: 'ws-1' }),
-        conversation({ id: 'c-2', title: 'Sessão inativa', workspaceId: 'ws-1' }),
+        conversation({ id: 'c-2', title: 'Sessão em execução', workspaceId: 'ws-1' }),
       ],
       activeId: 'c-1',
+      streamsByConversation: { 'c-2': streamingState() },
+      streaming: null,
     });
     renderSidebar();
 
-    const active = await screen.findByRole('button', { name: 'Sessão ativa' });
-    const inactive = screen.getByRole('button', { name: 'Sessão inativa' });
-    const dot = (row: HTMLElement) =>
-      row.querySelector('span[aria-hidden="true"].rounded-full');
+    const idle = await screen.findByRole('button', { name: 'Sessão ativa' });
+    const running = screen.getByRole('button', { name: 'Sessão em execução' });
 
-    expect(dot(active)?.className).toContain('bg-accent');
-    expect(dot(inactive)?.className ?? '').not.toContain('bg-accent');
-    expect(dot(inactive)?.className ?? '').not.toContain('bg-foreground-subtle');
+    expect(within(idle).queryByRole('status')).toBeNull();
+    expect(within(running).getByRole('status', { name: 'Executando' })).toBeTruthy();
+
+    // The old active-session dot is gone from every row.
+    expect(idle.querySelector('span[aria-hidden="true"].rounded-full')).toBeNull();
+    expect(running.querySelector('span[aria-hidden="true"].rounded-full')).toBeNull();
   });
 
   it('destaca o workspace ativo e marca pasta não confiável como Leitura', async () => {

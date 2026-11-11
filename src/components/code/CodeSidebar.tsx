@@ -48,12 +48,18 @@ import {
   Input,
   Kbd,
   SortableList,
+  Spinner,
   sortableDropClass,
 } from '@/components/ui';
 import type { SortableListApi } from '@/components/ui';
 import { api } from '@/lib/api';
 import { localeLowerCase } from '@/lib/i18n/format';
-import { useAppStore, useChatStore, useUiStore } from '@/lib/store';
+import {
+  selectConversationStream,
+  useAppStore,
+  useChatStore,
+  useUiStore,
+} from '@/lib/store';
 import { filterConversationsForLayout } from '@/lib/conversations';
 import type { Conversation, Workspace } from '@/lib/types';
 import { cn, compareConversationPosition, copyText, modKey } from '@/lib/utils';
@@ -132,8 +138,9 @@ interface SessionRowProps {
 }
 
 /**
- * One real Code session row. Only the active session shows the status dot;
- * inactive rows keep an invisible spacer so titles stay aligned.
+ * One real Code session row. A conversation with an active turn (foreground or
+ * background) shows a spinner in a fixed slot; the active row is still
+ * distinguished by its surface and `aria-current`.
  */
 function SessionRow({
   conversation,
@@ -148,6 +155,9 @@ function SessionRow({
   onDelete,
 }: SessionRowProps) {
   const { t } = useTranslation('code');
+  const running = useChatStore(
+    (state) => selectConversationStream(state, conversation.id) !== null,
+  );
   return (
     <div
       {...sortable.dropProps(conversation.id)}
@@ -159,7 +169,9 @@ function SessionRow({
         onClick={onSelect}
         aria-current={active ? 'true' : undefined}
         aria-label={
-          shared ? t('code:sidebar.session.sharedAria', { title: conversation.title }) : undefined
+          shared
+            ? t('code:sidebar.session.sharedAria', { title: conversation.title })
+            : conversation.title
         }
         title={conversation.title}
         className={cn(
@@ -174,10 +186,15 @@ function SessionRow({
         {conversation.pinned ? (
           <Pin aria-hidden className="size-3 shrink-0 text-foreground-subtle" strokeWidth={1.75} />
         ) : null}
-        <span
-          aria-hidden
-          className={cn('size-1.5 shrink-0 rounded-full', active && 'bg-accent')}
-        />
+        <span className="flex size-3 shrink-0 items-center justify-center">
+          {running ? (
+            <Spinner
+              size="xs"
+              label={t('code:sidebar.session.running')}
+              className="text-accent"
+            />
+          ) : null}
+        </span>
         <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
         {shared ? (
           <span

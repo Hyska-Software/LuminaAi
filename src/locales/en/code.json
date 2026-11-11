@@ -500,6 +500,7 @@
       "sharedAria": "{{title}}, Chat session shared with Code",
       "sharedTitle": "Chat session shared with Code",
       "fromChat": "From Chat",
+      "running": "Running",
       "options": "Options for {{title}}",
       "unpin": "Unpin",
       "pin": "Pin",
