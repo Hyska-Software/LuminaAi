@@ -82,8 +82,11 @@ Saída em `release/<versão>/`: `Zylara-Setup-<versão>-windows-x64.exe` no
 Windows; `.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com
 `SHA256SUMS.txt` e `release.json`. O instalador do Windows tem UI própria
 (dark), escopo por usuário ou para todos, atalhos, atualização, desinstalação e
-remoção opcional dos dados; macOS e Linux usam os formatos nativos. Detalhes,
-flags e assinatura: [`docs/INSTALLER.md`](docs/INSTALLER.md).
+remoção opcional dos dados. A instalação leva também o desinstalador
+(`Uninstall Zylara.exe`, mesma UI, inglês por padrão) para dentro da pasta do
+app, com entrada em Aplicativos e recursos e atalho no Menu Iniciar; macOS e
+Linux usam os formatos nativos. Detalhes, flags e assinatura:
+[`docs/INSTALLER.md`](docs/INSTALLER.md).
 
 Release de produção: um push na `main` com uma versão nova no `package.json`
 dispara `.github/workflows/installer.yml` automaticamente. O workflow compila

@@ -33,12 +33,15 @@ instalador.
 O binário entra em modo setup/uninstall quando:
 
 - recebe `--setup` ou `--uninstall`; ou
-- o nome do arquivo contém `setup`/`uninstall` (o build gera
-  `Zylara-Setup-<versão>-x64.exe`); ou
+- o nome do arquivo contém `setup`/`uninstall` — é assim que o artefato
+  `Zylara-Setup-<versão>-x64.exe` e o desinstalador instalado
+  `Uninstall Zylara.exe` se identificam, sem precisar de flag; ou
 - `ZYLARA_SETUP=1` no ambiente (somente desenvolvimento).
 
-Sem essas condições, o binário abre o app normal. O modo setup **não inicializa**
-`AppState`, SQLite, harness, OAuth ou terminais.
+A detecção por nome fica em `mode_from_name()` (`src-tauri/src/installer/mod.rs`)
+e `uninstall` tem precedência sobre `setup`. Sem essas condições, o binário abre o
+app normal. O modo setup **não inicializa** `AppState`, SQLite, harness, OAuth ou
+terminais.
 
 ### 2.2 Fluxo
 
@@ -53,6 +56,44 @@ Sem essas condições, o binário abre o app normal. O modo setup **não inicial
 Atualizações mantêm conversas, arquivos, configurações e chaves de API. O escopo
 é travado após a instalação; para trocar de escopo é preciso desinstalar antes.
 
+### 2.2.1 Desinstalador
+
+O mesmo binário é copiado duas vezes para a pasta de instalação:
+
+| Arquivo | Papel |
+| --- | --- |
+| `Zylara.exe` | aplicativo |
+| `Uninstall Zylara.exe` | desinstalador (mesmo payload, sem flag) |
+| `.zylara-install` | marcador de instalação (`app.zylara.chat` + versão) |
+
+O desinstalador abre a **mesma UI** do instalador (`src/installer/**`), em
+inglês por padrão, com o seletor de idioma no cabeçalho. Fluxo:
+
+1. **Boas-vindas** — versão instalada, escopo, pasta, tamanho em disco e os
+   caminhos de dados; o que é **mantido por padrão** (conversas, anexos,
+   artefatos, configurações, chaves de API) e o que é **sempre removido**
+   (arquivos do app, atalhos e entrada em Aplicativos e recursos).
+2. **Remover** — confirmação com “Remover também meus dados” (opt-in, em dois
+   passos quando marcado), a lista de pastas de dados com o rótulo
+   mantidas/apagadas e o aviso de que o app aberto será fechado.
+3. **Progresso** — etapas na ordem real da engine: validar, fechar o app,
+   remover dados (se pedido), remover arquivos, remover registro/atalhos, finalizar.
+4. **Concluído** — fecha a janela.
+
+Como o desinstalador fica dentro da pasta que ele apaga, ele se copia para
+`%TEMP%` e roda de lá (`relaunch_from_temp_uninstall`), apagando a cópia ao sair
+(`schedule_self_delete`). O registro aponta para ele:
+
+```text
+UninstallString      = "<pasta>\Uninstall Zylara.exe"
+QuietUninstallString = "<pasta>\Uninstall Zylara.exe" --silent
+```
+
+`Zylara.exe --uninstall` continua funcionando: instalações antigas que apontavam
+para ele são migradas na próxima atualização, quando o Registro e o atalho
+`Uninstall Zylara.lnk` (no Menu Iniciar) são reescritos e o atalho legado
+`Desinstalar Zylara.lnk` é removido.
+
 ### 2.3 Escopos
 
 | | Por usuário | Todos os usuários |
@@ -61,7 +102,7 @@ Atualizações mantêm conversas, arquivos, configurações e chaves de API. O e
 | UAC | Não | Sim, no início da instalação |
 | Registro | `HKCU\...\Uninstall\Zylara` | `HKLM\...\Uninstall\Zylara` (visão 64-bit) |
 | Atalhos | Desktop/Menu do usuário | Desktop público/Menu comum |
-| Desinstalação | Sem elevação | Relança elevada |
+| Desinstalação | `Uninstall Zylara.exe` na pasta, sem elevação | Relança elevada |
 | Dados | `%APPDATA%\app.zylara.chat` + `%LOCALAPPDATA%\app.zylara.chat` | idem, por usuário |
 
 Em instalação por máquina, o desinstalador remove apenas os dados do usuário que
@@ -70,13 +111,16 @@ de dados é sempre opt-in e pede confirmação.
 
 ### 2.4 Engine
 
-- Cópia atômica: `Zylara.exe.new` → `ReplaceFileW`/rename; remove o
-  `Zone.Identifier` para o app instalado não herdar Mark-of-the-Web.
+- Payload: `Zylara.exe` **e** `Uninstall Zylara.exe` (o desinstalador é o mesmo
+  binário; o nome do arquivo seleciona o modo). Cópia atômica por arquivo:
+  `<nome>.new` → `ReplaceFileW`/rename; remove o `Zone.Identifier` para o app
+  instalado não herdar Mark-of-the-Web.
 - Fecha o app em execução (`taskkill` sem `/F`, com timeout), nunca o setup.
-- Atalhos via `IShellLinkW`; `Desinstalar Zylara.lnk` usa `--uninstall`.
+- Atalhos via `IShellLinkW`: `Zylara.lnk` aponta para o app e
+  `Uninstall Zylara.lnk` aponta para o desinstalador (sem argumentos).
 - Registro de Apps & Features com `DisplayName`, `DisplayVersion`, `Publisher`,
   `InstallLocation`, `DisplayIcon`, `UninstallString`, `QuietUninstallString`,
-  `EstimatedSize`, `NoModify` e `NoRepair`.
+  `EstimatedSize` (duas cópias do binário), `NoModify` e `NoRepair`.
 - Desinstalação roda a partir de uma cópia em `%TEMP%` para poder apagar a pasta
   original; a cópia temporária se remove ao sair.
 - WebView2: checagem por registro; se ausente, baixa o bootstrapper oficial da
@@ -107,6 +151,9 @@ Desinstalação:
 --elevated           # uso interno do relançamento UAC
 --from-temp          # uso interno da cópia temporária
 ```
+
+O desinstalador instalado dispensa `--uninstall` (o nome do arquivo já seleciona
+o modo); as flags continuam aceitas para scripts e para `Zylara.exe --uninstall`.
 
 `--silent` não abre o app, mesmo com `--launch`, para manter testes e CI
 determinísticos.
@@ -249,11 +296,19 @@ cd src-tauri && cargo test --lib
 
 Cobertura específica:
 
-- `src/installer/state.test.ts`: fluxo do wizard, escopos, validação de caminho,
-  eventos de progresso/erro/sucesso e opções.
-- `src-tauri/src/installer/windows.rs`: comparação de versões, quoting e
-  tamanho humanizado. Instalação/desinstalação reais são verificadas por um
-  smoke test silencioso em diretório/registro isolados, sem UI automation.
+- `src/installer/state.test.ts`: fluxo do wizard (incluindo o fluxo do
+  desinstalador `welcome → confirmUninstall → progress → finish`), ordem das
+  etapas de desinstalação, escopos, validação de caminho, eventos de
+  progresso/erro/sucesso e opções.
+- `src/installer/InstallerApp.test.tsx`: navegação do desinstalador a partir da
+  tela de boas-vindas, dados preservados por padrão e idioma inicial em inglês.
+- `src-tauri/src/installer/mod.rs`: `mode_from_name` — `Uninstall Zylara.exe`,
+  `Zylara-Setup-<versão>-windows-x64.exe` e `Zylara.exe`.
+- `src-tauri/src/installer/windows.rs`: comparação de versões, quoting,
+  tamanho humanizado, `UninstallString`/`QuietUninstallString` apontando para
+  `Uninstall Zylara.exe` e tamanho instalado contando as duas cópias.
+  Instalação/desinstalação reais são verificadas por um smoke test silencioso em
+  diretório/registro isolados, sem UI automation.
 - `scripts/installer/__tests__/shared.test.mjs`: semver, nomes de artefatos,
   manifesto/checksums e sincronia das cinco fontes de versão.
 - `scripts/installer/__tests__/version.test.mjs`: bump patch/minor/major,
@@ -265,10 +320,14 @@ Smoke test manual no Windows:
 ```powershell
 $dir = Join-Path (Get-Location) '.tmp-install'
 .\src-tauri\target\debug\zylara.exe --setup --silent --scope user --dir $dir --no-desktop --no-start-menu --no-launch
-Get-ChildItem $dir
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Zylara"
-.\src-tauri\target\debug\zylara.exe --uninstall --silent
+Get-ChildItem $dir            # Zylara.exe, Uninstall Zylara.exe, .zylara-install
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Zylara" /v UninstallString
+& "$dir\Uninstall Zylara.exe" --silent
 ```
+
+O desinstalador dispensa `--uninstall` e pode ser executado direto da pasta. Não
+rode o smoke test em uma máquina com instalação real: ele reescreve o registro
+`HKCU\...\Uninstall\Zylara`.
 
 ## 7. Release pelo GitHub Actions
 
@@ -341,6 +400,8 @@ push na `main` publica. O workflow precisa de `contents: write`
 | Setup não abre | WebView2 ausente e download falhou; instale o WebView2 Runtime. |
 | “O Zylara não fechou” | Feche o app manualmente; o setup não força a morte para não perder dados. |
 | Pasta bloqueada na atualização | O app está aberto ou um antivírus está segurando o exe; feche e tente de novo. |
+| `Uninstall Zylara.exe` ausente na pasta | Instalação feita por uma versão anterior a 0.7.1; rode o setup novo por cima ou use `Zylara.exe --uninstall`. |
+| Desinstalador fecha sozinho ao abrir | Ele se reabre a partir de `%TEMP%` para poder apagar a própria pasta; a janela nova é a que importa. |
 | `pnpm installer` avisa sobre árvore suja | Normal em desenvolvimento; use `--require-clean` no CI e faça commit antes do release. |
 | Linux não abre em distro antiga | Build foi feito em glibc mais nova; use Ubuntu 22.04 como baseline. |
 | AppImage não abre | Falta FUSE ou WebKitGTK; use `--appimage-extract-and-run` ou o `.deb`. |

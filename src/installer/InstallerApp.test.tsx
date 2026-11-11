@@ -27,6 +27,7 @@ function context(overrides: Partial<InstallerContext> = {}): InstallerContext {
     webview2Installed: true,
     freeBytes: 1_000_000_000,
     requiredBytes: 25_000_000,
+    installedBytes: 24_000_000,
     logPath: 'C:\\Temp\\zylara-setup.log',
     dataPaths: ['C:\\Users\\ana\\AppData\\Roaming\\app.zylara.chat'],
     canElevate: true,
@@ -70,7 +71,9 @@ describe('InstallerApp', () => {
     expect(screen.getByRole('button', { name: /instalar zylara/i })).toBeTruthy();
   });
 
-  it('renders the uninstall confirmation with data preserved by default', async () => {
+  it('walks the uninstaller from the intro to the confirmation with data preserved', async () => {
+    await setLanguage('en', { persist: false });
+    const user = userEvent.setup();
     const uninstall = context({
       mode: 'uninstall',
       existing: {
@@ -81,11 +84,19 @@ describe('InstallerApp', () => {
     });
     render(<InstallerApp api={api(uninstall)} />);
 
-    expect(await screen.findByText('Remover o Zylara?')).toBeTruthy();
+    // Intro: says what is kept and what is removed, then continues.
+    expect(await screen.findByRole('heading', { name: 'Uninstall Zylara' })).toBeTruthy();
+    expect(screen.getByText('Kept by default')).toBeTruthy();
+    expect(screen.getByText('Always removed')).toBeTruthy();
+    expect(screen.getByText(/app\.zylara\.chat/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /^continue$/i }));
+
+    // Confirmation: data deletion is opt-in.
+    expect(await screen.findByText('Remove Zylara?')).toBeTruthy();
     expect(
-      screen.getByRole('checkbox', { name: /remover também meus dados/i }).getAttribute('aria-checked'),
+      screen.getByRole('checkbox', { name: /also remove my data/i }).getAttribute('aria-checked'),
     ).toBe('false');
-    expect(screen.getByRole('button', { name: /remover zylara/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^remove zylara$/i })).toBeTruthy();
   });
 
   it('renders in English and switches language from the header', async () => {

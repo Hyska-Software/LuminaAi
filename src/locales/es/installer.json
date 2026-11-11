@@ -13,6 +13,7 @@
     "location": "Destino",
     "options": "Opciones",
     "progress": "Instalación",
+    "progressUninstall": "Desinstalación",
     "finish": "Finalizado",
     "confirmUninstall": "Quitar",
     "error": "Error"
@@ -176,12 +177,32 @@
       "description": "Borra conversaciones, adjuntos, artefactos, configuración y claves de API guardadas en este equipo. Esta acción no se puede deshacer."
     },
     "purgeWarning": "Se eliminarán las claves de API. Tendrás que configurarlas de nuevo si reinstalas Zylara.",
+    "dataTitle": "Datos en este equipo",
+    "dataKept": "conservados",
+    "dataRemoved": "borrados",
+    "runningNote": "Zylara está abierto. El desinstalador lo cierra antes de eliminar los archivos, para que nada quede bloqueado.",
     "infoConfirm": "Confirma de nuevo para borrar la aplicación y todos los datos del usuario actual. Esta acción es definitiva.",
     "infoNext": "En el siguiente paso confirmas la eliminación de los datos. Tus archivos siguen protegidos hasta entonces.",
     "infoDefault": "Tus conversaciones, archivos y configuración se conservan de forma predeterminada.",
     "hint": "Quitar la aplicación no afecta a otras cuentas de este equipo.",
     "confirm": "Confirmar eliminación",
     "remove": "Quitar Zylara"
+  },
+  "uninstallIntro": {
+    "eyebrow": "Desinstalador",
+    "title": "Desinstalar Zylara",
+    "description": "Elimina la aplicación de este equipo. Tus conversaciones y archivos se conservan a menos que pidas borrarlos.",
+    "version": "Zylara {{version}}",
+    "size": "En disco",
+    "location": "Instalado para",
+    "keepsTitle": "Se conserva por defecto",
+    "keepsItem": "Conversaciones, adjuntos, artefactos, configuración y claves de API.",
+    "keepsKeys": "Si reinstalas Zylara más adelante, todo queda exactamente como está ahora.",
+    "removesTitle": "Se elimina siempre",
+    "removesApp": "Los archivos de la aplicación en la carpeta de instalación.",
+    "removesRegistry": "Los accesos directos del menú Inicio y del escritorio, además de la entrada en Aplicaciones y características.",
+    "hint": "No se borra nada hasta que confirmes en la pantalla siguiente.",
+    "continue": "Continuar"
   },
   "errorScreen": {
     "eyebrow": "Algo salió mal",

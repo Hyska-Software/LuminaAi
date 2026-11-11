@@ -910,8 +910,10 @@ pnpm app:dev            # dev com HMR
 
 O instalador é gerado por `scripts/build-installer.mjs` (versão única, build
 recente, testes, checksums e manifesto). No Windows o próprio binário roda em
-modo setup com UI React; macOS usa DMG e Linux usa `.deb`/`.rpm`/`.AppImage`.
-Contrato completo: `docs/INSTALLER.md`.
+modo setup com UI React; a instalação copia o binário duas vezes
+(`Zylara.exe` + `Uninstall Zylara.exe`) e o desinstalador reusa a mesma UI em
+modo uninstall, com dados preservados por padrão. macOS usa DMG e Linux usa
+`.deb`/`.rpm`/`.AppImage`. Contrato completo: `docs/INSTALLER.md`.
 
 **Atualizações no app** (`src-tauri/src/update/**`): a checagem lê o
 `release.json` da release estável mais recente via

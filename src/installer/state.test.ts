@@ -9,6 +9,7 @@ import {
   nextScreen,
   pathError,
   previousScreen,
+  screenOrder,
 } from './state';
 import type { InstallerContext } from './types';
 
@@ -26,6 +27,7 @@ function context(overrides: Partial<InstallerContext> = {}): InstallerContext {
     webview2Installed: true,
     freeBytes: 1_000_000_000,
     requiredBytes: 25_000_000,
+    installedBytes: 24_000_000,
     logPath: 'C:\\Temp\\zylara-setup.log',
     dataPaths: ['C:\\Users\\ana\\AppData\\Roaming\\app.zylara.chat'],
     canElevate: true,
@@ -67,7 +69,7 @@ describe('installer state', () => {
     expect(state.error).toContain('não está instalado');
   });
 
-  it('starts an uninstall at the confirmation screen', () => {
+  it('starts an uninstall at the intro screen and keeps data by default', () => {
     const state = createInitialState(
       context({
         mode: 'uninstall',
@@ -78,9 +80,42 @@ describe('installer state', () => {
         },
       }),
     );
-    expect(state.screen).toBe('confirmUninstall');
+    expect(state.screen).toBe('welcome');
     expect(state.draft.scope).toBe('machine');
     expect(state.draft.purgeData).toBe(false);
+  });
+
+  it('walks the uninstall flow from the intro to the confirmation', () => {
+    const current = context({
+      mode: 'uninstall',
+      existing: {
+        scope: 'user',
+        path: 'C:\\Users\\ana\\AppData\\Local\\Programs\\Zylara',
+        version: '0.0.9',
+      },
+    });
+    expect(screenOrder(current)).toEqual(['welcome', 'confirmUninstall', 'progress', 'finish']);
+    expect(nextScreen(current, 'welcome')).toBe('confirmUninstall');
+    expect(nextScreen(current, 'confirmUninstall')).toBe('progress');
+    expect(nextScreen(current, 'progress')).toBe('finish');
+    expect(nextScreen(current, 'finish')).toBeNull();
+  });
+
+  it('lists the uninstall steps in the order the engine emits them', () => {
+    const state = createInitialState(
+      context({
+        mode: 'uninstall',
+        existing: { scope: 'user', path: 'C:\\Apps\\Zylara', version: '0.0.9' },
+      }),
+    );
+    expect(state.steps.map((step) => step.id)).toEqual([
+      'prepare',
+      'closeApp',
+      'removeData',
+      'removeFiles',
+      'removeRegistry',
+      'cleanup',
+    ]);
   });
 
   it('skips scope and location when updating an existing install', () => {
