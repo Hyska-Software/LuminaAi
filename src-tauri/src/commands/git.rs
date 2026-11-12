@@ -15,8 +15,9 @@ use tauri::State;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::{
-    WorkspaceCommitDetail, WorkspaceCommitFile, WorkspaceGitCommit, WorkspaceGitCompare,
-    WorkspaceGitCompareFile, WorkspaceGitFile, WorkspaceGitStatus,
+    WorkspaceCommitDetail, WorkspaceCommitFile, WorkspaceGitBranch, WorkspaceGitBranches,
+    WorkspaceGitCommit, WorkspaceGitCompare, WorkspaceGitCompareFile, WorkspaceGitFile,
+    WorkspaceGitStatus,
 };
 use crate::state::AppState;
 use crate::workspace::exec::{self, ExecRequest};
@@ -348,31 +349,76 @@ async fn prepare_commit(
     }
 }
 
+/// Local and remote-tracking branches of the workspace repository.
+///
+/// Returns the legacy local-name list (branch-comparison filter) plus the full
+/// entries used by the branch picker: remote tracking branches, upstream state,
+/// ahead/behind counters and the tip commit.
 #[tauri::command]
 pub async fn git_branches(
     state: State<'_, AppState>,
     workspace_id: String,
-) -> Result<serde_json::Value, String> {
+) -> Result<WorkspaceGitBranches, String> {
     let root = workspace_path(&state, &workspace_id)?;
-    let branches = crate::workspace::git::branches(&root)
+    let entries = crate::workspace::git::branch_entries(&root)
         .await
         .map_err(map_err)?;
     let current = crate::workspace::git::detect(&root).await.branch;
-    Ok(serde_json::json!({ "current": current, "branches": branches }))
+    let branches = entries
+        .iter()
+        .filter(|entry| entry.local)
+        .map(|entry| entry.name.clone())
+        .collect();
+    Ok(WorkspaceGitBranches {
+        current,
+        branches,
+        all: entries.into_iter().map(to_branch).collect(),
+    })
 }
 
+fn to_branch(branch: crate::workspace::git::GitBranch) -> WorkspaceGitBranch {
+    WorkspaceGitBranch {
+        name: branch.name,
+        local: branch.local,
+        remote: branch.remote,
+        current: branch.current,
+        upstream: branch.upstream,
+        ahead: branch.ahead,
+        behind: branch.behind,
+        gone: branch.gone,
+        subject: branch.subject,
+        author: branch.author,
+        committed_at: branch.committed_at,
+    }
+}
+
+/// `git switch <branch>`, creating the local tracking branch when the target is
+/// a remote-tracking ref (`origin/feat`).
 #[tauri::command]
 pub async fn git_switch_branch(
     state: State<'_, AppState>,
     workspace_id: String,
     branch: String,
 ) -> Result<WorkspaceGitStatus, String> {
-    let trimmed = branch.trim();
-    if trimmed.is_empty() {
-        return Err(crate::i18n::t("git.errors.emptyBranch"));
-    }
     let root = workspace_path(&state, &workspace_id)?;
-    run_git(&root, &["switch", trimmed]).await?;
+    crate::workspace::git::switch_branch(&root, &branch)
+        .await
+        .map_err(|error| error.message)?;
+    status_of(&state, &workspace_id).await
+}
+
+/// Creates `name` (optionally from `start_point`) and checks it out.
+#[tauri::command]
+pub async fn git_create_branch(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    name: String,
+    start_point: Option<String>,
+) -> Result<WorkspaceGitStatus, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    crate::workspace::git::create_branch(&root, &name, start_point.as_deref())
+        .await
+        .map_err(|error| error.message)?;
     status_of(&state, &workspace_id).await
 }
 

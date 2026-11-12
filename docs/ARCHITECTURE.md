@@ -438,8 +438,10 @@ indisponíveis em subagentes).
    "Reverter turno". Execução de processos com `CREATE_NO_WINDOW`, env higienizado, timeout,
    kill de árvore (`taskkill /T`) e streaming de saída.
 6. **Git**: CLI do usuário (`git status --porcelain=v2 -z`, `diff`, `log`, `stage`,
-   `unstage`, `commit`, `branches`), sem libgit2. Operações mutantes são ações do usuário no
-   painel, nunca tools do modelo.
+   `unstage`, `commit`, `for-each-ref` em `refs/heads`+`refs/remotes` para as branches,
+   `switch`/`switch --create` para trocar e criar), sem libgit2. Uma branch remota
+   (`origin/feat`) é aceita pelo switch e vira a branch local de tracking. Operações
+   mutantes são ações do usuário no painel, nunca tools do modelo.
 7. **Jobs**: `run_command` pode rodar em background (`JobRegistry` com ring buffer 256 KB,
    limite 8 por sessão, cursor de saída, `JobUpdated`); foreground que estoura o timeout é
    promovido a job em vez de morto.
@@ -845,7 +847,7 @@ list_goal_rounds (limit? 1..=200), goal_can_continue (auto? — preflight),
 list_jobs, get_job_output, kill_job,
 -- git (painel)
 git_status, git_diff, git_stage, git_unstage, git_discard, git_commit,
-git_branches, git_switch_branch, git_log, suggest_commit_message,
+git_branches, git_create_branch, git_switch_branch, git_log, suggest_commit_message,
 -- terminal PTY
 open_terminal, write_terminal, resize_terminal, kill_terminal, close_terminal, list_terminals
 ```

@@ -14,6 +14,10 @@ vi.mock('@/lib/api', () => ({
     gitFetch: vi.fn(),
     gitPull: vi.fn(),
     gitPush: vi.fn(),
+    gitBranches: vi.fn(),
+    gitCreateBranch: vi.fn(),
+    gitSwitchBranch: vi.fn(),
+    getWorkspace: vi.fn(),
     gitLog: vi.fn(),
     readWorkspaceFile: vi.fn(),
     getFileDiff: vi.fn(),
@@ -132,6 +136,8 @@ beforeEach(() => {
   apiMock.watchWorkspace.mockResolvedValue(undefined);
   apiMock.unwatchWorkspace.mockResolvedValue(undefined);
   apiMock.gitLog.mockResolvedValue([]);
+  apiMock.gitBranches.mockResolvedValue({ current: 'main', branches: ['main'], all: [] });
+  apiMock.getWorkspace.mockResolvedValue(null);
   setViewport(1440);
   resetPanelState();
   __resetWorkspacesForTests();
@@ -322,13 +328,17 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
 
     render(<CodePanel />);
 
-    expect(screen.queryByText(/zylara · main/)).toBeNull();
+    const branchTrigger = () =>
+      screen.queryByRole('button', { name: /Branch atual main/ });
+    expect(branchTrigger()).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
-    expect(await screen.findByText(/zylara · main/)).toBeTruthy();
+    expect(await screen.findByText('zylara')).toBeTruthy();
+    // The branch lives in the picker now, not as plain text next to the workspace.
+    expect(await screen.findByRole('button', { name: 'Branch atual main. Trocar de branch' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Filtrar alterações' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Terminal' }));
-    expect(screen.queryByText(/zylara · main/)).toBeNull();
+    expect(branchTrigger()).toBeNull();
   });
 
   it('usa abas só com ícone quando o painel está na largura mínima', () => {
@@ -471,6 +481,93 @@ describe('CodePanel — histórico de commits', () => {
     await screen.findByRole('tab', { name: 'Alterações' });
     expect(screen.queryByRole('button', { name: 'Ver histórico de commits' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Ações do git' })).toBeNull();
+  });
+
+  it('reloads the panel and the workspace context after a branch switch', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.gitBranches.mockResolvedValue({
+      current: 'main',
+      branches: ['main', 'feat/login'],
+      all: [
+        {
+          name: 'main',
+          local: true,
+          remote: null,
+          current: true,
+          upstream: 'origin/main',
+          ahead: 0,
+          behind: 0,
+          gone: false,
+          subject: 'init',
+          author: 'Dev',
+          committedAt: 1_700_000_000,
+        },
+        {
+          name: 'feat/login',
+          local: true,
+          remote: null,
+          current: false,
+          upstream: null,
+          ahead: 0,
+          behind: 0,
+          gone: false,
+          subject: 'feat: login',
+          author: 'Dev',
+          committedAt: 1_700_000_100,
+        },
+      ],
+    });
+    apiMock.gitSwitchBranch.mockResolvedValue({
+      isRepo: true,
+      branch: 'feat/login',
+      ahead: 0,
+      behind: 0,
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      conflicted: [],
+    });
+    // `refreshWorkspaceTree` returns the new branch after the checkout.
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [],
+      dirs: {},
+      gitStatus: {
+        isRepo: true,
+        branch: 'main',
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        ahead: 0,
+        behind: 0,
+      },
+    });
+
+    render(<CodePanel />);
+
+    const trigger = await screen.findByRole('button', {
+      name: 'Branch atual main. Trocar de branch',
+    });
+    expect(apiMock.refreshWorkspaceTree).toHaveBeenCalledTimes(1);
+    expect(apiMock.getWorkspace).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: 'Branches do git' });
+    const option = within(dialog)
+      .getAllByRole('option')
+      .find((node) => node.querySelector('[title]')?.getAttribute('title') === 'feat/login');
+    expect(option).toBeTruthy();
+    fireEvent.click(option!);
+
+    // The panel reloads (files changed on disk) and the cached workspace branch
+    // is refreshed so the session header chip stops showing the old branch.
+    await waitFor(() => expect(apiMock.gitSwitchBranch).toHaveBeenCalledWith('ws-1', 'feat/login'));
+    await waitFor(() => expect(apiMock.refreshWorkspaceTree.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(apiMock.getWorkspace).toHaveBeenCalledWith('ws-1'));
   });
 
   it('oferece fetch, pull e push na barra da aba Alterações', async () => {

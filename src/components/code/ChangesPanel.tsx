@@ -32,6 +32,7 @@ import type {
   FileChangeKind,
   FileChangeSummary,
   WorkspaceCommitDetail,
+  WorkspaceGitBranches,
   WorkspaceGitCommit,
   WorkspaceGitCompare,
   WorkspaceGitStatus,
@@ -349,10 +350,7 @@ export function ChangesPanel({
   const [branchError, setBranchError] = useState<string | null>(null);
   const branchRun = useRef(0);
 
-  const [branches, setBranches] = useState<{
-    current: string | null;
-    branches: string[];
-  } | null>(null);
+  const [branches, setBranches] = useState<WorkspaceGitBranches | null>(null);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const branchesRun = useRef(0);
@@ -500,7 +498,7 @@ export function ChangesPanel({
     try {
       const result = await api.gitBranches(workspaceId);
       if (run !== branchesRun.current) return;
-      setBranches(result ?? { current: null, branches: [] });
+      setBranches(result ?? { current: null, branches: [], all: [] });
     } catch (error) {
       if (run !== branchesRun.current) return;
       setBranchesError(describeError(error, t('code:changes.loadBranchesError')));
@@ -522,7 +520,7 @@ export function ChangesPanel({
         try {
           const loaded = await api.gitBranches(workspaceId);
           if (run !== branchesRun.current) return;
-          result = loaded ?? { current: null, branches: [] };
+          result = loaded ?? { current: null, branches: [], all: [] };
           setBranches(result);
         } finally {
           if (run === branchesRun.current) setBranchesLoading(false);

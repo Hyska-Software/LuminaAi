@@ -453,6 +453,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::git::git_discard,
             commands::git::git_commit,
             commands::git::git_branches,
+            commands::git::git_create_branch,
             commands::git::git_switch_branch,
             commands::git::git_log,
             commands::git::git_commit_detail,

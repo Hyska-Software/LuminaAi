@@ -856,6 +856,313 @@ pub async fn branches(root: &Path) -> Result<Vec<String>, ExecError> {
         .map(str::to_string)
         .collect())
 }
+
+/* ------------------------------------------------------------------ */
+/* Branches: listing, creation and checkout (explicit user gestures)   */
+/* ------------------------------------------------------------------ */
+
+/// Separator between `for-each-ref` fields (never appears in ref names).
+const BRANCH_FIELD_SEP: char = '\u{1f}';
+
+/// `for-each-ref` template: one line per branch with everything the picker shows.
+const BRANCH_FORMAT: &str = "--format=%(HEAD)%1f%(refname)%1f%(refname:short)%1f%(symref)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(committerdate:unix)%1f%(subject)%1f%(authorname)";
+
+/// Upper bound for a branch name (git itself has no hard limit).
+const BRANCH_NAME_MAX: usize = 200;
+
+/// One local or remote-tracking branch of the repository.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GitBranch {
+    /// `main` for a local branch, `origin/main` for a remote-tracking one.
+    pub name: String,
+    /// `true` for `refs/heads/*`.
+    pub local: bool,
+    /// Remote name (e.g. `origin`) when the ref lives in `refs/remotes/*`.
+    pub remote: Option<String>,
+    /// `true` for the branch checked out in this working tree.
+    pub current: bool,
+    /// Upstream short name (`origin/main`), when configured.
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    /// `true` when the configured upstream no longer exists upstream.
+    pub gone: bool,
+    /// Subject of the tip commit.
+    pub subject: String,
+    pub author: String,
+    /// Committer date of the tip commit, in seconds since the Unix epoch.
+    pub committed_at: i64,
+}
+
+/// Parses `%(upstream:track,nobracket)` into `(ahead, behind, gone)`.
+///
+/// Output is empty when the branch is level with its upstream, otherwise
+/// `ahead N`, `behind N`, `ahead N, behind M` or `gone`.
+fn parse_upstream_track(raw: &str) -> (u32, u32, bool) {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return (0, 0, false);
+    }
+    if raw.eq_ignore_ascii_case("gone") {
+        return (0, 0, true);
+    }
+    let mut ahead = 0;
+    let mut behind = 0;
+    let tokens: Vec<&str> = raw
+        .split(|ch: char| ch == ',' || ch.is_whitespace())
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .collect();
+    let mut index = 0;
+    while index + 1 < tokens.len() {
+        let value = tokens[index + 1].parse::<u32>().unwrap_or(0);
+        if tokens[index].eq_ignore_ascii_case("ahead") {
+            ahead = value;
+        } else if tokens[index].eq_ignore_ascii_case("behind") {
+            behind = value;
+        }
+        index += 2;
+    }
+    (ahead, behind, false)
+}
+
+/// Parses one `for-each-ref` line of [`BRANCH_FORMAT`]. `None` for refs the
+/// picker must hide (the `refs/remotes/<remote>/HEAD` symref and anything that
+/// is neither a branch nor a remote-tracking branch).
+fn parse_branch_line(line: &str) -> Option<GitBranch> {
+    if line.trim().is_empty() {
+        return None;
+    }
+    let fields: Vec<&str> = line.split(BRANCH_FIELD_SEP).collect();
+    if fields.len() < 9 {
+        return None;
+    }
+    let head = fields[0].trim();
+    let refname = fields[1].trim();
+    let short = fields[2].trim();
+    let symref = fields[3].trim();
+    let upstream = fields[4].trim();
+    let track = fields[5];
+    let committed_at = fields[6].trim().parse::<i64>().unwrap_or(0);
+    let subject = fields[7].trim();
+    let author = fields[8].trim();
+
+    if short.is_empty() || !symref.is_empty() {
+        return None;
+    }
+    let local = refname.starts_with("refs/heads/");
+    let remote_ref = refname.starts_with("refs/remotes/");
+    if !local && !remote_ref {
+        return None;
+    }
+    let (ahead, behind, gone) = parse_upstream_track(track);
+    Some(GitBranch {
+        name: short.to_string(),
+        local,
+        remote: if local {
+            None
+        } else {
+            short.split_once('/').map(|(remote, _)| remote.to_string())
+        },
+        current: local && head == "*",
+        upstream: if upstream.is_empty() {
+            None
+        } else {
+            Some(upstream.to_string())
+        },
+        ahead,
+        behind,
+        gone,
+        subject: subject.to_string(),
+        author: author.to_string(),
+        committed_at,
+    })
+}
+
+/// Local and remote-tracking branches of the repository, sorted by refname.
+///
+/// Remote branches are listed even when a local branch shares the short name:
+/// the picker decides how to present them, and the branch-comparison filter
+/// needs the remote refs to reach commits that were never checked out here.
+pub async fn branch_entries(root: &Path) -> Result<Vec<GitBranch>, ExecError> {
+    let output = run_git_checked(
+        root,
+        &[
+            "for-each-ref",
+            BRANCH_FORMAT,
+            "--sort=refname",
+            "refs/heads",
+            "refs/remotes",
+        ],
+        TEXT_CAP,
+    )
+    .await?;
+    Ok(output
+        .stdout
+        .lines()
+        .filter_map(parse_branch_line)
+        .collect())
+}
+
+/// `origin/feat/x` → `feat/x`: the local name created when a remote-tracking
+/// branch is checked out. `None` for names without a remote prefix.
+pub fn local_name_for_remote(name: &str) -> Option<String> {
+    name.split_once('/')
+        .map(|(_, rest)| rest.trim().to_string())
+        .filter(|rest| !rest.is_empty())
+}
+
+/// Trims and rejects branch names that could reach git as an option or as
+/// multiple argv entries. `git check-ref-format` remains the authoritative
+/// check (see [`create_branch`]); this one keeps obvious garbage out early.
+pub fn validate_branch_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(crate::i18n::t("git.errors.emptyBranch"));
+    }
+    if trimmed.chars().count() > BRANCH_NAME_MAX {
+        return Err(crate::i18n::t("git.errors.branchNameTooLong"));
+    }
+    if trimmed.starts_with('-')
+        || trimmed
+            .chars()
+            .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(crate::i18n::t_args(
+            "git.errors.invalidBranchName",
+            &[("name", trimmed)],
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn branch_error(message: String) -> ExecError {
+    ExecError::failed(message, None)
+}
+
+/// `true` when `reference` resolves to a commit in this repository.
+async fn ref_exists(root: &Path, reference: &str) -> bool {
+    matches!(
+        run_git_capture(
+            root,
+            &["rev-parse", "--verify", "--quiet", reference],
+            TEXT_CAP
+        )
+        .await,
+        Ok(output) if output.exit_code == Some(0)
+    )
+}
+
+/// Runs `git check-ref-format --branch`, which is what git itself uses to
+/// accept or reject a new branch name.
+async fn check_branch_format(root: &Path, name: &str) -> Result<(), ExecError> {
+    let output = run_git_capture(root, &["check-ref-format", "--branch", name], TEXT_CAP).await?;
+    if output.exit_code == Some(0) {
+        Ok(())
+    } else {
+        Err(branch_error(crate::i18n::t_args(
+            "git.errors.invalidBranchName",
+            &[("name", name)],
+        )))
+    }
+}
+
+/// Checks out an existing local branch by name (`git switch -- <name>`).
+///
+/// The `--` separator keeps a crafted name from ever being parsed as an option.
+async fn checkout_local(root: &Path, name: &str) -> Result<(), ExecError> {
+    run_git_checked(root, &["switch", "--", name], TEXT_CAP)
+        .await
+        .map(|_| ())
+}
+
+/// Creates a local branch that tracks `remote_ref` and checks it out.
+async fn checkout_remote(
+    root: &Path,
+    local: &str,
+    remote_ref: &str,
+) -> Result<(), ExecError> {
+    if ref_exists(root, &format!("refs/heads/{local}")).await {
+        return checkout_local(root, local).await;
+    }
+    match run_git_checked(
+        root,
+        &["switch", "--create", local, "--track", remote_ref],
+        TEXT_CAP,
+    )
+    .await
+    {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            // The local branch may have appeared between the check and the
+            // switch (another terminal, another worktree): retry as a switch.
+            if ref_exists(root, &format!("refs/heads/{local}")).await {
+                checkout_local(root, local).await
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Switches the working tree to `branch`.
+///
+/// Accepts a local branch (`main`, `feat/x`) or a remote-tracking branch
+/// (`origin/main`): the latter creates the local tracking branch, which is
+/// what `git switch` refuses to do on its own.
+pub async fn switch_branch(root: &Path, branch: &str) -> Result<(), ExecError> {
+    let target = validate_branch_name(branch).map_err(branch_error)?;
+    if ref_exists(root, &format!("refs/heads/{target}")).await {
+        return checkout_local(root, &target).await;
+    }
+    if ref_exists(root, &format!("refs/remotes/{target}")).await {
+        let Some(local) = local_name_for_remote(&target) else {
+            return Err(branch_error(crate::i18n::t_args(
+                "git.errors.unknownBranch",
+                &[("name", &target)],
+            )));
+        };
+        return checkout_remote(root, &local, &target).await;
+    }
+    Err(branch_error(crate::i18n::t_args(
+        "git.errors.unknownBranch",
+        &[("name", &target)],
+    )))
+}
+
+/// Creates `name` and checks it out, optionally starting at `start_point`
+/// (a branch, a remote-tracking branch, a tag or a commit hash).
+pub async fn create_branch(
+    root: &Path,
+    name: &str,
+    start_point: Option<&str>,
+) -> Result<(), ExecError> {
+    let target = validate_branch_name(name).map_err(branch_error)?;
+    check_branch_format(root, &target).await?;
+    if ref_exists(root, &format!("refs/heads/{target}")).await {
+        return Err(branch_error(crate::i18n::t_args(
+            "git.errors.branchExists",
+            &[("name", &target)],
+        )));
+    }
+    let start = start_point.map(str::trim).filter(|value| !value.is_empty());
+    let Some(start) = start else {
+        run_git_checked(root, &["switch", "--create", &target], TEXT_CAP)
+            .await
+            .map(|_| ())?;
+        return Ok(());
+    };
+    validate_ref(start).map_err(branch_error)?;
+    if !ref_exists(root, start).await {
+        return Err(branch_error(crate::i18n::t_args(
+            "git.errors.unknownStartPoint",
+            &[("name", start)],
+        )));
+    }
+    run_git_checked(root, &["switch", "--create", &target, start], TEXT_CAP)
+        .await
+        .map(|_| ())
+}
 /* ------------------------------------------------------------------ */
 /* Histórico: um commit completo (metadados + arquivos + patch)        */
 /* ------------------------------------------------------------------ */
@@ -2092,5 +2399,324 @@ mod tests {
         assert!(text.starts_with('á'), "{text:?}");
         assert!(text.contains("[diff truncated]"), "{text:?}");
         assert!(!text.contains('\u{FFFD}'), "{text:?}");
+    }
+
+    /* -------- branches: parsing -------- */
+
+    #[test]
+    fn parses_upstream_track_variants() {
+        assert_eq!(parse_upstream_track(""), (0, 0, false));
+        assert_eq!(parse_upstream_track("ahead 2"), (2, 0, false));
+        assert_eq!(parse_upstream_track("behind 3"), (0, 3, false));
+        assert_eq!(parse_upstream_track("ahead 2, behind 1"), (2, 1, false));
+        assert_eq!(parse_upstream_track("gone"), (0, 0, true));
+    }
+
+    #[test]
+    fn parses_local_and_remote_branch_lines() {
+        let local = format!(
+            "*{sep}refs/heads/main{sep}main{sep}{sep}origin/main{sep}ahead 1, behind 2{sep}1700000000{sep}feat: subject{sep}Dev",
+            sep = BRANCH_FIELD_SEP
+        );
+        let branch = parse_branch_line(&local).expect("local branch");
+        assert_eq!(branch.name, "main");
+        assert!(branch.local);
+        assert!(branch.current);
+        assert_eq!(branch.remote, None);
+        assert_eq!(branch.upstream.as_deref(), Some("origin/main"));
+        assert_eq!((branch.ahead, branch.behind), (1, 2));
+        assert!(!branch.gone);
+        assert_eq!(branch.subject, "feat: subject");
+        assert_eq!(branch.committed_at, 1_700_000_000);
+
+        let remote = format!(
+            "{sep}refs/remotes/origin/feat/x{sep}origin/feat/x{sep}{sep}{sep}{sep}1700000001{sep}tip{sep}Dev",
+            sep = BRANCH_FIELD_SEP
+        );
+        let branch = parse_branch_line(&remote).expect("remote branch");
+        assert_eq!(branch.name, "origin/feat/x");
+        assert!(!branch.local);
+        assert!(!branch.current);
+        assert_eq!(branch.remote.as_deref(), Some("origin"));
+        assert_eq!(branch.upstream, None);
+    }
+
+    #[test]
+    fn hides_symrefs_and_foreign_refs() {
+        // `refs/remotes/origin/HEAD` is a symref: the picker must not list it.
+        let symref = format!(
+            "{sep}refs/remotes/origin/HEAD{sep}origin{sep}refs/remotes/origin/main{sep}{sep}{sep}0{sep}{sep}",
+            sep = BRANCH_FIELD_SEP
+        );
+        assert!(parse_branch_line(&symref).is_none());
+        let tag = format!(
+            "{sep}refs/tags/v1{sep}v1{sep}{sep}{sep}{sep}0{sep}{sep}",
+            sep = BRANCH_FIELD_SEP
+        );
+        assert!(parse_branch_line(&tag).is_none());
+        assert!(parse_branch_line("").is_none());
+    }
+
+    #[test]
+    fn derives_local_name_from_remote_ref() {
+        assert_eq!(local_name_for_remote("origin/main").as_deref(), Some("main"));
+        assert_eq!(
+            local_name_for_remote("origin/feat/login").as_deref(),
+            Some("feat/login")
+        );
+        assert_eq!(local_name_for_remote("main"), None);
+        assert_eq!(local_name_for_remote("origin/"), None);
+    }
+
+    #[test]
+    fn rejects_invalid_branch_names_early() {
+        assert!(validate_branch_name("  ").is_err());
+        assert!(validate_branch_name("-rf").is_err());
+        assert!(validate_branch_name("two words").is_err());
+        assert!(validate_branch_name(&"x".repeat(BRANCH_NAME_MAX + 1)).is_err());
+        assert_eq!(
+            validate_branch_name(" feat/login ").ok().as_deref(),
+            Some("feat/login")
+        );
+    }
+
+    /* -------- branches: real repositories -------- */
+
+    #[tokio::test]
+    async fn lists_local_and_remote_branches_with_upstream_state() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("work");
+        fs::create_dir_all(&root).expect("criar work");
+        if setup_repo(&root).is_none() {
+            return;
+        }
+        let origin = temp.path().join("origin.git");
+        let origin_str = origin.to_string_lossy().to_string();
+        assert!(run_git(temp.path(), &["init", "--bare", "-b", "main", &origin_str]));
+        assert!(run_git(
+            &root,
+            &["remote", "add", "origin", origin_str.as_str()]
+        ));
+        // `-u` is what makes `main` track `origin/main`; a bare push leaves it
+        // without an upstream and the assertion below would be meaningless.
+        assert!(run_git(&root, &["push", "-q", "-u", "origin", "main"]));
+        assert!(run_git(&root, &["branch", "feat/remote"]));
+        assert!(run_git(&root, &["push", "-q", "origin", "feat/remote"]));
+        assert!(run_git(&root, &["remote", "set-head", "origin", "main"]));
+        assert!(run_git(&root, &["fetch", "-q", "origin"]));
+
+        let entries = branch_entries(&root).await.expect("branches");
+        let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+        assert!(names.contains(&"main"), "{names:?}");
+        assert!(names.contains(&"feat/remote"), "{names:?}");
+        assert!(names.contains(&"origin/main"), "{names:?}");
+        assert!(names.contains(&"origin/feat/remote"), "{names:?}");
+        // The remote HEAD symref must never show up as a branch.
+        assert!(!names.contains(&"origin"), "{names:?}");
+
+        let main = entries
+            .iter()
+            .find(|entry| entry.name == "main")
+            .expect("main");
+        assert!(main.current);
+        assert!(main.local);
+        assert_eq!(main.upstream.as_deref(), Some("origin/main"));
+        assert_eq!(main.subject, "initial commit");
+
+        let remote = entries
+            .iter()
+            .find(|entry| entry.name == "origin/feat/remote")
+            .expect("remote branch");
+        assert!(!remote.local);
+        assert_eq!(remote.remote.as_deref(), Some("origin"));
+        assert!(!remote.current);
+    }
+
+    #[tokio::test]
+    async fn switches_between_local_branches() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        assert!(run_git(temp.path(), &["branch", "feat/other"]));
+
+        switch_branch(temp.path(), "feat/other")
+            .await
+            .expect("switch local");
+        assert_eq!(
+            git_stdout(temp.path(), &["symbolic-ref", "--short", "HEAD"]).as_deref(),
+            Some("feat/other")
+        );
+
+        switch_branch(temp.path(), " main ").await.expect("switch main");
+        assert_eq!(
+            git_stdout(temp.path(), &["symbolic-ref", "--short", "HEAD"]).as_deref(),
+            Some("main")
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_a_remote_branch_creates_the_tracking_local() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("work");
+        fs::create_dir_all(&root).expect("criar work");
+        if setup_repo(&root).is_none() {
+            return;
+        }
+        let origin = temp.path().join("origin.git");
+        let origin_str = origin.to_string_lossy().to_string();
+        assert!(run_git(temp.path(), &["init", "--bare", "-b", "main", &origin_str]));
+        assert!(run_git(
+            &root,
+            &["remote", "add", "origin", origin_str.as_str()]
+        ));
+        assert!(run_git(&root, &["push", "-q", "origin", "main"]));
+        assert!(run_git(&root, &["branch", "feat/published"]));
+        assert!(run_git(&root, &["push", "-q", "origin", "feat/published"]));
+        assert!(run_git(&root, &["fetch", "-q", "origin"]));
+        // Drop the local branch so only the remote-tracking ref remains.
+        assert!(run_git(&root, &["branch", "-D", "feat/published"]));
+
+        switch_branch(&root, "origin/feat/published")
+            .await
+            .expect("switch remote");
+
+        assert_eq!(
+            git_stdout(&root, &["symbolic-ref", "--short", "HEAD"]).as_deref(),
+            Some("feat/published")
+        );
+        assert_eq!(
+            git_stdout(
+                &root,
+                &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+            )
+            .as_deref(),
+            Some("origin/feat/published")
+        );
+        assert!(
+            git_stdout(&root, &["rev-parse", "--verify", "refs/heads/feat/published"]).is_some(),
+            "local tracking branch should exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_an_unknown_branch_reports_a_translated_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        let error = switch_branch(temp.path(), "nope/missing")
+            .await
+            .expect_err("missing branch");
+        assert!(error.message.contains("nope/missing"), "{}", error.message);
+        assert_eq!(
+            git_stdout(temp.path(), &["symbolic-ref", "--short", "HEAD"]).as_deref(),
+            Some("main"),
+            "a failed switch must not move HEAD"
+        );
+    }
+
+    #[tokio::test]
+    async fn creates_branches_from_head_and_from_a_start_point() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        create_branch(temp.path(), "feat/new", None)
+            .await
+            .expect("create from HEAD");
+        assert_eq!(
+            git_stdout(temp.path(), &["symbolic-ref", "--short", "HEAD"]).as_deref(),
+            Some("feat/new")
+        );
+
+        create_branch(temp.path(), "feat/from-main", Some("main"))
+            .await
+            .expect("create from main");
+        assert_eq!(
+            git_stdout(temp.path(), &["symbolic-ref", "--short", "HEAD"]).as_deref(),
+            Some("feat/from-main")
+        );
+        assert_eq!(
+            git_stdout(temp.path(), &["rev-parse", "feat/from-main"]),
+            git_stdout(temp.path(), &["rev-parse", "main"])
+        );
+    }
+
+    #[tokio::test]
+    async fn create_branch_rejects_duplicates_and_bad_names() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        if setup_repo(temp.path()).is_none() {
+            return;
+        }
+        assert!(run_git(temp.path(), &["branch", "taken"]));
+        let duplicate = create_branch(temp.path(), "taken", None)
+            .await
+            .expect_err("duplicate name");
+        assert!(duplicate.message.contains("taken"), "{}", duplicate.message);
+
+        let invalid = create_branch(temp.path(), "bad name", None)
+            .await
+            .expect_err("invalid name");
+        assert!(!invalid.message.is_empty());
+
+        // git itself rejects names like `foo..bar` / `foo~1`.
+        let dotted = create_branch(temp.path(), "foo..bar", None)
+            .await
+            .expect_err("git-invalid name");
+        assert!(dotted.message.contains("foo..bar"), "{}", dotted.message);
+
+        let unknown_start = create_branch(temp.path(), "ok-name", Some("nope/rev"))
+            .await
+            .expect_err("unknown start point");
+        assert!(
+            unknown_start.message.contains("nope/rev"),
+            "{}",
+            unknown_start.message
+        );
+        assert!(
+            git_stdout(temp.path(), &["rev-parse", "--verify", "refs/heads/ok-name"]).is_none(),
+            "a rejected creation must not leave a branch behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn creates_a_branch_tracking_a_remote_start_point() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("work");
+        fs::create_dir_all(&root).expect("criar work");
+        if setup_repo(&root).is_none() {
+            return;
+        }
+        let origin = temp.path().join("origin.git");
+        let origin_str = origin.to_string_lossy().to_string();
+        assert!(run_git(temp.path(), &["init", "--bare", "-b", "main", &origin_str]));
+        assert!(run_git(
+            &root,
+            &["remote", "add", "origin", origin_str.as_str()]
+        ));
+        assert!(run_git(&root, &["push", "-q", "origin", "main"]));
+        assert!(run_git(&root, &["branch", "shared"]));
+        assert!(run_git(&root, &["push", "-q", "origin", "shared"]));
+        assert!(run_git(&root, &["fetch", "-q", "origin"]));
+        assert!(run_git(&root, &["branch", "-D", "shared"]));
+
+        create_branch(&root, "shared", Some("origin/shared"))
+            .await
+            .expect("create from remote");
+
+        assert_eq!(
+            git_stdout(&root, &["symbolic-ref", "--short", "HEAD"]).as_deref(),
+            Some("shared")
+        );
+        assert_eq!(
+            git_stdout(
+                &root,
+                &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+            )
+            .as_deref(),
+            Some("origin/shared"),
+            "a branch created from a remote ref must track it"
+        );
     }
 }

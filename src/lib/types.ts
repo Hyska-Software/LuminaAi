@@ -639,6 +639,38 @@ export interface WorkspaceGitStatus {
   conflicted: string[];
 }
 
+/** One branch of the repository: local (`main`) or remote-tracking (`origin/main`). */
+export interface WorkspaceGitBranch {
+  /** `main` for a local branch, `origin/main` for a remote-tracking one. */
+  name: string;
+  /** `true` for `refs/heads/*`. */
+  local: boolean;
+  /** Remote name (e.g. `origin`) when `local` is `false`. */
+  remote?: string | null;
+  /** `true` for the branch checked out in this working tree. */
+  current: boolean;
+  /** Configured upstream (`origin/main`). */
+  upstream?: string | null;
+  ahead?: number;
+  behind?: number;
+  /** `true` when the configured upstream no longer exists. */
+  gone?: boolean;
+  /** Subject of the tip commit. */
+  subject?: string;
+  author?: string;
+  /** Committer date of the tip commit, in seconds since the Unix epoch. */
+  committedAt?: number;
+}
+
+/** Branch list of a workspace: local names plus the full entries. */
+export interface WorkspaceGitBranches {
+  current?: string | null;
+  /** Local branch names (branch-comparison filter). */
+  branches: string[];
+  /** Local and remote-tracking branches with commit metadata. */
+  all: WorkspaceGitBranch[];
+}
+
 /** Alvo do commit: tudo, somente o índice ou os caminhos selecionados. */
 export type CommitTarget = 'all' | 'staged' | 'selection';
 

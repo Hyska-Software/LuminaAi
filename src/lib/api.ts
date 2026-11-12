@@ -95,6 +95,7 @@ import type {
   WorkspaceFileEntry,
   WorkspaceGitCommit,
   WorkspaceGitCompare,
+  WorkspaceGitBranches,
   WorkspaceGitStatus,
   WorkspaceTreeSnapshot,
 } from './types';
@@ -637,11 +638,17 @@ export const api = {
       paths: paths ?? null,
     }),
   gitBranches: (workspaceId: string) =>
-    invoke<{ current: string | null; branches: string[] }>('git_branches', { workspaceId }),
+    invoke<WorkspaceGitBranches>('git_branches', { workspaceId }),
   gitCompare: (workspaceId: string, base: string) =>
     invoke<WorkspaceGitCompare>('git_compare', { workspaceId, base }),
   gitSwitchBranch: (workspaceId: string, branch: string) =>
     invoke<WorkspaceGitStatus>('git_switch_branch', { workspaceId, branch }),
+  gitCreateBranch: (workspaceId: string, name: string, startPoint?: string | null) =>
+    invoke<WorkspaceGitStatus>('git_create_branch', {
+      workspaceId,
+      name,
+      startPoint: startPoint ?? null,
+    }),
   gitLog: (workspaceId: string, limit = 20) =>
     invoke<WorkspaceGitCommit[]>('git_log', { workspaceId, limit }),
   gitCommitDetail: (workspaceId: string, revision: string) =>

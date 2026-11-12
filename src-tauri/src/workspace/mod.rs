@@ -18,7 +18,7 @@ pub mod safe_path;
 pub mod watch;
 
 pub use exec::{ExecError, ExecOutput, ExecRequest, StreamKind};
-pub use git::{GitCommit, GitFile, GitStatus};
+pub use git::{GitBranch, GitCommit, GitFile, GitStatus};
 pub use journal::{line_stats, unified_diff, FileCapture, ObjectStore};
 pub use project::{ProjectCheck, ProjectProfile};
 pub use safe_path::{is_within, resolve, to_relative, Access, FsError};

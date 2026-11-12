@@ -33,6 +33,7 @@ import type {
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ChangesPanel } from './ChangesPanel';
+import { BranchPicker } from './BranchPicker';
 import { FileTree } from './FileTree';
 import { GitActionsMenu } from './GitActionsMenu';
 import { TerminalPanel } from './TerminalPanel';
@@ -141,7 +142,7 @@ export function CodePanel() {
   );
   const workspaceId = conversation?.workspaceId ?? null;
   const panel = useWorkspacePanel(workspaceId);
-  const { workspaces } = useWorkspaces();
+  const { workspaces, refreshContext } = useWorkspaces();
   const workspace = workspaces.find((entry) => entry.id === workspaceId) ?? null;
   const sessionChangeFiles = useCodeStore((state) =>
     activeId ? (state.byConversation[activeId]?.changes?.files ?? null) : null,
@@ -232,6 +233,20 @@ export function CodePanel() {
     if (snapshot) applySnapshotDirs(snapshot, dirs);
     if (activeId) void refreshSession(activeId);
   }, [lazyChildren, panel, activeId, refreshSession, applySnapshotDirs]);
+
+  /**
+   * Branch switch/create: the whole tree changes under the panel (a checkout
+   * rewrites files), so the container reloads tree, status and commits and the
+   * Changes tab drops its cached comparison targets.
+   *
+   * The workspace list also carries a cached `git.branch` used by the session
+   * header chip and the sidebar; without refreshing it those surfaces would keep
+   * showing the branch the user just left.
+   */
+  const handleBranchChanged = useCallback(() => {
+    void refreshAll();
+    if (workspaceId) void refreshContext(workspaceId);
+  }, [refreshAll, refreshContext, workspaceId]);
 
   const handleWorkspaceChanges = useCallback(
     (event: WorkspaceChangedEvent) => {
@@ -398,14 +413,19 @@ export function CodePanel() {
               <GitBranch aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
               <span className="min-w-0 flex-1 truncate">
                 {workspace ? workspace.name : t('code:panel.workspaceNone')}
-                {branch ? ` · ${branch}` : ''}
               </span>
               {workspaceId && panel.gitStatus?.isRepo ? (
                 <>
-                  <span className="shrink-0 text-[11px] tabular-nums">
-                    {panel.gitStatus.ahead ? `↑${panel.gitStatus.ahead}` : ''}
-                    {panel.gitStatus.behind ? ` ↓${panel.gitStatus.behind}` : ''}
-                  </span>
+                  <BranchPicker
+                    workspaceId={workspaceId}
+                    isRepo={panel.gitStatus.isRepo}
+                    currentBranch={branch}
+                    ahead={panel.gitStatus.ahead ?? 0}
+                    behind={panel.gitStatus.behind ?? 0}
+                    compact={compactTabs}
+                    onChanged={handleBranchChanged}
+                    onRefresh={refreshAll}
+                  />
                   <Button
                     variant="ghost"
                     size="sm"

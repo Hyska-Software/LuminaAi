@@ -2413,6 +2413,55 @@ pub struct WorkspaceGitCommit {
     pub date: String,
 }
 
+/// One branch of the repository (local or remote-tracking) as listed by the
+/// branch picker of the Changes tab.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitBranch {
+    /// `main` for a local branch, `origin/main` for a remote-tracking one.
+    pub name: String,
+    /// `true` for `refs/heads/*`.
+    pub local: bool,
+    /// Remote name (e.g. `origin`) when `local` is `false`.
+    #[serde(default)]
+    pub remote: Option<String>,
+    /// `true` for the branch checked out in this working tree.
+    #[serde(default)]
+    pub current: bool,
+    /// Upstream short name (`origin/main`), when configured.
+    #[serde(default)]
+    pub upstream: Option<String>,
+    #[serde(default)]
+    pub ahead: u32,
+    #[serde(default)]
+    pub behind: u32,
+    /// `true` when the configured upstream no longer exists.
+    #[serde(default)]
+    pub gone: bool,
+    /// Subject of the tip commit.
+    #[serde(default)]
+    pub subject: String,
+    #[serde(default)]
+    pub author: String,
+    /// Committer date of the tip commit, in seconds since the Unix epoch.
+    #[serde(default)]
+    pub committed_at: i64,
+}
+
+/// Branch list of a workspace: the legacy local-name list plus full entries.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGitBranches {
+    #[serde(default)]
+    pub current: Option<String>,
+    /// Local branch names (kept for the branch-comparison filter).
+    #[serde(default)]
+    pub branches: Vec<String>,
+    /// Local and remote-tracking branches with commit metadata.
+    #[serde(default)]
+    pub all: Vec<WorkspaceGitBranch>,
+}
+
 /// Um arquivo alterado por um commit (patch completo por arquivo).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
