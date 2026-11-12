@@ -198,7 +198,6 @@
         "downloadFailed": "Falha ao baixar a atualização",
         "installerOpenTitle": "Instalador aberto",
         "installerOpenManual": "Siga as instruções do instalador do sistema.",
-        "installerOpenSetup": "Conclua a atualização na janela do Zylara Setup. Suas conversas e configurações são mantidas.",
         "installerOpenFailed": "Não foi possível abrir o instalador",
         "managedInstalledTitle": "Atualização instalada",
         "managedInstalledDescription": "O Zylara agora está na v{{version}}.",

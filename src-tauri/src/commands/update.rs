@@ -158,10 +158,19 @@ pub fn install_update(
         app.state::<AppState>().allow_exit_on_close();
     }
     let result = install::install(&app, &state, &version, &asset);
-    if result.is_err() {
+    if let Err(error) = result {
         app.state::<AppState>().take_exit_on_close();
+        return Err(to_error(error));
     }
-    result.map_err(to_error)
+    // On Windows the setup wizard is now running. Close this app immediately
+    // so the installer can replace the executable without the user having to
+    // close it manually; the wizard also sends WM_CLOSE, but this makes the
+    // click itself the single trigger.
+    #[cfg(windows)]
+    if asset.kind == "setup" {
+        crate::begin_graceful_exit(&app);
+    }
+    Ok(())
 }
 
 #[tauri::command]

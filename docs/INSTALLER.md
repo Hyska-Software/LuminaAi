@@ -472,7 +472,7 @@ release, o estado é “tudo atualizado” (sem toast de erro).
 
 | Plataforma | Arquivo | Ação |
 | --- | --- | --- |
-| Windows | `Zylara-Setup-<v>-windows-x64.exe` | Abre o wizard existente; ele detecta a instalação, pula escopo/pasta, fecha o app e preserva os dados |
+| Windows | `Zylara-Setup-<v>-windows-x64.exe` | O app abre o wizard e encerra em seguida; o wizard detecta a instalação, pula escopo/pasta e preserva os dados |
 | macOS | `Zylara-<v>-macos-arm64.dmg` | Abre o DMG; arrastar para Aplicativos |
 | Linux | `.AppImage` (preferido), `.deb`, `.rpm` | Abre o pacote no sistema ou revela o AppImage na pasta |
 

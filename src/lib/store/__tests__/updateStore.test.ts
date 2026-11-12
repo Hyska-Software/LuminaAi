@@ -295,11 +295,34 @@ describe('updateStore', () => {
     expect(toast.error).toHaveBeenCalled();
   });
 
-  it('installs only after a verified download is ready', async () => {
+  it('keeps the Windows setup in the installing phase until the app closes', async () => {
     useUpdateStore.setState({ info: releaseInfo(), downloaded, phase: 'ready' });
     mocks.installUpdate.mockResolvedValue(undefined);
     await useUpdateStore.getState().install();
     expect(mocks.installUpdate).toHaveBeenCalledWith('0.2.0');
+    expect(useUpdateStore.getState().phase).toBe('installing');
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('returns to ready for a manual installer that keeps the app open', async () => {
+    useUpdateStore.setState({
+      info: releaseInfo({
+        asset: {
+          name: 'Zylara-0.2.0-macos-arm64.dmg',
+          size: 100,
+          sha256: 'a'.repeat(64),
+          downloadUrl:
+            'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-0.2.0-macos-arm64.dmg',
+          platformLabel: 'macOS (Apple Silicon)',
+          kind: 'dmg',
+        },
+      }),
+      downloaded: { ...downloaded, path: '/Users/ana/updates/0.2.0/app.dmg' },
+      managed: { mode: 'manual', supported: false },
+      phase: 'ready',
+    });
+    mocks.installUpdate.mockResolvedValue(undefined);
+    await useUpdateStore.getState().install();
     expect(useUpdateStore.getState().phase).toBe('ready');
     expect(toast.success).toHaveBeenCalledWith('Instalador aberto', expect.anything());
   });

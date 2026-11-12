@@ -101,7 +101,8 @@ Também é possível rodar manualmente em **Actions → Release** (input `draft`
 O app instalado consulta automaticamente essas releases (ao abrir e a cada hora
 enquanto estiver aberto) e mostra um aviso na barra de título quando há uma
 versão estável mais nova. O download é verificado por SHA-256 e a instalação usa o instalador da
-plataforma, sempre com confirmação — no Windows, o wizard do Zylara. No Linux
+plataforma, sempre com confirmação — no Windows, o app fecha e o wizard do
+Zylara abre para concluir a instalação. No Linux
 x64/macOS arm64, uma instalação feita pelo script gerenciado mostra **Instalar e
 reiniciar** depois do download verificado; o app fecha, substitui o próprio
 payload e reabre. Fechar o app, reiniciar ou baixar sem clicar não instala.

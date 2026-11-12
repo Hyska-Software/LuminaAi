@@ -924,8 +924,8 @@ GitHub), compara SemVer e guarda o resultado em `<app-data>/updates.json`. O
 renderer agenda a checagem ao abrir e a cada 60 min (`useUpdateCheck`), mostra o
 chip na title bar e o popover com notas/progresso. O download vai para
 `<app-data>/updates/<versão>/`, com SHA-256 conferido durante o stream e de novo
-antes de instalar. No Windows a instalação abre o wizard Zylara existente; não
-há execução silenciosa. No Linux x64 e no macOS arm64, uma instalação feita pelo
+antes de instalar. No Windows a instalação abre o wizard Zylara existente e
+encerra o app em seguida; não há execução silenciosa. No Linux x64 e no macOS arm64, uma instalação feita pelo
 script gerenciado da release grava `<app-data>/managed-install.json`; quando o
 marcador, o destino e o caminho em execução coincidem, o estado `ready` oferece
 **Instalar e reiniciar**. O backend revalida o download, grava o job em

@@ -129,14 +129,20 @@ describe('UpdateChip', () => {
     expect(screen.getByRole('button', { name: 'Cancelar' })).toBeTruthy();
   });
 
-  it('installs from the ready state', async () => {
-    seed({ info: releaseInfo(), downloaded, phase: 'ready' });
+  it('keeps the Windows setup flow when managed installs are unsupported', async () => {
+    seed({
+      info: releaseInfo(),
+      downloaded,
+      managed: { mode: 'manual', supported: false, reason: 'unsupported-platform' },
+      phase: 'ready',
+    });
     mocks.installUpdate.mockResolvedValue(undefined);
     render(<UpdateChip />);
 
     await userEvent.click(
       screen.getByRole('button', { name: 'Atualização v0.2.0 pronta para instalar' }),
     );
+    expect(screen.queryByRole('button', { name: 'Instalar e reiniciar' })).toBeNull();
     await userEvent.click(await screen.findByRole('button', { name: /Instalar agora/ }));
     expect(mocks.installUpdate).toHaveBeenCalledWith('0.2.0');
   });

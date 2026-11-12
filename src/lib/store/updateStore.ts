@@ -350,19 +350,18 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
     const { info, downloaded, managed } = get();
     if (!info || !downloaded) return;
     const selfInstall = canSelfInstall(managed, info.asset?.kind);
+    // A managed helper and the Windows setup both close this app after the
+    // installer/helper starts. Keep the installing phase so the UI never
+    // returns to the ready action during the shutdown window.
+    const closesApp = selfInstall || info.asset?.kind === 'setup';
     set({ phase: 'installing', error: null, errorScope: null });
     try {
       await api.installUpdate(info.latestVersion);
-      if (selfInstall) {
-        // The backend spawned the local helper and is closing the app. Keep the
-        // installing phase; the next launch reports the helper result.
+      if (closesApp) {
         return;
       }
-      const manual = info.asset && info.asset.kind !== 'setup';
       toast.success(t('common:shell.update.toasts.installerOpenTitle'), {
-        description: manual
-          ? t('common:shell.update.toasts.installerOpenManual')
-          : t('common:shell.update.toasts.installerOpenSetup'),
+        description: t('common:shell.update.toasts.installerOpenManual'),
       });
       set({ phase: 'ready' });
     } catch (error) {
