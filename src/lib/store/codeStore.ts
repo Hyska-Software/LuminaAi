@@ -13,6 +13,7 @@ import type {
   ContextStats,
   CreateGoalInput,
   FileChange,
+  FileChangeSummary,
   GoalAction,
   GoalRound,
   GoalView,
@@ -103,16 +104,37 @@ function upsertJob(jobs: JobView[], job: JobView): JobView[] {
   return next;
 }
 
+/**
+ * Merges one `file_changed` event into the cumulative summary.
+ *
+ * The event carries the delta of **one edit** (`added`/`removed` of that write),
+ * while a git-origin row already holds the working-tree counters (`git diff
+ * --numstat`) applied by `collect_changes`. Overwriting them made a file with 40
+ * pending lines show `+2` until the next snapshot, so git rows keep their
+ * counters, stage state and origin — only non-git (journal-only) rows take the
+ * event values.
+ */
 function mergeChange(summary: ChangesSummary | null, change: FileChange): ChangesSummary {
   const files = summary?.files ?? [];
   const existing = files.findIndex((entry) => entry.path === change.path);
-  const entry = {
-    path: change.path,
-    kind: change.kind,
-    added: change.added ?? 0,
-    removed: change.removed ?? 0,
-    origin: 'session' as const,
-  };
+  const previous = existing < 0 ? undefined : files[existing];
+  const fromGit =
+    previous !== undefined && (previous.origin === 'git' || previous.origin === 'both');
+  const entry: FileChangeSummary =
+    fromGit && previous
+      ? {
+          ...previous,
+          path: change.path,
+          kind: change.kind,
+          origin: previous.origin ?? 'both',
+        }
+      : {
+        path: change.path,
+        kind: change.kind,
+        added: change.added ?? 0,
+        removed: change.removed ?? 0,
+        origin: 'session',
+      };
   const nextFiles = existing < 0 ? [...files, entry] : files.map((file, i) => (i === existing ? entry : file));
   return {
     turnId: summary?.turnId ?? null,
@@ -134,7 +156,20 @@ function mergeSummary(
 ): ChangesSummary {
   if (!current || current.files.length === 0) return incoming;
   const files = new Map(current.files.map((file) => [file.path, file]));
-  for (const file of incoming.files) files.set(file.path, file);
+  for (const file of incoming.files) {
+    const previous = files.get(file.path);
+    /* Same rule as `mergeChange`: a git row keeps the working-tree counters and
+       the stage state; the turn summary only marks it as also touched by the
+       agent (`both`). */
+    const keepGitCounters =
+      previous !== undefined &&
+      (previous.origin === 'git' || previous.origin === 'both') &&
+      (file.origin ?? 'session') === 'session';
+    files.set(
+      file.path,
+      keepGitCounters && previous ? { ...previous, kind: file.kind, origin: 'both' } : file,
+    );
+  }
   const list = [...files.values()];
   return {
     turnId: incoming.turnId ?? current.turnId ?? null,

@@ -697,6 +697,8 @@
     "tabs": {
       "files": "Archivos",
       "changes": "Cambios",
+      "changesCount_one": "Cambios ({{count}} archivo)",
+      "changesCount_other": "Cambios ({{count}} archivos)",
       "terminal": "Terminal"
     },
     "aria": "Panel de archivos y cambios",

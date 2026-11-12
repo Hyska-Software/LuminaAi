@@ -28,6 +28,7 @@ import { compareText } from '@/lib/i18n/format';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type {
+  CommitTarget,
   FileChange,
   FileChangeKind,
   FileChangeSummary,
@@ -60,6 +61,12 @@ export interface ChangeRow {
   origin: ChangeOrigin;
   /** `true` when the change is in the git index. */
   staged: boolean;
+  /**
+   * `true` for git `MM` files: edits in the index **and** in the working tree.
+   * The row keeps the index side as its primary group and lists here the
+   * working-tree side, so both filters see the file without counting it twice.
+   */
+  alsoUnstaged?: boolean;
   added?: number;
   removed?: number;
   /** Diff already known from the session journal (skips the API call). */
@@ -215,6 +222,16 @@ export function buildChangeRows(
     if (row.added !== undefined) existing.added = row.added;
     if (row.removed !== undefined) existing.removed = row.removed;
     if (row.knownDiff != null) existing.knownDiff = row.knownDiff;
+    /* git `MM`: one path with edits in the index and in the working tree. The
+       index side stays the primary group and the working-tree side becomes a
+       flag, so the file is listed by both filters and counted only once. */
+    if (row.group === 'staged' && existing.group !== 'staged') {
+      existing.alsoUnstaged = true;
+      existing.group = 'staged';
+      existing.staged = true;
+    } else if (row.group === 'unstaged' && existing.group === 'staged') {
+      existing.alsoUnstaged = true;
+    }
   };
 
   for (const file of gitStatus?.staged ?? []) {
@@ -292,6 +309,68 @@ export function buildChangeRows(
 }
 
 /**
+ * Rows shown under one group. A git `MM` file (index + working-tree edits)
+ * belongs to both `staged` and `unstaged`; its row keeps the index side as the
+ * primary group and is listed here for the working-tree side too.
+ */
+export function rowsForGroup(rows: readonly ChangeRow[], group: ChangeGroup): ChangeRow[] {
+  return rows.filter(
+    (row) => row.group === group || (group === 'unstaged' && row.alsoUnstaged === true),
+  );
+}
+
+/**
+ * Files the commit target will actually include — the single source for the
+ * footer counters and for `hasChanges`.
+ *
+ * Session-only rows (journal entries of the agent that are no longer pending:
+ * already committed, ignored by git or outside a repository) are never
+ * committed, so they must not inflate `+N −M` nor enable the commit button.
+ */
+export function committableRows(
+  rows: readonly ChangeRow[],
+  target: CommitTarget,
+  selectedPaths: readonly string[] = [],
+): ChangeRow[] {
+  switch (target) {
+    case 'staged':
+      return rows.filter((row) => row.group === 'staged');
+    case 'selection': {
+      const selected = new Set(selectedPaths);
+      return rows.filter((row) => selected.has(row.path) && row.group !== 'session');
+    }
+    case 'all':
+    default:
+      return rows.filter((row) => row.group !== 'session');
+  }
+}
+
+/** `+N −M` of the given rows (missing counters count as zero). */
+export function sumLines(rows: readonly ChangeRow[]): { added: number; removed: number } {
+  return rows.reduce(
+    (acc, row) => ({
+      added: acc.added + (row.added ?? 0),
+      removed: acc.removed + (row.removed ?? 0),
+    }),
+    { added: 0, removed: 0 },
+  );
+}
+
+/**
+ * Pending files (unique paths) for the badge of the panel tab: the same set the
+ * default "Sem commit" filter lists. Without a known git status the session
+ * rows still count, mirroring the panel fallback.
+ */
+export function countPendingChanges(
+  gitStatus: WorkspaceGitStatus | null | undefined,
+  sessionChanges: ChangeInput[] | null | undefined,
+): number {
+  const rows = buildChangeRows(gitStatus, sessionChanges);
+  if (!gitStatus || !gitStatus.isRepo) return rows.length;
+  return committableRows(rows, 'all').length;
+}
+
+/**
  * Changes tab of the Code panel (WORKBENCH §7.2/§15).
  *
  * Merges the git working tree (`gitStatus`) with the session journal
@@ -360,14 +439,14 @@ export function ChangesPanel({
     () => rows.filter((row) => row.group === 'staged').map((row) => row.path),
     [rows],
   );
-  const totals = useMemo(
-    () =>
-      rows.reduce(
-        (acc, row) => ({ added: acc.added + (row.added ?? 0), removed: acc.removed + (row.removed ?? 0) }),
-        { added: 0, removed: 0 },
-      ),
-    [rows],
+  /* O commit tem alvo (`target`); os contadores do rodapé seguem esse alvo em
+     vez de somar todas as linhas (que incluiria o que nunca vai no commit). */
+  const [commitTarget, setCommitTarget] = useState<CommitTarget>('all');
+  const targetRows = useMemo(
+    () => committableRows(rows, commitTarget),
+    [commitTarget, rows],
   );
+  const totals = useMemo(() => sumLines(targetRows), [targetRows]);
 
   const lastTurnPaths = useMemo(
     () => new Set((lastTurnChanges ?? sessionChanges ?? []).map((change) => change.path)),
@@ -413,7 +492,12 @@ export function ChangesPanel({
       case 'last-turn':
         return rows.filter((row) => lastTurnPaths.has(row.path));
       case 'unstaged':
-        return rows.filter((row) => row.group === 'unstaged' || row.group === 'untracked');
+        // git `MM` rows keep `staged` as the primary group; `alsoUnstaged` lists
+        // them here so the working-tree part is never hidden.
+        return rows.filter(
+          (row) =>
+            row.group === 'unstaged' || row.group === 'untracked' || row.alsoUnstaged === true,
+        );
       case 'staged':
         return rows.filter((row) => row.group === 'staged');
       case 'commit':
@@ -426,23 +510,53 @@ export function ChangesPanel({
     }
   }, [branchRows, commitRows, filterKind, isRepo, lastTurnPaths, rows]);
 
+  /** Groups the active filter renders — single source for sections and bulk actions. */
+  const visibleGroups = useMemo<ChangeGroup[]>(() => {
+    if (!isRepo) return GROUPS.filter((group) => group !== 'commit' && group !== 'branch');
+    switch (filterKind) {
+      case 'staged':
+        return ['staged'];
+      case 'unstaged':
+        return ['unstaged', 'untracked'];
+      case 'commit':
+        return ['commit'];
+      case 'branch':
+        return ['branch'];
+      case 'last-turn':
+        return ['staged', 'unstaged', 'untracked', 'session'];
+      case 'uncommitted':
+      default:
+        return ['staged', 'unstaged', 'untracked'];
+    }
+  }, [filterKind, isRepo]);
+
+  const sections = useMemo(
+    () =>
+      visibleGroups
+        .map((group) => ({ group, rows: rowsForGroup(visibleRows, group) }))
+        .filter((section) => section.rows.length > 0),
+    [visibleGroups, visibleRows],
+  );
+
   const visibleStagedPaths = useMemo(
     () =>
       filterReadOnly
         ? []
-        : visibleRows.filter((row) => row.group === 'staged').map((row) => row.path),
-    [filterReadOnly, visibleRows],
+        : (sections.find((section) => section.group === 'staged')?.rows ?? []).map(
+            (row) => row.path,
+          ),
+    [filterReadOnly, sections],
   );
   const visibleStageablePaths = useMemo(
     () =>
       filterReadOnly
         ? []
-        : visibleRows
-            .filter(
-              (row) => row.origin !== 'session' && !row.staged && row.status !== 'U',
-            )
+        : sections
+            .filter((section) => section.group === 'unstaged' || section.group === 'untracked')
+            .flatMap((section) => section.rows)
+            .filter((row) => row.origin !== 'session' && row.status !== 'U')
             .map((row) => row.path),
-    [filterReadOnly, visibleRows],
+    [filterReadOnly, sections],
   );
 
   const loadCommit = useCallback(
@@ -579,15 +693,18 @@ export function ChangesPanel({
   );
 
   const openRow = useCallback(
-    async (row: ChangeRow) => {
+    async (row: ChangeRow, options: { staged?: boolean } = {}) => {
+      /* git `MM`: o mesmo arquivo aparece em dois grupos; o diff (e o `staged`
+         repassado à aba central) segue o grupo clicado, não o grupo primário. */
+      const staged = options.staged ?? row.staged;
       // Padrão: o diff abre como aba central (configurável nas Configurações).
       if (onOpenDiffTab) {
-        onOpenDiffTab(row);
+        onOpenDiffTab({ ...row, staged });
         return;
       }
       const run = diffRun.current + 1;
       diffRun.current = run;
-      setSelected(row);
+      setSelected({ ...row, staged });
       setDiffError(null);
       if (row.knownDiff != null) {
         setDiffText(row.knownDiff);
@@ -604,7 +721,7 @@ export function ChangesPanel({
       try {
         const text = row.base
           ? await api.getFileDiffAt(workspaceId, row.path, row.base)
-          : await api.getFileDiff(workspaceId, row.path, row.staged);
+          : await api.getFileDiff(workspaceId, row.path, staged);
         if (run !== diffRun.current) return;
         setDiffText(text ?? '');
       } catch (error) {
@@ -706,7 +823,9 @@ export function ChangesPanel({
     <CommitBar
       workspaceId={workspaceId}
       isRepo={isRepo}
-      hasChanges={rows.length > 0}
+      hasChanges={targetRows.length > 0}
+      target={commitTarget}
+      onTargetChange={setCommitTarget}
       stagedPaths={stagedPaths}
       added={totals.added}
       removed={totals.removed}
@@ -908,9 +1027,7 @@ export function ChangesPanel({
           </div>
         ) : (
           <div>
-            {GROUPS.map((groupId) => {
-              const groupRows = visibleRows.filter((row) => row.group === groupId);
-              if (groupRows.length === 0) return null;
+            {sections.map(({ group: groupId, rows: groupRows }) => {
               const label =
                 groupId === 'commit' && activeFilter.kind === 'commit'
                   ? t('code:changesFilter.label.commit', { hash: shortHash(activeFilter.hash) })
@@ -938,7 +1055,7 @@ export function ChangesPanel({
                         >
                           <button
                             type="button"
-                            onClick={() => void openRow(row)}
+                            onClick={() => void openRow(row, { staged: groupId === 'staged' })}
                             title={row.path}
                             className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pl-3 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
                           >
@@ -977,7 +1094,7 @@ export function ChangesPanel({
 
                           {filterReadOnly ? null : (
                             <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
-                              {row.group === 'staged' ? (
+                              {groupId === 'staged' ? (
                                 <IconButton
                                   label={t('code:changes.unstageFile', { path: row.path })}
                                   size="sm"

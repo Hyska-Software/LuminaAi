@@ -12,12 +12,18 @@ export interface CommitBarProps {
   workspaceId?: string | null;
   /** `false` when the workspace is not a git repository (commit disabled). */
   isRepo?: boolean;
-  /** True when there is at least one pending change. */
+  /** True when the commit target has at least one file to commit. */
   hasChanges?: boolean;
   /** Paths currently prepared in the index (target "Preparados"). */
   stagedPaths?: string[];
   /** Paths checked by the user (target "Seleção"). */
   selectedPaths?: string[];
+  /**
+   * Commit target. When provided the bar is controlled by the container, so the
+   * footer counters can follow the same set the commit will use.
+   */
+  target?: CommitTarget;
+  onTargetChange?: (target: CommitTarget) => void;
   added?: number;
   removed?: number;
   /** Extra reason to block the commit (e.g. merge conflicts). */
@@ -59,6 +65,8 @@ export function CommitBar({
   hasChanges = true,
   stagedPaths = [],
   selectedPaths = [],
+  target: controlledTarget,
+  onTargetChange,
   added = 0,
   removed = 0,
   blockedReason = null,
@@ -67,7 +75,17 @@ export function CommitBar({
   className,
 }: CommitBarProps) {
   const { t } = useTranslation('code');
-  const [target, setTarget] = useState<CommitTarget>('all');
+  const [localTarget, setLocalTarget] = useState<CommitTarget>('all');
+  /* Controlled when the container passes `target` (the panel needs the same set
+     for the footer counters); uncontrolled otherwise. */
+  const target = controlledTarget ?? localTarget;
+  const setTarget = useCallback(
+    (next: CommitTarget) => {
+      if (controlledTarget === undefined) setLocalTarget(next);
+      onTargetChange?.(next);
+    },
+    [controlledTarget, onTargetChange],
+  );
   const [message, setMessage] = useState('');
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);

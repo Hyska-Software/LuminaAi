@@ -438,6 +438,11 @@ pub fn save_context_stats(
 }
 
 /// Resumo das alterações de um turno (journal) para o evento `WorkspaceChanges`.
+///
+/// O journal grava uma linha por escrita/edição, então o mesmo path pode
+/// aparecer várias vezes no turno. O resumo é **por arquivo** — o card de fecho
+/// ("N arquivos alterados") e o total `+N −M` contariam o mesmo arquivo duas
+/// vezes —, somando os contadores das edições e mantendo o `kind` da última.
 pub fn turn_changes(
     db: &Db,
     conversation_id: &str,
@@ -449,17 +454,29 @@ pub fn turn_changes(
     if entries.is_empty() {
         return None;
     }
-    let files: Vec<crate::domain::FileChangeSummary> = entries
-        .into_iter()
-        .map(|entry| crate::domain::FileChangeSummary {
-            path: entry.path,
-            kind: entry.change_kind,
-            added: entry.added.unwrap_or(0),
-            removed: entry.removed.unwrap_or(0),
-            origin: Some("session".to_string()),
-            staged: false,
-        })
-        .collect();
+    let mut files: std::collections::BTreeMap<String, crate::domain::FileChangeSummary> =
+        std::collections::BTreeMap::new();
+    for entry in entries {
+        let kind = entry.change_kind;
+        let added = entry.added.unwrap_or(0);
+        let removed = entry.removed.unwrap_or(0);
+        files
+            .entry(entry.path.clone())
+            .and_modify(|file| {
+                file.kind = kind;
+                file.added = file.added.saturating_add(added);
+                file.removed = file.removed.saturating_add(removed);
+            })
+            .or_insert(crate::domain::FileChangeSummary {
+                path: entry.path,
+                kind,
+                added,
+                removed,
+                origin: Some("session".to_string()),
+                staged: false,
+            });
+    }
+    let files: Vec<crate::domain::FileChangeSummary> = files.into_values().collect();
     Some(crate::domain::ChangesSummary {
         turn_id: Some(turn_id.to_string()),
         added: files.iter().map(|file| file.added).sum(),

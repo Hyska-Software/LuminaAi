@@ -32,7 +32,7 @@ import type {
 } from '@/lib/types';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { ChangesPanel } from './ChangesPanel';
+import { ChangesPanel, countPendingChanges } from './ChangesPanel';
 import { BranchPicker } from './BranchPicker';
 import { FileTree } from './FileTree';
 import { GitActionsMenu } from './GitActionsMenu';
@@ -151,6 +151,17 @@ export function CodePanel() {
     activeId ? (state.byConversation[activeId]?.lastTurnChanges?.files ?? null) : null,
   );
   const refreshSession = useCodeStore((state) => state.refresh);
+  const sessionLoading = useCodeStore((state) =>
+    activeId ? (state.byConversation[activeId]?.loading ?? false) : false,
+  );
+  const sessionError = useCodeStore((state) =>
+    activeId ? (state.byConversation[activeId]?.error ?? null) : null,
+  );
+  /* Contador da aba Alterações: mesmos arquivos do filtro "Sem commit". */
+  const pendingChanges = useMemo(
+    () => countPendingChanges(panel.gitStatus, sessionChangeFiles),
+    [panel.gitStatus, sessionChangeFiles],
+  );
 
   /** Width previewed while dragging; `null` means "use the persisted width". */
   const [previewWidth, setPreviewWidth] = useState<number | null>(null);
@@ -256,9 +267,12 @@ export function CodePanel() {
         .refresh({ dirs, foreground: false, reloadCommits: false })
         .then((snapshot) => {
           if (snapshot) applySnapshotDirs(snapshot, dirs);
+          /* Os contadores ± vêm do snapshot da sessão (git numstat), não de
+             `git status`: sem isso a linha nova fica com +0 −0 até o ⟳. */
+          if (activeId) void refreshSession(activeId);
         });
     },
-    [lazyChildren, panel, applySnapshotDirs],
+    [activeId, lazyChildren, panel, applySnapshotDirs, refreshSession],
   );
 
   useWorkspaceWatch({
@@ -364,8 +378,16 @@ export function CodePanel() {
                 }}
                 onClick={() => setTab(entry.id)}
                 onKeyDown={(event) => handleTabKeyDown(event, entry.id)}
-                aria-label={t(PANEL_TAB_KEYS[entry.id])}
-                title={t(PANEL_TAB_KEYS[entry.id])}
+                aria-label={
+                  entry.id === 'changes' && pendingChanges > 0
+                    ? t('code:panel.tabs.changesCount', { count: pendingChanges })
+                    : t(PANEL_TAB_KEYS[entry.id])
+                }
+                title={
+                  entry.id === 'changes' && pendingChanges > 0
+                    ? t('code:panel.tabs.changesCount', { count: pendingChanges })
+                    : t(PANEL_TAB_KEYS[entry.id])
+                }
                 className={cn(
                   'flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium',
                   'transition-colors duration-150',
@@ -378,6 +400,14 @@ export function CodePanel() {
               >
                 <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
                 {compactTabs ? null : t(PANEL_TAB_KEYS[entry.id])}
+                {entry.id === 'changes' && pendingChanges > 0 ? (
+                  <span
+                    aria-hidden
+                    className="min-w-4 rounded-full bg-accent-soft px-1 text-[10px] font-semibold leading-4 tabular-nums text-accent"
+                  >
+                    {pendingChanges}
+                  </span>
+                ) : null}
               </button>
             );
           })}
@@ -458,8 +488,8 @@ export function CodePanel() {
                 lastTurnChanges={lastTurnChangeFiles}
                 commits={panel.commits}
                 commitsLoading={panel.commitsLoading}
-                sessionLoading={false}
-                sessionError={null}
+                sessionLoading={sessionLoading}
+                sessionError={sessionError}
                 onRefresh={refreshAll}
                 onOpenDiffTab={
                   diffOpenMode === 'panel'
