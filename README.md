@@ -80,13 +80,16 @@ pnpm installer --dry-run       # valida versão, git e assets sem compilar
 
 Saída em `release/<versão>/`: `Zylara-Setup-<versão>-windows-x64.exe` no
 Windows; `.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com
-`SHA256SUMS.txt` e `release.json`. O instalador do Windows tem UI própria
+`SHA256SUMS.txt` e `release.json`. Linux x64 e macOS arm64 recebem também
+`Zylara-install-<versão>-linux-x64.sh`/`Zylara-install-<versão>-macos-arm64.sh`,
+que instalam por usuário em `~/.local/opt/zylara/Zylara.AppImage` e
+`~/Applications/Zylara.app`. O instalador do Windows tem UI própria
 (dark), escopo por usuário ou para todos, atalhos, atualização, desinstalação e
 remoção opcional dos dados. A instalação leva também o desinstalador
 (`Uninstall Zylara.exe`, mesma UI, inglês por padrão) para dentro da pasta do
 app, com entrada em Aplicativos e recursos e atalho no Menu Iniciar; macOS e
-Linux usam os formatos nativos. Detalhes, flags e assinatura:
-[`docs/INSTALLER.md`](docs/INSTALLER.md).
+Linux usam os formatos nativos (ou o script gerenciado). Detalhes, flags e
+assinatura: [`docs/INSTALLER.md`](docs/INSTALLER.md).
 
 Release de produção: um push na `main` com uma versão nova no `package.json`
 dispara `.github/workflows/installer.yml` automaticamente. O workflow compila
@@ -98,7 +101,11 @@ Também é possível rodar manualmente em **Actions → Release** (input `draft`
 O app instalado consulta automaticamente essas releases (ao abrir e a cada hora
 enquanto estiver aberto) e mostra um aviso na barra de título quando há uma
 versão estável mais nova. O download é verificado por SHA-256 e a instalação usa o instalador da
-plataforma, sempre com confirmação — no Windows, o wizard do Zylara. A
+plataforma, sempre com confirmação — no Windows, o wizard do Zylara. No Linux
+x64/macOS arm64, uma instalação feita pelo script gerenciado mostra **Instalar e
+reiniciar** depois do download verificado; o app fecha, substitui o próprio
+payload e reabre. Fechar o app, reiniciar ou baixar sem clicar não instala.
+Instalações manuais continuam abrindo o DMG/pacote. A
 verificação manual fica em **Configurações → Sobre → Atualizações**. Detalhes:
 [`docs/INSTALLER.md`](docs/INSTALLER.md) §9.
 

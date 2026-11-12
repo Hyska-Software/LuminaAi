@@ -826,7 +826,7 @@ update_status, check_for_update (force), get_update_notes (version),
 download_update (version, Channel<UpdateEvent>), cancel_update_download,
 install_update (version), reveal_update (version),
 set_update_preferences (autoCheck), skip_update_version (version?),
-mark_update_notified (version),
+mark_update_notified (version), acknowledge_update_result,
 run_turn, cancel_turn,
 -- harness de código (v1.9): workspace
 pick_workspace_folder, add_workspace, list_workspaces, get_workspace_context,
@@ -894,8 +894,10 @@ mesclado (catálogo + modelos da conta).
   HTTP só em `127.0.0.1` para fixtures de debug), nomes de arquivo são
   validados contra path traversal, o download é limitado a 1,5 GB e o SHA-256
   do `release.json` é conferido durante o stream e **de novo antes de
-  executar**. Nenhum binário fora de `<app-data>/updates/<versão>/` é executado
-  e a instalação nunca acontece sem uma ação explícita do usuário.
+  executar**. Nenhum binário fora de `<app-data>/updates/<versão>/` e de
+  `<app-data>/managed-update/helper/` é executado; o helper só é iniciado por
+  **Instalar e reiniciar** e revalida o job e o hash antes de aplicar. A
+  instalação nunca acontece sem uma ação explícita do usuário.
 - Scripts de skills e código do agente nunca recebem as API keys do app.
 
 ## 14. Build
@@ -923,8 +925,15 @@ renderer agenda a checagem ao abrir e a cada 60 min (`useUpdateCheck`), mostra o
 chip na title bar e o popover com notas/progresso. O download vai para
 `<app-data>/updates/<versão>/`, com SHA-256 conferido durante o stream e de novo
 antes de instalar. No Windows a instalação abre o wizard Zylara existente; não
-há execução silenciosa. Contrato e matriz por plataforma: `docs/INSTALLER.md`
-§9.
+há execução silenciosa. No Linux x64 e no macOS arm64, uma instalação feita pelo
+script gerenciado da release grava `<app-data>/managed-install.json`; quando o
+marcador, o destino e o caminho em execução coincidem, o estado `ready` oferece
+**Instalar e reiniciar**. O backend revalida o download, grava o job em
+`<app-data>/managed-update/job.json`, inicia o helper e encerra o app. O helper
+espera o processo sair, substitui o payload (staging/backup) e grava
+`result.json`, que a próxima abertura mostra e confirma. Instalações manuais e
+o Windows mantêm o fluxo anterior. Contrato e matriz por plataforma:
+`docs/INSTALLER.md` §9.
 
 ## 15. Verificação (TDD)
 

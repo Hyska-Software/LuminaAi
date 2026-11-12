@@ -8,7 +8,7 @@ import { ExternalLink, RefreshCw } from 'lucide-react';
 import { Badge, Button, Switch } from '@/components/ui';
 import { UpdateActions, updateCheckedLabel } from '@/components/layout/UpdatePanel';
 import { openExternalUrl } from '@/components/chat/external';
-import { useAppStore, useUpdateStore } from '@/lib/store';
+import { canSelfInstall, useAppStore, useUpdateStore } from '@/lib/store';
 import { SettingRow, SettingsSection } from './shared';
 
 function statusLabel(
@@ -17,11 +17,14 @@ function statusLabel(
   available: boolean,
   errorScope: string | null,
   lastCheckAt: number | null | undefined,
+  selfInstall: boolean,
 ): string {
   if (phase === 'checking') return t('update.status.checking');
   if (phase === 'downloading') return t('update.status.downloading');
   if (phase === 'verifying') return t('update.status.verifying');
-  if (phase === 'installing') return t('update.status.installing');
+  if (phase === 'installing') {
+    return selfInstall ? t('update.status.installingManaged') : t('update.status.installing');
+  }
   if (phase === 'error' && errorScope === 'download') return t('update.status.downloadError');
   if (available) return t('update.status.available');
   if (phase === 'up-to-date') return t('update.status.upToDate');
@@ -35,6 +38,7 @@ export function UpdateSection() {
   const appInfo = useAppStore((state) => state.appInfo);
   const phase = useUpdateStore((state) => state.phase);
   const info = useUpdateStore((state) => state.info);
+  const managed = useUpdateStore((state) => state.managed);
   const preferences = useUpdateStore((state) => state.preferences);
   const error = useUpdateStore((state) => state.error);
   const errorScope = useUpdateStore((state) => state.errorScope);
@@ -44,6 +48,7 @@ export function UpdateSection() {
   const unskip = useUpdateStore((state) => state.unskip);
 
   const available = Boolean(info?.available);
+  const selfInstall = canSelfInstall(managed, info?.asset?.kind);
   const checked = updateCheckedLabel(preferences.lastCheckAt);
   const checking = phase === 'checking';
   const installing = phase === 'installing';
@@ -70,9 +75,16 @@ export function UpdateSection() {
   return (
     <SettingsSection title={t('update.title')} description={t('update.description')}>
       <SettingRow label={t('update.current.label')} description={t('update.current.description')}>
-        <Badge tone="accent" size="md">
-          v{appInfo?.version ?? info?.currentVersion ?? '—'}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="accent" size="md">
+            v{appInfo?.version ?? info?.currentVersion ?? '—'}
+          </Badge>
+          {managed.mode === 'managed' ? (
+            <Badge tone="success" size="sm">
+              {t('update.mode.managed')}
+            </Badge>
+          ) : null}
+        </div>
       </SettingRow>
 
       <SettingRow label={t('update.auto.label')} description={t('update.auto.description')}>
@@ -90,7 +102,7 @@ export function UpdateSection() {
               className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-foreground"
               aria-live="polite"
             >
-              {statusLabel(t, phase, available, errorScope, preferences.lastCheckAt)}
+              {statusLabel(t, phase, available, errorScope, preferences.lastCheckAt, selfInstall)}
             </span>
             {available && info ? (
               <Badge tone="accent" size="sm">

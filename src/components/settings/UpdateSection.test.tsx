@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   setUpdatePreferences: vi.fn(),
   skipUpdateVersion: vi.fn(),
   markUpdateNotified: vi.fn(),
+  acknowledgeUpdateResult: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -25,7 +26,7 @@ vi.mock('sonner', () => ({
 import { initialUpdateState, useAppStore, useUpdateStore } from '@/lib/store';
 import { UpdateSection } from './UpdateSection';
 
-function releaseInfo(): UpdateInfo {
+function releaseInfo(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
   return {
     currentVersion: '0.1.0',
     latestVersion: '0.2.0',
@@ -44,6 +45,7 @@ function releaseInfo(): UpdateInfo {
     },
     checkedAt: 1,
     stale: false,
+    ...overrides,
   };
 }
 
@@ -58,6 +60,7 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
     },
     info: null,
     download: null,
+    managed: { mode: 'manual', supported: false, reason: null },
     ...overrides,
   };
 }
@@ -89,6 +92,32 @@ describe('UpdateSection', () => {
     expect(screen.getByText('v0.1.0')).toBeTruthy();
     expect(screen.getByText('Atualização disponível')).toBeTruthy();
     expect(screen.getByText('v0.2.0')).toBeTruthy();
+  });
+
+  it('marks a managed installation', () => {
+    useUpdateStore.setState({ managed: { mode: 'managed', supported: true } });
+    render(<UpdateSection />);
+    expect(screen.getByText('Instalação gerenciada')).toBeTruthy();
+  });
+
+  it('shows the managed closing status while installing', () => {
+    useUpdateStore.setState({
+      info: releaseInfo({
+        asset: {
+          name: 'Zylara-0.2.0-linux-x64.AppImage',
+          size: 100,
+          sha256: 'a'.repeat(64),
+          downloadUrl:
+            'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-0.2.0-linux-x64.AppImage',
+          platformLabel: 'Linux x64 · AppImage',
+          kind: 'appimage',
+        },
+      }),
+      managed: { mode: 'managed', supported: true },
+      phase: 'installing',
+    });
+    render(<UpdateSection />);
+    expect(screen.getAllByText('Fechando para atualizar…').length).toBeGreaterThan(0);
   });
 
   it('checks manually and keeps the panel in sync', async () => {

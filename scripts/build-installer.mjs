@@ -35,6 +35,11 @@ import {
   sha256File,
   VERSION_PATTERN,
 } from './installer/shared.mjs';
+import {
+  installerScriptName,
+  managedTarget,
+  renderUnixInstaller,
+} from './installer/unix.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 
@@ -235,6 +240,7 @@ function verifyTests() {
   }
   if (!values['skip-typecheck']) run('pnpm', ['typecheck']);
   run('pnpm', ['test:scripts']);
+  run('pnpm', ['test:installer']);
   run('pnpm', ['test']);
   run('cargo', ['test', '--lib'], { cwd: path.join(root, 'src-tauri') });
 }
@@ -328,8 +334,26 @@ function buildMacos() {
   if (!dmgs.length) fail(`DMG não encontrado em ${bundleRoot}/dmg`);
   const output = path.join(directory, `Zylara-${version}-macos-${arch}.dmg`);
   copyFileSync(dmgs[0], output);
+  const files = [output];
+  const target = managedTarget('macos', arch);
+  if (target) {
+    const artifact = listArtifacts([output])[0];
+    const script = path.join(directory, installerScriptName(version, 'macos', arch));
+    writeFileSync(
+      script,
+      renderUnixInstaller({
+        version,
+        platform: 'macos',
+        arch,
+        artifact,
+      }),
+    );
+    files.push(script);
+  } else {
+    log(`[installer] aviso: instalador gerenciado não é gerado para macos/${arch}.`);
+  }
   const signed = Boolean(process.env.APPLE_SIGNING_IDENTITY && process.env.APPLE_SIGNING_IDENTITY !== '-');
-  return { directory, files: [output], signed, label, minOs: 'macOS 11+' };
+  return { directory, files, signed, label, minOs: 'macOS 11+' };
 }
 
 function buildLinux() {
@@ -352,10 +376,31 @@ function buildLinux() {
     copyFileSync(rpm, output);
     files.push(output);
   }
+  let appImageOutput = null;
   if (appimage) {
-    const output = path.join(directory, `Zylara-${version}-linux-${arch}.AppImage`);
-    copyFileSync(appimage, output);
-    files.push(output);
+    appImageOutput = path.join(directory, `Zylara-${version}-linux-${arch}.AppImage`);
+    copyFileSync(appimage, appImageOutput);
+    files.push(appImageOutput);
+  }
+  if (!appImageOutput) {
+    fail(`AppImage não encontrado em ${bundleRoot}/appimage`);
+  }
+  const target = managedTarget('linux', arch);
+  if (target) {
+    const artifact = listArtifacts([appImageOutput])[0];
+    const script = path.join(directory, installerScriptName(version, 'linux', arch));
+    writeFileSync(
+      script,
+      renderUnixInstaller({
+        version,
+        platform: 'linux',
+        arch,
+        artifact,
+      }),
+    );
+    files.push(script);
+  } else {
+    log(`[installer] aviso: instalador gerenciado não é gerado para linux/${arch}.`);
   }
   return {
     directory,

@@ -7,10 +7,11 @@
 pub mod download;
 pub mod feed;
 pub mod install;
+pub mod managed;
 pub mod store;
 pub mod version;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
@@ -91,6 +92,8 @@ pub struct UpdateStatus {
     pub preferences: UpdatePreferences,
     pub info: Option<UpdateInfo>,
     pub download: Option<DownloadedUpdate>,
+    pub managed: managed::ManagedStatus,
+    pub last_install: Option<managed::ManagedInstallResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,6 +130,7 @@ pub enum UpdateEvent {
 /// Runtime state managed by Tauri.
 pub struct UpdateState {
     data_dir: PathBuf,
+    home: PathBuf,
     file: Mutex<store::UpdateFile>,
     checking: AtomicBool,
     downloading: AtomicBool,
@@ -134,7 +138,7 @@ pub struct UpdateState {
 }
 
 impl UpdateState {
-    pub fn new(data_dir: PathBuf) -> Self {
+    pub fn new(data_dir: PathBuf, home: PathBuf) -> Self {
         let path = store::path_in(&data_dir);
         let mut file = store::load_at(&path);
         // After an update the cache refers to the version that is now running:
@@ -148,8 +152,10 @@ impl UpdateState {
             file.cached = None;
             let _ = store::save_at(&path, &file);
         }
+        managed::cleanup_work_dir(&data_dir);
         let state = Self {
             data_dir,
+            home,
             file: Mutex::new(file),
             checking: AtomicBool::new(false),
             downloading: AtomicBool::new(false),
@@ -157,6 +163,26 @@ impl UpdateState {
         };
         state.cleanup_downloads();
         state
+    }
+
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
+    pub fn home_dir(&self) -> &Path {
+        &self.home
+    }
+
+    pub fn managed(&self) -> managed::ManagedStatus {
+        managed::detect(&self.data_dir, &self.home)
+    }
+
+    pub fn last_install_result(&self) -> Option<managed::ManagedInstallResult> {
+        managed::read_result(&self.data_dir)
+    }
+
+    pub fn acknowledge_install_result(&self) -> anyhow::Result<()> {
+        managed::acknowledge_result(&self.data_dir)
     }
 
     pub fn preferences(&self) -> UpdatePreferences {
@@ -186,6 +212,8 @@ impl UpdateState {
             preferences: file.preferences.clone(),
             info,
             download,
+            managed: self.managed(),
+            last_install: self.last_install_result(),
         }
     }
 
@@ -381,7 +409,7 @@ mod tests {
     }
 
     fn state(dir: &tempfile::TempDir) -> UpdateState {
-        UpdateState::new(dir.path().to_path_buf())
+        UpdateState::new(dir.path().to_path_buf(), dir.path().to_path_buf())
     }
 
     #[test]
@@ -465,7 +493,7 @@ mod tests {
             .expect("caminho");
         std::fs::create_dir_all(pending.parent().expect("pai")).expect("pasta");
         std::fs::write(pending.with_extension("exe.partial"), b"parcial").expect("parcial");
-        let _ = UpdateState::new(dir.path().to_path_buf());
+        let _ = UpdateState::new(dir.path().to_path_buf(), dir.path().to_path_buf());
         assert!(!old.exists());
         assert!(!pending.with_extension("exe.partial").exists());
     }

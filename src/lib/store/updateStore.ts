@@ -10,6 +10,8 @@ import { api } from '../api';
 import { t } from '../i18n';
 import type {
   DownloadedUpdate,
+  ManagedUpdateStatus,
+  UpdateAssetKind,
   UpdateInfo,
   UpdateNotes,
   UpdatePreferences,
@@ -52,6 +54,7 @@ export interface UpdateUiState {
   phase: UpdatePhase;
   info: UpdateInfo | null;
   downloaded: DownloadedUpdate | null;
+  managed: ManagedUpdateStatus;
   preferences: UpdatePreferences;
   progress: UpdateProgress | null;
   error: string | null;
@@ -92,6 +95,7 @@ export function initialUpdateState(): UpdateUiState {
     phase: 'idle',
     info: null,
     downloaded: null,
+    managed: { mode: 'manual', supported: false, reason: 'not-checked' },
     preferences: {
       autoCheck: true,
       lastCheckAt: null,
@@ -115,11 +119,26 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-function fromStatus(status: UpdateStatus): Pick<UpdateUiState, 'info' | 'downloaded' | 'preferences' | 'phase'> {
+function fromStatus(status: UpdateStatus): Pick<
+  UpdateUiState,
+  'info' | 'downloaded' | 'preferences' | 'phase' | 'managed'
+> {
   const info = status.info ?? null;
   const downloaded = status.download ?? null;
   const phase: UpdatePhase = downloaded ? 'ready' : info ? 'available' : 'idle';
-  return { info, downloaded, preferences: status.preferences, phase };
+  return { info, downloaded, managed: status.managed, preferences: status.preferences, phase };
+}
+
+/** True only when the running installation can replace itself in place. */
+export function canSelfInstall(
+  managed: ManagedUpdateStatus | null | undefined,
+  kind: UpdateAssetKind | null | undefined,
+): boolean {
+  return Boolean(
+    managed?.mode === 'managed' &&
+      managed.supported &&
+      (kind === 'appimage' || kind === 'dmg'),
+  );
 }
 
 function isBusy(phase: UpdatePhase): boolean {
@@ -149,6 +168,25 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         try {
           const status = await api.updateStatus();
           set({ ...fromStatus(status), hydrated: true, hydrating: false });
+          if (status.lastInstall) {
+            const result = status.lastInstall;
+            if (result.status === 'installed') {
+              toast.success(t('common:shell.update.toasts.managedInstalledTitle'), {
+                description: t('common:shell.update.toasts.managedInstalledDescription', {
+                  version: result.version,
+                }),
+              });
+            } else {
+              toast.error(t('common:shell.update.toasts.managedFailedTitle'), {
+                description: result.message
+                  ? t('common:shell.update.toasts.managedFailedDescription', {
+                      message: result.message,
+                    })
+                  : t('common:shell.update.toasts.managedFailedNoMessage'),
+              });
+            }
+            void api.acknowledgeUpdateResult().catch(() => undefined);
+          }
         } catch (error) {
           // A failed hydration must not block the app; a later manual check can
           // still recover. Keep the message for the Settings section.
@@ -309,11 +347,17 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   },
 
   install: async () => {
-    const { info, downloaded } = get();
+    const { info, downloaded, managed } = get();
     if (!info || !downloaded) return;
+    const selfInstall = canSelfInstall(managed, info.asset?.kind);
     set({ phase: 'installing', error: null, errorScope: null });
     try {
       await api.installUpdate(info.latestVersion);
+      if (selfInstall) {
+        // The backend spawned the local helper and is closing the app. Keep the
+        // installing phase; the next launch reports the helper result.
+        return;
+      }
       const manual = info.asset && info.asset.kind !== 'setup';
       toast.success(t('common:shell.update.toasts.installerOpenTitle'), {
         description: manual

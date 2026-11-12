@@ -757,6 +757,9 @@
       "label": "Versión actual",
       "description": "Versión de Zylara en ejecución."
     },
+    "mode": {
+      "managed": "Instalación gestionada"
+    },
     "auto": {
       "label": "Actualizaciones automáticas",
       "description": "Comprueba al abrir y cada hora mientras la app esté abierta. Descargar e instalar siguen siendo decisiones tuyas.",
@@ -768,6 +771,7 @@
       "downloading": "Descargando actualización…",
       "verifying": "Verificando la integridad de la descarga…",
       "installing": "Abriendo el instalador…",
+      "installingManaged": "Cerrando para actualizar…",
       "downloadError": "Error al descargar la actualización",
       "available": "Actualización disponible",
       "upToDate": "Tienes la versión más reciente",

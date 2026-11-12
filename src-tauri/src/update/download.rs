@@ -339,7 +339,7 @@ mod tests {
         let expected = hash(&payload);
         let (base, server) = serve_once(payload.clone(), None);
         let dir = tempfile::tempdir().expect("tempdir");
-        let state = UpdateState::new(dir.path().to_path_buf());
+        let state = UpdateState::new(dir.path().to_path_buf(), dir.path().to_path_buf());
         let (channel, events) = sink();
         let item = asset(&base, expected.clone(), payload.len() as u64);
         let client = crate::http::client();
@@ -374,7 +374,7 @@ mod tests {
         let payload = b"tampered".to_vec();
         let (base, server) = serve_once(payload.clone(), None);
         let dir = tempfile::tempdir().expect("tempdir");
-        let state = UpdateState::new(dir.path().to_path_buf());
+        let state = UpdateState::new(dir.path().to_path_buf(), dir.path().to_path_buf());
         let (channel, _) = sink();
         let item = asset(&base, hash(b"expected"), payload.len() as u64);
         let client = crate::http::client();
@@ -401,7 +401,7 @@ mod tests {
         let payload = b"short".to_vec();
         let (base, server) = serve_once(payload.clone(), Some(999));
         let dir = tempfile::tempdir().expect("tempdir");
-        let state = UpdateState::new(dir.path().to_path_buf());
+        let state = UpdateState::new(dir.path().to_path_buf(), dir.path().to_path_buf());
         let (channel, _) = sink();
         let item = asset(&base, hash(&payload), payload.len() as u64);
         let client = crate::http::client();
@@ -418,7 +418,7 @@ mod tests {
         let payload = b"cancelled".to_vec();
         let (base, server) = serve_once(payload.clone(), None);
         let dir = tempfile::tempdir().expect("tempdir");
-        let state = UpdateState::new(dir.path().to_path_buf());
+        let state = UpdateState::new(dir.path().to_path_buf(), dir.path().to_path_buf());
         state.request_cancel();
         let (channel, _) = sink();
         let item = asset(&base, hash(&payload), payload.len() as u64);

@@ -107,6 +107,10 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
+[target.'cfg(unix)'.dependencies]
+# Polls the parent process in the managed-update helper.
+libc = "0.2"
+
 # Windows: Job Object do runner de processos (kill de árvore confiável no
 # cancelamento/timeout; docs/research/workspace-runtime-options.md §3.4).
 [target.'cfg(windows)'.dependencies]

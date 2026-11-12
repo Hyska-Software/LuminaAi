@@ -2039,6 +2039,28 @@ export interface AppInfo {
 
 export type UpdateAssetKind = 'setup' | 'dmg' | 'appimage' | 'deb' | 'rpm';
 
+export type ManagedInstallMode = 'managed' | 'manual';
+
+/** How the running Zylara was installed and whether it can replace itself. */
+export interface ManagedUpdateStatus {
+  mode: ManagedInstallMode;
+  installPath?: string | null;
+  installedVersion?: string | null;
+  /** True only when the marker and the running path were validated. */
+  supported: boolean;
+  reason?: string | null;
+}
+
+export type ManagedInstallStatus = 'installed' | 'rolledBack' | 'failed';
+
+/** Outcome written by the managed update helper and shown after restart. */
+export interface ManagedInstallResult {
+  version: string;
+  status: ManagedInstallStatus;
+  message?: string | null;
+  completedAt: number;
+}
+
 /** Release artifact selected for the current platform. */
 export interface UpdateAsset {
   name: string;
@@ -2086,6 +2108,8 @@ export interface UpdateStatus {
   preferences: UpdatePreferences;
   info?: UpdateInfo | null;
   download?: DownloadedUpdate | null;
+  managed: ManagedUpdateStatus;
+  lastInstall?: ManagedInstallResult | null;
 }
 
 export interface UpdateNotes {

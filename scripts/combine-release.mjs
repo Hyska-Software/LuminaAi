@@ -55,7 +55,7 @@ if (manifests.some((manifest) => manifest.version !== version)) {
   process.exit(1);
 }
 
-const binaryExtensions = new Set(['.exe', '.dmg', '.deb', '.rpm', '.appimage']);
+const binaryExtensions = new Set(['.exe', '.dmg', '.deb', '.rpm', '.appimage', '.sh']);
 const binaries = files.filter((file) =>
   binaryExtensions.has(path.extname(file).toLowerCase()),
 );

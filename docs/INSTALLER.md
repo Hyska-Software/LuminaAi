@@ -476,6 +476,38 @@ release, o estado é “tudo atualizado” (sem toast de erro).
 | macOS | `Zylara-<v>-macos-arm64.dmg` | Abre o DMG; arrastar para Aplicativos |
 | Linux | `.AppImage` (preferido), `.deb`, `.rpm` | Abre o pacote no sistema ou revela o AppImage na pasta |
 
+#### 9.5.1 Instalação gerenciada (Linux x64/macOS arm64)
+
+A release publica também `Zylara-install-<v>-linux-x64.sh` e
+`Zylara-install-<v>-macos-arm64.sh`. O script embute versão, nome, tamanho e
+SHA-256 do payload, baixa o artefato exato daquela release, verifica tamanho e
+hash e instala por usuário:
+
+- Linux: `~/.local/opt/zylara/Zylara.AppImage` e
+  `${XDG_DATA_HOME:-~/.local/share}/applications/zylara-managed.desktop`.
+- macOS: `~/Applications/Zylara.app` (o DMG é montado e o `.app` copiado com
+  `ditto`).
+
+O script grava `<app-data>/managed-install.json` com `schemaVersion`, `method:
+"managed-script"`, plataforma, arquitetura, `installPath` e versão. O app só
+considera a instalação gerenciada quando o marcador, o destino esperado e o
+caminho real em execução (`APPIMAGE` no Linux; bundle derivado de `current_exe`
+no macOS) coincidem. Marcador ausente/inválido, caminho divergente ou
+plataforma não suportada falham fechado para o modo manual.
+
+Com uma instalação gerenciada, o estado `ready` mostra **Instalar e reiniciar**.
+O backend revalida o hash, grava o job em `<app-data>/managed-update/job.json`,
+inicia um helper com o mesmo executável, espera o handshake `ready` e encerra o
+app. O helper aguarda o processo terminar, substitui o payload (com staging e
+backup no macOS), grava o marcador e `<app-data>/managed-update/result.json` e
+reabre o app. Na próxima abertura o resultado é mostrado e confirmado. Falha de
+staging/promoção mantém ou restaura a versão anterior. Nenhum passo acontece
+sem o clique explícito.
+
+Instalações manuais (DMG em `/Applications`, AppImage avulso, DEB/RPM) e o
+Windows continuam usando as ações anteriores. O script não remove outras
+instalações nem migra dados automaticamente.
+
 A instalação não é silenciosa na v1. Assinatura/Authenticode continuam sendo o
 que remove o aviso do SmartScreen/Gatekeeper (§3.2).
 
@@ -516,14 +548,17 @@ usam um servidor TCP efêmero, sem depender da rede.
 ### 9.8 Testes
 
 ```bash
-cd src-tauri && cargo test --lib update
+pnpm test:installer
+(cd src-tauri && cargo test --lib update)
 pnpm test
 ```
 
 Cobertura: comparação SemVer (incluindo prerelease), parse/validação do
 `release.json` e do fallback da API, seleção por plataforma/arquitetura,
 allow-list de URLs, SHA-256 e parcial, detecção de download pronto, skip,
-cache local e os estados do chip/popover/Configurações. O teste
+cache local e os estados do chip/popover/Configurações. `pnpm test:installer`
+cobre a geração/verificação dos scripts gerenciados e a instalação em `HOME`
+temporário (Linux/macOS). O teste
 `update::feed::tests::fetches_the_live_release_feed` é `#[ignore]` e consulta o
 GitHub real sob demanda.
 
@@ -531,8 +566,10 @@ GitHub real sob demanda.
 
 - `tauri-plugin-updater` (o app usa o próprio manifesto e o instalador Zylara).
 - Delta updates, instalação silenciosa em segundo plano e canal beta.
-- Substituição automática do `.app` no macOS e do AppImage em execução.
-- Instalador customizado em macOS/Linux.
+- Substituição automática fora do fluxo gerenciado (o script e **Instalar e
+  reiniciar** são os únicos caminhos).
+- Wizard customizado em macOS/Linux; o script gerenciado é um bootstrap POSIX,
+  não um wizard.
 - Assinatura de repositório Linux (APT/RPM) e instalação por linha de comando
-  em macOS/Linux.
+  em macOS/Linux fora do script gerenciado.
 

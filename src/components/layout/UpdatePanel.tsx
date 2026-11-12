@@ -17,7 +17,8 @@ import { Badge, Button, ProgressBar } from '@/components/ui';
 import { openExternalUrl } from '@/components/chat/external';
 import { t } from '@/lib/i18n';
 import { formatDate } from '@/lib/i18n/format';
-import { useUpdateStore } from '@/lib/store';
+import { canSelfInstall, useUpdateStore } from '@/lib/store';
+import type { ManagedUpdateStatus, UpdateAssetKind } from '@/lib/types';
 import { cn, formatBytes, relativeTime } from '@/lib/utils';
 
 export function updateCheckedLabel(timestamp?: number | null): string | null {
@@ -53,7 +54,14 @@ function plainNotes(value: string): string {
     .trim();
 }
 
-function installHint(kind: string | undefined): string {
+function installHint(
+  kind: UpdateAssetKind | undefined,
+  managed: ManagedUpdateStatus,
+  version: string,
+): string {
+  if (canSelfInstall(managed, kind)) {
+    return t('common:shell.update.hintManaged', { version });
+  }
   switch (kind) {
     case 'setup':
       return t('common:shell.update.hintSetup');
@@ -69,13 +77,19 @@ function installHint(kind: string | undefined): string {
   }
 }
 
-function primaryLabel(kind: string | undefined): string {
+function primaryLabel(kind: UpdateAssetKind | undefined): string {
   return kind === 'setup'
     ? t('common:shell.update.downloadAction')
     : t('common:shell.update.downloadUpdate');
 }
 
-function installLabel(kind: string | undefined): string {
+function installLabel(
+  kind: UpdateAssetKind | undefined,
+  managed: ManagedUpdateStatus,
+): string {
+  if (canSelfInstall(managed, kind)) {
+    return t('common:shell.update.installAndRestart');
+  }
   switch (kind) {
     case 'setup':
       return t('common:shell.update.installNow');
@@ -111,6 +125,7 @@ export function UpdateActions({ className }: { className?: string }) {
   const phase = useUpdateStore((state) => state.phase);
   const info = useUpdateStore((state) => state.info);
   const downloaded = useUpdateStore((state) => state.downloaded);
+  const managed = useUpdateStore((state) => state.managed);
   const progress = useUpdateStore((state) => state.progress);
   const error = useUpdateStore((state) => state.error);
   const errorScope = useUpdateStore((state) => state.errorScope);
@@ -121,6 +136,7 @@ export function UpdateActions({ className }: { className?: string }) {
 
   if (!info) return null;
   const kind = info.asset?.kind;
+  const selfInstall = canSelfInstall(managed, kind);
 
   if (phase === 'downloading' || phase === 'verifying') {
     const received = progress?.received ?? 0;
@@ -171,7 +187,9 @@ export function UpdateActions({ className }: { className?: string }) {
     return (
       <div className={cn('mt-3', className)}>
         <Button size="md" className="w-full" loading>
-          {t('shell.update.installing')}
+          {selfInstall
+            ? t('shell.update.installingManaged')
+            : t('shell.update.installing')}
         </Button>
       </div>
     );
@@ -191,14 +209,16 @@ export function UpdateActions({ className }: { className?: string }) {
             leftIcon={<CheckCircle2 className="size-4" strokeWidth={1.75} />}
             onClick={() => void install()}
           >
-            {installLabel(kind)}
+            {installLabel(kind, managed)}
           </Button>
           <Button size="md" variant="secondary" onClick={() => void reveal()}>
             {t('shell.update.openFolder')}
           </Button>
         </div>
         {error && errorScope === 'install' ? <ErrorBox /> : null}
-        <p className="text-[11px] leading-relaxed text-foreground-subtle">{installHint(kind)}</p>
+        <p className="text-[11px] leading-relaxed text-foreground-subtle">
+          {installHint(kind, managed, info.latestVersion)}
+        </p>
       </div>
     );
   }

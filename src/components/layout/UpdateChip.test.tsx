@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   setUpdatePreferences: vi.fn(),
   skipUpdateVersion: vi.fn(),
   markUpdateNotified: vi.fn(),
+  acknowledgeUpdateResult: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -59,6 +60,7 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
     },
     info: null,
     download: null,
+    managed: { mode: 'manual', supported: false, reason: null },
     ...overrides,
   };
 }
@@ -137,6 +139,55 @@ describe('UpdateChip', () => {
     );
     await userEvent.click(await screen.findByRole('button', { name: /Instalar agora/ }));
     expect(mocks.installUpdate).toHaveBeenCalledWith('0.2.0');
+  });
+
+  it('offers install and restart for a managed AppImage', async () => {
+    seed({
+      info: releaseInfo({
+        asset: {
+          name: 'Zylara-0.2.0-linux-x64.AppImage',
+          size: 100,
+          sha256: 'a'.repeat(64),
+          downloadUrl:
+            'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-0.2.0-linux-x64.AppImage',
+          platformLabel: 'Linux x64 · AppImage',
+          kind: 'appimage',
+        },
+      }),
+      downloaded: { ...downloaded, path: '/home/ana/updates/0.2.0/app.AppImage' },
+      managed: { mode: 'managed', supported: true },
+      phase: 'ready',
+    });
+    mocks.installUpdate.mockResolvedValue(undefined);
+    render(<UpdateChip />);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Atualização v0.2.0 pronta para instalar' }),
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Instalar e reiniciar' }));
+    expect(mocks.installUpdate).toHaveBeenCalledWith('0.2.0');
+  });
+
+  it('uses the managed closing label while installing', () => {
+    seed({
+      info: releaseInfo({
+        asset: {
+          name: 'Zylara-0.2.0-linux-x64.AppImage',
+          size: 100,
+          sha256: 'a'.repeat(64),
+          downloadUrl:
+            'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-0.2.0-linux-x64.AppImage',
+          platformLabel: 'Linux x64 · AppImage',
+          kind: 'appimage',
+        },
+      }),
+      managed: { mode: 'managed', supported: true },
+      phase: 'installing',
+    });
+    render(<UpdateChip />);
+    expect(
+      screen.getByRole('button', { name: 'Fechando o Zylara para aplicar a atualização' }),
+    ).toBeTruthy();
   });
 
   it('ignores a version from the panel', async () => {

@@ -14,6 +14,8 @@ use crate::update::feed::UpdateNotes;
 use crate::update::{
     download, feed, install, DownloadResult, UpdateEvent, UpdateState, UpdateStatus,
 };
+#[cfg(unix)]
+use crate::update::managed::{self, ManagedMode};
 
 /// Manual checks within this window reuse the previous result instead of
 /// hammering GitHub. Automatic checks are paced by the renderer.
@@ -134,6 +136,21 @@ pub fn install_update(
         .asset
         .clone()
         .ok_or_else(|| crate::i18n::t("update.errors.noInstallerForPlatform"))?;
+    #[cfg(unix)]
+    {
+        let state = state.inner();
+        let managed_status = state.managed();
+        let compatible = (cfg!(target_os = "linux") && asset.kind == "appimage")
+            || (cfg!(target_os = "macos") && asset.kind == "dmg");
+        if managed_status.mode == ManagedMode::Managed
+            && managed_status.supported
+            && compatible
+        {
+            managed::launch(state, &version, &asset, &managed_status).map_err(to_error)?;
+            crate::begin_graceful_exit(&app);
+            return Ok(());
+        }
+    }
     // The Windows setup wizard closes the running app with WM_CLOSE; with
     // close-to-tray that close must quit instead of hiding.
     #[cfg(windows)]
@@ -183,6 +200,11 @@ pub fn skip_update_version(
 #[tauri::command]
 pub fn mark_update_notified(state: State<'_, UpdateState>, version: String) -> Result<(), String> {
     state.mark_notified(&version).map_err(to_error)
+}
+
+#[tauri::command]
+pub fn acknowledge_update_result(state: State<'_, UpdateState>) -> Result<(), String> {
+    state.acknowledge_install_result().map_err(to_error)
 }
 
 #[cfg(test)]

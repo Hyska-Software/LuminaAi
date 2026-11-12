@@ -145,6 +145,7 @@ export const api = {
     invoke<UpdateStatus>('skip_update_version', { version }),
   markUpdateNotified: (version: string) =>
     invoke<void>('mark_update_notified', { version }),
+  acknowledgeUpdateResult: () => invoke<void>('acknowledge_update_result'),
 
   /* -------- skills (gestão) -------- */
   getSkills: () => invoke<SkillSummary[]>('get_skills'),

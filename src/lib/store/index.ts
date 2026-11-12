@@ -2,6 +2,7 @@ export { useAppStore, MAX_STEPS_DEFAULT, MAX_STEPS_LIMIT } from './appStore';
 export {
   useUpdateStore,
   initialUpdateState,
+  canSelfInstall,
   UPDATE_CHECK_INTERVAL_MS,
 } from './updateStore';
 export type {

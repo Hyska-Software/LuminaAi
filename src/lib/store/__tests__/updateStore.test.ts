@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   setUpdatePreferences: vi.fn(),
   skipUpdateVersion: vi.fn(),
   markUpdateNotified: vi.fn(),
+  acknowledgeUpdateResult: vi.fn(),
 }));
 
 vi.mock('@/lib/api', () => ({ api: mocks }));
@@ -61,6 +62,7 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
     },
     info: null,
     download: null,
+    managed: { mode: 'manual', supported: false, reason: null },
     ...overrides,
   };
 }
@@ -81,6 +83,7 @@ beforeEach(() => {
   reset();
   mocks.updateStatus.mockResolvedValue(status());
   mocks.checkForUpdate.mockResolvedValue(status());
+  mocks.acknowledgeUpdateResult.mockResolvedValue(undefined);
 });
 
 describe('updateStore', () => {
@@ -299,6 +302,74 @@ describe('updateStore', () => {
     expect(mocks.installUpdate).toHaveBeenCalledWith('0.2.0');
     expect(useUpdateStore.getState().phase).toBe('ready');
     expect(toast.success).toHaveBeenCalledWith('Instalador aberto', expect.anything());
+  });
+
+  it('hydrates the managed mode and acknowledges a successful update result', async () => {
+    mocks.updateStatus.mockResolvedValue(
+      status({
+        managed: {
+          mode: 'managed',
+          supported: true,
+          installPath: '/home/ana/.local/opt/zylara/Zylara.AppImage',
+          installedVersion: '0.2.0',
+        },
+        lastInstall: { version: '0.2.0', status: 'installed', completedAt: 7 },
+      }),
+    );
+    await useUpdateStore.getState().init();
+    expect(useUpdateStore.getState().managed.mode).toBe('managed');
+    expect(toast.success).toHaveBeenCalledWith(
+      'Atualização instalada',
+      expect.objectContaining({ description: 'O Zylara agora está na v0.2.0.' }),
+    );
+    expect(mocks.acknowledgeUpdateResult).toHaveBeenCalledTimes(1);
+    expect(mocks.installUpdate).not.toHaveBeenCalled();
+  });
+
+  it('reports a rolled back helper result and clears it', async () => {
+    mocks.updateStatus.mockResolvedValue(
+      status({
+        managed: { mode: 'managed', supported: true },
+        lastInstall: {
+          version: '0.2.0',
+          status: 'rolledBack',
+          message: 'promotion failed',
+          completedAt: 8,
+        },
+      }),
+    );
+    await useUpdateStore.getState().init();
+    expect(toast.error).toHaveBeenCalledWith(
+      'Não foi possível aplicar a atualização',
+      expect.objectContaining({
+        description: 'A versão anterior foi restaurada. promotion failed',
+      }),
+    );
+    expect(mocks.acknowledgeUpdateResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the installing phase for a managed self-install', async () => {
+    useUpdateStore.setState({
+      info: releaseInfo({
+        asset: {
+          name: 'Zylara-0.2.0-linux-x64.AppImage',
+          size: 100,
+          sha256: 'a'.repeat(64),
+          downloadUrl:
+            'https://github.com/Hyska-Software/ZylaraAi/releases/download/v0.2.0/Zylara-0.2.0-linux-x64.AppImage',
+          platformLabel: 'Linux x64 · AppImage',
+          kind: 'appimage',
+        },
+      }),
+      downloaded: { ...downloaded, path: '/home/ana/updates/0.2.0/app.AppImage' },
+      managed: { mode: 'managed', supported: true },
+      phase: 'ready',
+    });
+    mocks.installUpdate.mockResolvedValue(undefined);
+    await useUpdateStore.getState().install();
+    expect(mocks.installUpdate).toHaveBeenCalledWith('0.2.0');
+    expect(useUpdateStore.getState().phase).toBe('installing');
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('does not install without a downloaded file', async () => {

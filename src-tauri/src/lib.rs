@@ -43,6 +43,11 @@ mod workspace;
 use tauri::Manager;
 
 pub fn run() {
+    #[cfg(unix)]
+    if let Some(job) = update::managed::helper_requested() {
+        update::managed::run_helper(&job);
+    }
+
     let context = tauri::generate_context!();
 
     #[cfg(windows)]
@@ -67,7 +72,7 @@ pub fn run() {
 
 /// Starts the app shutdown: cancel active turns, give them a short window to
 /// persist partial state, then exit. Shared by window close and the tray menu.
-fn begin_graceful_exit(app_handle: &tauri::AppHandle) {
+pub(crate) fn begin_graceful_exit(app_handle: &tauri::AppHandle) {
     if app_handle.try_state::<state::AppState>().is_none() {
         return;
     }
@@ -140,7 +145,8 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             crate::tray::watch_activation(app.handle().clone());
             let data_dir = crate::config::data_dir(app.handle())
                 .expect("failed to resolve the app data directory");
-            app.manage(crate::update::UpdateState::new(data_dir));
+            let home = app.path().home_dir().unwrap_or_default();
+            app.manage(crate::update::UpdateState::new(data_dir, home));
             // Agent routines run only while the app is open. A tick every 30s
             // keeps the schedule responsive without a cloud worker.
             let scheduler = app.handle().clone();
@@ -365,6 +371,7 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::update::set_update_preferences,
             commands::update::skip_update_version,
             commands::update::mark_update_notified,
+            commands::update::acknowledge_update_result,
             commands::skills::get_skills,
             commands::skills::set_skill_enabled,
             commands::skills::delete_skill,

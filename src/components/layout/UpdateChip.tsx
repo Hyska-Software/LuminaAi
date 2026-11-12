@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
-import { useUpdateStore } from '@/lib/store';
+import { canSelfInstall, useUpdateStore } from '@/lib/store';
 import { cn } from '@/lib/utils';
 import { UpdatePopoverBody } from './UpdatePanel';
 
@@ -36,6 +36,7 @@ export function UpdateChip() {
   const { t } = useTranslation('common');
   const info = useUpdateStore((state) => state.info);
   const phase = useUpdateStore((state) => state.phase);
+  const managed = useUpdateStore((state) => state.managed);
   const progress = useUpdateStore((state) => state.progress);
   const manualCheck = useUpdateStore((state) => state.manualCheck);
   const errorScope = useUpdateStore((state) => state.errorScope);
@@ -90,8 +91,13 @@ export function UpdateChip() {
       break;
     case 'installing':
       tone = 'accent';
-      label = t('shell.update.installing');
-      title = t('shell.update.installingTitle');
+      if (canSelfInstall(managed, info?.asset?.kind)) {
+        label = t('shell.update.installingManaged');
+        title = t('shell.update.installingManagedTitle');
+      } else {
+        label = t('shell.update.installing');
+        title = t('shell.update.installingTitle');
+      }
       Icon = Loader2;
       spin = true;
       break;
