@@ -161,7 +161,8 @@ pub fn config_hash(
 
 /// Hash of every **stable** Code prompt input that can change the frozen text.
 ///
-/// Includes the model/environment, workspace name/path, `AGENTS.md` content,
+/// Includes the model/environment, workspace name/path, repository instruction
+/// content (`AGENTS.md`/`CLAUDE.md`/`.zylara/instructions.md`),
 /// detected project (kind/name/checks), platform, shell/delegation gates and the
 /// canonical tool catalog. The volatile session state (git, tree, todos, plan,
 /// permission mode) is intentionally **absent**: it goes to `surface_items`,
@@ -482,7 +483,7 @@ mod tests {
         );
         assert_eq!(base.len(), 64);
 
-        // AGENTS.md, projeto, workspace, platform, shell, delegation, override
+        // AGENTS.md/CLAUDE.md, projeto, workspace, platform, shell, delegation, override
         // e catálogo de tools mudam a identidade do snapshot.
         assert_ne!(
             base,

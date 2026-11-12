@@ -4,7 +4,7 @@
 //! perfil de código:
 //! - `prompt`: system prompt próprio (ambiente, política, tools, projeto);
 //! - `compaction` (re-export de `harness::compaction`): resumo cache-safe compartilhado com o Chat;
-//! - `context`: contexto do turno (workspace, git, projeto, AGENTS.md, árvore);
+//! - `context`: contexto do turno (workspace, git, projeto, AGENTS.md/CLAUDE.md, árvore);
 //! - `session`: projeções sobre `code_events` (plano, tarefas, contexto);
 //! - `goal`: objetivo persistente da sessão (fold, mutações, rodada e preflight);
 //! - `observed`: política de leitura antes da escrita (CAS por hash);

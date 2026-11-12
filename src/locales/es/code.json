@@ -387,7 +387,7 @@
   "trust": {
     "title": "¿Confiar en esta carpeta?",
     "description": "El agente podrá leer, editar y ejecutar comandos en:",
-    "body": "Las instrucciones del proyecto (<code>AGENTS.md</code>) y las skills locales se cargarán en el prompt. Puedes cambiar la confianza después en las opciones del espacio de trabajo.",
+    "body": "Las instrucciones del proyecto (<code>AGENTS.md</code>/<code>CLAUDE.md</code>) y las skills locales se cargarán en el prompt. Puedes cambiar la confianza después en las opciones del espacio de trabajo.",
     "readOnly": "Abrir en lectura solo permite leer: sin ediciones, sin comandos y sin instrucciones del repositorio.",
     "openReadOnly": "Abrir en lectura",
     "confirm": "Confiar"

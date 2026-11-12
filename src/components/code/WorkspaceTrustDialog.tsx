@@ -30,7 +30,7 @@ export interface WorkspaceTrustDialogProps {
  * Pergunta de confiança da primeira abertura de uma pasta
  * (docs/goals/code-harness/WORKBENCH.md §8.2). É a medida de segurança contra
  * um repositório clonado malicioso: sem confiança o agente não edita arquivos,
- * não executa comandos e não carrega `AGENTS.md`/skills do projeto.
+ * não executa comandos e não carrega `AGENTS.md`/`CLAUDE.md`/skills do projeto.
  *
  * Acessibilidade: Radix Dialog com título/descrição, foco inicial em "Confiar",
  * `Esc` cancela (equivalente a "Cancelar") e as ações ficam desabilitadas

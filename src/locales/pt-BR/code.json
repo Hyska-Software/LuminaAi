@@ -387,7 +387,7 @@
   "trust": {
     "title": "Confiar nesta pasta?",
     "description": "O agente poderá ler, editar e executar comandos em:",
-    "body": "As instruções do projeto (<code>AGENTS.md</code>) e as skills locais serão carregadas no prompt. Você pode mudar a confiança depois nas opções do workspace.",
+    "body": "As instruções do projeto (<code>AGENTS.md</code>/<code>CLAUDE.md</code>) e as skills locais serão carregadas no prompt. Você pode mudar a confiança depois nas opções do workspace.",
     "readOnly": "Abrir em leitura libera apenas leitura: sem edições, sem comandos e sem instruções do repositório.",
     "openReadOnly": "Abrir em Leitura",
     "confirm": "Confiar"

@@ -1166,7 +1166,7 @@ gerenciar os artefatos na interface da biblioteca”. Plano e evidências:
 15. **v1.9 — harness de código (layout Code)**: o modo Code ganhou um agente real.
     Sessões apontam para `workspaces` (pasta do usuário, git opcional) e rodam o
     perfil `code` do loop (`harness/code/**`): prompt próprio com ambiente,
-    política, orientações das tools e contexto do projeto (AGENTS.md, árvore,
+    política, orientações das tools e contexto do projeto (AGENTS.md/CLAUDE.md, árvore,
     perfil, git); tools de leitura/edição (`read_file`, `list_dir`,
     `search_files`, `search_text`, `read_tool_output`, `write_file`, `edit_file`),
     shell (`run_command` + jobs `job_*`), git somente leitura, `todo_write`,
@@ -1264,7 +1264,7 @@ em `code_events`.
 - Arquivos de segredo (`.env`, `*.pem`, `*.key`, credenciais) exigem aprovação explícita
   fora do modo Autônomo.
 - Conteúdo de repositório/páginas é dado não confiável no prompt; instruções de projeto
-  (`AGENTS.md`) valem abaixo da política e do pedido direto do usuário.
+  (`AGENTS.md`/`CLAUDE.md`) valem abaixo da política e do pedido direto do usuário.
 
 ### 16.6 Diff de arquivo como aba central
 

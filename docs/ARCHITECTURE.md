@@ -401,8 +401,9 @@ limites e segurança: **`docs/FILES.md`**.
 Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code). O que muda:
 
 1. **Contexto do turno** (`harness/code/context.rs`): workspace da sessão, git (branch/ahead/
-   behind/dirty), perfil do projeto (comandos de test/lint/build detectados), `AGENTS.md`
-   (raiz + `.zylara/instructions.md`, cap 32 KiB), árvore resumida (2 níveis) e estado da
+   behind/dirty), perfil do projeto (comandos de test/lint/build detectados), instruções do
+   projeto (`AGENTS.md`/`CLAUDE.md` + `.zylara/instructions.md`, raiz, cap 32 KiB, só em
+   workspace confiável), árvore resumida (2 níveis) e estado da
    sessão (plano/tarefas/contexto) projetado de `code_events`.
 2. **Prompt próprio** (`harness/code/prompt.rs`): identidade de agente de código, ambiente,
    política de permissões, orientações das tools (geradas do registry — fonte única),

@@ -1,5 +1,5 @@
 //! Contexto do turno do perfil Code: workspace, git, projeto, instruções
-//! (`AGENTS.md`), árvore resumida e estado da sessão (plano/tarefas).
+//! (`AGENTS.md`/`CLAUDE.md`), árvore resumida e estado da sessão (plano/tarefas).
 //!
 //! É montado **uma vez por turno** (o loop reusa) e alimenta o system prompt e
 //! a política de permissões (`docs/goals/code-harness/HARNESS.md` §10.4).
@@ -14,8 +14,17 @@ use crate::domain::{
 
 use super::{goal, prompt, session};
 
-/// Limite do `AGENTS.md` injetado no prompt (mesmo racional do Codex).
+/// Limite do bloco de instruções do projeto injetado no prompt (mesmo
+/// racional do Codex).
 const MAX_AGENTS_CHARS: usize = 32_768;
+/// Arquivos de instrução do projeto, na ordem de leitura: o padrão
+/// multiagente (`AGENTS.md`), o do Claude Code (`CLAUDE.md`) e o específico do
+/// app (`.zylara/instructions.md`).
+const INSTRUCTION_FILES: &[(&str, &str)] = &[
+    ("AGENTS.md", "AGENTS.md"),
+    ("CLAUDE.md", "CLAUDE.md"),
+    (".zylara/instructions.md", ".zylara/instructions.md"),
+];
 /// Limite da árvore resumida.
 const MAX_TREE_CHARS: usize = 4_000;
 /// Nomes de diretórios que nunca entram na árvore/prompt.
@@ -165,7 +174,11 @@ pub async fn build_for_turn(
     }
     context.git = git_info(&root).await;
     context.project = Some(crate::workspace::project::detect(&root));
-    context.agents_md = read_agents_md(&root);
+    // Untrusted workspaces are read-only until the user trusts them: their
+    // instruction files must not steer the agent before that decision.
+    if context.trusted {
+        context.agents_md = read_instructions(&root);
+    }
     context.tree = tree_summary(&root);
     context.workspace = Some(workspace);
     context.root = Some(root);
@@ -196,21 +209,22 @@ async fn git_info(root: &Path) -> Option<GitInfo> {
     })
 }
 
-/// Lê `AGENTS.md` (raiz) + `.zylara/instructions.md` quando existirem.
-pub fn read_agents_md(root: &Path) -> Option<String> {
+/// Reads the repository instruction files that exist at the workspace root,
+/// concatenating them with source markers. Identical contents (for example a
+/// `CLAUDE.md` that mirrors `AGENTS.md`) are included once.
+pub fn read_instructions(root: &Path) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
-    for (relative, label) in [
-        ("AGENTS.md", "AGENTS.md"),
-        (".zylara/instructions.md", ".zylara/instructions.md"),
-    ] {
+    let mut seen: Vec<String> = Vec::new();
+    for &(relative, label) in INSTRUCTION_FILES {
         let path = root.join(relative);
         let Ok(raw) = std::fs::read_to_string(&path) else {
             continue;
         };
         let trimmed = raw.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || seen.iter().any(|previous| previous == trimmed) {
             continue;
         }
+        seen.push(trimmed.to_string());
         parts.push(format!("<!-- {label} -->\n{}", trimmed));
     }
     if parts.is_empty() {
@@ -398,6 +412,64 @@ mod tests {
         assert!(tree.contains("src/"));
         assert!(!tree.contains("node_modules"));
         assert!(context.workspace.is_some());
+    }
+
+    #[test]
+    fn reads_agents_md_and_claude_md_with_source_markers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("AGENTS.md"), "# Agents\n\nUse pnpm.\n").expect("agents");
+        std::fs::write(dir.path().join("CLAUDE.md"), "# Claude\n\nUse pnpm too.\n").expect("claude");
+        std::fs::create_dir_all(dir.path().join(".zylara")).expect(".zylara");
+        std::fs::write(
+            dir.path().join(".zylara/instructions.md"),
+            "# App\n\nPrefer the app tools.\n",
+        )
+        .expect("instructions");
+        let block = read_instructions(dir.path()).expect("instructions");
+        let agents = block.find("<!-- AGENTS.md -->").expect("agents marker");
+        let claude = block.find("<!-- CLAUDE.md -->").expect("claude marker");
+        let app = block
+            .find("<!-- .zylara/instructions.md -->")
+            .expect("app marker");
+        assert!(agents < claude && claude < app, "ordem: {block}");
+        assert!(block.contains("Use pnpm."));
+        assert!(block.contains("Use pnpm too."));
+        assert!(block.contains("Prefer the app tools."));
+    }
+
+    #[test]
+    fn ignores_duplicate_instruction_contents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("AGENTS.md"), "# Shared rules\n").expect("agents");
+        std::fs::write(dir.path().join("CLAUDE.md"), "  # Shared rules\n\n").expect("claude");
+        let block = read_instructions(dir.path()).expect("instructions");
+        assert_eq!(block.matches("Shared rules").count(), 1, "{block}");
+        assert!(!block.contains("<!-- CLAUDE.md -->"), "{block}");
+    }
+
+    #[tokio::test]
+    async fn untrusted_workspace_does_not_load_instruction_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("AGENTS.md"), "# Regras\n\nUse pnpm.\n").expect("agents");
+        let db = Db::open_in_memory().expect("db");
+        let workspace = db
+            .create_workspace("demo", &dir.path().to_string_lossy())
+            .expect("workspace");
+        let mut conv = conversation(Some(workspace.id.clone()));
+        conv.mode = CONVERSATION_MODE_CODE.to_string();
+
+        let untrusted = build(&db, &conv).await;
+        assert!(!untrusted.trusted);
+        assert!(
+            untrusted.agents_md.is_none(),
+            "workspace não confiável não injeta instruções"
+        );
+
+        db.set_workspace_trusted(&workspace.id, true)
+            .expect("trust");
+        let trusted = build(&db, &conv).await;
+        assert!(trusted.trusted);
+        assert!(trusted.agents_md.as_deref().unwrap().contains("Use pnpm"));
     }
 
     #[test]

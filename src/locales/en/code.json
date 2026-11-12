@@ -387,7 +387,7 @@
   "trust": {
     "title": "Trust this folder?",
     "description": "The agent will be able to read, edit and run commands in:",
-    "body": "The project instructions (<code>AGENTS.md</code>) and local skills will be loaded into the prompt. You can change the trust later in the workspace options.",
+    "body": "The project instructions (<code>AGENTS.md</code>/<code>CLAUDE.md</code>) and local skills will be loaded into the prompt. You can change the trust later in the workspace options.",
     "readOnly": "Opening read-only grants reading only: no edits, no commands and no repository instructions.",
     "openReadOnly": "Open Read-Only",
     "confirm": "Trust"
