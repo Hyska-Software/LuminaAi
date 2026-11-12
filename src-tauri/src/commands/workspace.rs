@@ -3,16 +3,17 @@
 //!
 //! Contrato: `docs/goals/code-harness/HARNESS.md` §7 e `WORKBENCH.md` §3/§7.1.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::domain::{
     Conversation, GitInfo, ProjectCheckInfo, ProjectInfo, Workspace, WorkspaceContext,
-    WorkspaceFileContent, WorkspaceFileEntry,
+    WorkspaceFileContent, WorkspaceFileEntry, WorkspaceGitStatus,
 };
 use crate::state::AppState;
 use crate::workspace::{project, safe_path, safe_path::Access};
@@ -29,6 +30,8 @@ const MAX_PREVIEW_BYTES: usize = 512 * 1024;
 const MAX_INLINE_PREVIEW_BYTES: u64 = 24 * 1024 * 1024;
 /// Limite de arquivos varridos em `search_workspace_files`.
 const MAX_SEARCH_ENTRIES: usize = 20_000;
+/// Tetos de diretórios lazy recarregados por refresh (watcher/manual).
+const MAX_WATCH_DIRS: usize = 32;
 
 fn map_err(error: impl std::fmt::Display) -> String {
     error.to_string()
@@ -466,6 +469,41 @@ fn list_tree(
     Ok(build_tree(&entries, relative))
 }
 
+/// Git badge (`M`/`A`/`D`/`U`/`!`) per workspace-relative path.
+///
+/// Precedence matches the panel: staged first, then unstaged (without
+/// overriding), then untracked (`U`) and conflicts (`!`) last.
+fn git_badges(status: &crate::workspace::git::GitStatus) -> HashMap<String, String> {
+    let mut badges: HashMap<String, String> = HashMap::new();
+    if !status.is_repo {
+        return badges;
+    }
+    for file in &status.staged {
+        badges.insert(file.path.clone(), file.status.clone());
+    }
+    for file in &status.unstaged {
+        badges
+            .entry(file.path.clone())
+            .or_insert_with(|| file.status.clone());
+    }
+    for path in &status.untracked {
+        badges.insert(path.clone(), "U".to_string());
+    }
+    for path in &status.conflicted {
+        badges.insert(path.clone(), "!".to_string());
+    }
+    badges
+}
+
+fn apply_badges(entries: &mut [WorkspaceFileEntry], badges: &HashMap<String, String>) {
+    for entry in entries.iter_mut() {
+        if let Some(badge) = badges.get(&entry.path) {
+            entry.git_status = Some(badge.clone());
+        }
+        apply_badges(&mut entry.children, badges);
+    }
+}
+
 #[tauri::command]
 pub async fn list_workspace_files(
     state: State<'_, AppState>,
@@ -478,32 +516,91 @@ pub async fn list_workspace_files(
     let mut tree = list_tree(&root, &relative, depth.unwrap_or(2))?;
     // Badges de git para os arquivos visíveis.
     let status = crate::workspace::git::detect(&root).await;
-    if status.is_repo {
-        use std::collections::HashMap;
-        let mut badges: HashMap<String, String> = HashMap::new();
-        for file in &status.staged {
-            badges.insert(file.path.clone(), file.status.clone());
-        }
-        for file in &status.unstaged {
-            badges.entry(file.path.clone()).or_insert_with(|| file.status.clone());
-        }
-        for path in &status.untracked {
-            badges.insert(path.clone(), "U".to_string());
-        }
-        for path in &status.conflicted {
-            badges.insert(path.clone(), "!".to_string());
-        }
-        fn apply_badges(entries: &mut [WorkspaceFileEntry], badges: &HashMap<String, String>) {
-            for entry in entries.iter_mut() {
-                if let Some(badge) = badges.get(&entry.path) {
-                    entry.git_status = Some(badge.clone());
-                }
-                apply_badges(&mut entry.children, badges);
-            }
-        }
+    let badges = git_badges(&status);
+    if !badges.is_empty() {
         apply_badges(&mut tree, &badges);
     }
     Ok(tree)
+}
+
+/// Root tree (depth 2) plus the fresh children of the directories the panel
+/// expanded lazily. A directory removed from disk yields an empty list (the
+/// renderer treats it as lazy again), never an error.
+fn tree_snapshot(
+    root: &Path,
+    extra_dirs: &[String],
+) -> Result<(Vec<WorkspaceFileEntry>, HashMap<String, Vec<WorkspaceFileEntry>>), String> {
+    let files = list_tree(root, ".", 2)?;
+    let mut dirs: HashMap<String, Vec<WorkspaceFileEntry>> = HashMap::new();
+    for dir in extra_dirs.iter().take(MAX_WATCH_DIRS) {
+        if dir.is_empty() || dir == "." || dirs.contains_key(dir) {
+            continue;
+        }
+        dirs.insert(dir.clone(), list_tree(root, dir, 2).unwrap_or_default());
+    }
+    Ok((files, dirs))
+}
+
+/// Single snapshot consumed by the Files/Changes panel: one `git status` feeds
+/// the badges of the root tree and of every lazily loaded directory, so a live
+/// refresh costs one status call instead of one per directory.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceTreeSnapshot {
+    pub files: Vec<WorkspaceFileEntry>,
+    pub dirs: HashMap<String, Vec<WorkspaceFileEntry>>,
+    pub git_status: WorkspaceGitStatus,
+}
+
+#[tauri::command]
+pub async fn refresh_workspace_tree(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    extra_dirs: Option<Vec<String>>,
+) -> Result<WorkspaceTreeSnapshot, String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    let status = crate::workspace::git::detect(&root).await;
+    let badges = git_badges(&status);
+    let (mut files, mut dirs) = tree_snapshot(&root, &extra_dirs.unwrap_or_default())?;
+    if !badges.is_empty() {
+        apply_badges(&mut files, &badges);
+        for entries in dirs.values_mut() {
+            apply_badges(entries, &badges);
+        }
+    }
+    Ok(WorkspaceTreeSnapshot {
+        files,
+        dirs,
+        git_status: crate::commands::git::to_status(status),
+    })
+}
+
+/// Starts the native filesystem watcher of a workspace; the renderer receives
+/// coalesced `zylara:workspace-changed` events while it is active.
+#[tauri::command]
+pub async fn watch_workspace(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<(), String> {
+    let root = workspace_path(&state, &workspace_id)?;
+    state
+        .watches
+        .start(&workspace_id, &root, move |event| {
+            let _ = app.emit(crate::workspace::watch::WORKSPACE_CHANGED_EVENT, event);
+        })
+        .map(|_| ())
+        .map_err(map_err)
+}
+
+/// Stops the watcher of a workspace (no-op when it is not running).
+#[tauri::command]
+pub async fn unwatch_workspace(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<(), String> {
+    state.watches.stop(&workspace_id);
+    Ok(())
 }
 
 /// Busca arquivos por nome (substring, case-insensitive) para `@` menções.
@@ -1068,5 +1165,23 @@ mod tests {
         std::fs::create_dir_all(root.join("dir")).expect("criar dir");
         let directory = read_file_content(&root, "dir").expect_err("diretório");
         assert!(directory.contains("FS_NOT_A_FILE"), "{directory}");
+    }
+
+    #[test]
+    fn tree_snapshot_lists_root_and_extra_dirs() {
+        let (_temp, root) = temp_workspace();
+        std::fs::create_dir_all(root.join("src")).expect("criar src");
+        std::fs::create_dir_all(root.join("deep").join("inner")).expect("criar deep");
+        std::fs::write(root.join("src").join("app.ts"), "export {}").expect("criar app");
+        std::fs::write(root.join("deep").join("inner").join("view.ts"), "x").expect("criar view");
+
+        let (files, dirs) =
+            tree_snapshot(&root, &["deep".to_string(), "nao-existe".to_string()])
+                .expect("snapshot da árvore");
+        let src = files.iter().find(|entry| entry.path == "src").expect("src na raiz");
+        assert!(src.children.iter().any(|child| child.path == "src/app.ts"));
+        let deep = dirs.get("deep").expect("deep recarregado");
+        assert!(deep.iter().any(|entry| entry.path == "deep/inner" && entry.is_dir));
+        assert!(dirs.get("nao-existe").expect("entrada pedida").is_empty());
     }
 }

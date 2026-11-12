@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generatedAt": "2026-11-11T21:02:28.698Z",
+ "generatedAt": "2026-11-12T03:36:47.290Z",
  "sources": {
   "docs": [
    "https://opencode.ai/v2/docs/console/go/",
@@ -184,10 +184,10 @@
       "output": 1.2,
       "cache_read": 0.006
      },
-     "releaseDate": "2026-09-10",
+     "releaseDate": "2026-10-17",
      "knowledge": "2025-05",
      "openWeights": true,
-     "description": "DeepSeek V4.1 Flash model for reasoning and agentic coding",
+     "description": "October 17 update of DeepSeek V4.1 Flash with improved reasoning, coding, agentic tasks, and visual understanding",
      "tags": [
       "open-weights",
       "fast",
@@ -2923,10 +2923,10 @@
       "output": 1.2,
       "cache_read": 0.006
      },
-     "releaseDate": "2026-09-10",
+     "releaseDate": "2026-10-17",
      "knowledge": "2025-05",
      "openWeights": true,
-     "description": "DeepSeek V4.1 Flash model for reasoning and agentic coding",
+     "description": "October 17 update of DeepSeek V4.1 Flash with improved reasoning, coding, agentic tasks, and visual understanding",
      "tags": [
       "open-weights",
       "fast",
@@ -2973,10 +2973,10 @@
       "output": 0,
       "cache_read": 0
      },
-     "releaseDate": "2026-09-10",
+     "releaseDate": "2026-10-17",
      "knowledge": "2025-05",
      "openWeights": true,
-     "description": "DeepSeek V4.1 Flash model for reasoning and agentic coding",
+     "description": "October 17 update of DeepSeek V4.1 Flash with improved reasoning, coding, agentic tasks, and visual understanding",
      "tags": [
       "free",
       "open-weights",

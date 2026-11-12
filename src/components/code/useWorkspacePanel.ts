@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { t } from '@/lib/i18n';
-import type { WorkspaceFileEntry, WorkspaceGitCommit, WorkspaceGitStatus } from '@/lib/types';
+import type {
+  WorkspaceFileEntry,
+  WorkspaceGitCommit,
+  WorkspaceGitStatus,
+  WorkspaceTreeSnapshot,
+} from '@/lib/types';
 
 export interface WorkspacePanelDiff {
   /** Lane showing the diff (`null` = nothing open). */
@@ -13,10 +18,18 @@ export interface WorkspacePanelDiff {
 }
 
 export interface UseWorkspacePanelOptions {
-  /** Directory depth requested from `list_workspace_files` (backend default 2). */
-  depth?: number;
   /** Commit log size (default 20). */
   commitLimit?: number;
+}
+
+/** Options of a snapshot refresh (manual `⟳`, panel actions and the watcher). */
+export interface WorkspacePanelRefreshOptions {
+  /** Lazily loaded directories to reload together with the root tree. */
+  dirs?: string[];
+  /** `false` keeps `filesLoading`/`gitLoading` untouched (background refresh, no skeleton). Default `true`. */
+  foreground?: boolean;
+  /** `false` skips `gitLog` (watcher batches). Default `true`. */
+  reloadCommits?: boolean;
 }
 
 export interface UseWorkspacePanelResult {
@@ -35,8 +48,12 @@ export interface UseWorkspacePanelResult {
   /** `gitStatus.isRepo` when known, `false` otherwise. */
   isRepo: boolean;
   diff: WorkspacePanelDiff;
-  /** Reloads files, git status and the commit log. */
-  refresh: () => Promise<void>;
+  /**
+   * Reloads the tree, `git status` and (optionally) the commit log through a
+   * single backend snapshot. Resolves with the snapshot, or `null` when the
+   * workspace is absent or a newer refresh superseded this one.
+   */
+  refresh: (options?: WorkspacePanelRefreshOptions) => Promise<WorkspaceTreeSnapshot | null>;
   /** Loads the unified diff of one file (uses the container's known diff when given). */
   openDiff: (path: string, options?: { staged?: boolean; knownDiff?: string | null }) => Promise<void>;
   closeDiff: () => void;
@@ -68,7 +85,7 @@ export function useWorkspacePanel(
   workspaceId: string | null | undefined,
   options: UseWorkspacePanelOptions = {},
 ): UseWorkspacePanelResult {
-  const { depth = 2, commitLimit = 20 } = options;
+  const { commitLimit = 20 } = options;
   const [files, setFiles] = useState<WorkspaceFileEntry[]>([]);
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
   const [commits, setCommits] = useState<WorkspaceGitCommit[]>([]);
@@ -83,73 +100,84 @@ export function useWorkspacePanel(
   const loadRun = useRef(0);
   const diffRun = useRef(0);
 
-  const load = useCallback(async () => {
-    const run = loadRun.current + 1;
-    loadRun.current = run;
+  const load = useCallback(
+    async (
+      options: WorkspacePanelRefreshOptions = {},
+    ): Promise<WorkspaceTreeSnapshot | null> => {
+      const run = loadRun.current + 1;
+      loadRun.current = run;
+      const { dirs = [], foreground = true, reloadCommits = true } = options;
 
-    if (!workspaceId) {
-      setFiles([]);
-      setGitStatus(null);
-      setCommits([]);
+      if (!workspaceId) {
+        setFiles([]);
+        setGitStatus(null);
+        setCommits([]);
+        setFilesLoading(false);
+        setGitLoading(false);
+        setCommitsLoading(false);
+        setFilesError(null);
+        setGitError(null);
+        setCommitsError(null);
+        return null;
+      }
+
+      if (foreground) {
+        setFilesLoading(true);
+        setGitLoading(true);
+        setFilesError(null);
+        setGitError(null);
+      }
+
+      let snapshot: WorkspaceTreeSnapshot;
+      try {
+        snapshot = await api.refreshWorkspaceTree(workspaceId, dirs);
+      } catch (error) {
+        if (run !== loadRun.current) return null;
+        const message = describeError(error, t('code:panelData.filesError'));
+        setFiles([]);
+        setFilesError(message);
+        setGitStatus(null);
+        setGitError(message);
+        setCommits([]);
+        setCommitsError(null);
+        setFilesLoading(false);
+        setGitLoading(false);
+        setCommitsLoading(false);
+        return null;
+      }
+      if (run !== loadRun.current) return null;
+
+      setFiles(snapshot.files ?? []);
       setFilesLoading(false);
+      setGitStatus(snapshot.gitStatus);
+      setGitError(null);
       setGitLoading(false);
-      setCommitsLoading(false);
-      setFilesError(null);
-      setGitError(null);
-      setCommitsError(null);
-      return;
-    }
 
-    setFilesLoading(true);
-    setGitLoading(true);
-    setFilesError(null);
-    setGitError(null);
+      if (!snapshot.gitStatus?.isRepo) {
+        setCommits([]);
+        setCommitsError(null);
+        setCommitsLoading(false);
+        return snapshot;
+      }
+      if (!reloadCommits) return snapshot;
 
-    const [filesResult, statusResult] = await Promise.allSettled([
-      api.listWorkspaceFiles(workspaceId, '.', depth),
-      api.gitStatus(workspaceId),
-    ]);
-    if (run !== loadRun.current) return;
-
-    if (filesResult.status === 'fulfilled') setFiles(filesResult.value ?? []);
-    else {
-      setFiles([]);
-      setFilesError(describeError(filesResult.reason, t('code:panelData.filesError')));
-    }
-    setFilesLoading(false);
-
-    let isRepo = false;
-    if (statusResult.status === 'fulfilled') {
-      setGitStatus(statusResult.value);
-      setGitError(null);
-      isRepo = Boolean(statusResult.value?.isRepo);
-    } else {
-      setGitStatus(null);
-      setGitError(describeError(statusResult.reason, t('code:panelData.gitError')));
-    }
-    setGitLoading(false);
-
-    if (!isRepo) {
-      setCommits([]);
-      setCommitsError(null);
-      setCommitsLoading(false);
-      return;
-    }
-
-    setCommitsLoading(true);
-    try {
-      const log = await api.gitLog(workspaceId, commitLimit);
-      if (run !== loadRun.current) return;
-      setCommits(log ?? []);
-      setCommitsError(null);
-    } catch (error) {
-      if (run !== loadRun.current) return;
-      setCommits([]);
-      setCommitsError(describeError(error, t('code:panelData.commitsError')));
-    } finally {
-      if (run === loadRun.current) setCommitsLoading(false);
-    }
-  }, [workspaceId, depth, commitLimit]);
+      setCommitsLoading(true);
+      try {
+        const log = await api.gitLog(workspaceId, commitLimit);
+        if (run !== loadRun.current) return null;
+        setCommits(log ?? []);
+        setCommitsError(null);
+      } catch (error) {
+        if (run !== loadRun.current) return null;
+        setCommits([]);
+        setCommitsError(describeError(error, t('code:panelData.commitsError')));
+      } finally {
+        if (run === loadRun.current) setCommitsLoading(false);
+      }
+      return snapshot;
+    },
+    [workspaceId, commitLimit],
+  );
 
   useEffect(() => {
     void load();
@@ -161,9 +189,10 @@ export function useWorkspacePanel(
     setDiff(EMPTY_DIFF);
   }, [workspaceId]);
 
-  const refresh = useCallback(async () => {
-    await load();
-  }, [load]);
+  const refresh = useCallback(
+    (options?: WorkspacePanelRefreshOptions) => load(options),
+    [load],
+  );
 
   const openDiff = useCallback(
     async (

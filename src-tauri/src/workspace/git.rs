@@ -1085,7 +1085,14 @@ fn git_request(root: &Path, args: &[&str], cap: usize) -> ExecRequest {
         program: "git".to_string(),
         args: full_args,
         cwd: root.to_path_buf(),
-        env: exec::sanitized_env(&[("LC_ALL", "C"), ("LANG", "C")]),
+        env: exec::sanitized_env(&[
+            ("LC_ALL", "C"),
+            ("LANG", "C"),
+            // Read-only calls (status/diff/log) must not rewrite `.git/index`:
+            // the workspace watcher reports index writes and would otherwise
+            // refresh -> status -> write -> refresh in a loop.
+            ("GIT_OPTIONAL_LOCKS", "0"),
+        ]),
         timeout: GIT_TIMEOUT,
         cancel: CancellationToken::new(),
         max_output_bytes: cap,

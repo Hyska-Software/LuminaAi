@@ -57,6 +57,23 @@
       "aria": "Keep running in the system tray when the window is closed"
     }
   },
+  "terminal": {
+    "appearance": {
+      "title": "Terminal appearance",
+      "description": "Typography of the integrated terminal in the Code layout."
+    },
+    "fontFamily": {
+      "label": "Font family",
+      "description": "CSS font-family list. Leave empty to use the theme's monospace stack.",
+      "placeholder": "Theme default",
+      "aria": "Terminal font family"
+    },
+    "fontSize": {
+      "label": "Font size",
+      "description": "Character size of the integrated terminal.",
+      "aria": "Terminal font size"
+    }
+  },
   "trayPrompt": {
     "title": "Keep Zylara running in the background?",
     "description": "When you close the window, Zylara can stay in the system tray so background agent work keeps going. You can change this later in Settings → General.",
@@ -124,6 +141,7 @@
   "tabs": {
     "general": "General",
     "themes": "Themes",
+    "terminal": "Terminal",
     "providers": "Providers",
     "model": "Default model",
     "instructions": "Instructions",

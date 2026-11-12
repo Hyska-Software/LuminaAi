@@ -96,6 +96,7 @@ import type {
   WorkspaceGitCommit,
   WorkspaceGitCompare,
   WorkspaceGitStatus,
+  WorkspaceTreeSnapshot,
 } from './types';
 
 export const api = {
@@ -506,6 +507,12 @@ export const api = {
   openWorkspaceInExplorer: (id: string) => invoke<void>('open_workspace_in_explorer', { id }),
   listWorkspaceFiles: (workspaceId: string, path = '.', depth = 2) =>
     invoke<WorkspaceFileEntry[]>('list_workspace_files', { workspaceId, path, depth }),
+  refreshWorkspaceTree: (workspaceId: string, extraDirs: string[] = []) =>
+    invoke<WorkspaceTreeSnapshot>('refresh_workspace_tree', { workspaceId, extraDirs }),
+  watchWorkspace: (workspaceId: string) =>
+    invoke<void>('watch_workspace', { workspaceId }),
+  unwatchWorkspace: (workspaceId: string) =>
+    invoke<void>('unwatch_workspace', { workspaceId }),
   searchWorkspaceFiles: (workspaceId: string, query: string, limit = 50) =>
     invoke<string[]>('search_workspace_files', { workspaceId, query, limit }),
   readWorkspaceFile: (workspaceId: string, path: string) =>

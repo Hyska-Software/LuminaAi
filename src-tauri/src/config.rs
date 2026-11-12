@@ -62,6 +62,13 @@ pub fn secrets_path(app: &AppHandle) -> PathBuf {
 pub const CODE_TIMEOUT_MIN_SECS: u32 = 10;
 pub const CODE_TIMEOUT_MAX_SECS: u32 = 600;
 
+/// Integrated terminal font size bounds (px); mirrored by
+/// `src/lib/terminalSettings.ts`.
+pub const TERMINAL_FONT_SIZE_MIN: u32 = 8;
+pub const TERMINAL_FONT_SIZE_MAX: u32 = 32;
+/// Longest accepted custom terminal font-family string.
+pub const TERMINAL_FONT_FAMILY_MAX_CHARS: usize = 200;
+
 /// Retenção dos arquivos de spill (saída completa de tools) do harness de
 /// código, em dias. Fora da faixa, o valor é clampado.
 pub const SPILL_RETENTION_MIN_DAYS: u32 = 1;
@@ -116,6 +123,17 @@ fn normalize_settings(mut settings: Settings) -> Settings {
         settings.font_scale = defaults.font_scale;
     }
     settings.font_scale = settings.font_scale.clamp(0.85, 1.3);
+
+    settings.terminal_font_family = settings
+        .terminal_font_family
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(TERMINAL_FONT_FAMILY_MAX_CHARS)
+        .collect();
+    settings.terminal_font_size = settings
+        .terminal_font_size
+        .clamp(TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX);
 
     if !matches!(settings.theme.as_str(), "light" | "dark" | "system") {
         settings.theme = defaults.theme;
@@ -1724,10 +1742,19 @@ mod tests {
     }
 
     #[test]
+    fn terminal_settings_default_to_theme_font_and_12px() {
+        let settings = parse_settings_json("{}").expect("parse empty settings");
+        assert_eq!(settings.terminal_font_family, "");
+        assert_eq!(settings.terminal_font_size, 12);
+    }
+
+    #[test]
     fn normalizes_out_of_range_settings() {
         let settings = Settings {
             max_steps: 5_000,
             font_scale: 4.0,
+            terminal_font_family: format!("  Fira Code\n  {}", "x".repeat(300)),
+            terminal_font_size: 99,
             theme: "neon".into(),
             locale: "xx".into(),
             send_key: "space".into(),
@@ -1747,6 +1774,13 @@ mod tests {
         let normalized = normalize_settings(settings);
         assert_eq!(normalized.max_steps, MAX_STEPS_LIMIT);
         assert_eq!(normalized.font_scale, 1.3);
+        assert!(normalized.terminal_font_family.starts_with("Fira Code"));
+        assert!(!normalized.terminal_font_family.contains('\n'));
+        assert_eq!(
+            normalized.terminal_font_family.chars().count(),
+            TERMINAL_FONT_FAMILY_MAX_CHARS
+        );
+        assert_eq!(normalized.terminal_font_size, TERMINAL_FONT_SIZE_MAX);
         assert_eq!(normalized.theme, "system");
         assert_eq!(normalized.locale, "en");
         assert_eq!(normalized.send_key, "enter");
@@ -1811,12 +1845,14 @@ mod tests {
         let settings = Settings {
             max_steps: 0,
             font_scale: 0.1,
+            terminal_font_size: 0,
             code_timeout_secs: 1,
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
         assert_eq!(normalized.max_steps, 1);
         assert_eq!(normalized.font_scale, 0.85);
+        assert_eq!(normalized.terminal_font_size, TERMINAL_FONT_SIZE_MIN);
         assert_eq!(normalized.code_timeout_secs, CODE_TIMEOUT_MIN_SECS);
     }
 

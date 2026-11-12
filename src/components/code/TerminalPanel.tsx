@@ -25,6 +25,7 @@ import {
   Spinner,
   Tooltip,
 } from '@/components/ui';
+import { useAppStore } from '@/lib/store';
 import { THEME_APPLIED_EVENT } from '@/lib/theme/apply';
 import type { TerminalSurface, TerminalTabInfo } from './terminalManager';
 import { terminalManager, terminalTabLabel } from './terminalManager';
@@ -63,6 +64,8 @@ export function TerminalPanel({
     () => terminalManager.getSnapshot(conversationId, surface),
     () => terminalManager.getSnapshot(conversationId, surface),
   );
+  const terminalFontFamilySetting = useAppStore((state) => state.settings.terminalFontFamily);
+  const terminalFontSizeSetting = useAppStore((state) => state.settings.terminalFontSize);
 
   const { tabs, activeId, loading, error, limit, used } = snapshot;
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
@@ -99,6 +102,10 @@ export function TerminalPanel({
     window.addEventListener(THEME_APPLIED_EVENT, handleThemeApplied);
     return () => window.removeEventListener(THEME_APPLIED_EVENT, handleThemeApplied);
   }, []);
+
+  useEffect(() => {
+    terminalManager.applyFonts();
+  }, [terminalFontFamilySetting, terminalFontSizeSetting]);
 
   useEffect(() => {
     let cancelled = false;

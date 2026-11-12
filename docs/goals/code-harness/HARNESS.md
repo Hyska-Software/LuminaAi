@@ -401,12 +401,14 @@ pub fn resolve(root: &Path, requested: &str, mode: Access) -> Result<PathBuf, Fs
 
 ### 7.5 Watcher
 
-- `notify` + `notify-debouncer-full` (debounce 400 ms), watch recursivo do workspace com exclusões
-  (`.git`, `node_modules`, `target`, `dist`, `build`, `.venv`, `__pycache__`, `.next`, e padrões do
-  `.gitignore` via `ignore`).
-- Eventos → invalidação de cache da árvore + `workspace/changed` (coalescido, no máximo 1/segundo)
-  para a UI atualizar árvore/diff sem reload. Se o repo for grande (> 20k arquivos), watch apenas
-  os diretórios visíveis e recarregar sob demanda (decisão de performance na fase 2).
+- `notify` (sem `notify-debouncer-full`: coalescedor próprio com quiet window de 400 ms e no
+  máximo 1 evento/segundo), watch recursivo do workspace com exclusões (`.git` exceto
+  `HEAD`/`index`/`refs`/`packed-refs`, `node_modules`, `target`, `dist`, `build`, `.venv`,
+  `__pycache__`, `.next`, e padrões do `.gitignore` da raiz via `ignore`). Fallback `PollWatcher`
+  (2 s) quando o backend nativo falha (share de rede, limite de inotify).
+- Eventos → invalidação de cache da árvore + `zylara:workspace-changed` (coalescido, no máximo
+  1/segundo) para a UI atualizar árvore/status sem reload. Se o repo for grande (> 20k arquivos),
+  watch apenas os diretórios visíveis e recarregar sob demanda (decisão de performance na fase 2).
 - Nunca confiar no watcher para correção: toda leitura de estado (status/diff) é refeita no backend
   quando a UI pede; o evento é só um "avise-se".
 

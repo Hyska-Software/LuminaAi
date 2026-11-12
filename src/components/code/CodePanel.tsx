@@ -25,7 +25,11 @@ import {
   type CodePanelTab,
 } from '@/lib/store';
 import { resolveSidePanelLayout, useViewportWidth } from '@/lib/sidePanel';
-import type { WorkspaceFileEntry } from '@/lib/types';
+import type {
+  WorkspaceChangedEvent,
+  WorkspaceFileEntry,
+  WorkspaceTreeSnapshot,
+} from '@/lib/types';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ChangesPanel } from './ChangesPanel';
@@ -33,6 +37,7 @@ import { FileTree } from './FileTree';
 import { GitActionsMenu } from './GitActionsMenu';
 import { TerminalPanel } from './TerminalPanel';
 import { useWorkspacePanel } from './useWorkspacePanel';
+import { dirsAffectedBy, useWorkspaceWatch } from './useWorkspaceWatch';
 import { useWorkspaces } from './useWorkspaces';
 
 /** Tabs of the Code right panel (WORKBENCH §7). */
@@ -202,14 +207,60 @@ export function CodePanel() {
   const selectedFilePath =
     workspaceId && codeFileTab?.workspaceId === workspaceId ? codeFileTab.path : undefined;
 
-  const refreshAll = useCallback(() => {
-    // Recarrega a raiz e descarta os filhos carregados sob demanda (podem ter
-    // mudado no disco).
-    setLazyChildren({});
-    setLazyLoading(new Set());
-    void panel.refresh();
+  /** Replaces the cached children of the refreshed lazy directories. */
+  const applySnapshotDirs = useCallback(
+    (snapshot: WorkspaceTreeSnapshot, dirs: string[]) => {
+      setLazyChildren((current) => {
+        const next = { ...current };
+        for (const dir of dirs) {
+          const entries = snapshot.dirs[dir] ?? [];
+          // Deleted/empty dir becomes lazy again: the next expand reloads it.
+          if (entries.length === 0) delete next[dir];
+          else next[dir] = entries;
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const refreshAll = useCallback(async () => {
+    // Preserva a expansão: a raiz e cada diretório carregado sob demanda vêm
+    // atualizados no mesmo snapshot.
+    const dirs = Object.keys(lazyChildren);
+    const snapshot = await panel.refresh({ dirs });
+    if (snapshot) applySnapshotDirs(snapshot, dirs);
     if (activeId) void refreshSession(activeId);
-  }, [panel, activeId, refreshSession]);
+  }, [lazyChildren, panel, activeId, refreshSession, applySnapshotDirs]);
+
+  const handleWorkspaceChanges = useCallback(
+    (event: WorkspaceChangedEvent) => {
+      const loaded = Object.keys(lazyChildren);
+      const dirs = (event.overflow ? loaded : dirsAffectedBy(event.paths, loaded)).slice(0, 32);
+      return panel
+        .refresh({ dirs, foreground: false, reloadCommits: false })
+        .then((snapshot) => {
+          if (snapshot) applySnapshotDirs(snapshot, dirs);
+        });
+    },
+    [lazyChildren, panel, applySnapshotDirs],
+  );
+
+  useWorkspaceWatch({
+    workspaceId,
+    enabled: open && layout.canDock,
+    onChanges: handleWorkspaceChanges,
+  });
+
+  /* Reabrir o painel reconcilia mudanças ocorridas com o watcher parado. */
+  const refreshAllRef = useRef(refreshAll);
+  refreshAllRef.current = refreshAll;
+  const wasVisible = useRef(open && layout.canDock);
+  useEffect(() => {
+    const visible = open && layout.canDock;
+    if (visible && !wasVisible.current) void refreshAllRef.current();
+    wasVisible.current = visible;
+  }, [open, layout.canDock]);
 
   /* The summary from the backend already carries `origin`/`staged` per file;
      keeping it intact lets the panel distinguish git-only rows from session
@@ -318,7 +369,11 @@ export function CodePanel() {
         </div>
 
         <Tooltip content={t('code:panel.refreshTooltip')} side="bottom">
-          <IconButton label={t('code:panel.refresh')} size="sm" onClick={refreshAll}>
+          <IconButton
+            label={t('code:panel.refresh')}
+            size="sm"
+            onClick={() => void refreshAll()}
+          >
             <RefreshCw aria-hidden className="size-3.5" />
           </IconButton>
         </Tooltip>

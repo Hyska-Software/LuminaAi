@@ -94,6 +94,8 @@ portable-pty = "0.8"
 # Árvore/busca do workspace respeitando .gitignore (mesmo motor do ripgrep).
 ignore = "0.4"
 globset = "0.4"
+# Recursive filesystem watcher for the Code panel (RDCW/FSEvents/inotify).
+notify = "8"
 
 [profile.dev]
 incremental = true

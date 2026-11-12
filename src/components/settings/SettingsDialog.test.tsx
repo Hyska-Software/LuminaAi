@@ -62,4 +62,14 @@ describe('SettingsDialog — aba controlada pelo uiStore (deep-link da paleta)',
     expect(useUiStore.getState().settingsTab).toBe('agents');
     expect(await screen.findByText('Desktop privado (computer use)')).not.toBeNull();
   });
+
+  it('opens the Terminal tab with the terminal appearance sections', async () => {
+    const user = userEvent.setup();
+    render(<SettingsDialog />);
+
+    await user.click(tab('Terminal'));
+
+    expect(useUiStore.getState().settingsTab).toBe('terminal');
+    expect(await screen.findByText('Aparência do terminal')).not.toBeNull();
+  });
 });

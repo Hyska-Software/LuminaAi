@@ -12,6 +12,7 @@ import {
   ScrollText,
   Settings2,
   Sparkles,
+  SquareTerminal,
   Wrench,
   type LucideIcon,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ import type { SettingsTabId } from '@/lib/settingsTabs';
 export const SETTINGS_TAB_ICONS: Record<SettingsTabId, LucideIcon> = {
   general: Settings2,
   themes: Palette,
+  terminal: SquareTerminal,
   providers: KeyRound,
   model: Sparkles,
   instructions: ScrollText,

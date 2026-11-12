@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/api', () => ({
   api: {
     listWorkspaces: vi.fn(),
     listWorkspaceFiles: vi.fn(),
+    refreshWorkspaceTree: vi.fn(),
+    watchWorkspace: vi.fn(),
+    unwatchWorkspace: vi.fn(),
     gitStatus: vi.fn(),
     gitFetch: vi.fn(),
     gitPull: vi.fn(),
@@ -24,6 +27,22 @@ vi.mock('@/lib/api', () => ({
   },
 }));
 
+const watchEvents = vi.hoisted(() => ({
+  handlers: [] as Array<(event: { payload: unknown }) => void>,
+}));
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(
+    async (_name: string, handler: (event: { payload: unknown }) => void) => {
+      watchEvents.handlers.push(handler);
+      return () => {
+        const index = watchEvents.handlers.indexOf(handler);
+        if (index >= 0) watchEvents.handlers.splice(index, 1);
+      };
+    },
+  ),
+}));
+
 import { api } from '@/lib/api';
 import {
   SIDE_PANEL_WIDTH_DEFAULT,
@@ -33,7 +52,7 @@ import {
   useCodeStore,
   useUiStore,
 } from '@/lib/store';
-import type { Conversation, Workspace } from '@/lib/types';
+import type { Conversation, Workspace, WorkspaceGitStatus } from '@/lib/types';
 import { __resetWorkspacesForTests } from './useWorkspaces';
 import { CodePanel } from './CodePanel';
 
@@ -96,17 +115,22 @@ function workspace(overrides: Partial<Workspace> = {}): Workspace {
   };
 }
 
+function notRepoStatus(): WorkspaceGitStatus {
+  return { isRepo: false, staged: [], unstaged: [], untracked: [], conflicted: [] };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  watchEvents.handlers.length = 0;
   apiMock.listWorkspaces.mockResolvedValue([]);
   apiMock.listWorkspaceFiles.mockResolvedValue([]);
-  apiMock.gitStatus.mockResolvedValue({
-    isRepo: false,
-    staged: [],
-    unstaged: [],
-    untracked: [],
-    conflicted: [],
+  apiMock.refreshWorkspaceTree.mockResolvedValue({
+    files: [],
+    dirs: {},
+    gitStatus: notRepoStatus(),
   });
+  apiMock.watchWorkspace.mockResolvedValue(undefined);
+  apiMock.unwatchWorkspace.mockResolvedValue(undefined);
   apiMock.gitLog.mockResolvedValue([]);
   setViewport(1440);
   resetPanelState();
@@ -189,23 +213,27 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
       activeId: 'conv-1',
     });
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
-    apiMock.listWorkspaceFiles.mockResolvedValue([
-      {
-        path: 'src',
-        name: 'src',
-        isDir: true,
-        depth: 0,
-        children: [
-          {
-            path: 'src/app.ts',
-            name: 'app.ts',
-            isDir: false,
-            depth: 1,
-            size: 20,
-          },
-        ],
-      },
-    ]);
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [
+        {
+          path: 'src',
+          name: 'src',
+          isDir: true,
+          depth: 0,
+          children: [
+            {
+              path: 'src/app.ts',
+              name: 'app.ts',
+              isDir: false,
+              depth: 1,
+              size: 20,
+            },
+          ],
+        },
+      ],
+      dirs: {},
+      gitStatus: notRepoStatus(),
+    });
     useUiStore.setState({ codePanelTab: 'files' });
 
     render(<CodePanel />);
@@ -229,7 +257,7 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
     expect(screen.getByRole('treeitem', { name: 'app.ts' }).getAttribute('aria-selected')).toBe(
       'true',
     );
-    expect(apiMock.listWorkspaceFiles).toHaveBeenCalledWith('ws-1', '.', 2);
+    expect(apiMock.refreshWorkspaceTree).toHaveBeenCalledWith('ws-1', []);
     // A barra workspace · branch vive só na aba Alterações.
     fireEvent.click(screen.getByRole('tab', { name: 'Alterações' }));
     expect(await screen.findByText(/zylara/)).toBeTruthy();
@@ -241,18 +269,22 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
       activeId: 'conv-1',
     });
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
-    apiMock.listWorkspaceFiles.mockResolvedValue([
-      {
-        path: 'src',
-        name: 'src',
-        isDir: true,
-        depth: 0,
-        children: [
-          { path: 'src/app.ts', name: 'app.ts', isDir: false, depth: 1, size: 20 },
-          { path: 'src/main.ts', name: 'main.ts', isDir: false, depth: 1, size: 20 },
-        ],
-      },
-    ]);
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [
+        {
+          path: 'src',
+          name: 'src',
+          isDir: true,
+          depth: 0,
+          children: [
+            { path: 'src/app.ts', name: 'app.ts', isDir: false, depth: 1, size: 20 },
+            { path: 'src/main.ts', name: 'main.ts', isDir: false, depth: 1, size: 20 },
+          ],
+        },
+      ],
+      dirs: {},
+      gitStatus: notRepoStatus(),
+    });
     useUiStore.setState({
       codePanelTab: 'files',
       codeView: 'file',
@@ -274,13 +306,17 @@ describe('CodePanel — abas Arquivos / Alterações', () => {
       activeId: 'conv-1',
     });
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
-    apiMock.gitStatus.mockResolvedValue({
-      isRepo: true,
-      branch: 'main',
-      staged: [],
-      unstaged: [],
-      untracked: [],
-      conflicted: [],
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [],
+      dirs: {},
+      gitStatus: {
+        isRepo: true,
+        branch: 'main',
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+      },
     });
     useUiStore.setState({ codePanelTab: 'files' });
 
@@ -396,16 +432,20 @@ describe('CodePanel — histórico de commits', () => {
       activeId: 'conv-1',
     });
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
-    apiMock.gitStatus.mockResolvedValue({
-      isRepo: true,
-      root: 'C:/projetos/zylara',
-      branch: 'main',
-      staged: [],
-      unstaged: [],
-      untracked: [],
-      conflicted: [],
-      ahead: 0,
-      behind: 0,
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [],
+      dirs: {},
+      gitStatus: {
+        isRepo: true,
+        root: 'C:/projetos/zylara',
+        branch: 'main',
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        ahead: 0,
+        behind: 0,
+      },
     });
 
     render(<CodePanel />);
@@ -425,13 +465,6 @@ describe('CodePanel — histórico de commits', () => {
       activeId: 'conv-1',
     });
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
-    apiMock.gitStatus.mockResolvedValue({
-      isRepo: false,
-      staged: [],
-      unstaged: [],
-      untracked: [],
-      conflicted: [],
-    });
 
     render(<CodePanel />);
 
@@ -458,6 +491,11 @@ describe('CodePanel — histórico de commits', () => {
       behind: 1,
     };
     apiMock.gitStatus.mockResolvedValue(repoStatus);
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [],
+      dirs: {},
+      gitStatus: repoStatus,
+    });
     apiMock.gitPush.mockResolvedValue(repoStatus);
 
     render(<CodePanel />);
@@ -479,10 +517,12 @@ describe('CodePanel — árvore lazy', () => {
       activeId: 'conv-1',
     });
     apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [{ path: 'apps', name: 'apps', isDir: true, depth: 0 }],
+      dirs: {},
+      gitStatus: notRepoStatus(),
+    });
     apiMock.listWorkspaceFiles.mockImplementation(async (_workspaceId: string, path = '.') => {
-      if (path === '.') {
-        return [{ path: 'apps', name: 'apps', isDir: true, depth: 0 }];
-      }
       if (path === 'apps') {
         return [{ path: 'apps/index.html', name: 'index.html', isDir: false, depth: 0, size: 10 }];
       }
@@ -540,8 +580,12 @@ describe('CodePanel — árvore lazy (3º nível)', () => {
         ],
       },
     ];
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: rootTree,
+      dirs: {},
+      gitStatus: notRepoStatus(),
+    });
     apiMock.listWorkspaceFiles.mockImplementation(async (_workspaceId: string, path = '.') => {
-      if (path === '.') return rootTree;
       if (path === 'apps/desktop/public') {
         return [
           { path: 'apps/desktop/public/logo.svg', name: 'logo.svg', isDir: false, depth: 0, size: 4 },
@@ -570,5 +614,50 @@ describe('CodePanel — árvore lazy (3º nível)', () => {
       (call) => call[1] === 'apps/desktop/public',
     );
     expect(publicCalls).toHaveLength(1);
+  });
+});
+
+describe('CodePanel — atualização em tempo real', () => {
+  it('recarrega árvore e status quando o watcher emite um lote', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [{ path: 'src', name: 'src', isDir: true, depth: 0, children: [] }],
+      dirs: {},
+      gitStatus: notRepoStatus(),
+    });
+    useUiStore.setState({ codePanelTab: 'files' });
+
+    render(<CodePanel />);
+
+    expect(await screen.findByRole('treeitem', { name: 'src' })).toBeTruthy();
+    await waitFor(() => expect(watchEvents.handlers.length).toBe(1));
+
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [{ path: 'docs', name: 'docs', isDir: true, depth: 0, children: [] }],
+      dirs: {},
+      gitStatus: notRepoStatus(),
+    });
+    act(() => {
+      watchEvents.handlers[0]?.({
+        payload: { workspaceId: 'ws-1', paths: ['docs'], overflow: false },
+      });
+    });
+
+    expect(await screen.findByRole('treeitem', { name: 'docs' })).toBeTruthy();
+    expect(apiMock.refreshWorkspaceTree).toHaveBeenCalledTimes(2);
+    expect(apiMock.refreshWorkspaceTree).toHaveBeenLastCalledWith('ws-1', []);
+  });
+
+  it('não liga o watcher com o painel fechado', async () => {
+    useUiStore.setState({ codePanelOpen: false });
+
+    render(<CodePanel />);
+    await act(async () => {});
+
+    expect(apiMock.watchWorkspace).not.toHaveBeenCalled();
   });
 });

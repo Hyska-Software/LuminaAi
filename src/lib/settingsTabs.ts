@@ -9,6 +9,7 @@
 export type SettingsTabId =
   | 'general'
   | 'themes'
+  | 'terminal'
   | 'providers'
   | 'model'
   | 'instructions'
@@ -25,6 +26,7 @@ export interface SettingsTabDefinition {
 export const SETTINGS_TABS = [
   { id: 'general', labelKey: 'tabs.general' },
   { id: 'themes', labelKey: 'tabs.themes' },
+  { id: 'terminal', labelKey: 'tabs.terminal' },
   { id: 'providers', labelKey: 'tabs.providers' },
   { id: 'model', labelKey: 'tabs.model' },
   { id: 'instructions', labelKey: 'tabs.instructions' },

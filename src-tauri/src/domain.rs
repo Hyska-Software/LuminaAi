@@ -1183,6 +1183,10 @@ fn default_computer_environment_setting() -> String {
     "auto".to_string()
 }
 
+fn default_terminal_font_size() -> u32 {
+    12
+}
+
 fn default_docker_memory_mb() -> u32 {
     2_048
 }
@@ -1295,6 +1299,11 @@ pub struct Settings {
     /// (não abre sozinho durante o streaming; o usuário pode expandir).
     pub thinking_collapsed_by_default: bool,
     pub font_scale: f32,
+    /// Custom font stack for the integrated terminal (CSS font-family list).
+    /// Empty follows the theme's monospace token (`--font-mono`).
+    pub terminal_font_family: String,
+    /// Integrated terminal font size in px (TERMINAL_FONT_SIZE_MIN..=MAX).
+    pub terminal_font_size: u32,
     pub temperature: Option<f32>,
     pub include_attachments: bool,
     pub auto_title: bool,
@@ -1446,6 +1455,8 @@ impl Default for Settings {
             reduce_motion: false,
             thinking_collapsed_by_default: false,
             font_scale: 1.0,
+            terminal_font_family: String::new(),
+            terminal_font_size: default_terminal_font_size(),
             temperature: None,
             include_attachments: true,
             auto_title: true,

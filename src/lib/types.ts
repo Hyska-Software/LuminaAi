@@ -642,6 +642,23 @@ export interface WorkspaceGitStatus {
 /** Alvo do commit: tudo, somente o índice ou os caminhos selecionados. */
 export type CommitTarget = 'all' | 'staged' | 'selection';
 
+/** Snapshot da árvore + status git usado pelo refresh do painel Code. */
+export interface WorkspaceTreeSnapshot {
+  files: WorkspaceFileEntry[];
+  /** Filhos frescos dos diretórios carregados sob demanda (chave = path relativo). */
+  dirs: Record<string, WorkspaceFileEntry[]>;
+  gitStatus: WorkspaceGitStatus;
+}
+
+/** Lote coalescido de mudanças de arquivo do workspace. */
+export interface WorkspaceChangedEvent {
+  workspaceId: string;
+  /** Caminhos relativos ao workspace (sempre `/`). */
+  paths: string[];
+  /** O watcher perdeu/truncou eventos: recarregar a raiz e todos os diretórios carregados. */
+  overflow: boolean;
+}
+
 /** Um arquivo alterado entre uma branch (merge-base) e a working tree. */
 export interface WorkspaceGitCompareFile {
   path: string;
@@ -1878,6 +1895,10 @@ export interface Settings {
    */
   thinkingCollapsedByDefault: boolean;
   fontScale: number;
+  /** Custom font stack for the code terminal; empty = theme mono (`--font-mono`). */
+  terminalFontFamily?: string;
+  /** Terminal font size in px (8–32). */
+  terminalFontSize?: number;
   temperature?: number | null;
   includeAttachments: boolean;
   autoTitle: boolean;

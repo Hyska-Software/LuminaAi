@@ -84,8 +84,11 @@ export function buildTerminalTheme(): ITheme {
   };
 }
 
-/** Monospace stack shared with the rest of the code surfaces. */
-export function terminalFontFamily(): string {
+/** Monospace stack shared with the rest of the code surfaces; a non-empty
+ * custom stack wins over the theme token. */
+export function terminalFontFamily(custom?: string): string {
+  const trimmed = custom?.trim();
+  if (trimmed) return trimmed;
   return readToken('--font-mono', FONT_FALLBACK);
 }
 

@@ -16,6 +16,8 @@ import { Terminal as XTerm, type IDisposable, type ITheme } from '@xterm/xterm';
 
 import { api } from '@/lib/api';
 import { t } from '@/lib/i18n';
+import { useAppStore } from '@/lib/store';
+import { normalizeTerminalFontSize } from '@/lib/terminalSettings';
 import type { TerminalEvent, TerminalInfo } from '@/lib/types';
 import {
   buildTerminalTheme,
@@ -25,8 +27,6 @@ import {
 
 /** Mirrors `MAX_TERMINALS_PER_CONVERSATION` in the Rust terminal registry. */
 export const TERMINAL_TAB_LIMIT = 4;
-
-const TERMINAL_FONT_SIZE = 12;
 
 /** Two independent terminal surfaces share one PTY registry per conversation. */
 export type TerminalSurface = 'panel' | 'center';
@@ -189,11 +189,25 @@ function terminalHost(): HTMLDivElement {
   return host;
 }
 
-function createTerminal(): XTerm {
+interface TerminalAppearance {
+  fontFamily: string;
+  fontSize: number;
+}
+
+/** Terminal typography from the persisted settings (theme mono by default). */
+function terminalAppearance(): TerminalAppearance {
+  const settings = useAppStore.getState().settings;
+  return {
+    fontFamily: terminalFontFamily(settings.terminalFontFamily),
+    fontSize: normalizeTerminalFontSize(settings.terminalFontSize),
+  };
+}
+
+function createTerminal(appearance: TerminalAppearance): XTerm {
   return new XTerm({
     cursorBlink: !prefersReducedMotion(),
-    fontFamily: terminalFontFamily(),
-    fontSize: TERMINAL_FONT_SIZE,
+    fontFamily: appearance.fontFamily,
+    fontSize: appearance.fontSize,
     scrollback: 5_000,
     allowProposedApi: true,
     screenReaderMode: true,
@@ -201,11 +215,11 @@ function createTerminal(): XTerm {
   });
 }
 
-/** Waits for the web font before measuring cells (avoids stale rows/columns). */
-async function loadTerminalFont(): Promise<void> {
+/** Waits for the configured font before measuring cells (avoids stale rows/columns). */
+async function loadTerminalFont(appearance: TerminalAppearance): Promise<void> {
   if (typeof document === 'undefined' || !document.fonts?.load) return;
   try {
-    await document.fonts.load(`${TERMINAL_FONT_SIZE}px "JetBrains Mono Variable"`);
+    await document.fonts.load(`${appearance.fontSize}px ${appearance.fontFamily}`);
   } catch {
     // Fall back to the bundled stack; FitAddon will measure whatever loads.
   }
@@ -300,9 +314,10 @@ class TerminalManager {
     runtime.errors[surface] = null;
     this.notify(runtime);
 
-    await loadTerminalFont();
+    const appearance = terminalAppearance();
+    await loadTerminalFont(appearance);
 
-    const term = createTerminal();
+    const term = createTerminal(appearance);
     const fit = new FitAddon();
     term.loadAddon(fit);
     const host = terminalHost();
@@ -525,18 +540,34 @@ class TerminalManager {
     this.notify(runtime);
   }
 
-  /** Re-applies the app theme to every live xterm. */
+  /** Re-applies the app theme and terminal typography to every live xterm. */
   applyTheme(): void {
     const theme: ITheme = buildTerminalTheme();
-    const fontFamily = terminalFontFamily();
+    const { fontFamily, fontSize } = terminalAppearance();
     for (const runtime of this.runtimes.values()) {
       for (const instance of runtime.instances.values()) {
         if (!instance.disposed) {
           instance.term.options.theme = theme;
           instance.term.options.fontFamily = fontFamily;
+          instance.term.options.fontSize = fontSize;
         }
       }
     }
+  }
+
+  /** Applies a terminal font change to every live xterm and refits the PTY. */
+  applyFonts(): void {
+    const appearance = terminalAppearance();
+    for (const runtime of this.runtimes.values()) {
+      for (const instance of runtime.instances.values()) {
+        if (!instance.disposed) {
+          instance.term.options.fontFamily = appearance.fontFamily;
+          instance.term.options.fontSize = appearance.fontSize;
+        }
+      }
+    }
+    this.refitAll();
+    void loadTerminalFont(appearance).then(() => this.refitAll());
   }
 
   /** Refits after the web font finishes loading (or the panel changes size). */

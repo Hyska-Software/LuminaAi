@@ -22,6 +22,7 @@ import { InstructionsTab } from './InstructionsTab';
 import { ModelTab } from './ModelTab';
 import { ProvidersTab } from './ProvidersTab';
 import { SETTINGS_TAB_ICONS } from './tabIcons';
+import { TerminalTab } from './TerminalTab';
 import { ThemesTab } from './ThemesTab';
 import { ToolsTab } from './ToolsTab';
 
@@ -96,6 +97,9 @@ export function SettingsDialog() {
                   </TabsContent>
                   <TabsContent value="themes">
                     <ThemesTab />
+                  </TabsContent>
+                  <TabsContent value="terminal">
+                    <TerminalTab />
                   </TabsContent>
                   <TabsContent value="providers">
                     <ProvidersTab />

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { buildTerminalTheme } from './terminalTheme';
+import { buildTerminalTheme, terminalFontFamily } from './terminalTheme';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -23,5 +23,15 @@ describe('terminalTheme', () => {
 
     expect(theme.background).toBe('#101012');
     expect(theme.cursorAccent).toBe('#101012');
+  });
+
+  it('lets the terminal font preference override the theme stack', () => {
+    vi.spyOn(window, 'getComputedStyle').mockReturnValue({
+      getPropertyValue: (name: string) =>
+        name === '--font-mono' ? '"Theme Mono", monospace' : '',
+    } as unknown as CSSStyleDeclaration);
+
+    expect(terminalFontFamily('Fira Code')).toBe('Fira Code');
+    expect(terminalFontFamily('  ')).toBe('"Theme Mono", monospace');
   });
 });

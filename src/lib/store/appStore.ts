@@ -44,6 +44,8 @@ const DEFAULT_SETTINGS: Settings = {
   reduceMotion: false,
   thinkingCollapsedByDefault: false,
   fontScale: 1,
+  terminalFontFamily: '',
+  terminalFontSize: 12,
   temperature: null,
   includeAttachments: true,
   autoTitle: true,

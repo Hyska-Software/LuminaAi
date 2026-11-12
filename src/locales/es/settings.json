@@ -57,6 +57,23 @@
       "aria": "Seguir en segundo plano en la bandeja del sistema al cerrar la ventana"
     }
   },
+  "terminal": {
+    "appearance": {
+      "title": "Apariencia del terminal",
+      "description": "Tipografía del terminal integrado del layout Code."
+    },
+    "fontFamily": {
+      "label": "Familia de la fuente",
+      "description": "Lista CSS de font-family. Déjalo vacío para usar la fuente monoespaciada del tema.",
+      "placeholder": "Predeterminado del tema",
+      "aria": "Familia de la fuente del terminal"
+    },
+    "fontSize": {
+      "label": "Tamaño de la fuente",
+      "description": "Tamaño de los caracteres del terminal integrado.",
+      "aria": "Tamaño de la fuente del terminal"
+    }
+  },
   "trayPrompt": {
     "title": "¿Mantener Zylara en segundo plano?",
     "description": "Al cerrar la ventana, Zylara puede permanecer en la bandeja del sistema para que el trabajo de los agentes siga en segundo plano. Puedes cambiarlo más tarde en Ajustes → General.",
@@ -124,6 +141,7 @@
   "tabs": {
     "general": "General",
     "themes": "Temas",
+    "terminal": "Terminal",
     "providers": "Proveedores",
     "model": "Modelo predeterminado",
     "instructions": "Instrucciones",

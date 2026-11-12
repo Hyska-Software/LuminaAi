@@ -408,6 +408,9 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::workspace::set_conversation_workspace,
             commands::workspace::open_workspace_in_explorer,
             commands::workspace::list_workspace_files,
+            commands::workspace::refresh_workspace_tree,
+            commands::workspace::watch_workspace,
+            commands::workspace::unwatch_workspace,
             commands::workspace::search_workspace_files,
             commands::workspace::read_workspace_file,
             /* -------- harness de código: sessão -------- */

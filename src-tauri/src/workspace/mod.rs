@@ -15,6 +15,7 @@ pub mod git;
 pub mod journal;
 pub mod project;
 pub mod safe_path;
+pub mod watch;
 
 pub use exec::{ExecError, ExecOutput, ExecRequest, StreamKind};
 pub use git::{GitCommit, GitFile, GitStatus};

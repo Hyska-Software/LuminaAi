@@ -88,7 +88,7 @@ async fn run_git(root: &PathBuf, args: &[&str]) -> Result<String, String> {
     Ok(output.stdout)
 }
 
-fn to_status(status: crate::workspace::git::GitStatus) -> WorkspaceGitStatus {
+pub(crate) fn to_status(status: crate::workspace::git::GitStatus) -> WorkspaceGitStatus {
     WorkspaceGitStatus {
         is_repo: status.is_repo,
         root: status

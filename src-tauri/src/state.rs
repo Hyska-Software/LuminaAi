@@ -236,6 +236,8 @@ pub struct AppState {
     pub mcp: Arc<crate::mcp::McpManager>,
     /// Terminais PTY abertos no layout Code.
     pub terminals: Arc<crate::terminal::TerminalRegistry>,
+    /// Native filesystem watchers per workspace (live Files/Changes panel).
+    pub watches: Arc<crate::workspace::watch::WorkspaceWatchRegistry>,
     /// Perguntas estruturadas pendentes (`ask_user`).
     pub questions: Arc<crate::harness::code::questions::QuestionRegistry>,
     /// Global/per-agent turn slots (cost/CPU protection for background agents).
@@ -266,6 +268,7 @@ impl AppState {
             observed: Arc::new(crate::harness::code::observed::ObservedFiles::new()),
             mcp: Arc::new(crate::mcp::McpManager::load(data_dir.as_path())),
             terminals: Arc::new(crate::terminal::TerminalRegistry::new()),
+            watches: Arc::new(crate::workspace::watch::WorkspaceWatchRegistry::new()),
             questions: Arc::new(crate::harness::code::questions::QuestionRegistry::new()),
             governor: crate::concurrency::ConcurrencyGovernor::new(),
             jobs: Arc::new(crate::jobs::JobRegistry::new()),

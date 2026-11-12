@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
+import { useAppStore } from '@/lib/store';
 import type { TerminalEvent, TerminalInfo } from '@/lib/types';
+
+/** Options of every fake xterm, in creation order (assertions read the live object). */
+const xtermRegistry = vi.hoisted(() => ({ options: [] as Record<string, unknown>[] }));
 
 /** xterm needs a canvas; the test validates the wiring with the backend, not the render. */
 vi.mock('@xterm/xterm', () => {
@@ -12,8 +16,12 @@ vi.mock('@xterm/xterm', () => {
     written: string[] = [];
     focused = false;
     cleared = false;
-    options: Record<string, unknown> = {};
+    options: Record<string, unknown>;
     host: HTMLElement | null = null;
+    constructor(options: Record<string, unknown> = {}) {
+      this.options = { ...options };
+      xtermRegistry.options.push(this.options);
+    }
     loadAddon() {}
     open(host: HTMLElement) {
       this.host = host;
@@ -93,6 +101,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   nextTerminal = 1;
   __resetTerminalManagerForTests();
+  xtermRegistry.options.length = 0;
   (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
     ResizeObserverStub;
   apiMock.openTerminal.mockImplementation(async () => terminalInfo());
@@ -137,6 +146,24 @@ describe('TerminalPanel', () => {
     const viewport = container.querySelector('[role="tabpanel"]');
     expect(viewport?.className).toContain('bg-surface');
     expect(viewport?.className).not.toContain('bg-background');
+  });
+
+  it('applies the terminal font preference to open xterms', async () => {
+    render(<TerminalPanel conversationId="conv-1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir terminal' }));
+    await screen.findByRole('tab', { name: 'Terminal 1' });
+    expect(xtermRegistry.options[0]?.fontSize).toBe(12);
+
+    act(() => {
+      useAppStore.setState((state) => ({
+        settings: { ...state.settings, terminalFontFamily: 'Fira Code', terminalFontSize: 18 },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(xtermRegistry.options[0]?.fontFamily).toBe('Fira Code');
+      expect(xtermRegistry.options[0]?.fontSize).toBe(18);
+    });
   });
 
   it('mantém o destaque compacto das abas: preenchimento neutro e sem sombra', async () => {
