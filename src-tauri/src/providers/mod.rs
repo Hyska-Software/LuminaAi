@@ -270,6 +270,11 @@ impl ReasoningRequest {
     pub fn is_auto(&self) -> bool {
         matches!(self, Self::Auto)
     }
+
+    /// Thinking explicitly disabled for this request.
+    pub fn is_off(&self) -> bool {
+        matches!(self, Self::Off)
+    }
 }
 
 #[derive(Debug, Clone)]

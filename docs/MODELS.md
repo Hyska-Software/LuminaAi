@@ -190,6 +190,22 @@ A UI exibe controles apenas se `reasoningOptions` do modelo contiver `toggle`, `
 | desligar | `thinking: {"type":"disabled"}` | GLM 5.x é thinking-only → 400; adaptador reenvia sem parâmetro |
 | ligar (toggle) | `thinking: {"type":"enabled"}` | Kimi aceita, mas reasoning não é exposto no stream |
 
+#### Replay de `reasoning_content` (contrato documentado)
+
+O adaptador reenvia o raciocínio **por família**, não por provedor; `reasoning: Off` desativa o replay. Fontes oficiais:
+
+| Família | Regra | Fonte |
+| --- | --- | --- |
+| deepseek | Com `tools`, `reasoning_content` em **todos** os assistant turns (string vazia quando não houve CoT); sem `tools`, só quando presente | https://api-docs.deepseek.com/guides/thinking_mode/ |
+| kimi | Reenviar a mensagem assistant completa, incluindo `reasoning_content` | https://platform.kimi.ai/docs/guide/use-thinking-models |
+| glm | Preserved Thinking: `reasoning_content` + `thinking: {type:"enabled", clear_thinking:false}`; Interleaved Thinking preserva os blocos com os tool results | https://docs.z.ai/guides/capabilities/thinking-mode |
+| qwen | `reasoning_content` + `preserve_thinking: true` para multi-turn; retornar o CoT junto dos tool results | https://docs.qwencloud.com/developer-guides/text-generation/thinking · https://docs.qwencloud.com/developer-guides/tool-calling/function-calling |
+| minimax | Reenviar a resposta completa (incluindo `reasoning_content`) para manter o Interleaved Thinking | https://platform.minimax.io/docs/guides/text-m3-function-call |
+| mimo | Manter todos os `reasoning_content` anteriores no array de mensagens | https://mimo.mi.com/docs/en-US/quick-start/faq/api-integration |
+| hy (Hunyuan) | `reasoning_content` preenchido de volta como veio no multi-turn | https://intl.cloud.tencent.com/document/product/1300/82345 |
+
+Sem `reasoning_content` documentado, o campo **não** é enviado: OpenAI Chat oficial, Mistral (reasoning em `content`/`ThinkChunk`), StepFun (campo `reasoning`; sem contrato de replay), LongCat (campo de resposta, sem contrato de replay), Nemotron e modelos de gateway sem doc. Anthropic, Responses e Google continuam com o replay nativo por `provider_state`.
+
 ### openai-responses
 | Ação | Parâmetro |
 | --- | --- |

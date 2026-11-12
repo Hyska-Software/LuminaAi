@@ -59,9 +59,50 @@ pub(crate) async fn stream(
 /* Request                                                             */
 /* ------------------------------------------------------------------ */
 
+/// Documented `reasoning_content` replay contract for the model family.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReasoningReplay {
+    /// The family has no documented `reasoning_content` replay: never send it.
+    None,
+    /// Send the field only when the assistant turn actually produced reasoning.
+    WhenPresent,
+    /// DeepSeek with `tools`: the API requires the field on every assistant
+    /// turn (an empty string when that turn produced none) and returns 400
+    /// otherwise.
+    EveryAssistantTurn,
+}
+
+/// Official contracts used here (see `docs/MODELS.md`):
+/// - DeepSeek Thinking Mode: with `tools`, every previous assistant turn must
+///   carry `reasoning_content` back.
+/// - Kimi Thinking Models: pass the complete assistant message back, including
+///   `reasoning_content`.
+/// - GLM Thinking Mode: preserved thinking requires `clear_thinking: false`
+///   and the complete `reasoning_content` returned unmodified.
+/// - Qwen Thinking: `preserve_thinking` enables multi-turn `reasoning_content`;
+///   tool-call loops should return it with the tool results.
+/// - MiniMax Interleaved Thinking: keep the full assistant message, including
+///   `reasoning_content`.
+/// - MiMo: keep all previous `reasoning_content` in the messages.
+/// - Hunyuan OpenAI Chat: `reasoning_content` must be filled back as-is.
+/// Families without that documented field (OpenAI Chat official, Mistral,
+/// StepFun, LongCat, Nemotron, unknown gateway models) never receive it.
+fn reasoning_replay(request: &CompletionRequest) -> ReasoningReplay {
+    if !request.config.model.reasoning || request.reasoning.is_off() {
+        return ReasoningReplay::None;
+    }
+    match request.config.model.family.to_ascii_lowercase().as_str() {
+        "deepseek" if !request.tools.is_empty() => ReasoningReplay::EveryAssistantTurn,
+        "deepseek" | "kimi" | "glm" | "qwen" | "minimax" | "mimo" | "hy" => {
+            ReasoningReplay::WhenPresent
+        }
+        _ => ReasoningReplay::None,
+    }
+}
+
 fn build_body(request: &CompletionRequest) -> Value {
     let model = &request.config.model;
-    let replay_reasoning = model.family.eq_ignore_ascii_case("deepseek");
+    let replay = reasoning_replay(request);
     let mut messages: Vec<Value> = Vec::new();
     let system = system_text(request);
     if !system.is_empty() {
@@ -72,7 +113,7 @@ fn build_body(request: &CompletionRequest) -> Value {
             HistoryRole::System => {}
             HistoryRole::User => messages.push(user_message(message)),
             HistoryRole::Assistant => {
-                if let Some(entry) = assistant_message(message, replay_reasoning) {
+                if let Some(entry) = assistant_message(message, replay) {
                     messages.push(entry);
                 }
             }
@@ -122,6 +163,24 @@ fn build_body(request: &CompletionRequest) -> Value {
         &request.reasoning,
         &mut body,
     );
+    // Family-specific switches that make the replayed reasoning effective.
+    if replay != ReasoningReplay::None {
+        match model.family.to_ascii_lowercase().as_str() {
+            // Z.ai: Preserved Thinking keeps previous reasoning; it is opt-in
+            // on the standard endpoint and on by default on the Coding Plan.
+            "glm" => {
+                body["thinking"] = json!({
+                    "type": "enabled",
+                    "clear_thinking": false,
+                });
+            }
+            // Qwen: multi-turn reasoning is opt-in for most thinking models.
+            "qwen" => {
+                body["preserve_thinking"] = json!(true);
+            }
+            _ => {}
+        }
+    }
     body
 }
 
@@ -142,7 +201,7 @@ fn user_message(message: &HistoryMessage) -> Value {
     json!({"role": "user", "content": parts})
 }
 
-fn assistant_message(message: &HistoryMessage, replay_reasoning: bool) -> Option<Value> {
+fn assistant_message(message: &HistoryMessage, replay: ReasoningReplay) -> Option<Value> {
     let tool_calls = chat_tool_calls(message);
     let has_tool_calls = !tool_calls.is_empty();
     let has_text = !message.text.trim().is_empty();
@@ -163,14 +222,18 @@ fn assistant_message(message: &HistoryMessage, replay_reasoning: bool) -> Option
     } else {
         json!({"role": "assistant", "content": message.text})
     };
-    // DeepSeek V4 requires the prior reasoning on tool-call turns and, once a
-    // turn carried it, on later assistant turns of the same wire. An empty
-    // string is the accepted placeholder when the provider returned none.
     let has_reasoning = message
         .reasoning
         .as_deref()
         .is_some_and(|reasoning| !reasoning.trim().is_empty());
-    if replay_reasoning && (has_reasoning || has_tool_calls) {
+    let send_reasoning = match replay {
+        ReasoningReplay::None => false,
+        ReasoningReplay::WhenPresent => has_reasoning,
+        // DeepSeek with tools requires the field on every assistant turn; an
+        // empty string is the accepted placeholder when none was produced.
+        ReasoningReplay::EveryAssistantTurn => true,
+    };
+    if send_reasoning {
         entry["reasoning_content"] = json!(message.reasoning.as_deref().unwrap_or_default());
     }
     Some(entry)
@@ -576,14 +639,24 @@ mod tests {
         }
     }
 
-    fn request_with_model(model_id: &str) -> CompletionRequest {
+    fn request_with_model_on(provider_id: &str, model_id: &str) -> CompletionRequest {
         let mut request = test_request();
         let catalog = crate::catalog::CatalogFile::load().expect("catalog.json carrega");
+        if let Some(provider) = catalog.provider(provider_id) {
+            request.config.provider_id = provider.id.clone();
+            request.config.provider_name = provider.name.clone();
+            request.config.base_url = provider.base_url.clone();
+            request.config.endpoints = provider.endpoints.clone();
+        }
         request.config.model = catalog
-            .model("opencode-go", model_id)
-            .unwrap_or_else(|| panic!("modelo {model_id}"))
+            .model(provider_id, model_id)
+            .unwrap_or_else(|| panic!("modelo {provider_id}/{model_id}"))
             .clone();
         request
+    }
+
+    fn request_with_model(model_id: &str) -> CompletionRequest {
+        request_with_model_on("opencode-go", model_id)
     }
 
     fn assistant_with_tool_call(reasoning: Option<&str>) -> HistoryMessage {
@@ -610,6 +683,30 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_with_tools_replays_every_assistant_turn() {
+        // DeepSeek requires reasoning_content on all previous assistant turns
+        // when the request carries tools, even text-only turns without a CoT.
+        let mut request = request_with_model("deepseek-v4.1-flash");
+        let assistant = HistoryMessage::assistant("resposta final");
+        request.history = vec![assistant];
+        let body = build_body(&request);
+        assert_eq!(body["messages"][1]["reasoning_content"], json!(""));
+    }
+
+    #[test]
+    fn deepseek_without_tools_only_replays_present_reasoning() {
+        let mut request = request_with_model("deepseek-v4.1-flash");
+        request.tools.clear();
+        request.history = vec![HistoryMessage::assistant("resposta final")];
+        let body = build_body(&request);
+        assert!(
+            body["messages"][1].get("reasoning_content").is_none(),
+            "{}",
+            body["messages"][1]
+        );
+    }
+
+    #[test]
     fn assistant_message_sends_empty_reasoning_on_tool_call_without_thinking() {
         let mut request = request_with_model("deepseek-v4.1-flash");
         request.history = vec![assistant_with_tool_call(None)];
@@ -628,15 +725,78 @@ mod tests {
     }
 
     #[test]
-    fn assistant_message_omits_reasoning_content_for_other_families() {
+    fn documented_families_replay_reasoning_content() {
+        for model_id in [
+            "kimi-k2.7-code",
+            "glm-5.3-flash",
+            "qwen3.6-plus",
+            "minimax-m3",
+            "mimo-v2.6-flash",
+            "hy3",
+        ] {
+            let mut request = request_with_model(model_id);
+            request.history = vec![assistant_with_tool_call(Some("penso"))];
+            let body = build_body(&request);
+            assert_eq!(
+                body["messages"][1]["reasoning_content"],
+                json!("penso"),
+                "{model_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn glm_enables_preserved_thinking() {
         let mut request = request_with_model("glm-5.3-flash");
         request.history = vec![assistant_with_tool_call(Some("penso"))];
         let body = build_body(&request);
-        assert!(
-            body["messages"][1].get("reasoning_content").is_none(),
-            "{}",
-            body["messages"][1]
-        );
+        assert_eq!(body["thinking"]["type"], json!("enabled"));
+        assert_eq!(body["thinking"]["clear_thinking"], json!(false));
+    }
+
+    #[test]
+    fn qwen_enables_preserve_thinking() {
+        let mut request = request_with_model("qwen3.6-plus");
+        request.history = vec![assistant_with_tool_call(Some("penso"))];
+        let body = build_body(&request);
+        assert_eq!(body["preserve_thinking"], json!(true));
+    }
+
+    #[test]
+    fn reasoning_off_never_replays_or_enables_preserved_thinking() {
+        let mut request = request_with_model("glm-5.3-flash");
+        request.reasoning = crate::providers::ReasoningRequest::Off;
+        request.history = vec![assistant_with_tool_call(Some("penso"))];
+        let body = build_body(&request);
+        assert!(body["messages"][1].get("reasoning_content").is_none());
+        assert!(body.get("thinking").is_none());
+    }
+
+    #[test]
+    fn undocumented_families_never_replay() {
+        for (provider_id, model_id) in [
+            ("opencode-go", "longcat-2.0"),
+            ("opencode-go", "step-5-preview"),
+            ("opencode-zen", "mistral-large-4"),
+        ] {
+            let mut request = request_with_model_on(provider_id, model_id);
+            request.history = vec![assistant_with_tool_call(Some("penso"))];
+            let body = build_body(&request);
+            assert!(
+                body["messages"][1].get("reasoning_content").is_none(),
+                "{provider_id}/{model_id}: {}",
+                body["messages"][1]
+            );
+        }
+    }
+
+    #[test]
+    fn deepseek_family_replays_outside_the_gateways() {
+        let mut request = request_with_model("deepseek-v4.1-flash");
+        request.config.provider_id = "deepseek".to_string();
+        request.history = vec![assistant_with_tool_call(Some("penso"))];
+        let body = build_body(&request);
+        assert_eq!(body["messages"][1]["reasoning_content"], json!("penso"));
     }
 
     /// F4b: plan applied after `build_body` and before the digest; `None` keeps
