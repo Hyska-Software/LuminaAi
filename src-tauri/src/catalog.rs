@@ -41,6 +41,12 @@ pub struct ProviderInfo {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub auth_env: String,
+    /// Header that carries the API key (`authorization` by default).
+    #[serde(default = "default_auth_header")]
+    pub auth_header: String,
+    /// Prefix before the API key in that header (`Bearer ` by default).
+    #[serde(default = "default_auth_prefix")]
+    pub auth_prefix: String,
     pub default_model_id: String,
     /// Authentication mode the provider primarily uses. Providers without the
     /// field (older catalogs) are API-key providers.
@@ -79,7 +85,28 @@ pub struct CacheInfo {
     pub source: Option<String>,
 }
 
+fn default_auth_header() -> String {
+    "authorization".into()
+}
+
+fn default_auth_prefix() -> String {
+    "Bearer ".into()
+}
+
 impl ProviderInfo {
+    /// Header name/value that carries `token` for this provider.
+    pub fn credential_header(&self, token: &str) -> (String, String) {
+        let name = if self.auth_header.trim().is_empty() {
+            "authorization"
+        } else {
+            self.auth_header.trim()
+        };
+        (
+            name.to_ascii_lowercase(),
+            format!("{}{}", self.auth_prefix, token),
+        )
+    }
+
     /// Request profile to use with a concrete credential.
     pub fn request_profile(&self, auth: ProviderAuth) -> RequestProfile {
         match auth {
@@ -481,6 +508,68 @@ mod tests {
                 !(last_segment.len() == 8 && last_segment.chars().all(|c| c.is_ascii_digit())),
                 "snapshot datado no seed: {id}"
             );
+        }
+    }
+
+    #[test]
+    fn embedded_catalog_has_the_gemini_provider() {
+        let catalog = embedded();
+        let gemini = catalog.provider("gemini").expect("provedor gemini presente");
+        assert_eq!(gemini.name, "Google Gemini");
+        assert_eq!(gemini.short_name, "Gemini");
+        assert_eq!(
+            gemini.base_url,
+            "https://generativelanguage.googleapis.com/v1beta"
+        );
+        assert_eq!(
+            gemini.endpoints.get("google").map(String::as_str),
+            Some("/models/{model}")
+        );
+        assert_eq!(
+            gemini.endpoints.get("models").map(String::as_str),
+            Some("/models")
+        );
+        assert_eq!(gemini.auth_env, "GEMINI_API_KEY");
+        assert_eq!(gemini.auth, ProviderAuth::ApiKey);
+        assert!(!gemini.supports_oauth());
+        assert_eq!(gemini.auth_header, "x-goog-api-key");
+        assert_eq!(gemini.auth_prefix, "");
+        assert_eq!(
+            gemini.credential_header("AIza-test"),
+            ("x-goog-api-key".to_string(), "AIza-test".to_string())
+        );
+        assert!(
+            gemini.models.iter().any(|model| model.id == gemini.default_model_id),
+            "defaultModelId precisa existir no provider"
+        );
+        assert_eq!(gemini.default_model_id, "gemini-4-argon");
+
+        let ids: Vec<&str> = gemini.models.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["gemini-4-carbon", "gemini-4-argon", "gemini-3.8-flash"]
+        );
+        for model in &gemini.models {
+            assert_eq!(model.family, "gemini", "{} fora da família gemini", model.id);
+            assert_eq!(
+                model.protocols,
+                vec!["google".to_string()],
+                "{} não é exclusivo do protocolo google",
+                model.id
+            );
+            assert_eq!(model.max_output, 65_536, "{} sem o teto de streaming", model.id);
+            assert_eq!(model.context_window, 1_048_576, "{}", model.id);
+            assert_eq!(
+                model.reasoning_options,
+                vec![ReasoningOption::Effort {
+                    values: vec!["low".into(), "medium".into(), "high".into()]
+                }],
+                "{}",
+                model.id
+            );
+            assert!(model.cost.is_some(), "{} sem preço", model.id);
+            assert!(model.attachment, "{} sem imagem", model.id);
+            assert!(!model.estimated);
         }
     }
 

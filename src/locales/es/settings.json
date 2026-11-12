@@ -142,7 +142,7 @@
     "openFolderFailed": "No se pudo abrir la carpeta"
   },
   "providers": {
-    "securityNote": "Las claves de API (OpenCode/Anthropic) y la sesión de ChatGPT se guardan solo en el backend (<code>secrets.json</code> en app-data) y nunca se exponen a la interfaz. También detectamos las variables de entorno de los proveedores y el inicio de sesión existente de OpenCode CLI.",
+    "securityNote": "Las claves de API (OpenCode/Anthropic/Google) y la sesión de ChatGPT se guardan solo en el backend (<code>secrets.json</code> en app-data) y nunca se exponen a la interfaz. También detectamos las variables de entorno de los proveedores y el inicio de sesión existente de OpenCode CLI.",
     "storeErrorTitle": "La última acción falló",
     "dismiss": "Descartar",
     "secretsErrorTitle": "No se pudo leer el archivo de secretos",
@@ -161,6 +161,7 @@
       "replace": "Pega una nueva clave para reemplazar…",
       "openai": "Pega tu clave de API de OpenAI…",
       "anthropic": "Pega tu clave de API de Anthropic (sk-ant-…)…",
+      "gemini": "Pega tu clave de API de Google AI Studio (AIza…)…",
       "opencode": "Pega tu clave de API de OpenCode Console…",
       "generic": "Pega tu clave de API de {{name}}…"
     },
@@ -247,7 +248,8 @@
       "opencode-go": "Suscripción OpenCode Go: modelos abiertos de alto rendimiento con límites mensuales.",
       "opencode-zen": "OpenCode Console (pay-as-you-go): catálogo curado de modelos de varios proveedores.",
       "openai": "Modelos de OpenAI usando el plan de ChatGPT de tu cuenta (Sign in with ChatGPT) o una clave de API de la plataforma.",
-      "anthropic": "Modelos Claude mediante la API oficial de Anthropic: facturación por token en tu cuenta (pay-as-you-go)."
+      "anthropic": "Modelos Claude mediante la API oficial de Anthropic: facturación por token en tu cuenta (pay-as-you-go).",
+      "gemini": "Modelos Gemini mediante la API oficial de Google: facturación por token en tu cuenta (Gemini Developer API)."
     },
     "notes": {
       "opencode-go": {
@@ -268,6 +270,12 @@
         "1": "Crea o revisa la clave de API en https://platform.claude.com/settings/keys.",
         "2": "La lista de la cuenta se obtiene de GET /v1/models; usa \"Actualizar modelos\" para combinar novedades.",
         "3": "Versión de la API fijada en anthropic-version: 2026-10-21 (sin encabezados beta)."
+      },
+      "gemini": {
+        "0": "Facturación por token en tu cuenta de Google (Gemini Developer API).",
+        "1": "Crea o revisa la clave de API en https://aistudio.google.com/apikey.",
+        "2": "La lista de la cuenta se consulta en GET /v1beta/models y se limita a Gemini 4 Carbon, Gemini 4 Argon y Gemini 3.8 Flash.",
+        "3": "Thinking low/medium/high con resúmenes; long decode por encima de 65.536 tokens no está soportado."
       }
     }
   },

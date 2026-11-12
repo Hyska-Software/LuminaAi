@@ -214,21 +214,39 @@ fn apply_anthropic(model: &ModelInfo, request: &ReasoningRequest, body: &mut Val
     }
 }
 
+fn has_zero_min_budget(model: &ModelInfo) -> bool {
+    model.reasoning_options.iter().any(|option| {
+        matches!(
+            option,
+            crate::catalog::ReasoningOption::BudgetTokens { min: Some(0), .. }
+        )
+    })
+}
+
 fn apply_google(model: &ModelInfo, request: &ReasoningRequest, body: &mut Value) {
     match request {
         ReasoningRequest::Auto => {}
         ReasoningRequest::Off => {
-            if has_any_control(model) {
+            // Gemini 4 / 3.8 Flash expose only thinking levels and cannot be
+            // disabled; sending thinkingBudget: 0 would return 400.
+            if has_toggle(model) || has_zero_min_budget(model) {
                 set_google_thinking(body, json!({"thinkingBudget": 0}));
             }
         }
         ReasoningRequest::Effort(effort) => {
-            if has_any_control(model) {
+            if has_effort(model) {
                 set_google_thinking(body, json!({"thinkingLevel": effort.trim().to_uppercase()}));
+            } else if has_budget(model) {
+                set_google_thinking(body, json!({"thinkingBudget": budget_for_effort(effort)}));
+            } else if has_toggle(model) {
+                // Dynamic thinking for toggle-only Gemini 2.5 models.
+                set_google_thinking(body, json!({"thinkingBudget": -1}));
             }
         }
         ReasoningRequest::Budget(budget) => {
-            if has_any_control(model) {
+            // Effort-only models have no budget surface: keep the model default
+            // instead of sending an unsupported field.
+            if has_budget(model) {
                 set_google_thinking(body, json!({"thinkingBudget": budget}));
             }
         }
@@ -239,6 +257,7 @@ fn apply_google(model: &ModelInfo, request: &ReasoningRequest, body: &mut Value)
 mod tests {
     use super::*;
     use crate::catalog::CatalogFile;
+    use crate::catalog::ReasoningOption;
 
     fn model(provider_id: &str, model_id: &str) -> ModelInfo {
         CatalogFile::load()
@@ -407,10 +426,51 @@ mod tests {
             "LOW"
         );
 
-        let mut body = json!({"generationConfig": {"maxOutputTokens": 100}});
+        // Effort-only models cannot be disabled and have no budget surface.
+        let before = json!({"generationConfig": {"maxOutputTokens": 100}});
+        let mut disabled = before.clone();
         apply(
             WireProtocol::Google,
             &gemini,
+            &ReasoningRequest::Off,
+            &mut disabled,
+        );
+        assert_eq!(disabled, before, "Gemini 4 não aceita thinkingBudget: 0");
+
+        let mut budget_on_effort_model = before.clone();
+        apply(
+            WireProtocol::Google,
+            &gemini,
+            &ReasoningRequest::Budget(2_048),
+            &mut budget_on_effort_model,
+        );
+        assert_eq!(
+            budget_on_effort_model, before,
+            "Gemini 4 não aceita thinkingBudget"
+        );
+
+        // Budget-capable models (2.5 family) keep the numeric controls.
+        let mut budget_model = gemini.clone();
+        budget_model.reasoning_options = vec![ReasoningOption::BudgetTokens {
+            min: Some(0),
+            max: Some(24_576),
+        }];
+        let mut body = json!({"generationConfig": {"maxOutputTokens": 100}});
+        apply(
+            WireProtocol::Google,
+            &budget_model,
+            &ReasoningRequest::Off,
+            &mut body,
+        );
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            0
+        );
+
+        let mut body = json!({"generationConfig": {"maxOutputTokens": 100}});
+        apply(
+            WireProtocol::Google,
+            &budget_model,
             &ReasoningRequest::Budget(2_048),
             &mut body,
         );
@@ -419,16 +479,19 @@ mod tests {
             2_048
         );
 
+        // Toggle-only models use dynamic thinking for an effort request.
+        let mut toggle_model = gemini.clone();
+        toggle_model.reasoning_options = vec![ReasoningOption::Toggle];
         let mut body = json!({"generationConfig": {"maxOutputTokens": 100}});
         apply(
             WireProtocol::Google,
-            &gemini,
-            &ReasoningRequest::Off,
+            &toggle_model,
+            &ReasoningRequest::Effort("high".into()),
             &mut body,
         );
         assert_eq!(
             body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
-            0
+            -1
         );
     }
 

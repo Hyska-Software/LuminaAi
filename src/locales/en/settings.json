@@ -142,7 +142,7 @@
     "openFolderFailed": "Could not open the folder"
   },
   "providers": {
-    "securityNote": "API keys (OpenCode/Anthropic) and the ChatGPT session are stored only in the backend (<code>secrets.json</code> in app-data) and are never exposed to the interface. We also detect the providers' environment variables and an existing OpenCode CLI login.",
+    "securityNote": "API keys (OpenCode/Anthropic/Google) and the ChatGPT session are stored only in the backend (<code>secrets.json</code> in app-data) and are never exposed to the interface. We also detect the providers' environment variables and an existing OpenCode CLI login.",
     "storeErrorTitle": "The last action failed",
     "dismiss": "Dismiss",
     "secretsErrorTitle": "Could not read the secrets file",
@@ -161,6 +161,7 @@
       "replace": "Paste a new key to replace…",
       "openai": "Paste your OpenAI API key…",
       "anthropic": "Paste your Anthropic API key (sk-ant-…)…",
+      "gemini": "Paste your Google AI Studio API key (AIza…)…",
       "opencode": "Paste your OpenCode Console API key…",
       "generic": "Paste your {{name}} API key…"
     },
@@ -247,7 +248,8 @@
       "opencode-go": "OpenCode Go subscription — high-performance open models with monthly limits.",
       "opencode-zen": "OpenCode Console (pay-as-you-go) — curated catalog of models from multiple providers.",
       "openai": "OpenAI models using your account's ChatGPT plan (Sign in with ChatGPT) or a platform API key.",
-      "anthropic": "Claude models through the official Anthropic API — per-token billing on your account (pay-as-you-go)."
+      "anthropic": "Claude models through the official Anthropic API — per-token billing on your account (pay-as-you-go).",
+      "gemini": "Gemini models through the official Google API — per-token billing on your account (Gemini Developer API)."
     },
     "notes": {
       "opencode-go": {
@@ -268,6 +270,12 @@
         "1": "Create or review the API key at https://platform.claude.com/settings/keys.",
         "2": "The account list is fetched from GET /v1/models; use \"Refresh models\" to merge new entries.",
         "3": "API version pinned to anthropic-version: 2026-10-21 (no beta headers)."
+      },
+      "gemini": {
+        "0": "Per-token billing on your Google account (Gemini Developer API).",
+        "1": "Create or review the API key at https://aistudio.google.com/apikey.",
+        "2": "The account list is fetched from GET /v1beta/models and limited to Gemini 4 Carbon, Gemini 4 Argon and Gemini 3.8 Flash.",
+        "3": "Thinking low/medium/high with summaries; long decode above 65,536 tokens is not supported."
       }
     }
   },

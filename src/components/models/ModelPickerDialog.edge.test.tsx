@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { catalog } from '@/lib/catalog';
@@ -78,6 +78,15 @@ async function renderOpenDialog() {
   );
   await screen.findByRole('dialog');
   await waitFor(() => expect(document.activeElement).toBe(searchField()));
+}
+
+/** Opens the provider dropdown and picks a provider (or All). */
+async function selectProvider(
+  user: UserEvent,
+  name: string,
+) {
+  await user.click(screen.getByRole('button', { name: 'Provedores' }));
+  await user.click(await screen.findByRole('menuitemradio', { name }));
 }
 
 /** Catalog stand-in with a single provider; used to inject hostile/dirty data. */
@@ -167,7 +176,7 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
     await renderOpenDialog();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+    await selectProvider(user, 'Zen');
 
     const zenOptions = screen.getAllByRole('option');
     expect(zenOptions).toHaveLength(ZEN_COUNT);
@@ -185,7 +194,7 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
       TOTAL_MATCHING_O,
     );
     expect(screen.getByText('Todos os provedores')).toBeTruthy();
-    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Provedores' })).toBeNull();
     // O destaque é reancorado no primeiro resultado e aponta para um id real.
     expect(activeOption()).toBeTruthy();
     expect(activeOption()?.getAttribute('aria-disabled')).toBeNull();
@@ -206,7 +215,7 @@ describe('ModelPickerDialog (edge) — catálogo grande e busca hostil', () => {
     expect(screen.getAllByRole('option')).toHaveLength(GO_COUNT);
 
     await user.type(searchField(), '    ');
-    expect(screen.queryAllByRole('tab')).toHaveLength(4);
+    expect(screen.getByRole('button', { name: 'Provedores' })).toBeTruthy();
     expect(modelCount()).toBe(countLabel(GO_COUNT));
     expect(screen.queryByText('Todos os provedores')).toBeNull();
 
@@ -393,7 +402,7 @@ describe('ModelPickerDialog (edge) — estados de modelo e provedor', () => {
     const user = userEvent.setup();
 
     expect(screen.getByText('Nenhum modelo disponível')).toBeTruthy();
-    expect(screen.queryAllByRole('tab')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Provedores' })).toBeTruthy();
     expect(
       (screen.getByRole('button', { name: 'Usar este modelo' }) as HTMLButtonElement).disabled,
     ).toBe(true);
@@ -420,20 +429,22 @@ describe('ModelPickerDialog (edge) — teclado', () => {
     expect(activeOption()?.id).toBe(options[0].id);
   });
 
-  it('setas nas abas de provedor trocam o provedor e a contagem acompanha', async () => {
+  it('dropdown de provedor navega por teclado e troca a contagem', async () => {
     await renderOpenDialog();
     const user = userEvent.setup();
+    const trigger = screen.getByRole('button', { name: 'Provedores' });
+    expect(trigger.textContent).toContain('Go');
 
-    await user.click(screen.getByRole('tab', { name: 'Go' }));
-    expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('aria-selected')).toBe('true');
+    await user.click(trigger);
+    await user.keyboard('{ArrowDown}');
+    expect(document.querySelector('[role="menuitemradio"][data-highlighted]')).toBeTruthy();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    expect(trigger.textContent).toContain('Go');
 
-    await user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: 'Zen' }).getAttribute('aria-selected')).toBe('true');
+    await selectProvider(user, 'Zen');
+    expect(screen.getByRole('button', { name: 'Provedores' }).textContent).toContain('Zen');
     expect(modelCount()).toBe(countLabel(ZEN_COUNT));
-
-    await user.keyboard('{ArrowLeft}');
-    expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('aria-selected')).toBe('true');
-    expect(modelCount()).toBe(countLabel(GO_COUNT));
   });
 });
 

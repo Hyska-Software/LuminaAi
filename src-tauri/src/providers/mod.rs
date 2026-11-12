@@ -171,6 +171,10 @@ pub struct ProviderConfig {
     pub base_url: String,
     /// Bearer credential: API key **or** OAuth access token for the plan path.
     pub api_key: String,
+    /// Header that carries the credential (`authorization` by default).
+    pub auth_header: String,
+    /// Prefix before the credential in that header (`Bearer ` by default).
+    pub auth_prefix: String,
     pub model: ModelInfo,
     /// Stable id sent as `x-opencode-session` for routing / prompt caching.
     /// Only OpenCode gateway providers receive it.
@@ -223,9 +227,14 @@ impl ProviderConfig {
     pub(crate) fn headers(&self) -> Vec<(String, String)> {
         let mut headers: Vec<(String, String)> = Vec::new();
         if !self.api_key.is_empty() {
+            let name = if self.auth_header.trim().is_empty() {
+                "authorization"
+            } else {
+                self.auth_header.trim()
+            };
             headers.push((
-                "authorization".to_string(),
-                format!("Bearer {}", self.api_key),
+                name.to_ascii_lowercase(),
+                format!("{}{}", self.auth_prefix, self.api_key),
             ));
         }
         if self.is_opencode() && !self.session_id.is_empty() {
@@ -1041,6 +1050,8 @@ mod smoke {
             provider_name: provider.name.clone(),
             base_url: provider.base_url.clone(),
             api_key: key.to_string(),
+            auth_header: provider.auth_header.clone(),
+            auth_prefix: provider.auth_prefix.clone(),
             model: model.clone(),
             session_id: format!("zylara-smoke-{}", uuid::Uuid::new_v4()),
             user_agent: concat!("Zylara/", env!("CARGO_PKG_VERSION")).to_string(),
@@ -1102,7 +1113,7 @@ mod smoke {
             system_prompt: String::new(),
             tools,
             reasoning,
-            max_output_tokens: Some(1_024),
+            max_output_tokens: Some(4_096),
             temperature: None,
             cache_plan: None,
             cancel,
@@ -1908,6 +1919,62 @@ mod smoke {
             "stream do provedor direto não produziu texto"
         );
     }
+
+    #[tokio::test]
+    #[ignore = "real Gemini API smoke test (needs GEMINI_API_KEY)"]
+    async fn gemini_direct_streams_text_and_usage() {
+        let Some(key) = std::env::var("GEMINI_API_KEY")
+            .ok()
+            .or_else(|| std::env::var("GOOGLE_API_KEY").ok())
+        else {
+            eprintln!("SKIP gemini_direct_streams_text_and_usage: GEMINI_API_KEY ausente");
+            return;
+        };
+        let catalog = CatalogFile::load().expect("catalog");
+        let provider = catalog.provider("gemini").expect("provider gemini");
+        let model = catalog
+            .model("gemini", "gemini-3.8-flash")
+            .expect("gemini-3.8-flash")
+            .clone();
+        let result = collect(
+            provider_config(provider, &model, &key),
+            vec![WireProtocol::Google],
+            vec![HistoryMessage::user(
+                "Reply with the single word: pong",
+            )],
+            Vec::new(),
+            ReasoningRequest::Effort("low".into()),
+        )
+        .await
+        .expect("POST :streamGenerateContent falhou");
+        eprintln!(
+            "[gemini] texto={:?} reasoning_chars={} usage={:?} state_chars={}",
+            result.text.trim(),
+            result.reasoning.chars().count(),
+            result.usage,
+            result
+                .state
+                .as_ref()
+                .map(|state| state.to_string().chars().count())
+                .unwrap_or(0)
+        );
+        assert!(
+            result.text.to_ascii_lowercase().contains("pong"),
+            "{:?}",
+            result.text
+        );
+        assert!(result.state.is_some(), "sem provider_state");
+        assert!(
+            result
+                .usage
+                .as_ref()
+                .and_then(|usage| usage.input_tokens)
+                .unwrap_or(0)
+                > 0,
+            "usage sem promptTokenCount: {:?}",
+            result.usage
+        );
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1939,6 +2006,8 @@ mod tests {
             provider_name: provider.name.clone(),
             base_url: provider.base_url.clone(),
             api_key: "sk-test".to_string(),
+            auth_header: provider.auth_header.clone(),
+            auth_prefix: provider.auth_prefix.clone(),
             model,
             session_id: "session-1".to_string(),
             user_agent: "Zylara/test".to_string(),
@@ -2138,6 +2207,7 @@ mod tests {
         let mut checked = 0usize;
         let mut has_go_google = false;
         let mut has_zen_google = false;
+        let mut has_direct_google = false;
         for provider in &catalog.providers {
             for model in &provider.models {
                 if !model.protocols.iter().any(|protocol| protocol == "google") {
@@ -2147,6 +2217,7 @@ mod tests {
                 match provider.id.as_str() {
                     "opencode-go" => has_go_google = true,
                     "opencode-zen" => has_zen_google = true,
+                    "gemini" => has_direct_google = true,
                     _ => {}
                 }
                 let mut config = ProviderConfig {
@@ -2154,6 +2225,8 @@ mod tests {
                     provider_name: provider.name.clone(),
                     base_url: provider.base_url.clone(),
                     api_key: "sk-test".to_string(),
+                    auth_header: provider.auth_header.clone(),
+                    auth_prefix: provider.auth_prefix.clone(),
                     model: model.clone(),
                     session_id: String::new(),
                     user_agent: "Zylara/test".to_string(),
@@ -2165,11 +2238,20 @@ mod tests {
                 // A live id that is not in the catalog must still build.
                 config.model.id = "gemini-live-test".to_string();
                 let url = config.endpoint_for(WireProtocol::Google).expect("google");
+                let template = provider
+                    .endpoints
+                    .get("google")
+                    .expect("provedor google declara endpoint");
+                let expected_path = format!(
+                    "{}:streamGenerateContent?alt=sse",
+                    template.replace("{model}", "gemini-live-test")
+                );
                 assert_eq!(
                     url,
                     format!(
-                        "{}/google/v1beta/models/gemini-live-test:streamGenerateContent?alt=sse",
-                        provider.base_url.trim_end_matches('/')
+                        "{}{}",
+                        provider.base_url.trim_end_matches('/'),
+                        expected_path
                     ),
                     "{} / {}",
                     provider.id,
@@ -2181,10 +2263,10 @@ mod tests {
                 );
             }
         }
-        assert!(checked > 0, "catálogo deve declarar modelos google (Go+Zen)");
+        assert!(checked > 0, "catálogo deve declarar modelos google");
         assert!(
-            has_go_google && has_zen_google,
-            "Go e Zen devem expor ao menos um modelo google"
+            has_go_google && has_zen_google && has_direct_google,
+            "Go, Zen e Gemini devem expor ao menos um modelo google"
         );
     }
 
@@ -2220,6 +2302,13 @@ mod tests {
                 "header interno vazou: {forbidden}"
             );
         }
+
+        // Gemini uses the dedicated API-key header and no bearer/session.
+        let gemini = test_config("gemini", "gemini-3.8-flash");
+        let headers = gemini.headers();
+        assert_eq!(header(&headers, "x-goog-api-key"), Some("sk-test"));
+        assert!(header(&headers, "authorization").is_none());
+        assert!(header(&headers, "x-opencode-session").is_none());
     }
 
     #[test]

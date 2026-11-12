@@ -56,6 +56,7 @@ const mdOpencode = mdModels('opencode');
 const mdGo = mdModels('opencode-go');
 const mdOpenai = mdModels('openai');
 const mdAnthropic = mdModels('anthropic');
+const mdGoogle = mdModels('google');
 const docsOpenai = [];
 
 const byId = (list) => Object.fromEntries(list.map((m) => [m.id, m]));
@@ -557,6 +558,85 @@ function buildAnthropicProvider() {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Google Gemini (Gemini Developer API, API key)                       */
+/* ------------------------------------------------------------------ */
+
+const GEMINI_ENDPOINTS = {
+  google: '/models/{model}',
+  models: '/models',
+};
+
+const GEMINI_DOCS = [
+  'https://ai.google.dev/gemini-api/docs/models',
+  'https://ai.google.dev/api/models',
+  'https://ai.google.dev/api/generate-content',
+];
+
+// The provider exposes only the requested text-output families. Media, Live,
+// TTS, embeddings and agent models use different APIs and are filtered out.
+const GEMINI_SEED = ['gemini-4-carbon', 'gemini-4-argon', 'gemini-3.8-flash'];
+
+// Official model pages: 65,536 tokens for a single streaming request.
+const GEMINI_MAX_OUTPUT = {
+  'gemini-4-carbon': 65_536,
+  'gemini-4-argon': 65_536,
+  'gemini-3.8-flash': 65_536,
+};
+
+function buildGeminiProvider() {
+  const models = GEMINI_SEED.map((id) => {
+    const md = mdGoogle[id];
+    const model = buildModel(id, md ? { md, providerKind: 'gemini' } : { providerKind: 'gemini' });
+    return {
+      ...model,
+      // The picker/icon resolver knows only the "gemini" family.
+      family: 'gemini',
+      protocols: ['google'],
+      maxOutput: GEMINI_MAX_OUTPUT[id] ?? model.maxOutput,
+    };
+  });
+
+  const ids = new Set(models.map((model) => model.id));
+  const defaultModelId = ids.has('gemini-4-argon')
+    ? 'gemini-4-argon'
+    : (ids.has('gemini-3.8-flash') ? 'gemini-3.8-flash' : (models[0]?.id ?? ''));
+
+  return {
+    id: 'gemini',
+    name: 'Google Gemini',
+    shortName: 'Gemini',
+    description:
+      'Modelos Gemini pela API oficial do Google — cobrança por token na sua conta (Gemini Developer API).',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    consoleUrl: 'https://aistudio.google.com/apikey',
+    endpoints: GEMINI_ENDPOINTS,
+    authHeader: 'x-goog-api-key',
+    authPrefix: '',
+    authEnv: 'GEMINI_API_KEY',
+    defaultModelId,
+    models,
+    cache: {
+      mode: 'auto',
+      minTokens: 4096,
+      blockTokens: null,
+      ttlOptions: [],
+      supportsKey: false,
+      supportsRetention: false,
+      supportsExplicitBreakpoints: false,
+      reportsRead: true,
+      reportsWrite: false,
+      source: 'docs',
+    },
+    notes: [
+      'Cobrança por token na sua conta Google (Gemini Developer API).',
+      'Crie ou revise a API key em https://aistudio.google.com/apikey.',
+      'A lista da conta é buscada em GET /v1beta/models e limitada a Gemini 4 Carbon, Gemini 4 Argon e Gemini 3.8 Flash.',
+      'Thinking low/medium/high com resumos; long decode acima de 65.536 tokens não é suportado.',
+    ],
+  };
+}
+
 const catalog = {
   version: 1,
   generatedAt: new Date().toISOString(),
@@ -566,6 +646,7 @@ const catalog = {
       'https://opencode.ai/v2/docs/console/models/',
       ...OPENAI_DOCS,
       ...ANTHROPIC_DOCS,
+      ...GEMINI_DOCS,
     ],
     models: 'https://models.dev/api.json',
     probe: 'scripts/probe-models.mjs',
@@ -602,6 +683,7 @@ const catalog = {
     }),
     buildOpenAiProvider(),
     buildAnthropicProvider(),
+    buildGeminiProvider(),
   ],
 };
 
@@ -613,6 +695,7 @@ fs.mkdirSync(outDir, { recursive: true });
 const SURGICAL_PROVIDERS = {
   openai: { build: buildOpenAiProvider, docs: OPENAI_DOCS },
   anthropic: { build: buildAnthropicProvider, docs: ANTHROPIC_DOCS },
+  gemini: { build: buildGeminiProvider, docs: GEMINI_DOCS },
 };
 
 const providerFlagIndex = process.argv.indexOf('--provider');

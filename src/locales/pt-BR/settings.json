@@ -142,7 +142,7 @@
     "openFolderFailed": "Não foi possível abrir a pasta"
   },
   "providers": {
-    "securityNote": "As chaves de API (OpenCode/Anthropic) e a sessão do ChatGPT são gravadas apenas no backend (<code>secrets.json</code> no app-data) e nunca são expostas à interface. Também detectamos as variáveis de ambiente dos provedores e o login existente do OpenCode CLI.",
+    "securityNote": "As chaves de API (OpenCode/Anthropic/Google) e a sessão do ChatGPT são gravadas apenas no backend (<code>secrets.json</code> no app-data) e nunca são expostas à interface. Também detectamos as variáveis de ambiente dos provedores e o login existente do OpenCode CLI.",
     "storeErrorTitle": "A última ação falhou",
     "dismiss": "Dispensar",
     "secretsErrorTitle": "Não foi possível ler o arquivo de segredos",
@@ -161,6 +161,7 @@
       "replace": "Colar nova chave para substituir…",
       "openai": "Colar API key da OpenAI…",
       "anthropic": "Colar API key da Anthropic (sk-ant-…)…",
+      "gemini": "Colar API key do Google AI Studio (AIza…)…",
       "opencode": "Colar API key do OpenCode Console…",
       "generic": "Colar API key de {{name}}…"
     },
@@ -247,7 +248,8 @@
       "opencode-go": "Assinatura OpenCode Go — modelos abertos de alta performance com limites mensais.",
       "opencode-zen": "OpenCode Console (pay-as-you-go) — catálogo curado de modelos de vários provedores.",
       "openai": "Modelos OpenAI usando o plano ChatGPT da sua conta (Sign in with ChatGPT) ou uma API key da plataforma.",
-      "anthropic": "Modelos Claude pela API oficial da Anthropic — cobrança por token na sua conta (pay-as-you-go)."
+      "anthropic": "Modelos Claude pela API oficial da Anthropic — cobrança por token na sua conta (pay-as-you-go).",
+      "gemini": "Modelos Gemini pela API oficial do Google — cobrança por token na sua conta (Gemini Developer API)."
     },
     "notes": {
       "opencode-go": {
@@ -268,6 +270,12 @@
         "1": "Crie ou revise a API key em https://platform.claude.com/settings/keys.",
         "2": "A lista da conta é buscada em GET /v1/models; use \"Atualizar modelos\" para mesclar novidades.",
         "3": "Versão da API fixada em anthropic-version: 2026-10-21 (sem headers beta)."
+      },
+      "gemini": {
+        "0": "Cobrança por token na sua conta Google (Gemini Developer API).",
+        "1": "Crie ou revise a API key em https://aistudio.google.com/apikey.",
+        "2": "A lista da conta é buscada em GET /v1beta/models e limitada a Gemini 4 Carbon, Gemini 4 Argon e Gemini 3.8 Flash.",
+        "3": "Thinking low/medium/high com resumos; long decode acima de 65.536 tokens não é suportado."
       }
     }
   },

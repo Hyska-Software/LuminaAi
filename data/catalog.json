@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generatedAt": "2026-11-10T17:47:51.966Z",
+ "generatedAt": "2026-11-11T21:02:28.698Z",
  "sources": {
   "docs": [
    "https://opencode.ai/v2/docs/console/go/",
@@ -11,7 +11,10 @@
    "https://platform.claude.com/docs/en/api/overview",
    "https://platform.claude.com/docs/en/api/messages/create",
    "https://platform.claude.com/docs/en/api/models/list",
-   "https://platform.claude.com/docs/en/api/versioning"
+   "https://platform.claude.com/docs/en/api/versioning",
+   "https://ai.google.dev/gemini-api/docs/models",
+   "https://ai.google.dev/api/models",
+   "https://ai.google.dev/api/generate-content"
   ],
   "models": "https://models.dev/api.json",
   "probe": "scripts/probe-models.mjs"
@@ -8952,6 +8955,192 @@
     "Crie ou revise a API key em https://platform.claude.com/settings/keys.",
     "A lista da conta é buscada em GET /v1/models; use \"Atualizar modelos\" para mesclar novidades.",
     "Versão da API fixada em anthropic-version: 2026-10-21 (sem headers beta)."
+   ]
+  },
+  {
+   "id": "gemini",
+   "name": "Google Gemini",
+   "shortName": "Gemini",
+   "description": "Modelos Gemini pela API oficial do Google — cobrança por token na sua conta (Gemini Developer API).",
+   "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+   "consoleUrl": "https://aistudio.google.com/apikey",
+   "endpoints": {
+    "google": "/models/{model}",
+    "models": "/models"
+   },
+   "authHeader": "x-goog-api-key",
+   "authPrefix": "",
+   "authEnv": "GEMINI_API_KEY",
+   "defaultModelId": "gemini-4-argon",
+   "models": [
+    {
+     "id": "gemini-4-carbon",
+     "name": "Gemini 4 Carbon",
+     "family": "gemini",
+     "protocols": [
+      "google"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "low",
+        "medium",
+        "high"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "video",
+       "audio",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 65536,
+     "cost": {
+      "input": 2,
+      "output": 10,
+      "cache_read": 0.1,
+      "input_audio": 2
+     },
+     "releaseDate": "2026-11-10",
+     "knowledge": "2026-03",
+     "openWeights": false,
+     "description": "Google's most capable reasoning model for complex software engineering, deep math and science, high factual accuracy, and long-horizon autonomous agents",
+     "tags": [
+      "fast",
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
+    },
+    {
+     "id": "gemini-4-argon",
+     "name": "Gemini 4 Argon",
+     "family": "gemini",
+     "protocols": [
+      "google"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "low",
+        "medium",
+        "high"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "video",
+       "audio",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 65536,
+     "cost": {
+      "input": 2,
+      "output": 10,
+      "cache_read": 0.1,
+      "input_audio": 2
+     },
+     "releaseDate": "2026-10-13",
+     "knowledge": "2026-03",
+     "openWeights": false,
+     "description": "Google's flagship reasoning model for complex software engineering, deep math and science, and long-horizon autonomous agents",
+     "tags": [
+      "fast",
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
+    },
+    {
+     "id": "gemini-3.8-flash",
+     "name": "Gemini 3.8 Flash",
+     "family": "gemini",
+     "protocols": [
+      "google"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "low",
+        "medium",
+        "high"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "video",
+       "audio",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 65536,
+     "cost": {
+      "input": 0.75,
+      "output": 3.75,
+      "cache_read": 0.075,
+      "input_audio": 0.75
+     },
+     "releaseDate": "2026-09-02",
+     "knowledge": null,
+     "openWeights": false,
+     "description": "Google's most intelligent Flash model, engineered for long-horizon software engineering, autonomous agents, and complex enterprise workflows",
+     "tags": [
+      "fast",
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
+    }
+   ],
+   "cache": {
+    "mode": "auto",
+    "minTokens": 4096,
+    "blockTokens": null,
+    "ttlOptions": [],
+    "supportsKey": false,
+    "supportsRetention": false,
+    "supportsExplicitBreakpoints": false,
+    "reportsRead": true,
+    "reportsWrite": false,
+    "source": "docs"
+   },
+   "notes": [
+    "Cobrança por token na sua conta Google (Gemini Developer API).",
+    "Crie ou revise a API key em https://aistudio.google.com/apikey.",
+    "A lista da conta é buscada em GET /v1beta/models e limitada a Gemini 4 Carbon, Gemini 4 Argon e Gemini 3.8 Flash.",
+    "Thinking low/medium/high com resumos; long decode acima de 65.536 tokens não é suportado."
    ]
   }
  ]

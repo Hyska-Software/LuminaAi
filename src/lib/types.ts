@@ -125,6 +125,10 @@ export interface ProviderInfo {
    */
   headers?: Record<string, string>;
   authEnv: string;
+  /** Header carrying the API key (`authorization` by default). */
+  authHeader?: string;
+  /** Prefix before the key (`Bearer ` by default; empty for x-goog-api-key). */
+  authPrefix?: string;
   defaultModelId: string;
   auth?: ProviderAuth;
   requestProfiles?: RequestProfiles;

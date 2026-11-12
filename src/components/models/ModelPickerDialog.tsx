@@ -58,14 +58,11 @@ import {
   DialogHeader,
   DialogTitle,
   Kbd,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
 } from '@/components/ui';
 import { ModelDetailPanel } from './ModelDetailPanel';
 import { FamilyAvatar } from './FamilyAvatar';
-import { authStatusFor, providerAuthenticated, providerTabTitle } from './providerAuth';
+import { authStatusFor } from './providerAuth';
+import { ALL_PROVIDERS, ProviderSelect } from './ProviderSelect';
 import { ModelList } from './ModelList';
 import { ModelSearchField } from './ModelSearchField';
 import { modelOptionId } from './ModelRow';
@@ -191,7 +188,9 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
   const groups = useMemo(
     () =>
       buildModelGroups(providerList, {
-        ...(searching ? { query } : { providerId }),
+        ...(searching
+          ? { query }
+          : { providerId: providerId === ALL_PROVIDERS ? null : providerId }),
         filters,
         includeUnavailable: true,
         favorites,
@@ -289,6 +288,14 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
 
   const changeProvider = (nextProviderId: string) => {
     setProviderId(nextProviderId);
+    if (nextProviderId === ALL_PROVIDERS) {
+      // Keep the current preview; the re-anchor effect picks the first visible
+      // model if the previous one somehow left the list.
+      if (preview.providerId && preview.modelId) {
+        setActiveKey(modelKey(preview.providerId, preview.modelId));
+      }
+      return;
+    }
     if (preview.providerId === nextProviderId) {
       setActiveKey(modelKey(preview.providerId, preview.modelId));
       return;
@@ -472,51 +479,33 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
       </DialogHeader>
 
       <div className="flex min-h-0 flex-1 border-t border-border">
-        <Tabs
-          value={providerId}
-          onValueChange={changeProvider}
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
-        >
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-2">
             {searching ? (
               <span className="px-1 text-[11px] font-medium uppercase tracking-wider text-foreground-subtle">
                 {t('picker.allProviders')}
               </span>
             ) : (
-              <TabsList aria-label={t('picker.providersAria')} className="h-8 gap-0.5 bg-transparent p-0">
-                {providerList.map((provider) => {
-                  const providerKey = keyStatusFor(keys, provider.id);
-                  const providerAuthStatus = authStatusFor(auth, provider.id);
-                  return (
-                    <TabsTrigger
-                      key={provider.id}
-                      value={provider.id}
-                      variant="pill"
-                      title={providerTabTitle(provider, providerKey, providerAuthStatus)}
-                      className="h-8 gap-1.5 px-3 text-[12.5px] data-[state=active]:bg-surface-active data-[state=active]:shadow-none"
-                    >
-                      {provider.shortName}
-                      <span
-                        aria-hidden
-                        className={cn(
-                          'size-1.5 rounded-full',
-                          providerAuthenticated(providerKey, providerAuthStatus)
-                            ? 'bg-success'
-                            : 'bg-border-strong',
-                        )}
-                      />
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
+              <ProviderSelect
+                providers={providerList}
+                value={providerId}
+                onChange={changeProvider}
+                keys={keys}
+                auth={auth}
+                ariaLabel={t('picker.providersAria')}
+              />
             )}
           </div>
 
-          <TabsContent value={providerId} className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1">
             <ModelList
               groups={groups}
               listId={listId}
-              ariaLabel={searching ? t('picker.resultsAria') : t('picker.providerModelsAria')}
+              ariaLabel={
+                searching || providerId === ALL_PROVIDERS
+                  ? t('picker.resultsAria')
+                  : t('picker.providerModelsAria')
+              }
               activeKey={activeEntry ? entryKey(activeEntry) : null}
               selectedKey={selectedKey}
               onActivate={(key) => {
@@ -527,7 +516,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
               onCommit={commitEntry}
               onFavoriteToggle={toggleFavorite}
               variant="dialog"
-              showProvider={searching}
+              showProvider={searching || providerId === ALL_PROVIDERS}
               emptyState={
                 <EmptyResults
                   onClear={clearSearchAndFilters}
@@ -535,8 +524,8 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
                 />
               }
             />
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
 
         <aside
           aria-label={t('picker.detailsAria')}
@@ -665,8 +654,8 @@ function ModelLockedDialog({
 }
 
 /**
- * Full model selector (DESIGN §8): global search, quick filters, provider tabs,
- * preview panel and an explicit "Usar este modelo" confirmation.
+ * Full model selector (DESIGN §8): global search, quick filters, provider
+ * dropdown (including All), preview panel and an explicit "Usar este modelo" confirmation.
  *
  * Mounted once in `App` and driven by `useUiStore.modelPickerOpen`; the dialog
  * body is only rendered while open, so every opening starts from a clean state.

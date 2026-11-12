@@ -982,6 +982,7 @@ fn default_auth_env(provider_id: &str) -> &'static str {
     match provider_id {
         "openai" => "OPENAI_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
+        "gemini" => "GEMINI_API_KEY",
         _ => "OPENCODE_API_KEY",
     }
 }
@@ -1024,6 +1025,12 @@ pub fn api_key_from_env(provider_id: &str, auth_env: &str) -> Option<String> {
     };
     if let Some(key) = env_key(name) {
         return Some(key);
+    }
+    // Google SDKs also accept GOOGLE_API_KEY; keep it as the second choice.
+    if provider_id == "gemini" && name != "GOOGLE_API_KEY" {
+        if let Some(key) = env_key("GOOGLE_API_KEY") {
+            return Some(key);
+        }
     }
     if name != "OPENCODE_API_KEY" && matches!(provider_id, "opencode-go" | "opencode-zen") {
         return env_key("OPENCODE_API_KEY");
@@ -1632,6 +1639,29 @@ mod tests {
         );
         std::env::remove_var(name);
         assert_eq!(api_key_from_env("anthropic", name), None);
+    }
+
+    #[test]
+    fn gemini_env_and_google_api_key_fallback() {
+        assert_eq!(default_auth_env("gemini"), "GEMINI_API_KEY");
+
+        let declared = "ZYLARA_TEST_GEMINI_ENV_5C2D";
+        std::env::set_var(declared, "  AIza-declared  ");
+        assert_eq!(
+            api_key_from_env("gemini", declared).as_deref(),
+            Some("AIza-declared")
+        );
+        std::env::remove_var(declared);
+
+        // Fallback to the env var used by the Google SDKs. Skip when the
+        // developer already has it set so the test never clobbers a real key.
+        if std::env::var_os("GOOGLE_API_KEY").is_some() {
+            return;
+        }
+        std::env::set_var("GOOGLE_API_KEY", "  AIza-fallback  ");
+        let fallback = api_key_from_env("gemini", "ZYLARA_TEST_GEMINI_MISSING_8B1E");
+        std::env::remove_var("GOOGLE_API_KEY");
+        assert_eq!(fallback.as_deref(), Some("AIza-fallback"));
     }
 
     #[test]

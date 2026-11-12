@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 
 const external = vi.hoisted(() => ({ openExternal: vi.fn().mockResolvedValue(true) }));
 
@@ -111,24 +111,44 @@ async function renderOpenDialog() {
   return screen.getByRole('dialog');
 }
 
-async function openOpenAiTab(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('tab', { name: 'ChatGPT' }));
+/** Opens the provider dropdown and picks a provider (or All). */
+async function selectProvider(
+  user: UserEvent,
+  name: string,
+) {
+  await user.click(screen.getByRole('button', { name: 'Provedores' }));
+  await user.click(await screen.findByRole('menuitemradio', { name }));
+}
+
+async function openOpenAiTab(user: UserEvent) {
+  await selectProvider(user, 'ChatGPT');
   await waitFor(() =>
-    expect(screen.getByRole('tab', { name: 'ChatGPT' }).getAttribute('aria-selected')).toBe('true'),
+    expect(screen.getByRole('button', { name: 'Provedores' }).textContent).toContain(
+      'ChatGPT',
+    ),
   );
 }
 
 describe('ModelPickerDialog — provedor OpenAI', () => {
-  it('lista os quatro provedores do catálogo, incluindo OpenAI (ChatGPT) e Anthropic', async () => {
+  it('lista os cinco provedores do catálogo, incluindo OpenAI (ChatGPT), Anthropic e Gemini', async () => {
     await renderOpenDialog();
+    const user = userEvent.setup();
 
-    const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(4);
-    expect(screen.getByRole('tab', { name: 'Go' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Zen' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'ChatGPT' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Anthropic' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('aria-selected')).toBe('true');
+    const trigger = screen.getByRole('button', { name: 'Provedores' });
+    expect(trigger.textContent).toContain('Go');
+    await user.click(trigger);
+
+    const items = await screen.findAllByRole('menuitemradio');
+    expect(items).toHaveLength(6);
+    expect(screen.getByRole('menuitemradio', { name: 'Todos os provedores' })).toBeTruthy();
+    expect(screen.getByRole('menuitemradio', { name: 'Go' })).toBeTruthy();
+    expect(screen.getByRole('menuitemradio', { name: 'Zen' })).toBeTruthy();
+    expect(screen.getByRole('menuitemradio', { name: 'ChatGPT' })).toBeTruthy();
+    expect(screen.getByRole('menuitemradio', { name: 'Anthropic' })).toBeTruthy();
+    expect(screen.getByRole('menuitemradio', { name: 'Gemini' })).toBeTruthy();
+    expect(screen.getByRole('menuitemradio', { name: 'Go' }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
   });
 
   it('mostra modelos que só existem na conta, com selo Estimado', async () => {
@@ -206,7 +226,7 @@ describe('ModelPickerDialog — provedor OpenAI', () => {
     expect(within(goDetails).queryByText(/Conta ChatGPT/i)).toBeNull();
     expect(within(goDetails).getByText('Custo (1M tok.)')).toBeTruthy();
 
-    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+    await selectProvider(user, 'Zen');
     const zenDetails = modelDetails();
     expect(within(zenDetails).queryByText(/Conta ChatGPT/i)).toBeNull();
     expect(within(zenDetails).getByText('Custo (1M tok.)')).toBeTruthy();
@@ -226,7 +246,7 @@ describe('ModelPickerDialog — favoritos por par', () => {
       }),
     ).toBeTruthy();
 
-    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+    await selectProvider(user, 'Zen');
     const zenStar = within(screen.getByRole('listbox')).getByRole('button', {
       name: 'Favoritar GPT 6.1 Sol',
     });
@@ -245,7 +265,7 @@ describe('ModelPickerDialog — favoritos por par', () => {
       }),
     ).toBeTruthy();
 
-    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+    await selectProvider(user, 'Zen');
     expect(
       within(screen.getByRole('listbox')).getByRole('button', {
         name: 'Remover GPT 6.1 Sol dos favoritos',
@@ -275,7 +295,7 @@ describe('ModelPickerDialog — favoritos por par', () => {
     expect(screen.queryAllByRole('option')).toHaveLength(0);
     expect(screen.getByText('Nenhum modelo encontrado')).toBeTruthy();
 
-    await user.click(screen.getByRole('tab', { name: 'ChatGPT' }));
+    await selectProvider(user, 'ChatGPT');
     const options = screen.getAllByRole('option');
     expect(options).toHaveLength(1);
     expect(options[0].textContent).toContain('GPT-6.1 Sol');

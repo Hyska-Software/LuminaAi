@@ -6,7 +6,7 @@
  * `pnpm build:fast` used by `tauri build`, and `pnpm app:build`). It covers
  * every provider that can be refreshed without credentials:
  *  - OpenCode Go / Zen: official docs tables (ids, names, wire protocol)
- *  - OpenAI / Anthropic: models.dev (capabilities, limits, pricing, families)
+ *  - OpenAI / Anthropic / Google: models.dev (capabilities, limits, pricing, families)
  *
  * Live account lists (`GET /v1/models`) stay a runtime concern: they need the
  * user's credential and are merged by the app after sign-in/key save.
@@ -84,7 +84,7 @@ async function fetchText(url, accept, timeoutMs) {
 }
 
 function validateModelsDev(value) {
-  const required = ['opencode-go', 'opencode', 'openai', 'anthropic'];
+  const required = ['opencode-go', 'opencode', 'openai', 'anthropic', 'google'];
   const missing = required.filter(
     (provider) => !value[provider]?.models || Object.keys(value[provider].models).length === 0,
   );

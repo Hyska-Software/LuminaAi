@@ -96,6 +96,7 @@ function apiKeyPlaceholder(
   if (hasKey) return t('providers.keyPlaceholder.replace');
   if (provider.id === 'openai') return t('providers.keyPlaceholder.openai');
   if (provider.id === 'anthropic') return t('providers.keyPlaceholder.anthropic');
+  if (provider.id === 'gemini') return t('providers.keyPlaceholder.gemini');
   if (provider.id.startsWith('opencode-')) return t('providers.keyPlaceholder.opencode');
   return t('providers.keyPlaceholder.generic', { name: provider.name });
 }
@@ -242,6 +243,8 @@ export function ProvidersTab() {
         return t('providers.description.openai');
       case 'anthropic':
         return t('providers.description.anthropic');
+      case 'gemini':
+        return t('providers.description.gemini');
       default:
         return provider.description;
     }
@@ -266,6 +269,13 @@ export function ProvidersTab() {
           t('providers.notes.anthropic.1'),
           t('providers.notes.anthropic.2'),
           t('providers.notes.anthropic.3'),
+        ];
+      case 'gemini':
+        return [
+          t('providers.notes.gemini.0'),
+          t('providers.notes.gemini.1'),
+          t('providers.notes.gemini.2'),
+          t('providers.notes.gemini.3'),
         ];
       default:
         return provider.notes;

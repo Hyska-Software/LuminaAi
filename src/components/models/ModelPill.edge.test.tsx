@@ -12,7 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui';
 import { ModelPill } from '@/components/models/ModelPill';
 import { catalog } from '@/lib/catalog';
@@ -68,12 +68,22 @@ function thinkingTrigger(): HTMLButtonElement {
   }) as HTMLButtonElement;
 }
 
-async function openModelStage(user: ReturnType<typeof userEvent.setup>) {
+async function openModelStage(user: UserEvent) {
   await user.click(modelTrigger());
   return screen.findByRole('dialog', { name: 'Selecionar modelo' });
 }
 
-async function openThinkingStage(user: ReturnType<typeof userEvent.setup>) {
+/** Opens the compact provider dropdown and picks a provider (or All). */
+async function selectProvider(
+  user: UserEvent,
+  dialog: HTMLElement,
+  name: string,
+) {
+  await user.click(within(dialog).getByRole('button', { name: 'Provedor' }));
+  await user.click(await screen.findByRole('menuitemradio', { name }));
+}
+
+async function openThinkingStage(user: UserEvent) {
   await user.click(thinkingTrigger());
   return screen.findByRole('dialog', { name: 'Selecionar modelo' });
 }
@@ -264,8 +274,8 @@ describe('ModelPill (edge) — busca hostil', () => {
     await user.clear(search);
     await user.type(search, '    ');
     // Só espaços não é uma busca: o seletor de provedor continua visível.
-    expect(within(dialog).getByRole('radio', { name: 'Go' })).toBeTruthy();
-    expect(within(dialog).queryByText('Go + Zen + ChatGPT + Anthropic')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Provedor' })).toBeTruthy();
+    expect(within(dialog).queryByText('Go + Zen + ChatGPT + Anthropic + Gemini')).toBeNull();
     expect(within(dialog).getByText(countLabel(GO_AVAILABLE_COUNT))).toBeTruthy();
   });
 
@@ -319,7 +329,7 @@ describe('ModelPill (edge) — busca hostil', () => {
     const options = within(dialog).getAllByRole('option');
     expect(options).toHaveLength(OPENCODE_SEARCH_COUNT);
     expect(new Set(options.map((option) => option.id)).size).toBe(OPENCODE_SEARCH_COUNT);
-    expect(within(dialog).getByText('Go + Zen + ChatGPT + Anthropic')).toBeTruthy();
+    expect(within(dialog).getByText('Go + Zen + ChatGPT + Anthropic + Gemini')).toBeTruthy();
 
     const activeId = search.getAttribute('aria-activedescendant');
     expect(activeId).toBeTruthy();
@@ -491,7 +501,7 @@ describe('ModelPill (edge) — foco, reset e estados degenerados', () => {
       name: 'Buscar modelos',
     }) as HTMLInputElement;
     expect(reopened.value).toBe('');
-    expect(within(dialog).getByRole('radio', { name: 'Go' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Provedor' })).toBeTruthy();
     expect(within(dialog).queryByText('Modo de pensamento')).toBeNull();
 
     // E a etapa ✦ volta sempre fechada ao reabrir o popover.

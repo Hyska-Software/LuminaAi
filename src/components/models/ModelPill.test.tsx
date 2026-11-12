@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactElement } from 'react';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { toast } from 'sonner';
 import { TooltipProvider } from '@/components/ui';
@@ -48,6 +48,11 @@ const ZEN_MODELS = catalog.providers.find((provider) => provider.id === ZEN)?.mo
 /** The compact pill hides models the gateway reports as unavailable. */
 const GO_AVAILABLE_COUNT = GO_MODELS.filter((model) => model.status !== 'unavailable').length;
 const ZEN_COUNT = ZEN_MODELS.filter((model) => model.status !== 'unavailable').length;
+const ALL_AVAILABLE_COUNT = catalog.providers.reduce(
+  (total, provider) =>
+    total + provider.models.filter((model) => model.status !== 'unavailable').length,
+  0,
+);
 
 function countLabel(count: number): string {
   return `${count} ${count === 1 ? 'modelo' : 'modelos'}`;
@@ -73,12 +78,22 @@ function thinkingTrigger(): HTMLButtonElement {
   }) as HTMLButtonElement;
 }
 
-async function openModelStage(user: ReturnType<typeof userEvent.setup>) {
+async function openModelStage(user: UserEvent) {
   await user.click(modelTrigger());
   return screen.findByRole('dialog', { name: 'Selecionar modelo' });
 }
 
-async function openThinkingStage(user: ReturnType<typeof userEvent.setup>) {
+/** Opens the compact provider dropdown and picks a provider (or All). */
+async function selectProvider(
+  user: UserEvent,
+  dialog: HTMLElement,
+  name: string,
+) {
+  await user.click(within(dialog).getByRole('button', { name: 'Provedor' }));
+  await user.click(await screen.findByRole('menuitemradio', { name }));
+}
+
+async function openThinkingStage(user: UserEvent) {
   await user.click(thinkingTrigger());
   return screen.findByRole('dialog', { name: 'Selecionar modelo' });
 }
@@ -294,11 +309,10 @@ describe('ModelPill (model step)', () => {
       within(dialog).getByRole('option', { name: 'DeepSeek V4.1 Flash' }).id,
     );
 
-    // Provider switch with key dots + model count.
-    expect(
-      (within(dialog).getByRole('radio', { name: 'Go' }) as HTMLElement).getAttribute('aria-checked'),
-    ).toBe('true');
-    expect(within(dialog).getByRole('radio', { name: 'Zen' })).toBeTruthy();
+    // Provider dropdown with key dot + model count.
+    const providerTrigger = within(dialog).getByRole('button', { name: 'Provedor' });
+    expect(providerTrigger.textContent).toContain('Go');
+    expect(providerTrigger.getAttribute('title')).toBe('Chave configurada');
     expect(within(dialog).getByText(countLabel(GO_AVAILABLE_COUNT))).toBeTruthy();
 
     // Groups: favorites first, then the families.
@@ -345,8 +359,8 @@ describe('ModelPill (model step)', () => {
     await user.type(search, 'opus');
 
     expect(await within(dialog).findByText('Zen · Claude')).toBeTruthy();
-    expect(within(dialog).getByText('Go + Zen + ChatGPT + Anthropic')).toBeTruthy();
-    expect(within(dialog).queryByRole('radio', { name: 'Go' })).toBeNull();
+    expect(within(dialog).getByText('Go + Zen + ChatGPT + Anthropic + Gemini')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Provedor' })).toBeNull();
     expect(
       within(dialog)
         .getAllByRole('option')
@@ -356,20 +370,35 @@ describe('ModelPill (model step)', () => {
     expect(within(dialog).getAllByText('Zen').length).toBeGreaterThan(0);
   });
 
+  it('opção Todos lista modelos de todos os provedores com o provedor em cada linha', async () => {
+    const user = userEvent.setup();
+    renderPill();
+
+    const dialog = await openModelStage(user);
+    await selectProvider(user, dialog, 'Todos os provedores');
+
+    expect(
+      within(dialog).getByRole('button', { name: 'Provedor' }).textContent,
+    ).toContain('Todos os provedores');
+    expect(within(dialog).getAllByRole('option')).toHaveLength(ALL_AVAILABLE_COUNT);
+    expect(within(dialog).getByText(countLabel(ALL_AVAILABLE_COUNT))).toBeTruthy();
+    for (const provider of ['Zen', 'ChatGPT', 'Anthropic', 'Gemini']) {
+      expect(within(dialog).getAllByText(provider).length).toBeGreaterThan(0);
+    }
+  });
+
   it('switches the list between Go and Zen', async () => {
     const user = userEvent.setup();
     renderPill();
 
     const dialog = await openModelStage(user);
-    await user.click(within(dialog).getByRole('radio', { name: 'Zen' }));
+    await selectProvider(user, dialog, 'Zen');
 
     expect(await within(dialog).findByRole('option', { name: 'Claude Fable 5' })).toBeTruthy();
     expect(within(dialog).queryByRole('option', { name: 'GLM-5.3-Flash' })).toBeNull();
     expect(
-      (within(dialog).getByRole('radio', { name: 'Zen' }) as HTMLElement).getAttribute(
-        'aria-checked',
-      ),
-    ).toBe('true');
+      within(dialog).getByRole('button', { name: 'Provedor' }).textContent,
+    ).toContain('Zen');
     expect(within(dialog).getByText(countLabel(ZEN_COUNT))).toBeTruthy();
   });
 

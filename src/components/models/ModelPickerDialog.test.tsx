@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { TooltipProvider } from '@/components/ui';
 import { ModelPickerDialog } from '@/components/models/ModelPickerDialog';
 import { providers } from '@/lib/catalog';
@@ -46,6 +46,10 @@ const GO_MODELS = CATALOG_PROVIDERS.find((provider) => provider.id === CURRENT_P
 const ZEN_MODELS = CATALOG_PROVIDERS.find((provider) => provider.id === 'opencode-zen')?.models ?? [];
 const GO_COUNT = GO_MODELS.length;
 const ZEN_COUNT = ZEN_MODELS.length;
+const ALL_COUNT = CATALOG_PROVIDERS.reduce(
+  (total, provider) => total + provider.models.length,
+  0,
+);
 const GO_VISION_COUNT = GO_MODELS.filter(modelSupportsVision).length;
 const GO_FREE_COUNT = GO_MODELS.filter((model) => model.status === 'free').length;
 const GO_VISION_FREE_COUNT = GO_MODELS.filter(
@@ -99,6 +103,15 @@ async function renderDialog() {
 async function renderOpenDialog() {
   await renderDialog();
   await waitFor(() => expect(document.activeElement).toBe(searchField()));
+}
+
+/** Opens the provider dropdown and picks a provider (or All). */
+async function selectProvider(
+  user: UserEvent,
+  name: string,
+) {
+  await user.click(screen.getByRole('button', { name: 'Provedores' }));
+  await user.click(await screen.findByRole('menuitemradio', { name }));
 }
 
 function selectedModelName(): string | undefined {
@@ -210,31 +223,47 @@ describe('ModelPickerDialog', () => {
     expect(screen.getAllByRole('option', { name: /Claude Opus 5\.5/ })).toHaveLength(2);
     // 6 variantes no Zen + 6 na Anthropic.
     expect(modelCount()).toBe(12);
-    // As abas dão lugar ao rótulo da busca global.
-    expect(screen.queryByRole('tab', { name: 'Go' })).toBeNull();
+    // The provider dropdown gives way to the global-search label.
+    expect(screen.queryByRole('button', { name: 'Provedores' })).toBeNull();
     expect(screen.getByRole('listbox', { name: 'Resultados da busca de modelos' })).toBeTruthy();
   });
 
-  it('alterna de provedor pelas abas e move a prévia para o modelo padrão', async () => {
+  it('alterna de provedor pelo dropdown e move a prévia para o modelo padrão', async () => {
     await renderOpenDialog();
     const user = userEvent.setup();
 
-    const goTab = screen.getByRole('tab', { name: 'Go' });
-    expect(goTab.getAttribute('aria-selected')).toBe('true');
-    expect(goTab.getAttribute('title')).toBe('Chave configurada');
-    // Sem trilho próprio, a aba ativa usa preenchimento em vez de sombra.
-    expect(goTab.className).toContain('data-[state=active]:bg-surface-active');
-    expect(goTab.className).not.toContain('shadow-sm');
+    const providerTrigger = screen.getByRole('button', { name: 'Provedores' });
+    expect(providerTrigger.textContent).toContain('Go');
+    expect(providerTrigger.getAttribute('title')).toBe('Chave configurada');
     expect(modelCount()).toBe(GO_COUNT);
 
-    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+    await selectProvider(user, 'Zen');
 
-    expect(screen.getByRole('tab', { name: 'Zen' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Provedores' }).textContent).toContain('Zen');
     expect(modelCount()).toBe(ZEN_COUNT);
     // O Zen não tem Omen Alpha (exclusivo do Go).
     expect(screen.queryByRole('option', { name: /Omen Alpha/ })).toBeNull();
     // A prévia passa para o modelo padrão do provedor.
     expect(screen.getByRole('heading', { name: 'GPT 6 Luna' })).toBeTruthy();
+  });
+
+  it('opção Todos lista todos os modelos com o provedor em cada linha', async () => {
+    await renderOpenDialog();
+    const user = userEvent.setup();
+
+    await selectProvider(user, 'Todos os provedores');
+
+    expect(screen.getByRole('button', { name: 'Provedores' }).textContent).toContain(
+      'Todos os provedores',
+    );
+    expect(modelCount()).toBe(ALL_COUNT);
+    const options = screen.getAllByRole('option');
+    expect(options).toHaveLength(ALL_COUNT);
+    const texts = options.map((option) => option.textContent ?? '');
+    expect(texts.some((text) => text.includes('ChatGPT'))).toBe(true);
+    expect(texts.some((text) => text.includes('Zen'))).toBe(true);
+    expect(texts.some((text) => text.includes('Anthropic'))).toBe(true);
+    expect(texts.some((text) => text.includes('Gemini'))).toBe(true);
   });
 
   it('filtros de capability reduzem a lista e combinam entre si', async () => {
@@ -373,7 +402,7 @@ describe('ModelPickerDialog', () => {
     await renderOpenDialog();
     const user = userEvent.setup();
 
-    expect(screen.getByRole('tab', { name: 'Go' }).getAttribute('title')).toBe(
+    expect(screen.getByRole('button', { name: 'Provedores' }).getAttribute('title')).toBe(
       'Sem chave de API',
     );
     expect(screen.getByText(/Sem chave de API para OpenCode Go/)).toBeTruthy();
@@ -469,10 +498,10 @@ describe('ModelPickerDialog (modelo bloqueado após iniciar a conversa)', () => 
       ),
     ).toBeTruthy();
 
-    // Nada de seletor: sem busca, lista, abas ou confirmação.
+    // Nada de seletor: sem busca, lista, dropdown ou confirmação.
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.queryByRole('listbox')).toBeNull();
-    expect(screen.queryByRole('tab')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Provedores' })).toBeNull();
     expect(screen.queryByRole('option')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Usar este modelo' })).toBeNull();
     expect(screen.queryByText('Em uso')).toBeNull();
@@ -566,13 +595,13 @@ describe('ModelPickerDialog (troca de modelo na sessão do Code)', () => {
     expect(apiMocks.saveSettings).not.toHaveBeenCalled();
   });
 
-  it('troca de provedor no meio da conversa: aba Zen, modelo do Zen e commit na sessão', async () => {
+  it('troca de provedor no meio da conversa: dropdown Zen, modelo do Zen e commit na sessão', async () => {
     startCodeSession();
     await renderOpenDialog();
     const user = userEvent.setup();
 
     // Sai do Go (rota atual da sessão) para o Zen e escolhe um modelo daquele provedor.
-    await user.click(screen.getByRole('tab', { name: 'Zen' }));
+    await selectProvider(user, 'Zen');
     await user.click(await screen.findByRole('option', { name: /Claude Haiku 5\.5/ }));
     expect(screen.getByRole('heading', { name: 'Claude Haiku 5.5' })).toBeTruthy();
 

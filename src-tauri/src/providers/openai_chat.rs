@@ -536,6 +536,8 @@ mod tests {
                 provider_name: provider.name.clone(),
                 base_url: provider.base_url.clone(),
                 api_key: "sk-test".to_string(),
+                auth_header: provider.auth_header.clone(),
+                auth_prefix: provider.auth_prefix.clone(),
                 model,
                 session_id: "session-1".to_string(),
                 user_agent: "Zylara/test".to_string(),

@@ -67,7 +67,9 @@ fn api_key_validation_hint(provider: &ProviderInfo) -> String {
     // The catalog id is stable, so copy can be provider-specific without
     // guessing from URLs. Direct providers get their own console text; the
     // ChatGPT provider keeps the plan copy and the gateways the OpenCode copy.
-    if provider.id == "anthropic" {
+    if provider.id == "gemini" {
+        crate::i18n::t("settings.keys.hint.gemini")
+    } else if provider.id == "anthropic" {
         crate::i18n::t("settings.keys.hint.anthropic")
     } else if provider.supports_oauth() {
         crate::i18n::t("settings.keys.hint.oauth")
@@ -375,9 +377,10 @@ fn models_request(
     url: &str,
     token: &str,
 ) -> reqwest::RequestBuilder {
+    let (header_name, header_value) = provider.credential_header(token);
     let mut request = client
         .get(url)
-        .header("Authorization", format!("Bearer {token}"))
+        .header(header_name.as_str(), header_value.as_str())
         .header("User-Agent", concat!("Zylara/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(15));
     for (name, value) in provider.static_headers() {
@@ -664,6 +667,26 @@ mod tests {
             models_endpoint(provider),
             "https://api.anthropic.com/v1/models"
         );
+    }
+
+    #[test]
+    fn models_endpoint_supports_the_direct_gemini_api() {
+        let catalog = crate::catalog::CatalogFile::load().expect("catálogo embutido válido");
+        let provider = catalog.provider("gemini").expect("provedor gemini");
+        let url = models_endpoint(provider);
+        assert_eq!(
+            url,
+            "https://generativelanguage.googleapis.com/v1beta/models"
+        );
+
+        let client = reqwest::Client::new();
+        let request = models_request(&client, provider, &url, "AIza-test")
+            .build()
+            .expect("request válido");
+        let headers = request.headers();
+        let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+        assert_eq!(header("x-goog-api-key"), Some("AIza-test"));
+        assert!(header("authorization").is_none(), "Gemini não usa Bearer");
     }
 
     #[test]

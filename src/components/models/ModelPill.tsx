@@ -43,12 +43,11 @@ import {
   Popover,
   PopoverAnchor,
   PopoverContent,
-  SegmentedControl,
-  type SegmentedOption,
 } from '@/components/ui';
 import { FamilyAvatar } from './FamilyAvatar';
 import { ModelDetailPanel } from './ModelDetailPanel';
-import { authStatusFor, providerAuthenticated, providerTabTitle } from './providerAuth';
+import { authStatusFor } from './providerAuth';
+import { ALL_PROVIDERS, ProviderSelect } from './ProviderSelect';
 import { ModelList } from './ModelList';
 import { ModelSearchField } from './ModelSearchField';
 import { modelOptionId } from './ModelRow';
@@ -191,9 +190,10 @@ function PillEmptyState({ query, onClear }: PillEmptyStateProps) {
 
 /**
  * Compact model selector (DESIGN §7 default), a two-step popover:
- * 1. the compact model list: search (global across Go/Zen), provider switch and
- *    families, with the model details shown as a floating tooltip-like bubble
- *    anchored to the active row (on hover or keyboard navigation);
+ * 1. the compact model list: search (global across providers), provider dropdown
+ *    (including All), grouped by family, with the model details shown as a
+ *    floating tooltip-like bubble anchored to the active row (on hover or
+ *    keyboard navigation);
  * 2. the thinking-mode list, reached after picking a model or straight from the
  *    ✦ segment (with a back button that returns without closing).
  * "Ver todos os modelos…" at the bottom opens the full dialog.
@@ -280,7 +280,11 @@ export function ModelPill({
   const groups = useMemo(
     () =>
       buildModelGroups(providerList, {
-        ...(searching ? { query } : { providerId: listProviderId }),
+        ...(searching
+          ? { query }
+          : {
+              providerId: listProviderId === ALL_PROVIDERS ? null : listProviderId,
+            }),
         includeUnavailable: false,
         favorites,
         favoriteMatch: (pid, modelId) => favoriteEntryMatches(favorites, pid, modelId),
@@ -521,12 +525,18 @@ export function ModelPill({
     setListProviderId(value);
     setQuery('');
     const nextGroups = buildModelGroups(providerList, {
-      providerId: value,
+      providerId: value === ALL_PROVIDERS ? null : value,
       includeUnavailable: false,
       favorites,
       favoriteMatch: (pid, modelId) => favoriteEntryMatches(favorites, pid, modelId),
     });
-    const next = firstSelectable(nextGroups);
+    // Keep the highlighted row when it is still visible (e.g. switching back to
+    // All); otherwise anchor on the first selectable model of the new scope.
+    const nextEntries = flattenGroups(nextGroups);
+    const kept = activeKey
+      ? nextEntries.find((entry) => entryKey(entry) === activeKey)
+      : undefined;
+    const next = kept ?? firstSelectable(nextGroups);
     setActiveKey(next ? entryKey(next) : null);
   };
 
@@ -646,6 +656,12 @@ export function ModelPill({
 
   const handleInteractOutside = (event: { target: EventTarget | null; preventDefault: () => void }) => {
     const target = event.target;
+    // The provider dropdown is portaled outside the popover; selecting an item
+    // must not close the model stage before the click is handled.
+    if (target instanceof Element && target.closest('[role="menu"]')) {
+      event.preventDefault();
+      return;
+    }
     const onTrigger =
       target instanceof Node &&
       (modelTriggerRef.current?.contains(target) === true ||
@@ -657,29 +673,6 @@ export function ModelPill({
     }
     closedByOutsideRef.current = true;
   };
-
-  const providerOptions: SegmentedOption[] = providerList.map((provider) => {
-    const providerKey = keyStatusFor(keys, provider.id);
-    const providerAuthStatus = authStatusFor(auth, provider.id);
-    return {
-      value: provider.id,
-      title: providerTabTitle(provider, providerKey, providerAuthStatus),
-      label: (
-        <span className="flex items-center gap-1.5">
-          <span
-            aria-hidden
-            className={cn(
-              'size-1.5 rounded-full',
-              providerAuthenticated(providerKey, providerAuthStatus)
-                ? 'bg-success'
-                : 'bg-border-strong',
-            )}
-          />
-          {provider.shortName}
-        </span>
-      ),
-    };
-  });
 
   const allProvidersLabel = providerList.map((provider) => provider.shortName).join(' + ');
 
@@ -850,11 +843,13 @@ export function ModelPill({
                     {allProvidersLabel}
                   </span>
                 ) : (
-                  <SegmentedControl
+                  <ProviderSelect
                     size="sm"
-                    options={providerOptions}
+                    providers={providerList}
                     value={listProviderId}
                     onChange={handleProviderChange}
+                    keys={keys}
+                    auth={auth}
                     ariaLabel={t('picker.providerAria')}
                   />
                 )}
@@ -881,7 +876,7 @@ export function ModelPill({
                 onPick={handleModelPick}
                 onFavoriteToggle={toggleFavorite}
                 variant="compact"
-                showProvider={searching}
+                showProvider={searching || listProviderId === ALL_PROVIDERS}
                 emptyState={
                   <PillEmptyState query={query} onClear={() => handleQueryChange('')} />
                 }

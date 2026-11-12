@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, State};
@@ -39,6 +40,8 @@ pub struct RemoteModel {
     pub reasoning_efforts: Vec<String>,
     /// The model exposes some thinking control (`capabilities.thinking`).
     pub reasoning: bool,
+    /// Generation methods reported by the list (`supportedGenerationMethods`).
+    pub generation_methods: Vec<String>,
     /// The payload carried a `capabilities` object, so "no reasoning/image" is
     /// authoritative instead of "metadata absent" (see [`estimated_model`]).
     pub capabilities_reported: bool,
@@ -50,6 +53,8 @@ pub struct RemotePage {
     pub models: Vec<RemoteModel>,
     /// `after_id` value for the next request when the provider paginates.
     pub next_after: Option<String>,
+    /// `nextPageToken` value (Google `GET /v1beta/models`).
+    pub next_page_token: Option<String>,
 }
 
 impl RemoteModel {
@@ -94,20 +99,38 @@ fn u32_field(item: &Value, keys: &[&str]) -> Option<u32> {
 /// `{"data":[{"id","display_name","max_input_tokens","max_tokens","capabilities"}]}`
 /// (Anthropic Models API) and `{"data":[{"id"}]}` (OpenAI platform).
 fn parse_remote_model(item: &Value) -> Option<RemoteModel> {
-    let id = item
+    // Gemini lists `name` as the resource (`models/gemini-…`) and `displayName`
+    // as the label; the other providers use `id`/`slug` + `display_name`.
+    let raw_id = item
         .get("id")
         .or_else(|| item.get("slug"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|id| !id.is_empty())?
-        .to_string();
-    let display_name = item
-        .get("display_name")
         .or_else(|| item.get("name"))
         .and_then(Value::as_str)
         .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    let id = raw_id.rsplit('/').next().unwrap_or(raw_id).trim().to_string();
+    if id.is_empty() {
+        return None;
+    }
+    let display_name = item
+        .get("display_name")
+        .or_else(|| item.get("displayName"))
+        .and_then(Value::as_str)
+        .map(str::trim)
         .filter(|name| !name.is_empty())
-        .map(str::to_string);
+        .map(str::to_string)
+        .or_else(|| {
+            // `name` is a display label only when it was not used as the id.
+            if item.get("id").is_some() || item.get("slug").is_some() {
+                item.get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+            } else {
+                None
+            }
+        });
     let visibility = item
         .get("visibility")
         .and_then(Value::as_str)
@@ -120,6 +143,16 @@ fn parse_remote_model(item: &Value) -> Option<RemoteModel> {
     // Retired models still appear in the Anthropic catalogue as history but can
     // never be called: keep them out of the account list.
     if item.get("lifecycle").and_then(Value::as_str) == Some("retired") {
+        return None;
+    }
+    // Gemini model lists include embedding/agent endpoints; only models that
+    // accept generateContent are selectable in the chat UI.
+    let generation_methods = string_array(item.get("supportedGenerationMethods"));
+    if !generation_methods.is_empty()
+        && !generation_methods
+            .iter()
+            .any(|method| method == "generateContent")
+    {
         return None;
     }
 
@@ -150,17 +183,25 @@ fn parse_remote_model(item: &Value) -> Option<RemoteModel> {
         })
         .unwrap_or_default();
     let reasoning = flag_supported(item, "/capabilities/thinking/supported")
-        || item.get("reasoning").and_then(Value::as_bool).unwrap_or(false);
+        || item.get("reasoning").and_then(Value::as_bool).unwrap_or(false)
+        || item.get("thinking").and_then(Value::as_bool).unwrap_or(false);
 
     Some(RemoteModel {
         id,
         display_name,
         visibility,
-        context_window: u32_field(item, &["max_input_tokens", "context_window"]),
-        max_output: u32_field(item, &["max_tokens", "max_output_tokens"]),
+        context_window: u32_field(
+            item,
+            &["max_input_tokens", "context_window", "inputTokenLimit"],
+        ),
+        max_output: u32_field(
+            item,
+            &["max_tokens", "max_output_tokens", "outputTokenLimit"],
+        ),
         input_modalities,
         reasoning_efforts,
         reasoning,
+        generation_methods,
         capabilities_reported,
     })
 }
@@ -187,9 +228,16 @@ pub fn parse_remote_page(document: &Value) -> RemotePage {
     } else {
         None
     };
+    let next_page_token = document
+        .get("nextPageToken")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string);
     RemotePage {
         models,
         next_after,
+        next_page_token,
     }
 }
 
@@ -202,6 +250,26 @@ pub fn parse_remote_models(document: &Value) -> Vec<RemoteModel> {
 pub fn next_page_url(base: &str, after: &str) -> String {
     let separator = if base.contains('?') { '&' } else { '?' };
     format!("{base}{separator}after_id={after}")
+}
+
+/// Appends (or replaces) the Google `pageToken` of a paginated list endpoint.
+pub fn next_page_token_url(base: &str, token: &str) -> String {
+    let base = base
+        .split_once("pageToken=")
+        .map(|(head, _)| head.trim_end_matches(|c| c == '&' || c == '?'))
+        .unwrap_or(base);
+    let separator = if base.contains('?') { '&' } else { '?' };
+    let token = utf8_percent_encode(token, NON_ALPHANUMERIC);
+    format!("{base}{separator}pageToken={token}")
+}
+
+/// Text-output Gemini models this provider exposes.
+pub const GEMINI_CHAT_MODELS: [&str; 3] =
+    ["gemini-4-carbon", "gemini-4-argon", "gemini-3.8-flash"];
+
+/// Provider-specific allowlist for the live account list.
+pub(crate) fn remote_model_allowed(provider_id: &str, model_id: &str) -> bool {
+    provider_id != "gemini" || GEMINI_CHAT_MODELS.iter().any(|allowed| *allowed == model_id)
 }
 
 fn models_endpoint(provider: &ProviderInfo) -> String {
@@ -267,13 +335,20 @@ async fn fetch_remote_models(
 ) -> Result<Vec<RemoteModel>, String> {
     let bearer = bearer_for(app, state, provider).await?;
     let endpoint = models_endpoint(provider);
-    let mut url = endpoint.clone();
+    // Google caps the page at 1000 models; ask for the maximum up front.
+    let mut url = if provider.id == "gemini" {
+        format!("{endpoint}?pageSize=1000")
+    } else {
+        endpoint.clone()
+    };
     let mut remote: Vec<RemoteModel> = Vec::new();
+    let mut any_models = false;
     for _ in 0..MAX_MODEL_PAGES {
+        let (header_name, header_value) = provider.credential_header(&bearer);
         let mut request = state
             .http
             .get(&url)
-            .header("Authorization", format!("Bearer {bearer}"))
+            .header(header_name.as_str(), header_value.as_str())
             .header("User-Agent", concat!("Zylara/", env!("CARGO_PKG_VERSION")))
             .timeout(std::time::Duration::from_secs(25));
         // Provider-declared headers (e.g. `anthropic-version`) are required by
@@ -304,13 +379,23 @@ async fn fetch_remote_models(
                 )
             })?;
         let page = parse_remote_page(&document);
-        remote.extend(page.models);
-        match page.next_after {
-            Some(cursor) => url = next_page_url(&endpoint, &cursor),
-            None => break,
+        any_models |= !page.models.is_empty();
+        remote.extend(
+            page.models
+                .into_iter()
+                .filter(|model| remote_model_allowed(&provider.id, &model.id)),
+        );
+        if let Some(cursor) = page.next_after {
+            url = next_page_url(&endpoint, &cursor);
+        } else if let Some(token) = page.next_page_token {
+            url = next_page_token_url(&url, &token);
+        } else {
+            break;
         }
     }
-    if remote.is_empty() {
+    // A Gemini account may have none of the three exposed models; keep the
+    // bundled seed as fallback instead of failing the refresh.
+    if !any_models {
         return Err(crate::i18n::t_args(
             "models.errors.noModels",
             &[("provider", &provider.name)],
@@ -825,5 +910,82 @@ mod tests {
         assert!(anthropic.starts_with("nenhuma credencial"));
         assert!(anthropic.contains("API key"));
         assert!(!anthropic.contains("ChatGPT"), "copy errada: {anthropic}");
+    }
+
+    #[test]
+    fn parses_the_gemini_models_page() {
+        let document = json!({
+            "models": [
+                {
+                    "name": "models/gemini-4-carbon",
+                    "baseModelId": "gemini-4-carbon",
+                    "displayName": "Gemini 4 Carbon",
+                    "inputTokenLimit": 1_048_576,
+                    "outputTokenLimit": 65_536,
+                    "supportedGenerationMethods": ["generateContent", "countTokens"],
+                    "thinking": true
+                },
+                {
+                    "name": "models/gemini-embedding-001",
+                    "displayName": "Gemini Embedding",
+                    "supportedGenerationMethods": ["embedContent"]
+                }
+            ],
+            "nextPageToken": "page-2"
+        });
+        let page = parse_remote_page(&document);
+        // Embedding-only models are not chat models.
+        assert_eq!(page.models.len(), 1);
+        let model = &page.models[0];
+        assert_eq!(model.id, "gemini-4-carbon");
+        assert_eq!(model.display_name.as_deref(), Some("Gemini 4 Carbon"));
+        assert_eq!(model.context_window, Some(1_048_576));
+        assert_eq!(model.max_output, Some(65_536));
+        assert!(model.reasoning);
+        assert_eq!(
+            model.generation_methods,
+            vec!["generateContent".to_string(), "countTokens".to_string()]
+        );
+        assert_eq!(page.next_page_token.as_deref(), Some("page-2"));
+        assert!(page.next_after.is_none());
+    }
+
+    #[test]
+    fn gemini_remote_filter_keeps_only_the_three_models() {
+        for id in GEMINI_CHAT_MODELS {
+            assert!(remote_model_allowed("gemini", id), "{id}");
+        }
+        for id in [
+            "gemini-2.5-pro",
+            "gemini-3.1-flash-image",
+            "gemini-flash-latest",
+            "gemini-3.8-flash-001",
+        ] {
+            assert!(!remote_model_allowed("gemini", id), "{id}");
+        }
+        assert!(remote_model_allowed("opencode-zen", "gemini-2.5-pro"));
+    }
+
+    #[test]
+    fn next_page_token_url_replaces_the_previous_token() {
+        assert_eq!(
+            next_page_token_url("https://x.test/models?pageSize=1000", "A"),
+            "https://x.test/models?pageSize=1000&pageToken=A"
+        );
+        assert_eq!(
+            next_page_token_url(
+                "https://x.test/models?pageSize=1000&pageToken=A",
+                "B"
+            ),
+            "https://x.test/models?pageSize=1000&pageToken=B"
+        );
+        assert_eq!(
+            next_page_token_url("https://x.test/models?pageToken=A", "B"),
+            "https://x.test/models?pageToken=B"
+        );
+        assert_eq!(
+            next_page_token_url("https://x.test/models", "a+b/c="),
+            "https://x.test/models?pageToken=a%2Bb%2Fc%3D"
+        );
     }
 }
