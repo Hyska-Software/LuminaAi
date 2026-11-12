@@ -14,6 +14,7 @@
 //! do usuário, todo resultado grande vai para spill com caminho de recuperação
 //! (`read_tool_output`).
 
+use std::borrow::Cow;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1471,6 +1472,16 @@ fn normalize_eol(content: &str, before: Option<&[u8]>) -> String {
     content.to_string()
 }
 
+/// Collapses CRLF to LF so snippets copied from the LF-normalized `read_file`
+/// output match files checked out with CRLF (Windows, `core.autocrlf`).
+fn normalize_crlf(text: &str) -> Cow<'_, str> {
+    if text.contains("\r\n") {
+        Cow::Owned(text.replace("\r\n", "\n"))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 fn preserve_bom(content: &str, before: Option<&[u8]>) -> String {
     match before {
         Some(bytes) if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) => {
@@ -1796,7 +1807,7 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         Err(outcome) => return outcome,
     };
     let old_string = match args.get("old_string").and_then(Value::as_str) {
-        Some(value) if !value.is_empty() => value.to_string(),
+        Some(value) if !value.is_empty() => normalize_crlf(value).into_owned(),
         _ => {
             return err(
                 "TOOL_INVALID_ARGS",
@@ -1805,7 +1816,7 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         }
     };
     let new_string = match args.get("new_string").and_then(Value::as_str) {
-        Some(value) => value.to_string(),
+        Some(value) => normalize_crlf(value).into_owned(),
         None => {
             return err(
                 "TOOL_INVALID_ARGS",
@@ -1813,6 +1824,8 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             )
         }
     };
+    // CRLF and LF spellings of the same edit are a no-op once the file EOL is
+    // reapplied; reject them like byte-identical strings.
     if old_string == new_string {
         return err(
             "TOOL_INVALID_ARGS",
@@ -1880,7 +1893,8 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             )
         }
     };
-    let occurrences = text.matches(old_string.as_str()).count();
+    let normalized = normalize_crlf(&text);
+    let occurrences = normalized.matches(old_string.as_str()).count();
     if occurrences == 0 {
         return err(
             "FS_NOT_FOUND",
@@ -1900,10 +1914,11 @@ async fn edit_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         );
     }
     let after_text = if replace_all {
-        text.replacen(old_string.as_str(), new_string.as_str(), occurrences)
+        normalized.replacen(old_string.as_str(), new_string.as_str(), occurrences)
     } else {
-        text.replacen(old_string.as_str(), new_string.as_str(), 1)
+        normalized.replacen(old_string.as_str(), new_string.as_str(), 1)
     };
+    let after_text = preserve_bom(&normalize_eol(&after_text, Some(&before)), Some(&before));
     let after = after_text.into_bytes();
     match commit_mutation(ctx, &path, &relative, Some(&before), &after, FileChangeKind::Modified) {
         Ok((content, presentation)) => {
@@ -4131,6 +4146,56 @@ mod tests {
         )
         .await;
         assert_eq!(error_code(&missing), "FS_NOT_FOUND");
+    }
+
+    #[tokio::test]
+    async fn edit_file_matches_lf_snippets_in_crlf_files() {
+        let fixture = Fixture::new();
+        fixture.write("a.rs", "pub struct A {\r\n    pub x: u8,\r\n}\r\n");
+        let ctx = fixture.ctx();
+        let _ = call(&ctx, "read_file", json!({ "path": "a.rs" })).await;
+        let outcome = call(
+            &ctx,
+            "edit_file",
+            json!({
+                "path": "a.rs",
+                "old_string": "pub struct A {\n    pub x: u8,\n}",
+                "new_string": "pub struct A {\n    pub x: u16,\n    pub y: u8,\n}"
+            }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+        let bytes = std::fs::read(fixture.root.join("a.rs")).expect("ler");
+        assert_eq!(
+            String::from_utf8(bytes).expect("utf8"),
+            "pub struct A {\r\n    pub x: u16,\r\n    pub y: u8,\r\n}\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_normalizes_crlf_snippets_and_rejects_eol_only_changes() {
+        let fixture = Fixture::new();
+        fixture.write("b.txt", "alpha\nbeta\n");
+        let ctx = fixture.ctx();
+        let _ = call(&ctx, "read_file", json!({ "path": "b.txt" })).await;
+        let noop = call(
+            &ctx,
+            "edit_file",
+            json!({ "path": "b.txt", "old_string": "alpha\nbeta", "new_string": "alpha\r\nbeta" }),
+        )
+        .await;
+        assert_eq!(error_code(&noop), "TOOL_INVALID_ARGS");
+        let ok = call(
+            &ctx,
+            "edit_file",
+            json!({ "path": "b.txt", "old_string": "alpha\r\nbeta", "new_string": "alpha\r\ngamma" }),
+        )
+        .await;
+        assert!(!ok.is_error, "{}", ok.content);
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("b.txt")).expect("ler"),
+            "alpha\ngamma\n"
+        );
     }
 
     #[tokio::test]

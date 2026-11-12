@@ -182,6 +182,8 @@ Leitura paginada com números de linha. **Nunca** lê binário como texto.
 - Substituição literal; **exige match único** (a não ser `replace_all: true`); erro com a contagem
   de ocorrências e dica de incluir mais contexto. Preserva tabs/espaços fora do trecho; aplica
   sobre o conteúdo lido (stale → re-ler). `new_string` vazio = remoção de trecho.
+- O match ignora CRLF: `old_string`/`new_string` são normalizados para LF e o arquivo é regravado
+  com o EOL detectado, então trechos multi-linha copiados do `read_file` casam em arquivos CRLF.
 - **Resultado**: `Updated file src/app.ts (+2 −2)` + diff do trecho. `presentation: FileChange`.
 - **Testes**: único, ambíguo, inexistente, replace_all, stale, EOL, edição que não altera nada.
 
