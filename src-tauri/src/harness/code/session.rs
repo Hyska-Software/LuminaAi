@@ -871,4 +871,34 @@ mod tests {
         assert_eq!(stats.used, 12_000);
         assert_eq!(stats.breakdown, ContextBreakdown::default());
     }
+
+    #[test]
+    fn turn_changes_dedupes_paths_and_sums_the_edits() {
+        let db = db();
+        for (path, added, removed) in [("src/a.ts", 2, 1), ("src/a.ts", 3, 0), ("src/b.ts", 1, 0)] {
+            let mut entry = crate::db::FileJournalEntry::new(
+                "conv-1",
+                "turn-1",
+                path,
+                crate::domain::FileChangeKind::Modified,
+            );
+            entry.added = Some(added);
+            entry.removed = Some(removed);
+            db.append_file_journal(&entry).expect("journal");
+        }
+
+        let summary = turn_changes(&db, "conv-1", "turn-1").expect("resumo do turno");
+        // Uma entrada por ARQUIVO: as duas edições de `src/a.ts` viram uma linha.
+        assert_eq!(summary.files.len(), 2);
+        let a = summary
+            .files
+            .iter()
+            .find(|file| file.path == "src/a.ts")
+            .expect("a.ts");
+        assert_eq!(a.added, 5);
+        assert_eq!(a.removed, 1);
+        // O total do resumo segue a lista deduplicada.
+        assert_eq!(summary.added, 6);
+        assert_eq!(summary.removed, 1);
+    }
 }

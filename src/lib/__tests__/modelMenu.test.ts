@@ -574,7 +574,9 @@ describe('modelDetails', () => {
     expect(line('Custo (1M tok.)')).toBe('$0.30 / $1.20');
     expect(line('Entrada')).toBe('Texto, Imagem');
     expect(line('Protocolo')).toBe('OpenAI Chat');
-    expect(line('Lançamento')).toBe('2026-09-10');
+    // Catalog-driven value: `pnpm catalog:sync` updates the date, so the test
+    // follows the model instead of hardcoding it.
+    expect(line('Lançamento')).toBe(deepseek.releaseDate);
   });
 
   it('lists capability badges', () => {

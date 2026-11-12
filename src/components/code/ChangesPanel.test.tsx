@@ -25,7 +25,14 @@ const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: v
 vi.mock('@/lib/api', () => ({ api: mocks }));
 vi.mock('sonner', () => ({ toast: toastMocks }));
 
-import { buildChangeRows, ChangesPanel, pickBranchBase } from './ChangesPanel';
+import {
+  buildChangeRows,
+  ChangesPanel,
+  committableRows,
+  countPendingChanges,
+  pickBranchBase,
+  rowsForGroup,
+} from './ChangesPanel';
 
 function status(overrides: Partial<WorkspaceGitStatus> = {}): WorkspaceGitStatus {
   return {
@@ -142,6 +149,49 @@ describe('buildChangeRows', () => {
     expect(novo?.group).toBe('untracked');
     expect(novo?.added).toBe(3);
   });
+
+  it('keeps a file with index and working-tree edits in both groups', () => {
+    const mm = status({
+      staged: [{ path: 'src/meio.ts', status: 'M' }],
+      unstaged: [{ path: 'src/meio.ts', status: 'M' }],
+      untracked: [],
+    });
+    const rows = buildChangeRows(mm, []);
+    // One file, listed by both filters (and counted once).
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.group).toBe('staged');
+    expect(rows[0]?.staged).toBe(true);
+    expect(rows[0]?.alsoUnstaged).toBe(true);
+    expect(rowsForGroup(rows, 'staged')).toHaveLength(1);
+    expect(rowsForGroup(rows, 'unstaged')).toHaveLength(1);
+  });
+
+  it('only sums the files the commit target will include', () => {
+    const rows = buildChangeRows(status(), [
+      { path: 'src/a.ts', kind: 'modified', added: 7, removed: 2, origin: 'git', staged: true },
+      { path: 'src/b.ts', kind: 'modified', added: 3, removed: 0, origin: 'git' },
+      { path: 'src/so-sessao.ts', kind: 'modified', added: 9, removed: 4 },
+    ]);
+    // Session-only rows are never committed.
+    expect(committableRows(rows, 'all').map((row) => row.path)).not.toContain(
+      'src/so-sessao.ts',
+    );
+    expect(committableRows(rows, 'staged').map((row) => row.path)).toEqual(['src/a.ts']);
+  });
+
+  it('counts the pending files of the tab badge', () => {
+    const session = [{ path: 'src/so-sessao.ts', kind: 'modified' as const }];
+    expect(countPendingChanges(status(), session)).toBe(3);
+    expect(
+      countPendingChanges(status({ staged: [], unstaged: [], untracked: [] }), session),
+    ).toBe(0);
+    expect(
+      countPendingChanges(
+        status({ isRepo: false, staged: [], unstaged: [], untracked: [] }),
+        session,
+      ),
+    ).toBe(1);
+  });
 });
 
 describe('ChangesPanel', () => {
@@ -160,6 +210,67 @@ describe('ChangesPanel', () => {
     expect(b.textContent).toContain('+4');
     expect(b.textContent).toContain('−1');
     expect(rowButton('src/a.ts').textContent).not.toContain('agente');
+  });
+
+  it('lists an MM file in both groups and counts it once', () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status({
+          staged: [{ path: 'src/meio.ts', status: 'M' }],
+          unstaged: [{ path: 'src/meio.ts', status: 'M' }],
+          untracked: [],
+        })}
+        sessionChanges={[
+          { path: 'src/meio.ts', kind: 'modified', added: 6, removed: 2, origin: 'git', staged: true },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: /Preparados/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /Não preparados/ })).toBeTruthy();
+    // One file, not two: the header count and the footer follow unique paths.
+    expect(screen.getByText('1 arquivo')).toBeTruthy();
+    expect(
+      screen.getByTitle('Linhas adicionadas e removidas').textContent,
+    ).toBe('+6 −2');
+  });
+
+  it('computes the footer totals from the commit target', () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status()}
+        sessionChanges={[
+          { path: 'src/a.ts', kind: 'modified', added: 7, removed: 2, origin: 'git', staged: true },
+          { path: 'src/b.ts', kind: 'modified', added: 3, removed: 0, origin: 'git' },
+        ]}
+      />,
+    );
+    const totals = () => screen.getByTitle('Linhas adicionadas e removidas').textContent;
+    expect(totals()).toBe('+10 −2');
+
+    fireEvent.change(screen.getByLabelText('Alvo do commit'), { target: { value: 'staged' } });
+    expect(totals()).toBe('+7 −2');
+  });
+
+  it('ignores session-only rows in the footer and keeps the commit disabled', () => {
+    render(
+      <ChangesPanel
+        workspaceId="ws-1"
+        gitStatus={status({ staged: [], unstaged: [], untracked: [] })}
+        sessionChanges={[
+          { path: 'src/ja-commitado.ts', kind: 'modified', added: 9, removed: 3 },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByTitle('Linhas adicionadas e removidas').textContent,
+    ).toBe('+0 −0');
+    const commit = screen.getByRole('button', { name: 'Commit' });
+    expect((commit as HTMLButtonElement).disabled).toBe(true);
+    expect(commit.getAttribute('title')).toBe('Nenhuma alteração para commitar');
   });
 
   it('shows git-only counters without the agent badge', () => {

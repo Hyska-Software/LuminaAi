@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { applyCodeEvent, emptyCodeSession, fromSnapshot, isCodeEvent } from '../codeStore';
+import {
+  applyCodeEvent,
+  emptyCodeSession,
+  fromSnapshot,
+  isCodeEvent,
+  type CodeSessionUi,
+} from '../codeStore';
 import type {
   ApprovalRequest,
   AskUserRequest,
@@ -326,5 +332,57 @@ describe('codeStore — objetivo (Goal)', () => {
     const cleared = fromSnapshot({ ...snapshot, goal: null }, next);
     expect(cleared.goal).toBeNull();
     expect(cleared.goalRounds).toEqual([]);
+  });
+
+  it('keeps the git counters when a file_changed event reports only the edit delta', () => {
+    let state: CodeSessionUi = {
+      ...emptyCodeSession('conv-1'),
+      changes: {
+        turnId: null,
+        files: [
+          { path: 'a.ts', kind: 'modified' as const, added: 40, removed: 5, origin: 'git' as const, staged: true },
+        ],
+        added: 40,
+        removed: 5,
+      },
+    };
+    state = applyCodeEvent(state, {
+      type: 'file_changed',
+      change: { path: 'a.ts', kind: 'modified', added: 2, removed: 1 },
+    });
+    // The event delta must not replace the working-tree counters (`+40 −5`).
+    expect(state.changes?.files[0]).toMatchObject({
+      added: 40,
+      removed: 5,
+      origin: 'git',
+      staged: true,
+    });
+    expect(state.changes?.added).toBe(40);
+    expect(state.changes?.removed).toBe(5);
+  });
+
+  it('keeps the git counters when the turn summary arrives', () => {
+    let state: CodeSessionUi = {
+      ...emptyCodeSession('conv-1'),
+      changes: {
+        turnId: null,
+        files: [{ path: 'a.ts', kind: 'modified' as const, added: 40, removed: 5, origin: 'git' as const }],
+        added: 40,
+        removed: 5,
+      },
+    };
+    state = applyCodeEvent(state, {
+      type: 'workspace_changes',
+      summary: {
+        turnId: 'turn-1',
+        files: [{ path: 'a.ts', kind: 'modified', added: 3, removed: 0, origin: 'session' }],
+        added: 3,
+        removed: 0,
+      },
+    });
+    expect(state.changes?.files[0]).toMatchObject({ added: 40, removed: 5, origin: 'both' });
+    expect(state.changes?.added).toBe(40);
+    // The turn card keeps the journal view of the turn.
+    expect(state.lastTurnChanges?.files[0].added).toBe(3);
   });
 });
