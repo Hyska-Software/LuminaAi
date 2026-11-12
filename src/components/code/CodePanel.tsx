@@ -11,7 +11,14 @@ import {
   SquareTerminal,
   type LucideIcon,
 } from 'lucide-react';
-import { Button, IconButton, Spinner, Tooltip } from '@/components/ui';
+import {
+  Button,
+  IconButton,
+  SortableList,
+  Spinner,
+  Tooltip,
+  sortableDropClassHorizontal,
+} from '@/components/ui';
 import { PanelResizer } from '@/components/layout/PanelResizer';
 import { api } from '@/lib/api';
 import {
@@ -41,12 +48,12 @@ import { useWorkspacePanel } from './useWorkspacePanel';
 import { dirsAffectedBy, useWorkspaceWatch } from './useWorkspaceWatch';
 import { useWorkspaces } from './useWorkspaces';
 
-/** Tabs of the Code right panel (WORKBENCH §7). */
-const PANEL_TABS: ReadonlyArray<{ id: CodePanelTab; icon: LucideIcon }> = [
-  { id: 'files', icon: Files },
-  { id: 'changes', icon: FileDiff },
-  { id: 'terminal', icon: SquareTerminal },
-];
+/** Icons of the Code right panel tabs (WORKBENCH §7). The order lives in the store. */
+const TAB_ICONS: Record<CodePanelTab, LucideIcon> = {
+  files: Files,
+  changes: FileDiff,
+  terminal: SquareTerminal,
+};
 
 /** Stable catalog key per panel tab. */
 const PANEL_TAB_KEYS = {
@@ -122,6 +129,8 @@ export function CodePanel() {
   const open = useUiStore((state) => state.codePanelOpen);
   const tab = useUiStore((state) => state.codePanelTab);
   const setTab = useUiStore((state) => state.setCodePanelTab);
+  const tabOrder = useUiStore((state) => state.codePanelTabOrder);
+  const setTabOrder = useUiStore((state) => state.setCodePanelTabOrder);
   const setOpen = useUiStore((state) => state.setCodePanelOpen);
   const openCodeDiff = useUiStore((state) => state.openCodeDiff);
   const openCodeCommits = useUiStore((state) => state.openCodeCommits);
@@ -320,27 +329,27 @@ export function CodePanel() {
   };
 
   const handleTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, current: CodePanelTab) => {
-    const index = PANEL_TABS.findIndex((entry) => entry.id === current);
+    const index = tabOrder.findIndex((entry) => entry === current);
     let nextIndex: number;
     switch (event.key) {
       case 'ArrowRight':
-        nextIndex = (index + 1) % PANEL_TABS.length;
+        nextIndex = (index + 1) % tabOrder.length;
         break;
       case 'ArrowLeft':
-        nextIndex = (index - 1 + PANEL_TABS.length) % PANEL_TABS.length;
+        nextIndex = (index - 1 + tabOrder.length) % tabOrder.length;
         break;
       case 'Home':
         nextIndex = 0;
         break;
       case 'End':
-        nextIndex = PANEL_TABS.length - 1;
+        nextIndex = tabOrder.length - 1;
         break;
       default:
         return;
     }
     event.preventDefault();
-    const next = PANEL_TABS[nextIndex];
-    if (next) selectTab(next.id);
+    const next = tabOrder[nextIndex];
+    if (next) selectTab(next);
   };
 
   const branch = panel.gitStatus?.branch ?? workspace?.git?.branch ?? null;
@@ -355,63 +364,86 @@ export function CodePanel() {
       className="relative z-10 flex h-full shrink-0 flex-col bg-surface"
     >
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border px-2">
-        <div
-          role="tablist"
-          aria-label={t('code:panel.tablist')}
-          className="flex min-w-0 flex-1 items-center gap-0.5"
+        <SortableList
+          ids={tabOrder}
+          label={t('code:panel.tablist')}
+          itemLabel={(id) => t(PANEL_TAB_KEYS[id as CodePanelTab])}
+          orientation="horizontal"
+          onReorder={(ids) => setTabOrder(ids as CodePanelTab[])}
         >
-          {PANEL_TABS.map((entry) => {
-            const selected = tab === entry.id;
-            const Icon = entry.icon;
-            return (
-              <button
-                key={entry.id}
-                type="button"
-                role="tab"
-                id={`code-panel-tab-${entry.id}`}
-                aria-selected={selected}
-                aria-controls={PANEL_BODY_ID}
-                tabIndex={selected ? 0 : -1}
-                ref={(node) => {
-                  if (node) tabRefs.current.set(entry.id, node);
-                  else tabRefs.current.delete(entry.id);
-                }}
-                onClick={() => setTab(entry.id)}
-                onKeyDown={(event) => handleTabKeyDown(event, entry.id)}
-                aria-label={
-                  entry.id === 'changes' && pendingChanges > 0
-                    ? t('code:panel.tabs.changesCount', { count: pendingChanges })
-                    : t(PANEL_TAB_KEYS[entry.id])
-                }
-                title={
-                  entry.id === 'changes' && pendingChanges > 0
-                    ? t('code:panel.tabs.changesCount', { count: pendingChanges })
-                    : t(PANEL_TAB_KEYS[entry.id])
-                }
-                className={cn(
-                  'flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium',
-                  'transition-colors duration-150',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                  selected
-                    ? 'bg-surface-active text-foreground'
-                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-                  compactTabs && 'px-2',
-                )}
-              >
-                <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
-                {compactTabs ? null : t(PANEL_TAB_KEYS[entry.id])}
-                {entry.id === 'changes' && pendingChanges > 0 ? (
-                  <span
-                    aria-hidden
-                    className="min-w-4 rounded-full bg-accent-soft px-1 text-[10px] font-semibold leading-4 tabular-nums text-accent"
+          {(sortable) => (
+            <div
+              ref={sortable.containerRef}
+              role="tablist"
+              aria-label={t('code:panel.tablist')}
+              className="flex min-w-0 flex-1 items-center gap-0.5"
+            >
+              {tabOrder.map((id) => {
+                const selected = tab === id;
+                const Icon = TAB_ICONS[id];
+                const itemProps = sortable.itemProps(id);
+                return (
+                  <div
+                    key={id}
+                    role="presentation"
+                    {...sortable.dropProps(id)}
+                    className={cn('shrink-0', sortableDropClassHorizontal)}
                   >
-                    {pendingChanges}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+                    <button
+                      type="button"
+                      role="tab"
+                      id={`code-panel-tab-${id}`}
+                      aria-selected={selected}
+                      aria-controls={PANEL_BODY_ID}
+                      tabIndex={selected ? 0 : -1}
+                      {...itemProps}
+                      ref={(node) => {
+                        itemProps.ref(node);
+                        if (node) tabRefs.current.set(id, node);
+                        else tabRefs.current.delete(id);
+                      }}
+                      onClick={() => setTab(id)}
+                      onKeyDown={(event) => {
+                        itemProps.onKeyDown(event);
+                        if (!event.defaultPrevented) handleTabKeyDown(event, id);
+                      }}
+                      aria-label={
+                        id === 'changes' && pendingChanges > 0
+                          ? t('code:panel.tabs.changesCount', { count: pendingChanges })
+                          : t(PANEL_TAB_KEYS[id])
+                      }
+                      title={
+                        id === 'changes' && pendingChanges > 0
+                          ? t('code:panel.tabs.changesCount', { count: pendingChanges })
+                          : t(PANEL_TAB_KEYS[id])
+                      }
+                      className={cn(
+                        'flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium',
+                        'transition-colors duration-150',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                        selected
+                          ? 'bg-surface-active text-foreground'
+                          : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                        compactTabs && 'px-2',
+                      )}
+                    >
+                      <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
+                      {compactTabs ? null : t(PANEL_TAB_KEYS[id])}
+                      {id === 'changes' && pendingChanges > 0 ? (
+                        <span
+                          aria-hidden
+                          className="min-w-4 rounded-full bg-accent-soft px-1 text-[10px] font-semibold leading-4 tabular-nums text-accent"
+                        >
+                          {pendingChanges}
+                        </span>
+                      ) : null}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SortableList>
 
         <Tooltip content={t('code:panel.refreshTooltip')} side="bottom">
           <IconButton

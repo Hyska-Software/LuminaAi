@@ -68,6 +68,7 @@
   },
   "sortable": {
     "instructions": "Use Alt+Seta para cima ou Alt+Seta para baixo para reordenar.",
+    "instructionsHorizontal": "Use Alt+Seta para a esquerda ou Alt+Seta para a direita para reordenar.",
     "moved": "{{label}}: {{item}} movido para a posição {{position}} de {{total}}"
   },
   "panelResizer": {

@@ -49,6 +49,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 
 import { api } from '@/lib/api';
 import {
+  CODE_PANEL_TAB_ORDER_DEFAULT,
   SIDE_PANEL_WIDTH_DEFAULT,
   SIDE_PANEL_WIDTH_MAX,
   SIDE_PANEL_WIDTH_STEP,
@@ -78,6 +79,7 @@ function resetPanelState(): void {
   useUiStore.setState({
     codePanelOpen: true,
     codePanelTab: 'changes',
+    codePanelTabOrder: [...CODE_PANEL_TAB_ORDER_DEFAULT],
     sidePanelWidth: SIDE_PANEL_WIDTH_DEFAULT,
     sidebarOpen: true,
     sidebarWidth: 272,
@@ -756,5 +758,59 @@ describe('CodePanel — atualização em tempo real', () => {
     await act(async () => {});
 
     expect(apiMock.watchWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe('CodePanel — ordem das abas', () => {
+  it('renderiza as abas na ordem persistida e navega por ela', () => {
+    useUiStore.setState({
+      codePanelTabOrder: ['terminal', 'files', 'changes'],
+      codePanelTab: 'files',
+    });
+
+    render(<CodePanel />);
+
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((node) => node.textContent?.trim())).toEqual([
+      'Terminal',
+      'Arquivos',
+      'Alterações',
+    ]);
+
+    tabs[1]?.focus();
+    fireEvent.keyDown(tabs[1] as HTMLElement, { key: 'ArrowRight' });
+    expect(useUiStore.getState().codePanelTab).toBe('changes');
+    expect(document.activeElement).toBe(tabs[2]);
+  });
+
+  it('reordena as abas com Alt+ArrowRight e persiste no store', () => {
+    render(<CodePanel />);
+
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Arquivos' }), {
+      key: 'ArrowRight',
+      altKey: true,
+    });
+
+    expect(useUiStore.getState().codePanelTabOrder).toEqual(['changes', 'files', 'terminal']);
+    expect(screen.getAllByRole('tab').map((node) => node.textContent?.trim())).toEqual([
+      'Alterações',
+      'Arquivos',
+      'Terminal',
+    ]);
+  });
+
+  it('mantém a seleção ao clicar numa aba depois de reordenar', () => {
+    render(<CodePanel />);
+
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Arquivos' }), {
+      key: 'ArrowRight',
+      altKey: true,
+    });
+    fireEvent.click(screen.getByRole('tab', { name: 'Arquivos' }));
+
+    expect(useUiStore.getState().codePanelTab).toBe('files');
+    expect(screen.getByRole('tab', { name: 'Arquivos' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
   });
 });

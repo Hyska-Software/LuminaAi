@@ -16,6 +16,8 @@ import { cn } from '@/lib/utils';
 
 type DropPosition = 'before' | 'after';
 
+export type SortableOrientation = 'vertical' | 'horizontal';
+
 interface DropTarget {
   id: string;
   position: DropPosition;
@@ -23,8 +25,10 @@ interface DropTarget {
 
 interface ItemRect {
   id: string;
-  top: number;
-  bottom: number;
+  start: number;
+  end: number;
+  crossStart: number;
+  crossEnd: number;
 }
 
 export interface SortableItemProps {
@@ -43,6 +47,7 @@ export interface SortableDropProps {
 
 export interface SortableListApi {
   disabled: boolean;
+  orientation: SortableOrientation;
   containerRef: RefObject<HTMLDivElement | null>;
   itemProps: (id: string) => SortableItemProps;
   dropProps: (id: string) => SortableDropProps;
@@ -53,6 +58,8 @@ export interface SortableListProps {
   label: string;
   itemLabel?: (id: string) => string;
   disabled?: boolean;
+  /** Layout axis of the list; tabs use `horizontal`. */
+  orientation?: SortableOrientation;
   /** Items at the start that cannot be dragged or crossed. */
   lockedCount?: number;
   onReorder: (ids: string[]) => void;
@@ -71,16 +78,46 @@ export const sortableDropClass = cn(
   'data-[drop=after]:after:pointer-events-none data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-1 data-[drop=after]:after:-bottom-px data-[drop=after]:after:h-0.5 data-[drop=after]:after:rounded-full data-[drop=after]:after:bg-accent',
 );
 
-function findScrollParent(node: HTMLElement | null): HTMLElement | null {
+/** Horizontal variant for tab strips: the drop line is a vertical bar. */
+export const sortableDropClassHorizontal = cn(
+  'relative',
+  'data-[dragging=true]:opacity-40',
+  'data-[drop=before]:before:pointer-events-none data-[drop=before]:before:absolute data-[drop=before]:before:inset-y-1 data-[drop=before]:before:-left-0.5 data-[drop=before]:before:w-0.5 data-[drop=before]:before:rounded-full data-[drop=before]:before:bg-accent',
+  'data-[drop=after]:after:pointer-events-none data-[drop=after]:after:absolute data-[drop=after]:after:inset-y-1 data-[drop=after]:after:-right-0.5 data-[drop=after]:after:w-0.5 data-[drop=after]:after:rounded-full data-[drop=after]:after:bg-accent',
+);
+
+function findScrollParent(
+  node: HTMLElement | null,
+  orientation: SortableOrientation,
+): HTMLElement | null {
+  const horizontal = orientation === 'horizontal';
   let current = node?.parentElement ?? null;
   while (current) {
     const style = window.getComputedStyle(current);
-    if (/(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight) {
-      return current;
-    }
+    const scrollable = horizontal
+      ? /(auto|scroll)/.test(style.overflowX) && current.scrollWidth > current.clientWidth
+      : /(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight;
+    if (scrollable) return current;
     current = current.parentElement;
   }
   return null;
+}
+
+/**
+ * Scroller driven while dragging. The list container itself may be the scroll
+ * surface (horizontal tab strips are `overflow-x-auto` on the tablist).
+ */
+function findDragScroller(
+  container: HTMLElement | null,
+  orientation: SortableOrientation,
+): HTMLElement | null {
+  if (!container) return null;
+  const style = window.getComputedStyle(container);
+  const scrollable =
+    orientation === 'horizontal'
+      ? /(auto|scroll)/.test(style.overflowX) && container.scrollWidth > container.clientWidth
+      : /(auto|scroll)/.test(style.overflowY) && container.scrollHeight > container.clientHeight;
+  return scrollable ? container : findScrollParent(container, orientation);
 }
 
 /**
@@ -93,6 +130,7 @@ export function SortableList({
   label,
   itemLabel,
   disabled = false,
+  orientation = 'vertical',
   lockedCount = 0,
   onReorder,
   children,
@@ -104,6 +142,7 @@ export function SortableList({
   const idsRef = useRef(ids);
   const lockedRef = useRef(lockedCount);
   const disabledRef = useRef(disabled);
+  const orientationRef = useRef(orientation);
   const onReorderRef = useRef(onReorder);
   const itemLabelRef = useRef(itemLabel);
   const labelRef = useRef(label);
@@ -114,6 +153,7 @@ export function SortableList({
   idsRef.current = ids;
   lockedRef.current = lockedCount;
   disabledRef.current = disabled;
+  orientationRef.current = orientation;
   onReorderRef.current = onReorder;
   itemLabelRef.current = itemLabel;
   labelRef.current = label;
@@ -130,12 +170,17 @@ export function SortableList({
   }, []);
 
   const measure = useCallback((): ItemRect[] => {
+    const horizontal = orientationRef.current === 'horizontal';
     const rects: ItemRect[] = [];
     for (const id of idsRef.current) {
       const element = elementsRef.current.get(id);
       if (!element) continue;
       const rect = element.getBoundingClientRect();
-      rects.push({ id, top: rect.top, bottom: rect.bottom });
+      rects.push(
+        horizontal
+          ? { id, start: rect.left, end: rect.right, crossStart: rect.top, crossEnd: rect.bottom }
+          : { id, start: rect.top, end: rect.bottom, crossStart: rect.left, crossEnd: rect.right },
+      );
     }
     return rects;
   }, []);
@@ -177,15 +222,22 @@ export function SortableList({
         setDropState(null);
         return;
       }
+      const horizontal = orientationRef.current === 'horizontal';
       const bounds = container.getBoundingClientRect();
       const viewport = scroller?.getBoundingClientRect() ?? bounds;
-      const top = Math.max(bounds.top, viewport.top);
-      const bottom = Math.min(bounds.bottom, viewport.bottom);
+      // Along the list axis the viewport clips the drop area (scrolled list);
+      // across the axis the container bounds decide.
+      const start = horizontal ? bounds.left : Math.max(bounds.top, viewport.top);
+      const end = horizontal ? bounds.right : Math.min(bounds.bottom, viewport.bottom);
+      const crossStart = horizontal ? Math.max(bounds.top, viewport.top) : bounds.left;
+      const crossEnd = horizontal ? Math.min(bounds.bottom, viewport.bottom) : bounds.right;
+      const along = horizontal ? pointerX : pointerY;
+      const cross = horizontal ? pointerY : pointerX;
       if (
-        pointerX < bounds.left - EDGE ||
-        pointerX > bounds.right + EDGE ||
-        pointerY < top - EDGE ||
-        pointerY > bottom + EDGE
+        along < start - EDGE ||
+        along > end + EDGE ||
+        cross < crossStart - EDGE ||
+        cross > crossEnd + EDGE
       ) {
         setDropState(null);
         return;
@@ -199,7 +251,7 @@ export function SortableList({
         return;
       }
       const next = candidates.find(
-        (rect) => pointerY < rect.top + (rect.bottom - rect.top) / 2,
+        (rect) => rect.start + (rect.end - rect.start) / 2 > along,
       );
       setDropState(
         next
@@ -211,16 +263,30 @@ export function SortableList({
     const tick = () => {
       if (!started) return;
       if (scroller) {
+        const horizontal = orientationRef.current === 'horizontal';
         const bounds = scroller.getBoundingClientRect();
         let delta = 0;
-        if (pointerY < bounds.top + EDGE) delta = -SCROLL_STEP;
-        else if (pointerY > bounds.bottom - EDGE) delta = SCROLL_STEP;
-        if (delta !== 0) {
-          const before = scroller.scrollTop;
-          scroller.scrollTop += delta;
-          if (scroller.scrollTop !== before) {
-            rects = measure();
-            updateDrop();
+        if (horizontal) {
+          if (pointerX < bounds.left + EDGE) delta = -SCROLL_STEP;
+          else if (pointerX > bounds.right - EDGE) delta = SCROLL_STEP;
+          if (delta !== 0) {
+            const before = scroller.scrollLeft;
+            scroller.scrollLeft += delta;
+            if (scroller.scrollLeft !== before) {
+              rects = measure();
+              updateDrop();
+            }
+          }
+        } else {
+          if (pointerY < bounds.top + EDGE) delta = -SCROLL_STEP;
+          else if (pointerY > bounds.bottom - EDGE) delta = SCROLL_STEP;
+          if (delta !== 0) {
+            const before = scroller.scrollTop;
+            scroller.scrollTop += delta;
+            if (scroller.scrollTop !== before) {
+              rects = measure();
+              updateDrop();
+            }
           }
         }
       }
@@ -274,7 +340,7 @@ export function SortableList({
         if (Math.hypot(pointerX - startX, pointerY - startY) < DRAG_THRESHOLD) return;
         started = true;
         rects = measure();
-        scroller = findScrollParent(containerRef.current);
+        scroller = findDragScroller(containerRef.current, orientationRef.current);
         document.body.classList.add('zylara-sortable-dragging');
         setDraggingId(id);
         frame = requestAnimationFrame(tick);
@@ -320,11 +386,14 @@ export function SortableList({
 
   const handleItemKeyDown = (event: KeyboardEvent<HTMLElement>, id: string) => {
     if (disabledRef.current) return;
-    if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+    const horizontal = orientationRef.current === 'horizontal';
+    const previousKey = horizontal ? 'ArrowLeft' : 'ArrowUp';
+    const nextKey = horizontal ? 'ArrowRight' : 'ArrowDown';
+    if (!event.altKey || (event.key !== previousKey && event.key !== nextKey)) return;
     const current = idsRef.current;
     const index = current.indexOf(id);
     if (index < 0 || index < lockedRef.current) return;
-    const target = event.key === 'ArrowUp' ? index - 1 : index + 1;
+    const target = event.key === previousKey ? index - 1 : index + 1;
     if (target < lockedRef.current || target >= current.length) return;
     event.preventDefault();
     event.stopPropagation();
@@ -351,7 +420,8 @@ export function SortableList({
       event.preventDefault();
       event.stopPropagation();
     },
-    'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown',
+    'aria-keyshortcuts':
+      orientation === 'horizontal' ? 'Alt+ArrowLeft Alt+ArrowRight' : 'Alt+ArrowUp Alt+ArrowDown',
     'aria-describedby': instructionsId,
   });
 
@@ -362,9 +432,13 @@ export function SortableList({
 
   return (
     <>
-      {children({ disabled, containerRef, itemProps, dropProps })}
+      {children({ disabled, orientation, containerRef, itemProps, dropProps })}
       <span id={instructionsId} className="sr-only">
-        {t('common:sortable.instructions')}
+        {t(
+          orientation === 'horizontal'
+            ? 'common:sortable.instructionsHorizontal'
+            : 'common:sortable.instructions',
+        )}
       </span>
       <span role="status" aria-live="polite" className="sr-only">
         {announcement}

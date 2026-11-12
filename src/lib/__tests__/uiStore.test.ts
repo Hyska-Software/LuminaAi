@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   clampSidebarWidth,
   clampSidePanelWidth,
+  CODE_PANEL_TAB_ORDER_DEFAULT,
+  normalizeCodePanelTabOrder,
   SIDEBAR_WIDTH_DEFAULT,
   SIDEBAR_WIDTH_MAX,
   SIDEBAR_WIDTH_MIN,
@@ -42,6 +44,8 @@ function resetUi(): void {
     codeView: 'session',
     codePanelOpen: true,
     codePanelTab: 'changes',
+    codePanelTabOrder: [...CODE_PANEL_TAB_ORDER_DEFAULT],
+    codeTabOrder: [],
   });
 }
 
@@ -596,5 +600,46 @@ describe('useUiStore — visibilidade dos layouts', () => {
       agent: true,
     });
     expect(useUiStore.getState().layoutMode).toBe('agent');
+  });
+});
+
+describe('uiStore — ordem das abas do Code', () => {
+  it('normalizes the panel tab order (dedupe, drop invalid, append missing)', () => {
+    expect(normalizeCodePanelTabOrder(['terminal', 'terminal', 'nope', 'files'])).toEqual([
+      'terminal',
+      'files',
+      'changes',
+    ]);
+    expect(normalizeCodePanelTabOrder(undefined)).toEqual([...CODE_PANEL_TAB_ORDER_DEFAULT]);
+    expect(normalizeCodePanelTabOrder('files')).toEqual([...CODE_PANEL_TAB_ORDER_DEFAULT]);
+  });
+
+  it('stores the panel tab order sanitized', () => {
+    useUiStore.getState().setCodePanelTabOrder(['terminal', 'files']);
+
+    expect(useUiStore.getState().codePanelTabOrder).toEqual(['terminal', 'files', 'changes']);
+  });
+
+  it('stores the center tab order sanitized', () => {
+    useUiStore.getState().setCodeTabOrder([' c-2 ', 'c-1', 'c-2', '']);
+
+    expect(useUiStore.getState().codeTabOrder).toEqual(['c-2', 'c-1']);
+  });
+
+  it('repairs persisted tab orders on rehydrate', async () => {
+    window.localStorage.setItem(
+      'zylara.ui',
+      JSON.stringify({
+        version: 0,
+        state: {
+          codePanelTabOrder: ['terminal', 'bogus'],
+          codeTabOrder: ['c-2', '', 'c-2', 42],
+        },
+      }),
+    );
+    await useUiStore.persist.rehydrate();
+
+    expect(useUiStore.getState().codePanelTabOrder).toEqual(['terminal', 'files', 'changes']);
+    expect(useUiStore.getState().codeTabOrder).toEqual(['c-2']);
   });
 });

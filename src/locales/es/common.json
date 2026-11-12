@@ -68,6 +68,7 @@
   },
   "sortable": {
     "instructions": "Usa Alt+Flecha arriba o Alt+Flecha abajo para reordenar.",
+    "instructionsHorizontal": "Usa Alt+Flecha izquierda o Alt+Flecha derecha para reordenar.",
     "moved": "{{label}}: {{item}} movido a la posición {{position}} de {{total}}"
   },
   "panelResizer": {

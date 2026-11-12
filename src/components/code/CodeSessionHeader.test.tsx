@@ -256,6 +256,7 @@ beforeEach(() => {
     codePanelTab: 'changes',
     activeWorkspaceId: null,
     openSessionsByWorkspace: {},
+    codeTabOrder: [],
     artifactPanelOpen: false,
     artifacts: [],
   });
@@ -754,6 +755,41 @@ describe('CodeSessionHeader — teclado e painel', () => {
     fireEvent.keyDown(tab('Primeira sessão'), { key: 'Delete' });
 
     expect(screen.queryByRole('tab', { name: 'Primeira sessão' })).toBeNull();
+  });
+
+  it('reordena as abas de sessão com Alt+ArrowRight sem ativar outra aba', async () => {
+    await renderWithThreeTabs();
+
+    tab('Primeira sessão').focus();
+    fireEvent.keyDown(tab('Primeira sessão'), { key: 'ArrowRight', altKey: true });
+
+    expect(screen.getAllByRole('tab').map((node) => node.textContent)).toEqual([
+      'Segunda sessão',
+      'Primeira sessão',
+      'Terceira sessão',
+    ]);
+    expect(useChatStore.getState().activeId).toBe('c-3');
+    expect(useUiStore.getState().codeTabOrder).toEqual(['c-2', 'c-1', 'c-3']);
+  });
+
+  it('reordena a aba do terminal junto das abas de sessão', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'c-1', title: 'Primeira sessão' })],
+      activeId: 'c-1',
+    });
+    terminalMock.emit({ tabs: [terminalMock.tab()], activeId: 'term-1', used: 1 });
+
+    render(<CodeSessionHeader />);
+
+    await waitFor(() => expect(tab('Terminal 1')).toBeTruthy());
+    fireEvent.keyDown(tab('Terminal 1'), { key: 'ArrowLeft', altKey: true });
+
+    expect(useUiStore.getState().codeTabOrder).toEqual(['term-1', 'c-1']);
+    expect(screen.getAllByRole('tab').map((node) => node.textContent)).toEqual([
+      'Terminal 1',
+      'Primeira sessão',
+    ]);
+    expect(useChatStore.getState().activeId).toBe('c-1');
   });
 
   it('o botão do painel alterna codePanelOpen e expõe aria-pressed', () => {

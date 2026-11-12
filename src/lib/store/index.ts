@@ -46,6 +46,8 @@ export {
   sortArtifacts,
   codeFileTabKey,
   codeSubagentTabKey,
+  normalizeCodePanelTabOrder,
+  CODE_PANEL_TAB_ORDER_DEFAULT,
   clampSidebarWidth,
   SIDEBAR_WIDTH_MIN,
   SIDEBAR_WIDTH_MAX,

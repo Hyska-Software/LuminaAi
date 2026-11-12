@@ -127,6 +127,43 @@ export function codeSubagentTabKey(tab: CodeSubagentTab): string {
 /** Tabs of the Code right panel (Arquivos | Alterações). */
 export type CodePanelTab = 'files' | 'changes' | 'terminal';
 
+/** Factory order of the Code right panel tabs (used when no order is stored). */
+export const CODE_PANEL_TAB_ORDER_DEFAULT: readonly CodePanelTab[] = [
+  'files',
+  'changes',
+  'terminal',
+];
+
+/** Keeps a stored panel order inside the known ids, appending what is missing. */
+export function normalizeCodePanelTabOrder(value: unknown): CodePanelTab[] {
+  const valid = new Set<CodePanelTab>(CODE_PANEL_TAB_ORDER_DEFAULT);
+  const order: CodePanelTab[] = [];
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (typeof entry !== 'string' || !valid.has(entry as CodePanelTab)) continue;
+      const tab = entry as CodePanelTab;
+      if (!order.includes(tab)) order.push(tab);
+    }
+  }
+  for (const tab of CODE_PANEL_TAB_ORDER_DEFAULT) {
+    if (!order.includes(tab)) order.push(tab);
+  }
+  return order;
+}
+
+/** Trims, drops empties and dedupes a persisted tab order list. */
+function normalizeTabOrder(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const order: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const id = entry.trim();
+    if (!id || order.includes(id)) continue;
+    order.push(id);
+  }
+  return order;
+}
+
 /** Tabs of the agent right sidebar. */
 export type AgentPanelTab = 'screen' | 'routines' | 'browser' | 'data';
 
@@ -235,6 +272,10 @@ interface UiState {
   codePanelOpen: boolean;
   /** Active tab of the Code right panel. */
   codePanelTab: CodePanelTab;
+  /** Persisted order of the Code right panel tabs (drag-and-drop). */
+  codePanelTabOrder: CodePanelTab[];
+  /** Persisted order of the movable center tabs (sessions + center terminals). */
+  codeTabOrder: string[];
   /** Whether the agent layout shows its right sidebar. */
   agentPanelOpen: boolean;
   /** Active tab of the agent right sidebar. */
@@ -332,6 +373,10 @@ interface UiState {
   setCodePanelOpen: (open: boolean) => void;
   toggleCodePanel: () => void;
   setCodePanelTab: (tab: CodePanelTab) => void;
+  /** Persists the drag-and-drop order of the Code right panel tabs. */
+  setCodePanelTabOrder: (order: readonly CodePanelTab[]) => void;
+  /** Persists the drag-and-drop order of the movable center tabs. */
+  setCodeTabOrder: (order: readonly string[]) => void;
   setAgentPanelOpen: (open: boolean) => void;
   toggleAgentPanel: () => void;
   setAgentPanelTab: (tab: AgentPanelTab) => void;
@@ -440,6 +485,8 @@ export const useUiStore = create<UiState>()(
       codeCommitsTab: null,
       codePanelOpen: true,
       codePanelTab: 'changes',
+      codePanelTabOrder: [...CODE_PANEL_TAB_ORDER_DEFAULT],
+      codeTabOrder: [],
       agentPanelOpen: true,
       agentPanelTab: 'screen',
       agentRightPanel: 'agent',
@@ -663,6 +710,9 @@ export const useUiStore = create<UiState>()(
                 ? 'terminal'
                 : 'changes',
         }),
+      setCodePanelTabOrder: (order) =>
+        set({ codePanelTabOrder: normalizeCodePanelTabOrder(order) }),
+      setCodeTabOrder: (order) => set({ codeTabOrder: normalizeTabOrder(order) }),
       setAgentPanelOpen: (agentPanelOpen) => set({ agentPanelOpen }),
       toggleAgentPanel: () => set((state) => ({ agentPanelOpen: !state.agentPanelOpen })),
       setAgentPanelTab: (agentPanelTab) =>
@@ -788,6 +838,8 @@ export const useUiStore = create<UiState>()(
         activeAgentId: state.activeAgentId,
         activeChannelId: state.activeChannelId,
         codePanelOpen: state.codePanelOpen,
+        codePanelTabOrder: state.codePanelTabOrder,
+        codeTabOrder: state.codeTabOrder,
         agentPanelOpen: state.agentPanelOpen,
         agentPanelTab: state.agentPanelTab,
         agentRightPanel: state.agentRightPanel,
@@ -838,6 +890,8 @@ export const useUiStore = create<UiState>()(
           activeChannelId: validWorkspaceId(stored.activeChannelId),
           codePanelOpen:
             typeof stored.codePanelOpen === 'boolean' ? stored.codePanelOpen : current.codePanelOpen,
+          codePanelTabOrder: normalizeCodePanelTabOrder(stored.codePanelTabOrder),
+          codeTabOrder: normalizeTabOrder(stored.codeTabOrder),
           agentPanelOpen:
             typeof stored.agentPanelOpen === 'boolean'
               ? stored.agentPanelOpen

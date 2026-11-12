@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
-import { SortableList, sortableDropClass } from './sortable-list';
+import { SortableList, sortableDropClass, sortableDropClassHorizontal } from './sortable-list';
 
 function rect(top: number, height = 32, left = 0, right = 240): DOMRect {
   return {
@@ -69,6 +69,63 @@ function Harness({
       )}
     </SortableList>
   );
+}
+
+interface HorizontalHarnessProps {
+  initial?: string[];
+  disabled?: boolean;
+  onReorder?: (ids: string[]) => void;
+}
+
+function HorizontalHarness({
+  initial = ['a', 'b', 'c'],
+  disabled = false,
+  onReorder = vi.fn(),
+}: HorizontalHarnessProps) {
+  const [ids, setIds] = useState(initial);
+  return (
+    <SortableList
+      ids={ids}
+      label="Abas"
+      orientation="horizontal"
+      disabled={disabled}
+      onReorder={(next) => {
+        onReorder(next);
+        setIds(next);
+      }}
+    >
+      {(sortable) => (
+        <div ref={sortable.containerRef} data-testid="h-container" role="tablist" className="flex">
+          {ids.map((id) => (
+            <div
+              key={id}
+              {...sortable.dropProps(id)}
+              data-testid={`h-row-${id}`}
+              className={sortableDropClassHorizontal}
+            >
+              <button
+                type="button"
+                role="tab"
+                {...sortable.itemProps(id)}
+                data-testid={`h-item-${id}`}
+              >
+                {id}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </SortableList>
+  );
+}
+
+function stubHorizontalLayout(ids = ['a', 'b', 'c']) {
+  const container = screen.getByTestId('h-container');
+  container.getBoundingClientRect = () => rect(0, 32, 0, 300);
+  ids.forEach((id, index) => {
+    const item = screen.getByTestId(`h-item-${id}`);
+    item.getBoundingClientRect = () => rect(0, 32, index * 100, index * 100 + 80);
+  });
 }
 
 function stubLayout(ids = ['a', 'b', 'c']) {
@@ -186,5 +243,86 @@ describe('SortableList', () => {
 
     fireEvent.click(screen.getByTestId('item-b'));
     expect(onClick).toHaveBeenCalledWith('b');
+  });
+});
+
+describe('SortableList (horizontal)', () => {
+  it('drops a tab after another tab along the X axis', () => {
+    const onReorder = vi.fn();
+    render(<HorizontalHarness onReorder={onReorder} />);
+    stubHorizontalLayout();
+
+    fireEvent.pointerDown(screen.getByTestId('h-item-a'), {
+      button: 0,
+      clientX: 40,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(window, { clientX: 250, clientY: 10 });
+    expect(screen.getByTestId('h-row-c').getAttribute('data-drop')).toBe('after');
+    fireEvent.pointerUp(window, { clientX: 250, clientY: 10 });
+
+    expect(onReorder).toHaveBeenCalledWith(['b', 'c', 'a']);
+  });
+
+  it('ignores drops outside the strip height', () => {
+    const onReorder = vi.fn();
+    render(<HorizontalHarness onReorder={onReorder} />);
+    stubHorizontalLayout();
+
+    fireEvent.pointerDown(screen.getByTestId('h-item-a'), {
+      button: 0,
+      clientX: 40,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(window, { clientX: 250, clientY: 200 });
+    expect(screen.getByTestId('h-row-c').getAttribute('data-drop')).toBeNull();
+    fireEvent.pointerUp(window, { clientX: 250, clientY: 200 });
+
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('ignores drops beyond the strip width', () => {
+    const onReorder = vi.fn();
+    render(<HorizontalHarness onReorder={onReorder} />);
+    stubHorizontalLayout();
+
+    fireEvent.pointerDown(screen.getByTestId('h-item-a'), {
+      button: 0,
+      clientX: 40,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(window, { clientX: 400, clientY: 10 });
+    expect(screen.getByTestId('h-row-b').getAttribute('data-drop')).toBeNull();
+    fireEvent.pointerUp(window, { clientX: 400, clientY: 10 });
+
+    expect(onReorder).not.toHaveBeenCalled();
+  });
+
+  it('reorders with Alt+ArrowRight and exposes the horizontal shortcut', () => {
+    const onReorder = vi.fn();
+    render(<HorizontalHarness onReorder={onReorder} />);
+
+    const item = screen.getByTestId('h-item-b');
+    expect(item.getAttribute('aria-keyshortcuts')).toBe('Alt+ArrowLeft Alt+ArrowRight');
+
+    fireEvent.keyDown(item, { key: 'ArrowRight', altKey: true });
+
+    expect(onReorder).toHaveBeenCalledWith(['a', 'c', 'b']);
+  });
+
+  it('ignores pointer reorder when disabled', () => {
+    const onReorder = vi.fn();
+    render(<HorizontalHarness onReorder={onReorder} disabled />);
+    stubHorizontalLayout();
+
+    fireEvent.pointerDown(screen.getByTestId('h-item-a'), {
+      button: 0,
+      clientX: 40,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(window, { clientX: 250, clientY: 10 });
+    fireEvent.pointerUp(window, { clientX: 250, clientY: 10 });
+
+    expect(onReorder).not.toHaveBeenCalled();
   });
 });

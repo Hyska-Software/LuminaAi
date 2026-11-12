@@ -13,6 +13,7 @@ import {
   groupConversations,
   hostnameOf,
   safeJsonParse,
+  sortStableByOrder,
   truncate,
 } from '@/lib/utils';
 
@@ -229,5 +230,25 @@ describe('createSerialRunner', () => {
       }),
     ).rejects.toThrow('boom');
     await expect(run(async () => 'ok')).resolves.toBe('ok');
+  });
+});
+
+describe('sortStableByOrder', () => {
+  it('applies the stored order and keeps unknown ids next to their natural predecessor', () => {
+    expect(sortStableByOrder(['a', 'b', 'c'], ['c', 'x', 'a'])).toEqual(['c', 'a', 'b']);
+  });
+
+  it('keeps the natural order with an empty or partial order', () => {
+    expect(sortStableByOrder(['a', 'b'], [])).toEqual(['a', 'b']);
+    expect(sortStableByOrder(['a', 'b', 'c'], ['b'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('anchors an unknown id at the start when it naturally comes first', () => {
+    expect(sortStableByOrder(['new', 'a'], ['a'])).toEqual(['new', 'a']);
+    expect(sortStableByOrder(['a', 'new', 'b'], ['b', 'a'])).toEqual(['b', 'a', 'new']);
+  });
+
+  it('dedupes the incoming ids and drops repeated order entries', () => {
+    expect(sortStableByOrder(['a', 'a', 'b'], ['a', 'a'])).toEqual(['a', 'b']);
   });
 });

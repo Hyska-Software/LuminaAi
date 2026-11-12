@@ -182,6 +182,43 @@ export function compareConversationPosition(left: Conversation, right: Conversat
   return (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || right.updatedAt - left.updatedAt;
 }
 
+/**
+ * Orders `ids` by a persisted order (drag-and-drop tab strips). Ids present in
+ * `order` follow it; ids missing from `order` stay next to their natural
+ * predecessor instead of jumping to the end (a freshly opened tab keeps its
+ * place). Duplicates and stale order entries are dropped.
+ */
+export function sortStableByOrder(ids: string[], order: readonly string[]): string[] {
+  const unique = [...new Set(ids)];
+  const present = new Set(unique);
+  const seen = new Set<string>();
+  const known: string[] = [];
+  for (const id of order) {
+    if (!present.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    known.push(id);
+  }
+  const knownSet = new Set(known);
+  const anchored = new Map<string | null, string[]>();
+  let previous: string | null = null;
+  for (const id of unique) {
+    if (knownSet.has(id)) {
+      previous = id;
+      continue;
+    }
+    const list = anchored.get(previous) ?? [];
+    list.push(id);
+    anchored.set(previous, list);
+  }
+  const result = [...(anchored.get(null) ?? [])];
+  for (const id of known) {
+    result.push(id);
+    const extra = anchored.get(id);
+    if (extra) result.push(...extra);
+  }
+  return result;
+}
+
 /** Runs async tasks one at a time, preserving the call order. */
 export function createSerialRunner(): <T>(task: () => Promise<T>) => Promise<T> {
   let tail: Promise<unknown> = Promise.resolve();

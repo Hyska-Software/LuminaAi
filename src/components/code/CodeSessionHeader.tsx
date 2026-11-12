@@ -37,9 +37,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   IconButton,
+  SortableList,
   Spinner,
   Tooltip,
+  sortableDropClassHorizontal,
 } from '@/components/ui';
+import type { SortableListApi } from '@/components/ui';
 import { api } from '@/lib/api';
 import { t } from '@/lib/i18n';
 import { filterConversationsForLayout } from '@/lib/conversations';
@@ -55,11 +58,11 @@ import {
 } from '@/lib/store';
 import type { Conversation, GoalView, Workspace } from '@/lib/types';
 import { SIDE_PANEL_DOCK_MIN_VIEWPORT, useViewportWidth } from '@/lib/sidePanel';
-import { cn, copyText } from '@/lib/utils';
+import { cn, copyText, sortStableByOrder } from '@/lib/utils';
 import { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 import { CodeContextMeterChip } from './CodeAgentWidgets';
 import { FileIcon } from './FileIcon';
-import { terminalManager, terminalTabLabel } from './terminalManager';
+import { terminalManager, terminalTabLabel, type TerminalTabInfo } from './terminalManager';
 import { useHorizontalWheelScroll } from './useHorizontalWheelScroll';
 import { NO_WORKSPACE_KEY, openFolder, useWorkspaces } from './useWorkspaces';
 
@@ -370,6 +373,8 @@ export function CodeSessionHeader() {
   const codeGoalOpen = useUiStore((state) => state.codeGoalOpen);
   const codeFileTab = useUiStore((state) => state.codeFileTab);
   const closeCodeFile = useUiStore((state) => state.closeCodeFile);
+  const codeTabOrder = useUiStore((state) => state.codeTabOrder);
+  const setCodeTabOrder = useUiStore((state) => state.setCodeTabOrder);
   const liveSubagents = useChatStore((state) => state.streaming?.subagents);
   const viewportWidth = useViewportWidth();
   /** The docked code panel only exists on wide windows (see CodePanel). */
@@ -450,7 +455,10 @@ export function CodeSessionHeader() {
   const tabs: SessionTab[] =
     openIds.length === 0
       ? []
-      : openIds.map((id) => ({ id, title: sessionTitle(codeConversations, id) }));
+      : sortStableByOrder(openIds, codeTabOrder).map((id) => ({
+          id,
+          title: sessionTitle(codeConversations, id),
+        }));
   /* No active Code session (no conversation, or it belongs to Chat only): the
      tab strip falls back to the synthetic "Nova sessão" tab, so the tablist
      always has exactly one selected tab. */
@@ -463,6 +471,24 @@ export function CodeSessionHeader() {
     () => terminalManager.getSnapshot(activeId, 'center'),
     () => terminalManager.getSnapshot(activeId, 'center'),
   );
+
+  /* Drag-and-drop order of the movable tabs (sessions + center terminals).
+     The context tabs rendered after them (diff/file/plan/goal/commits) keep
+     their stable order — they are not part of the reorderable strip. */
+  const stripIds = sortStableByOrder(
+    [
+      ...(showNewSessionTab ? [] : tabs.map((tab) => tab.id)),
+      ...centerTerminals.tabs.map((terminalTab) => terminalTab.id),
+    ],
+    codeTabOrder,
+  );
+
+  const stripItemLabel = (id: string): string => {
+    const session = tabs.find((tab) => tab.id === id);
+    if (session) return session.title;
+    const terminalTab = centerTerminals.tabs.find((tab) => tab.id === id);
+    return terminalTab ? terminalTabLabel(terminalTab) : id;
+  };
 
   const workspace = activeConversation?.workspaceId
     ? (workspaces.find((entry) => entry.id === activeConversation.workspaceId) ?? null)
@@ -788,6 +814,151 @@ export function CodeSessionHeader() {
     </IconButton>
   );
 
+  /** Movable session tab of the strip (drag-and-drop reorders `codeTabOrder`). */
+  const renderSessionTab = (tab: SessionTab, sortable: SortableListApi) => {
+    const selected = tab.id === activeId && codeView === 'session';
+    const itemProps = sortable.itemProps(tab.id);
+    return (
+      <div
+        key={tab.id}
+        role="presentation"
+        {...middleClickClose(tab.id)}
+        {...sortable.dropProps(tab.id)}
+        className={cn(
+          'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+          selected
+            ? 'bg-surface-active text-foreground'
+            : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+          sortableDropClassHorizontal,
+        )}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-label={tab.title}
+          aria-selected={selected}
+          aria-controls={SESSION_PANEL_ID}
+          title={tab.title}
+          tabIndex={selected ? 0 : -1}
+          {...itemProps}
+          ref={(node) => {
+            itemProps.ref(node);
+            addTabRef(tab.id)(node);
+          }}
+          onClick={() => selectTab(tab.id)}
+          onKeyDown={(event) => {
+            itemProps.onKeyDown(event);
+            if (!event.defaultPrevented) handleTabKeyDown(event, tab.id);
+          }}
+          className={cn(
+            'h-full min-w-0 flex-1 cursor-pointer select-none rounded-l-lg pl-2.5 text-left text-[12px]',
+            'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            !sortable.disabled && 'cursor-grab active:cursor-grabbing',
+          )}
+        >
+          <span className="block truncate">{tab.title}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={t('code:header.closeTab', { title: tab.title })}
+          tabIndex={-1}
+          onClick={() => closeTab(tab.id)}
+          className={cn(
+            'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+            'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+          )}
+        >
+          <X aria-hidden className="size-3.5" />
+        </button>
+      </div>
+    );
+  };
+
+  /** Movable center-terminal tab, ordered together with the session tabs. */
+  const renderTerminalTab = (terminalTab: TerminalTabInfo, sortable: SortableListApi) => {
+    const label = terminalTabLabel(terminalTab);
+    const selected = codeView === 'terminal' && centerTerminals.activeId === terminalTab.id;
+    const itemProps = sortable.itemProps(terminalTab.id);
+    return (
+      <div
+        key={terminalTab.id}
+        role="presentation"
+        {...middleClickClose(terminalTab.id)}
+        {...sortable.dropProps(terminalTab.id)}
+        className={cn(
+          'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+          selected
+            ? 'bg-surface-active text-foreground'
+            : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+          sortableDropClassHorizontal,
+        )}
+      >
+        <button
+          type="button"
+          role="tab"
+          id={`terminal-tab-${terminalTab.id}`}
+          aria-label={label}
+          aria-selected={selected}
+          aria-controls="code-terminal-panel"
+          title={
+            terminalTab.cwd
+              ? t('code:terminal.tabTitleWithCwd', {
+                  title: label,
+                  cwd: terminalTab.cwd,
+                })
+              : label
+          }
+          tabIndex={selected ? 0 : -1}
+          {...itemProps}
+          ref={(node) => {
+            itemProps.ref(node);
+            addTabRef(terminalTab.id)(node);
+          }}
+          onClick={() => selectTab(terminalTab.id)}
+          onKeyDown={(event) => {
+            itemProps.onKeyDown(event);
+            if (!event.defaultPrevented) handleTabKeyDown(event, terminalTab.id);
+          }}
+          className={cn(
+            'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+            'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+            !sortable.disabled && 'cursor-grab active:cursor-grabbing',
+          )}
+        >
+          <SquareTerminal
+            aria-hidden
+            className={cn(
+              'size-3.5 shrink-0',
+              terminalTab.running ? 'text-foreground-subtle' : 'text-warning',
+            )}
+            strokeWidth={1.75}
+          />
+          <span className="truncate">{label}</span>
+          {!terminalTab.running ? (
+            <span
+              aria-hidden
+              className="ml-0.5 inline-flex size-1.5 shrink-0 rounded-full bg-warning"
+            />
+          ) : null}
+        </button>
+        <button
+          type="button"
+          aria-label={t('code:header.closeTab', { title: label })}
+          tabIndex={-1}
+          onClick={() => closeTab(terminalTab.id)}
+          className={cn(
+            'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+            'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+          )}
+        >
+          <X aria-hidden className="size-3.5" />
+        </button>
+      </div>
+    );
+  };
+
   return (
     <header className="flex shrink-0 flex-col bg-background">
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
@@ -848,43 +1019,182 @@ export function CodeSessionHeader() {
       <div className="flex h-10 shrink-0 items-center gap-1 px-2">
         {/* Active tabs use a neutral fill instead of a raised surface + shadow:
             on the white header the shadow reads as a glow in light mode. */}
-        <div
-          ref={tabStripRef}
-          role="tablist"
-          aria-label={t('code:header.tabsTablist')}
-          onMouseDown={(event) => {
-            // Suppress WebView2 autoscroll on middle click.
-            if (event.button === 1) event.preventDefault();
-          }}
-          className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-0.5"
+        <SortableList
+          ids={stripIds}
+          label={t('code:header.tabsTablist')}
+          itemLabel={stripItemLabel}
+          orientation="horizontal"
+          onReorder={setCodeTabOrder}
         >
-          {showNewSessionTab ? (
+          {(sortable) => (
             <div
-              role="tab"
-              aria-label={t('code:header.newSession')}
-              aria-selected
-              aria-controls={SESSION_PANEL_ID}
-              title={t('code:header.newSession')}
-              tabIndex={0}
-              className={cn(
-                'flex h-8 max-w-44 shrink-0 select-none items-center rounded-lg',
-                'bg-surface-active pl-2.5 pr-2 text-[12px] text-foreground',
-                'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-              )}
+              ref={(node) => {
+                tabStripRef.current = node;
+                sortable.containerRef.current = node;
+              }}
+              role="tablist"
+              aria-label={t('code:header.tabsTablist')}
+              onMouseDown={(event) => {
+                // Suppress WebView2 autoscroll on middle click.
+                if (event.button === 1) event.preventDefault();
+              }}
+              className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-0.5"
             >
-              <span className="truncate">{t('code:header.newSession')}</span>
-            </div>
-          ) : (
-            tabs.map((tab) => {
-              const selected = tab.id === activeId && codeView === 'session';
-              return (
+              {showNewSessionTab ? (
                 <div
-                  key={tab.id}
+                  role="tab"
+                  aria-label={t('code:header.newSession')}
+                  aria-selected
+                  aria-controls={SESSION_PANEL_ID}
+                  title={t('code:header.newSession')}
+                  tabIndex={0}
+                  className={cn(
+                    'flex h-8 max-w-44 shrink-0 select-none items-center rounded-lg',
+                    'bg-surface-active pl-2.5 pr-2 text-[12px] text-foreground',
+                    'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                  )}
+                >
+                  <span className="truncate">{t('code:header.newSession')}</span>
+                </div>
+              ) : null}
+              {stripIds.map((id) => {
+                const terminalTab = centerTerminals.tabs.find((tab) => tab.id === id);
+                if (terminalTab) return renderTerminalTab(terminalTab, sortable);
+                const session = tabs.find((tab) => tab.id === id);
+                return session ? renderSessionTab(session, sortable) : null;
+              })}
+              {codeSubagentTabs.map((subagentTab) => {
+                const id = codeSubagentTabDomId(subagentTab);
+                const selected =
+                  codeView === 'subagent' &&
+                  codeSubagentTab !== null &&
+                  codeSubagentTabKey(codeSubagentTab) ===
+                    codeSubagentTabKey(subagentTab);
+                const live = liveSubagents?.[subagentTab.taskCallId];
+                const label = t('code:header.subagent.tabLabel', {
+                  description: subagentTab.description,
+                });
+                return (
+                  <div
+                    key={id}
+                    role="presentation"
+                    {...middleClickClose(id)}
+                    className={cn(
+                      'group flex h-8 max-w-48 shrink-0 items-center rounded-lg transition-colors duration-150',
+                      selected
+                        ? 'bg-surface-active text-foreground'
+                        : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-label={label}
+                      aria-selected={selected}
+                      aria-controls="code-subagent-panel"
+                      title={label}
+                      tabIndex={selected ? 0 : -1}
+                      ref={addTabRef(id)}
+                      onClick={() => selectTab(id)}
+                      onKeyDown={(event) => handleTabKeyDown(event, id)}
+                      className={cn(
+                        'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                        'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <Bot
+                        aria-hidden
+                        className={cn(
+                          'size-3.5 shrink-0',
+                          live?.status === 'running' ? 'text-accent' : 'text-foreground-subtle',
+                        )}
+                        strokeWidth={1.75}
+                      />
+                      <span className="truncate">
+                        {subagentTab.subagentType in SUBAGENT_TYPE_KEYS
+                          ? t(SUBAGENT_TYPE_KEYS[subagentTab.subagentType as keyof typeof SUBAGENT_TYPE_KEYS])
+                          : subagentTab.subagentType}{' '}
+                        · {subagentTab.description}
+                      </span>
+                      {live?.status === 'running' ? <Spinner size="xs" /> : null}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={t('code:header.closeTab', { title: label })}
+                      tabIndex={-1}
+                      onClick={() => closeTab(id)}
+                      className={cn(
+                        'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                        'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <X aria-hidden className="size-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+              {codeFileTabs.map((fileTab) => {
+                const id = codeFileTabDomId(fileTab);
+                const name = codeFileTabName(fileTab);
+                const selected =
+                  codeView === 'file' &&
+                  codeFileTab !== null &&
+                  codeFileTabKey(codeFileTab) === codeFileTabKey(fileTab);
+                return (
+                  <div
+                    key={id}
+                    role="presentation"
+                    {...middleClickClose(id)}
+                    className={cn(
+                      'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                      selected
+                        ? 'bg-surface-active text-foreground'
+                        : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-label={t('code:header.fileTab', { path: fileTab.path })}
+                      aria-selected={selected}
+                      aria-controls="code-file-panel"
+                      title={t('code:header.fileTab', { path: fileTab.path })}
+                      tabIndex={selected ? 0 : -1}
+                      ref={addTabRef(id)}
+                      onClick={() => selectTab(id)}
+                      onKeyDown={(event) => handleTabKeyDown(event, id)}
+                      className={cn(
+                        'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                        'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <FileIcon path={fileTab.path} className="size-3.5" />
+                      <span className="truncate">{name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={t('code:header.closeTab', { title: name })}
+                      tabIndex={-1}
+                      onClick={() => closeTab(id)}
+                      className={cn(
+                        'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                        'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <X aria-hidden className="size-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+              {codePlanTab ? (
+                <div
                   role="presentation"
-                  {...middleClickClose(tab.id)}
+                  {...middleClickClose(CODE_PLAN_TAB_ID)}
                   className={cn(
                     'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
-                    selected
+                    codeView === 'plan'
                       ? 'bg-surface-active text-foreground'
                       : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                   )}
@@ -892,26 +1202,29 @@ export function CodeSessionHeader() {
                   <button
                     type="button"
                     role="tab"
-                    aria-label={tab.title}
-                    aria-selected={selected}
-                    aria-controls={SESSION_PANEL_ID}
-                    title={tab.title}
-                    tabIndex={selected ? 0 : -1}
-                    ref={addTabRef(tab.id)}
-                    onClick={() => selectTab(tab.id)}
-                    onKeyDown={(event) => handleTabKeyDown(event, tab.id)}
+                    aria-label={t('code:header.planTab.label')}
+                    aria-selected={codeView === 'plan'}
+                    aria-controls="code-plan-panel"
+                    title={t('code:header.planTab.label')}
+                    tabIndex={codeView === 'plan' ? 0 : -1}
+                    ref={addTabRef(CODE_PLAN_TAB_ID)}
+                    onClick={() => selectTab(CODE_PLAN_TAB_ID)}
+                    onKeyDown={(event) => handleTabKeyDown(event, CODE_PLAN_TAB_ID)}
                     className={cn(
-                      'h-full min-w-0 flex-1 cursor-pointer select-none rounded-l-lg pl-2.5 text-left text-[12px]',
+                      'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
                       'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                     )}
                   >
-                    <span className="block truncate">{tab.title}</span>
+                    <FileIcon path={t('code:plan.previewPath')} className="size-3.5 shrink-0" />
+                    <span className="truncate">
+                      {codePlanTab.title ?? t('code:header.planTab.visible')}
+                    </span>
                   </button>
                   <button
                     type="button"
-                    aria-label={t('code:header.closeTab', { title: tab.title })}
+                    aria-label={t('code:header.planTab.close')}
                     tabIndex={-1}
-                    onClick={() => closeTab(tab.id)}
+                    onClick={() => closeTab(CODE_PLAN_TAB_ID)}
                     className={cn(
                       'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
                       'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
@@ -921,389 +1234,145 @@ export function CodeSessionHeader() {
                     <X aria-hidden className="size-3.5" />
                   </button>
                 </div>
-              );
-            })
+              ) : null}
+              {codeGoalOpen ? (
+                <div
+                  role="presentation"
+                  {...middleClickClose(CODE_GOAL_TAB_ID)}
+                  className={cn(
+                    'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                    codeView === 'goal'
+                      ? 'bg-surface-active text-foreground'
+                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  )}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-label={t('code:header.goalTab.label')}
+                    aria-selected={codeView === 'goal'}
+                    aria-controls="code-goal-panel"
+                    title={t('code:header.goalTab.label')}
+                    tabIndex={codeView === 'goal' ? 0 : -1}
+                    ref={addTabRef(CODE_GOAL_TAB_ID)}
+                    onClick={() => selectTab(CODE_GOAL_TAB_ID)}
+                    onKeyDown={(event) => handleTabKeyDown(event, CODE_GOAL_TAB_ID)}
+                    className={cn(
+                      'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                      'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <Target aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="truncate">{t('code:header.goalTab.visible')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t('code:header.goalTab.close')}
+                    tabIndex={-1}
+                    onClick={() => closeTab(CODE_GOAL_TAB_ID)}
+                    className={cn(
+                      'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                      'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </button>
+                </div>
+              ) : null}
+              {codeDiffTab ? (
+                <div
+                  role="presentation"
+                  {...middleClickClose(CODE_DIFF_TAB_ID)}
+                  className={cn(
+                    'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                    codeView === 'diff'
+                      ? 'bg-surface-active text-foreground'
+                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  )}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-label={t('code:header.diffTab.label', { path: codeDiffTab.path })}
+                    aria-selected={codeView === 'diff'}
+                    aria-controls="code-diff-panel"
+                    title={t('code:header.diffTab.title', { path: codeDiffTab.path })}
+                    tabIndex={codeView === 'diff' ? 0 : -1}
+                    ref={addTabRef(CODE_DIFF_TAB_ID)}
+                    onClick={() => selectTab(CODE_DIFF_TAB_ID)}
+                    onKeyDown={(event) => handleTabKeyDown(event, CODE_DIFF_TAB_ID)}
+                    className={cn(
+                      'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                      'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <FileDiff aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="truncate">{t('code:header.diffTab.visible')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t('code:header.diffTab.close', { path: codeDiffTab.path })}
+                    tabIndex={-1}
+                    onClick={() => closeTab(CODE_DIFF_TAB_ID)}
+                    className={cn(
+                      'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                      'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </button>
+                </div>
+              ) : null}
+              {codeCommitsTab ? (
+                <div
+                  role="presentation"
+                  {...middleClickClose(CODE_COMMITS_TAB_ID)}
+                  className={cn(
+                    'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                    codeView === 'commits'
+                      ? 'bg-surface-active text-foreground'
+                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  )}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-label={t('code:header.commitsTab.label')}
+                    aria-selected={codeView === 'commits'}
+                    aria-controls="code-commits-panel"
+                    title={t('code:header.commitsTab.label')}
+                    tabIndex={codeView === 'commits' ? 0 : -1}
+                    ref={addTabRef(CODE_COMMITS_TAB_ID)}
+                    onClick={() => selectTab(CODE_COMMITS_TAB_ID)}
+                    onKeyDown={(event) => handleTabKeyDown(event, CODE_COMMITS_TAB_ID)}
+                    className={cn(
+                      'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                      'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <History aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="truncate">{t('code:header.commitsTab.visible')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t('code:header.commitsTab.close')}
+                    tabIndex={-1}
+                    onClick={() => closeTab(CODE_COMMITS_TAB_ID)}
+                    className={cn(
+                      'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                      'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </button>
+                </div>
+              ) : null}
+            </div>
           )}
-          {centerTerminals.tabs.map((terminalTab) => {
-            const label = terminalTabLabel(terminalTab);
-            const selected =
-              codeView === 'terminal' && centerTerminals.activeId === terminalTab.id;
-            return (
-              <div
-                key={terminalTab.id}
-                role="presentation"
-                {...middleClickClose(terminalTab.id)}
-                className={cn(
-                  'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
-                  selected
-                    ? 'bg-surface-active text-foreground'
-                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-                )}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  id={`terminal-tab-${terminalTab.id}`}
-                  aria-label={label}
-                  aria-selected={selected}
-                  aria-controls="code-terminal-panel"
-                  title={
-                    terminalTab.cwd
-                      ? t('code:terminal.tabTitleWithCwd', {
-                          title: label,
-                          cwd: terminalTab.cwd,
-                        })
-                      : label
-                  }
-                  tabIndex={selected ? 0 : -1}
-                  ref={addTabRef(terminalTab.id)}
-                  onClick={() => selectTab(terminalTab.id)}
-                  onKeyDown={(event) => handleTabKeyDown(event, terminalTab.id)}
-                  className={cn(
-                    'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
-                    'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                  )}
-                >
-                  <SquareTerminal
-                    aria-hidden
-                    className={cn(
-                      'size-3.5 shrink-0',
-                      terminalTab.running ? 'text-foreground-subtle' : 'text-warning',
-                    )}
-                    strokeWidth={1.75}
-                  />
-                  <span className="truncate">{label}</span>
-                  {!terminalTab.running ? (
-                    <span
-                      aria-hidden
-                      className="ml-0.5 inline-flex size-1.5 shrink-0 rounded-full bg-warning"
-                    />
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  aria-label={t('code:header.closeTab', { title: label })}
-                  tabIndex={-1}
-                  onClick={() => closeTab(terminalTab.id)}
-                  className={cn(
-                    'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                    'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                  )}
-                >
-                  <X aria-hidden className="size-3.5" />
-                </button>
-              </div>
-            );
-          })}
-          {codeSubagentTabs.map((subagentTab) => {
-            const id = codeSubagentTabDomId(subagentTab);
-            const selected =
-              codeView === 'subagent' &&
-              codeSubagentTab !== null &&
-              codeSubagentTabKey(codeSubagentTab) ===
-                codeSubagentTabKey(subagentTab);
-            const live = liveSubagents?.[subagentTab.taskCallId];
-            const label = t('code:header.subagent.tabLabel', {
-              description: subagentTab.description,
-            });
-            return (
-              <div
-                key={id}
-                role="presentation"
-                {...middleClickClose(id)}
-                className={cn(
-                  'group flex h-8 max-w-48 shrink-0 items-center rounded-lg transition-colors duration-150',
-                  selected
-                    ? 'bg-surface-active text-foreground'
-                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-                )}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-label={label}
-                  aria-selected={selected}
-                  aria-controls="code-subagent-panel"
-                  title={label}
-                  tabIndex={selected ? 0 : -1}
-                  ref={addTabRef(id)}
-                  onClick={() => selectTab(id)}
-                  onKeyDown={(event) => handleTabKeyDown(event, id)}
-                  className={cn(
-                    'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
-                    'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                  )}
-                >
-                  <Bot
-                    aria-hidden
-                    className={cn(
-                      'size-3.5 shrink-0',
-                      live?.status === 'running' ? 'text-accent' : 'text-foreground-subtle',
-                    )}
-                    strokeWidth={1.75}
-                  />
-                  <span className="truncate">
-                    {subagentTab.subagentType in SUBAGENT_TYPE_KEYS
-                      ? t(SUBAGENT_TYPE_KEYS[subagentTab.subagentType as keyof typeof SUBAGENT_TYPE_KEYS])
-                      : subagentTab.subagentType}{' '}
-                    · {subagentTab.description}
-                  </span>
-                  {live?.status === 'running' ? <Spinner size="xs" /> : null}
-                </button>
-                <button
-                  type="button"
-                  aria-label={t('code:header.closeTab', { title: label })}
-                  tabIndex={-1}
-                  onClick={() => closeTab(id)}
-                  className={cn(
-                    'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                    'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                  )}
-                >
-                  <X aria-hidden className="size-3.5" />
-                </button>
-              </div>
-            );
-          })}
-          {codeFileTabs.map((fileTab) => {
-            const id = codeFileTabDomId(fileTab);
-            const name = codeFileTabName(fileTab);
-            const selected =
-              codeView === 'file' &&
-              codeFileTab !== null &&
-              codeFileTabKey(codeFileTab) === codeFileTabKey(fileTab);
-            return (
-              <div
-                key={id}
-                role="presentation"
-                {...middleClickClose(id)}
-                className={cn(
-                  'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
-                  selected
-                    ? 'bg-surface-active text-foreground'
-                    : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-                )}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-label={t('code:header.fileTab', { path: fileTab.path })}
-                  aria-selected={selected}
-                  aria-controls="code-file-panel"
-                  title={t('code:header.fileTab', { path: fileTab.path })}
-                  tabIndex={selected ? 0 : -1}
-                  ref={addTabRef(id)}
-                  onClick={() => selectTab(id)}
-                  onKeyDown={(event) => handleTabKeyDown(event, id)}
-                  className={cn(
-                    'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
-                    'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                  )}
-                >
-                  <FileIcon path={fileTab.path} className="size-3.5" />
-                  <span className="truncate">{name}</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={t('code:header.closeTab', { title: name })}
-                  tabIndex={-1}
-                  onClick={() => closeTab(id)}
-                  className={cn(
-                    'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                    'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                  )}
-                >
-                  <X aria-hidden className="size-3.5" />
-                </button>
-              </div>
-            );
-          })}
-          {codePlanTab ? (
-            <div
-              role="presentation"
-              {...middleClickClose(CODE_PLAN_TAB_ID)}
-              className={cn(
-                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
-                codeView === 'plan'
-                  ? 'bg-surface-active text-foreground'
-                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-              )}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-label={t('code:header.planTab.label')}
-                aria-selected={codeView === 'plan'}
-                aria-controls="code-plan-panel"
-                title={t('code:header.planTab.label')}
-                tabIndex={codeView === 'plan' ? 0 : -1}
-                ref={addTabRef(CODE_PLAN_TAB_ID)}
-                onClick={() => selectTab(CODE_PLAN_TAB_ID)}
-                onKeyDown={(event) => handleTabKeyDown(event, CODE_PLAN_TAB_ID)}
-                className={cn(
-                  'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
-                  'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <FileIcon path={t('code:plan.previewPath')} className="size-3.5 shrink-0" />
-                <span className="truncate">
-                  {codePlanTab.title ?? t('code:header.planTab.visible')}
-                </span>
-              </button>
-              <button
-                type="button"
-                aria-label={t('code:header.planTab.close')}
-                tabIndex={-1}
-                onClick={() => closeTab(CODE_PLAN_TAB_ID)}
-                className={cn(
-                  'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <X aria-hidden className="size-3.5" />
-              </button>
-            </div>
-          ) : null}
-          {codeGoalOpen ? (
-            <div
-              role="presentation"
-              {...middleClickClose(CODE_GOAL_TAB_ID)}
-              className={cn(
-                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
-                codeView === 'goal'
-                  ? 'bg-surface-active text-foreground'
-                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-              )}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-label={t('code:header.goalTab.label')}
-                aria-selected={codeView === 'goal'}
-                aria-controls="code-goal-panel"
-                title={t('code:header.goalTab.label')}
-                tabIndex={codeView === 'goal' ? 0 : -1}
-                ref={addTabRef(CODE_GOAL_TAB_ID)}
-                onClick={() => selectTab(CODE_GOAL_TAB_ID)}
-                onKeyDown={(event) => handleTabKeyDown(event, CODE_GOAL_TAB_ID)}
-                className={cn(
-                  'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
-                  'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <Target aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="truncate">{t('code:header.goalTab.visible')}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={t('code:header.goalTab.close')}
-                tabIndex={-1}
-                onClick={() => closeTab(CODE_GOAL_TAB_ID)}
-                className={cn(
-                  'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <X aria-hidden className="size-3.5" />
-              </button>
-            </div>
-          ) : null}
-          {codeDiffTab ? (
-            <div
-              role="presentation"
-              {...middleClickClose(CODE_DIFF_TAB_ID)}
-              className={cn(
-                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
-                codeView === 'diff'
-                  ? 'bg-surface-active text-foreground'
-                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-              )}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-label={t('code:header.diffTab.label', { path: codeDiffTab.path })}
-                aria-selected={codeView === 'diff'}
-                aria-controls="code-diff-panel"
-                title={t('code:header.diffTab.title', { path: codeDiffTab.path })}
-                tabIndex={codeView === 'diff' ? 0 : -1}
-                ref={addTabRef(CODE_DIFF_TAB_ID)}
-                onClick={() => selectTab(CODE_DIFF_TAB_ID)}
-                onKeyDown={(event) => handleTabKeyDown(event, CODE_DIFF_TAB_ID)}
-                className={cn(
-                  'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
-                  'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <FileDiff aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="truncate">{t('code:header.diffTab.visible')}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={t('code:header.diffTab.close', { path: codeDiffTab.path })}
-                tabIndex={-1}
-                onClick={() => closeTab(CODE_DIFF_TAB_ID)}
-                className={cn(
-                  'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <X aria-hidden className="size-3.5" />
-              </button>
-            </div>
-          ) : null}
-          {codeCommitsTab ? (
-            <div
-              role="presentation"
-              {...middleClickClose(CODE_COMMITS_TAB_ID)}
-              className={cn(
-                'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
-                codeView === 'commits'
-                  ? 'bg-surface-active text-foreground'
-                  : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-              )}
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-label={t('code:header.commitsTab.label')}
-                aria-selected={codeView === 'commits'}
-                aria-controls="code-commits-panel"
-                title={t('code:header.commitsTab.label')}
-                tabIndex={codeView === 'commits' ? 0 : -1}
-                ref={addTabRef(CODE_COMMITS_TAB_ID)}
-                onClick={() => selectTab(CODE_COMMITS_TAB_ID)}
-                onKeyDown={(event) => handleTabKeyDown(event, CODE_COMMITS_TAB_ID)}
-                className={cn(
-                  'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
-                  'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <History aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
-                <span className="truncate">{t('code:header.commitsTab.visible')}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={t('code:header.commitsTab.close')}
-                tabIndex={-1}
-                onClick={() => closeTab(CODE_COMMITS_TAB_ID)}
-                className={cn(
-                  'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
-                  'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-                )}
-              >
-                <X aria-hidden className="size-3.5" />
-              </button>
-            </div>
-          ) : null}
-        </div>
+        </SortableList>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
