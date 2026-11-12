@@ -31,6 +31,9 @@ pub enum TurnEvent {
     TextDelta { delta: String },
     /// A tool call started streaming its arguments.
     ToolCallStarted { tool_call: ToolCallRecord },
+    /// The step's batch reached execution. `started_at` is authoritative for
+    /// the live duration (the stream start above is not execution time).
+    ToolCallExecuting { id: String, started_at: i64 },
     /// JSON arguments delta for a streaming tool call.
     ToolCallArgs { id: String, delta: String },
     /// Tool execution finished.
@@ -45,6 +48,8 @@ pub enum TurnEvent {
         /// Apresentação estruturada (diff/todo/plano/job) para o card ao vivo.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         presentation: Option<serde_json::Value>,
+        /// Authoritative execution end, paired with `ToolCallExecuting`.
+        finished_at: i64,
     },
     /// A file artifact was created by the agent.
     ArtifactCreated { artifact: Artifact },
@@ -198,6 +203,31 @@ mod tests {
         assert_eq!(value["taskCallId"], "task-1");
         assert_eq!(value["event"]["type"], "text_delta");
         assert_eq!(value["event"]["delta"], "hello");
+    }
+
+    #[test]
+    fn tool_execution_timestamps_serialize_in_camel_case() {
+        let executing = serde_json::to_value(TurnEvent::ToolCallExecuting {
+            id: "tool-1".to_string(),
+            started_at: 1_000,
+        })
+        .expect("serialize executing");
+        assert_eq!(executing["type"], "tool_call_executing");
+        assert_eq!(executing["id"], "tool-1");
+        assert_eq!(executing["startedAt"], 1_000);
+
+        let finished = serde_json::to_value(TurnEvent::ToolCallFinished {
+            id: "tool-1".to_string(),
+            status: "done".to_string(),
+            result: "ok".to_string(),
+            summary: None,
+            citations: Vec::new(),
+            presentation: None,
+            finished_at: 2_500,
+        })
+        .expect("serialize finished");
+        assert_eq!(finished["type"], "tool_call_finished");
+        assert_eq!(finished["finishedAt"], 2_500);
     }
 }
 

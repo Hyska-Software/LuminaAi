@@ -1624,6 +1624,7 @@ export type TurnEvent =
   | { type: 'reasoning_done' }
   | { type: 'text_delta'; delta: string }
   | { type: 'tool_call_started'; toolCall: ToolCallRecord }
+  | { type: 'tool_call_executing'; id: string; startedAt: number }
   | { type: 'tool_call_args'; id: string; delta: string }
   | {
       type: 'tool_call_finished';
@@ -1633,6 +1634,7 @@ export type TurnEvent =
       summary?: string;
       citations?: Citation[];
       presentation?: ToolPresentation | null;
+      finishedAt?: number;
     }
   | { type: 'artifact_created'; artifact: Artifact }
   | { type: 'usage'; usage: UsageInfo }

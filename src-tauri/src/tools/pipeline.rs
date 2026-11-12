@@ -20,8 +20,8 @@ use crate::domain::{RiskClass, ToolCallRecord};
 use crate::policy::PolicyDecision;
 use crate::tools::registry::{ParallelClass, ToolSpec};
 
-/// Chamadas paralelas por lote (TOOLS.md §4: até 4 em paralelo).
-pub const DEFAULT_MAX_PARALLEL: usize = 4;
+/// Chamadas paralelas por lote (TOOLS.md §4: até 8 em paralelo).
+pub const DEFAULT_MAX_PARALLEL: usize = 8;
 
 /// Lembretes de repetição: o modelo recebe o aviso quando o mesmo lote de
 /// tool calls aparece pela terceira vez consecutiva (TOOLS.md §4).
@@ -230,6 +230,18 @@ mod tests {
         let mut call = ToolCallRecord::running(format!("call-{tool}"), tool);
         call.arguments = arguments.to_string();
         ToolCallRequest::new(call, spec)
+    }
+
+    #[test]
+    fn safe_calls_use_the_default_parallel_limit() {
+        let calls: Vec<_> = (0..9)
+            .map(|index| request("read_file", &format!("{{\"path\":\"src/{index}.rs\"}}")))
+            .collect();
+        let batches = plan(&calls);
+        assert_eq!(
+            batches,
+            vec![vec![0, 1, 2, 3, 4, 5, 6, 7], vec![8]]
+        );
     }
 
     #[test]

@@ -462,6 +462,10 @@ pub enum ProviderError {
     BadRequest(String),
     #[error("network error: {0}")]
     Network(String),
+    /// The SSE stream produced no model event before the first-event/idle
+    /// deadline. Retriable once when the attempt has no partial output.
+    #[error("stream stalled: {0}")]
+    StreamStalled(String),
     #[error("provider error: {0}")]
     Other(String),
     /// The ChatGPT-plan allowance is exhausted (429
@@ -576,6 +580,7 @@ impl ProviderError {
             Self::UnsupportedProtocol(_)
             | Self::BadRequest(_)
             | Self::Network(_)
+            | Self::StreamStalled(_)
             | Self::Other(_) => None,
         }
     }
@@ -604,6 +609,12 @@ impl ProviderError {
     /// exactly once before asking for a new login.
     pub fn is_auth_failure(&self) -> bool {
         matches!(self, Self::Unauthorized(_) | Self::AuthRequired(_))
+    }
+
+    /// The stream watchdog aborted the attempt before the model produced any
+    /// output. The harness retries once when the attempt is still empty.
+    pub fn is_stream_stall(&self) -> bool {
+        matches!(self, Self::StreamStalled(_))
     }
 
     /// Plan allowance exhausted: do not auto-retry; surface the "Gerenciar

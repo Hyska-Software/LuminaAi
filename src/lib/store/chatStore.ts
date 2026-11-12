@@ -948,6 +948,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ),
           }));
           break;
+        case 'tool_call_executing':
+          patchMessage(context.conversationId, context.assistantId, (message) => ({
+            ...message,
+            toolCalls: message.toolCalls.map((tool) =>
+              tool.id === event.id ? { ...tool, startedAt: event.startedAt } : tool,
+            ),
+          }));
+          break;
         case 'tool_progress': {
           // Saída incremental de shell/job no card da tool em execução.
           patchMessage(context.conversationId, context.assistantId, (message) => {
@@ -976,7 +984,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                     result: event.result,
                     summary: event.summary ?? tool.summary,
                     presentation: event.presentation ?? tool.presentation ?? null,
-                    finishedAt: Date.now(),
+                    finishedAt: event.finishedAt ?? Date.now(),
                   }
                 : tool,
             ),
@@ -1221,6 +1229,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
                   : tool,
               ),
             }));
+          } else if (nested.type === 'tool_call_executing') {
+            patchSubagent(event.taskCallId, (current) => ({
+              ...current,
+              toolCalls: current.toolCalls.map((tool) =>
+                tool.id === nested.id ? { ...tool, startedAt: nested.startedAt } : tool,
+              ),
+            }));
           } else if (nested.type === 'tool_call_finished') {
             patchSubagent(event.taskCallId, (current) => ({
               ...current,
@@ -1232,7 +1247,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                       result: nested.result,
                       summary: nested.summary ?? tool.summary,
                       presentation: nested.presentation ?? tool.presentation ?? null,
-                      finishedAt: Date.now(),
+                      finishedAt: nested.finishedAt ?? Date.now(),
                     }
                   : tool,
               ),
@@ -2872,6 +2887,14 @@ export const useChatStore = create<ChatState>()((set, get) => {
             ),
           }));
           break;
+        case 'tool_call_executing':
+          patchMessage(conversationId, assistantId, (message) => ({
+            ...message,
+            toolCalls: message.toolCalls.map((tool) =>
+              tool.id === event.id ? { ...tool, startedAt: event.startedAt } : tool,
+            ),
+          }));
+          break;
         case 'tool_call_finished':
           patchMessage(conversationId, assistantId, (message) => ({
             ...message,
@@ -2883,7 +2906,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
                     result: event.result,
                     summary: event.summary ?? tool.summary,
                     presentation: event.presentation ?? tool.presentation ?? null,
-                    finishedAt: Date.now(),
+                    finishedAt: event.finishedAt ?? Date.now(),
                   }
                 : tool,
             ),

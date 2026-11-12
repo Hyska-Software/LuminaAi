@@ -9,10 +9,37 @@
 //! `stream_sse` reads the response body incrementally, honours the turn's
 //! [`CancellationToken`] between chunks and reports transport failures as
 //! `anyhow` errors (the adapters turn them into `ProviderError::Network`).
+//!
+//! It also owns the stream watchdog: the first model event must arrive within
+//! [`FIRST_EVENT_TIMEOUT`] and every subsequent gap without a data event is
+//! capped by [`IDLE_TIMEOUT`]. Keep-alive comments (`:`) and events without
+//! `data` do not reset the deadline — a gateway that only pings must not keep a
+//! dead stream parked indefinitely.
+
+use std::time::Duration;
 
 use anyhow::Context;
 use futures_util::StreamExt;
+use tokio::time::{timeout, Instant};
 use tokio_util::sync::CancellationToken;
+
+use super::ProviderError;
+
+/// Deadline for the first SSE event carrying model output.
+const FIRST_EVENT_TIMEOUT: Duration = Duration::from_secs(180);
+/// Maximum gap between two model events after the stream started.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn stalled(first_event: bool) -> anyhow::Error {
+    let (phase, seconds) = if first_event {
+        ("first event", FIRST_EVENT_TIMEOUT.as_secs())
+    } else {
+        ("idle", IDLE_TIMEOUT.as_secs())
+    };
+    anyhow::Error::new(ProviderError::StreamStalled(format!(
+        "no model event within {seconds} s ({phase})"
+    )))
+}
 
 /// Incremental SSE parser. Public within the crate so it can be unit tested by
 /// feeding arbitrary byte chunks (chunks may split UTF-8 sequences or lines).
@@ -161,10 +188,24 @@ where
 {
     let mut decoder = SseDecoder::new();
     let mut stream = response.bytes_stream();
+    let mut first_event = true;
+    let mut last_progress = Instant::now();
     loop {
+        let limit = if first_event {
+            FIRST_EVENT_TIMEOUT
+        } else {
+            IDLE_TIMEOUT
+        };
+        let remaining = limit.saturating_sub(last_progress.elapsed());
+        if remaining.is_zero() {
+            return Err(stalled(first_event));
+        }
         let next = tokio::select! {
             _ = cancel.cancelled() => return Ok(()),
-            next = stream.next() => next,
+            next = timeout(remaining, stream.next()) => match next {
+                Ok(next) => next,
+                Err(_) => return Err(stalled(first_event)),
+            },
         };
         match next {
             None => break,
@@ -172,19 +213,51 @@ where
                 return Err(anyhow::Error::new(error).context("erro de rede ao ler o stream SSE"));
             }
             Some(Ok(chunk)) => {
-                if decoder.push(&chunk, &mut on_event)? {
+                // Only a dispatched event with data counts as progress; keep-alives
+                // and partial lines must not extend the watchdog.
+                let mut on_data = |event: Option<&str>, data: &str| {
+                    if !data.trim().is_empty() {
+                        first_event = false;
+                        last_progress = Instant::now();
+                    }
+                    on_event(event, data)
+                };
+                if decoder.push(&chunk, &mut on_data)? {
                     return Ok(());
                 }
             }
         }
     }
-    decoder.finish(&mut on_event)?;
+    let mut on_data = |event: Option<&str>, data: &str| {
+        if !data.trim().is_empty() {
+            first_event = false;
+            last_progress = Instant::now();
+        }
+        on_event(event, data)
+    };
+    decoder.finish(&mut on_data)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::SseDecoder;
+    use super::{stalled, ProviderError, SseDecoder};
+
+    #[test]
+    fn stall_error_is_typed_and_phase_labeled() {
+        for first_event in [true, false] {
+            let error = stalled(first_event);
+            let provider = error
+                .downcast_ref::<ProviderError>()
+                .expect("stall must stay a typed ProviderError");
+            assert!(provider.is_stream_stall());
+            let message = provider.to_string();
+            assert!(
+                message.contains(if first_event { "first event" } else { "idle" }),
+                "{message}"
+            );
+        }
+    }
 
     fn collect(chunks: &[&[u8]]) -> (Vec<(Option<String>, String)>, bool) {
         let mut decoder = SseDecoder::new();

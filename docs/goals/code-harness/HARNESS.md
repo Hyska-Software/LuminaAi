@@ -197,7 +197,7 @@ pub struct TurnProfileSpec {
   timeout declarativo não aplicado — não repetir).
 - **Erros** são resultados (`Error: …` + código), nunca propagam para derrubar o turno; só falhas
   de infraestrutura do turno (provider) encerram o turno.
-- **Scheduling**: `Safe` (leitura/busca/git read/web) em paralelo até 4; `PathLocked` (write/edit)
+- **Scheduling**: `Safe` (leitura/busca/git read/web) em paralelo até 8; `PathLocked` (write/edit)
   paralelo por arquivo distinto, serializado no mesmo path; `Exclusive` (run_command, todo_write,
   submit_plan, ask_user, job_kill) age como barreira — mantém a ordem do modelo. Ordem canônica
   dos resultados = ordem original das tool calls (provider exige pareamento).

@@ -530,7 +530,7 @@ pub struct ToolSpec {
 | Item | Padrão | Observação |
 | --- | --- | --- |
 | `max_steps` | **120** (máx 1000) | configurable por sessão; ao atingir, resposta final forçada com aviso |
-| Tools por passo | até 8 chamadas, 4 em paralelo (máx) | `Exclusive` como barreira |
+| Tools por passo | até 64 chamadas, 8 em paralelo (máx) | `Exclusive` como barreira |
 | Resultado para o modelo | 24 000 chars/tool | acima → spill + `read_tool_output` |
 | Resultado para a UI | 8 000 chars no card | saída completa no painel/streaming |
 | Saída de processo | 1 MB backend / 24k modelo | timeout default 120 s, máx 10 min |

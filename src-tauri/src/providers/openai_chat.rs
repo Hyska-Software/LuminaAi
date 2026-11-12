@@ -61,6 +61,7 @@ pub(crate) async fn stream(
 
 fn build_body(request: &CompletionRequest) -> Value {
     let model = &request.config.model;
+    let replay_reasoning = model.family.eq_ignore_ascii_case("deepseek");
     let mut messages: Vec<Value> = Vec::new();
     let system = system_text(request);
     if !system.is_empty() {
@@ -71,7 +72,7 @@ fn build_body(request: &CompletionRequest) -> Value {
             HistoryRole::System => {}
             HistoryRole::User => messages.push(user_message(message)),
             HistoryRole::Assistant => {
-                if let Some(entry) = assistant_message(message) {
+                if let Some(entry) = assistant_message(message, replay_reasoning) {
                     messages.push(entry);
                 }
             }
@@ -141,25 +142,38 @@ fn user_message(message: &HistoryMessage) -> Value {
     json!({"role": "user", "content": parts})
 }
 
-fn assistant_message(message: &HistoryMessage) -> Option<Value> {
+fn assistant_message(message: &HistoryMessage, replay_reasoning: bool) -> Option<Value> {
     let tool_calls = chat_tool_calls(message);
+    let has_tool_calls = !tool_calls.is_empty();
     let has_text = !message.text.trim().is_empty();
-    if tool_calls.is_empty() {
-        if !has_text {
-            return None;
-        }
-        return Some(json!({"role": "assistant", "content": message.text}));
+    if !has_tool_calls && !has_text {
+        return None;
     }
-    let content = if has_text {
-        json!(message.text)
+    let mut entry = if has_tool_calls {
+        let content = if has_text {
+            json!(message.text)
+        } else {
+            Value::Null
+        };
+        json!({
+            "role": "assistant",
+            "content": content,
+            "tool_calls": tool_calls,
+        })
     } else {
-        Value::Null
+        json!({"role": "assistant", "content": message.text})
     };
-    Some(json!({
-        "role": "assistant",
-        "content": content,
-        "tool_calls": tool_calls,
-    }))
+    // DeepSeek V4 requires the prior reasoning on tool-call turns and, once a
+    // turn carried it, on later assistant turns of the same wire. An empty
+    // string is the accepted placeholder when the provider returned none.
+    let has_reasoning = message
+        .reasoning
+        .as_deref()
+        .is_some_and(|reasoning| !reasoning.trim().is_empty());
+    if replay_reasoning && (has_reasoning || has_tool_calls) {
+        entry["reasoning_content"] = json!(message.reasoning.as_deref().unwrap_or_default());
+    }
+    Some(entry)
 }
 
 /// OpenAI-style tool calls for replay: prefer the verbatim `provider_state`
@@ -560,6 +574,69 @@ mod tests {
             cache_plan: None,
             cancel: tokio_util::sync::CancellationToken::new(),
         }
+    }
+
+    fn request_with_model(model_id: &str) -> CompletionRequest {
+        let mut request = test_request();
+        let catalog = crate::catalog::CatalogFile::load().expect("catalog.json carrega");
+        request.config.model = catalog
+            .model("opencode-go", model_id)
+            .unwrap_or_else(|| panic!("modelo {model_id}"))
+            .clone();
+        request
+    }
+
+    fn assistant_with_tool_call(reasoning: Option<&str>) -> HistoryMessage {
+        let mut assistant = HistoryMessage::assistant("chamando");
+        assistant.reasoning = reasoning.map(str::to_string);
+        assistant.tool_calls = vec![crate::providers::HistoryToolCall {
+            id: "call-1".to_string(),
+            name: "echo".to_string(),
+            arguments: "{}".to_string(),
+        }];
+        assistant
+    }
+
+    #[test]
+    fn assistant_message_replays_reasoning_content_for_deepseek() {
+        let mut request = request_with_model("deepseek-v4.1-flash");
+        request.history = vec![assistant_with_tool_call(Some("penso antes de chamar"))];
+        let body = build_body(&request);
+        assert_eq!(body["messages"][1]["role"], json!("assistant"));
+        assert_eq!(
+            body["messages"][1]["reasoning_content"],
+            json!("penso antes de chamar")
+        );
+    }
+
+    #[test]
+    fn assistant_message_sends_empty_reasoning_on_tool_call_without_thinking() {
+        let mut request = request_with_model("deepseek-v4.1-flash");
+        request.history = vec![assistant_with_tool_call(None)];
+        let body = build_body(&request);
+        assert_eq!(body["messages"][1]["reasoning_content"], json!(""));
+    }
+
+    #[test]
+    fn assistant_message_replays_reasoning_on_text_only_turns() {
+        let mut request = request_with_model("deepseek-v4.1-flash");
+        let mut assistant = HistoryMessage::assistant("resposta final");
+        assistant.reasoning = Some("penso".to_string());
+        request.history = vec![assistant];
+        let body = build_body(&request);
+        assert_eq!(body["messages"][1]["reasoning_content"], json!("penso"));
+    }
+
+    #[test]
+    fn assistant_message_omits_reasoning_content_for_other_families() {
+        let mut request = request_with_model("glm-5.3-flash");
+        request.history = vec![assistant_with_tool_call(Some("penso"))];
+        let body = build_body(&request);
+        assert!(
+            body["messages"][1].get("reasoning_content").is_none(),
+            "{}",
+            body["messages"][1]
+        );
     }
 
     /// F4b: plan applied after `build_body` and before the digest; `None` keeps

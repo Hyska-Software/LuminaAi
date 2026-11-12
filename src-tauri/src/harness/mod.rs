@@ -50,7 +50,7 @@ const MAX_HISTORY_IMAGE_BASE64_CHARS: usize = 16_000_000;
 /// Single image payload limit (providers reject very large inline images).
 const MAX_INLINE_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 /// Screenshots fed back to vision models are capped per turn and resized.
-const MAX_TOOL_IMAGES_PER_TURN: usize = 2;
+const MAX_TOOL_IMAGES_PER_TURN: usize = 8;
 const MAX_TOOL_IMAGE_WIDTH: u32 = 1280;
 /// Tool result text sent to the renderer (the model gets a larger budget).
 const MAX_EVENT_TOOL_RESULT_CHARS: usize = 8_000;
@@ -2891,6 +2891,7 @@ pub async fn run_turn(
         // One provider attempt may be retried once after a forced OAuth refresh
         // (401 → force_refresh → same step again).
         let mut auth_retried = false;
+        let mut stall_retried = false;
         let outcome = loop {
             let mut request = CompletionRequest {
                 config: provider_config(&provider, &model, &credential, &wire_session_id),
@@ -2927,17 +2928,28 @@ pub async fn run_turn(
             };
             let outcome =
                 run_stream_attempt(&deps, request, &on_event, &cancel, &on_partial).await;
-            let retry = match &outcome {
-                AttemptOutcome::Failed { error, .. } => {
-                    error
-                        .downcast_ref::<ProviderError>()
-                        .is_some_and(ProviderError::is_auth_failure)
+            let (stall_retry, auth_retry) = match &outcome {
+                AttemptOutcome::Failed { attempt, error } => {
+                    let provider_error = error.downcast_ref::<ProviderError>();
+                    // A stall is only retried when the attempt produced nothing:
+                    // a retry after partial deltas would duplicate the UI stream.
+                    let stall = provider_error.is_some_and(ProviderError::is_stream_stall)
+                        && !stall_retried
+                        && attempt.text.is_empty()
+                        && attempt.reasoning.is_empty()
+                        && attempt.tool_calls.is_empty();
+                    let auth = provider_error.is_some_and(ProviderError::is_auth_failure)
                         && credential.is_bearer()
-                        && !auth_retried
+                        && !auth_retried;
+                    (stall, auth)
                 }
-                _ => false,
+                _ => (false, false),
             };
-            if !retry {
+            if stall_retry {
+                stall_retried = true;
+                continue;
+            }
+            if !auth_retry {
                 break outcome;
             }
             auth_retried = true;
@@ -3086,6 +3098,7 @@ pub async fn run_turn(
             // precisa do assistant que as declara para não deixar o output órfão.
             replay_steps.push(ReplayStep {
                 text: step_text.clone(),
+                reasoning: step_reasoning.clone(),
                 state: step_state.clone(),
                 call_ids: failed.iter().map(|call| call.id.clone()).collect(),
             });
@@ -3140,6 +3153,7 @@ pub async fn run_turn(
             full_text = step_text.trim().to_string();
             replay_steps.push(ReplayStep {
                 text: full_text.clone(),
+                reasoning: step_reasoning.clone(),
                 state: step_state.clone(),
                 call_ids: Vec::new(),
             });
@@ -3162,6 +3176,15 @@ pub async fn run_turn(
         // Tools requested on the last allowed step still run: artifacts and other
         // deliverables must never be lost. A forced final-answer pass (below)
         // then summarizes what was collected.
+        for call in &step_calls {
+            emit(
+                &on_event,
+                TurnEvent::ToolCallExecuting {
+                    id: call.id.clone(),
+                    started_at: now_ms(),
+                },
+            );
+        }
         let outcomes = match (&code_tool_ctx, profile) {
             (Some(ctx), TurnProfile::Code) if agent.is_some() => {
                 execute_agent_tools(ctx, &runtime, &step_calls).await
@@ -3201,6 +3224,7 @@ pub async fn run_turn(
                     summary: outcome.summary.clone(),
                     citations: outcome.citations.clone(),
                     presentation: outcome.presentation.clone(),
+                    finished_at: call.finished_at.unwrap_or_else(now_ms),
                 },
             );
             for artifact in &outcome.artifacts {
@@ -3284,6 +3308,7 @@ pub async fn run_turn(
         // ordem cronológica de `ChatMessage.tool_calls`.
         replay_steps.push(ReplayStep {
             text: step_text.clone(),
+            reasoning: step_reasoning.clone(),
             state: step_state.clone(),
             call_ids: step_call_ids,
         });
@@ -3478,6 +3503,7 @@ pub async fn run_turn(
             // A resposta final forçada é o último passo do replay.
             replay_steps.push(ReplayStep {
                 text: forced_text.trim().to_string(),
+                reasoning: forced_reasoning.trim().to_string(),
                 state: forced_state,
                 call_ids: Vec::new(),
             });
@@ -3894,6 +3920,9 @@ const MISSING_TOOL_RESULT: &str = "(sem resultado: a ferramenta não concluiu)";
 struct ReplayStep {
     /// Texto visível emitido no passo (narração intermediária ou resposta final).
     text: String,
+    /// Raciocínio emitido no passo; reenviado como `reasoning_content` no wire
+    /// OpenAI-Chat (DeepSeek) e preservado entre turnos.
+    reasoning: String,
     /// Payload bruto do provedor naquele passo (opaco para o harness).
     state: Option<Value>,
     /// Ids das tool calls do passo, na ordem cronológica de `ChatMessage.tool_calls`.
@@ -3902,13 +3931,17 @@ struct ReplayStep {
 
 impl ReplayStep {
     fn is_empty(&self) -> bool {
-        self.state.is_none() && self.text.trim().is_empty() && self.call_ids.is_empty()
+        self.state.is_none()
+            && self.text.trim().is_empty()
+            && self.reasoning.trim().is_empty()
+            && self.call_ids.is_empty()
     }
 
     fn to_value(&self) -> Value {
         serde_json::json!({
             "state": self.state.clone().unwrap_or(Value::Null),
             "text": self.text,
+            "reasoning": self.reasoning,
             "toolCallIds": self.call_ids,
         })
     }
@@ -3956,6 +3989,11 @@ fn parse_provider_state_v2(state: &Value) -> Option<Vec<ReplayStep>> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
+        let reasoning = object
+            .get("reasoning")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         // `state` nulo não é payload replayável (passo só com texto).
         let state = object
             .get("state")
@@ -3973,6 +4011,7 @@ fn parse_provider_state_v2(state: &Value) -> Option<Vec<ReplayStep>> {
             .unwrap_or_default();
         let replay_step = ReplayStep {
             text,
+            reasoning,
             state,
             call_ids,
         };
@@ -4318,6 +4357,7 @@ fn replay_steps_history(
 
     for step in steps {
         let mut assistant = HistoryMessage::assistant(step.text.clone());
+        assistant.reasoning = (!step.reasoning.trim().is_empty()).then(|| step.reasoning.clone());
         assistant.provider_state = step.state.clone();
         let mut step_calls: Vec<&ToolCallRecord> = Vec::new();
         for id in &step.call_ids {
@@ -4810,6 +4850,7 @@ fn merge_cancelled_attempt(
         push_trace_step(trace, reasoning, "", attempt.duration_ms, 0);
         Some(ReplayStep {
             text: text.to_string(),
+            reasoning: reasoning.to_string(),
             state: None,
             call_ids: Vec::new(),
         })
@@ -5359,6 +5400,15 @@ mod tests {
         assert!(std::path::Path::new(&refs[0].path).exists());
         assert!(!serde_json::to_string(&refs).expect("json").contains("data_base64"));
 
+        let many: Vec<_> = std::iter::repeat_with(|| image.clone()).take(9).collect();
+        let capped = persist_tool_images(
+            &directory,
+            "call-cap",
+            &many,
+            MAX_TOOL_IMAGES_PER_TURN,
+        );
+        assert_eq!(capped.len(), 8);
+
         let call = ToolCallRecord {
             id: "call-1".to_string(),
             name: "computer_screenshot".to_string(),
@@ -5377,7 +5427,7 @@ mod tests {
         assert!(with_vision.text.contains("shot.png"));
         let without_vision = tool_result_message(&call, None, false);
         assert!(without_vision.images.is_empty());
-        // The 2-image per-turn cap is enforced before anything is written.
+        // The 8-image per-turn cap is enforced before anything is written.
         assert!(persist_tool_images(&directory, "call-2", &[image.clone()], 0).is_empty());
         let _ = std::fs::remove_dir_all(&directory);
     }
@@ -7014,11 +7064,19 @@ mod agent_loop_tests {
                     match current {
                         0 => {
                             emit(&sink, ProviderEvent::ProviderState(first_state.clone()));
+                            emit(
+                                &sink,
+                                ProviderEvent::ReasoningDelta("penso no passo 1".to_string()),
+                            );
                             text_stream(&sink, "Vou consultar a ferramenta.");
                             tool_call_stream(&sink, "call-1", "ferramenta_inexistente");
                         }
                         1 => {
                             emit(&sink, ProviderEvent::ProviderState(final_state.clone()));
+                            emit(
+                                &sink,
+                                ProviderEvent::ReasoningDelta("penso no passo final".to_string()),
+                            );
                             text_stream(&sink, "Resposta final em duas frases.");
                         }
                         _ => text_stream(&sink, "Resposta ao novo pedido."),
@@ -7064,6 +7122,10 @@ mod agent_loop_tests {
             steps[0].get("text"),
             Some(&serde_json::json!("Vou consultar a ferramenta."))
         );
+        assert_eq!(
+            steps[0].get("reasoning"),
+            Some(&serde_json::json!("penso no passo 1"))
+        );
         assert_eq!(steps[0].get("state"), Some(&first_state));
         assert_eq!(
             steps[0].get("toolCallIds"),
@@ -7072,6 +7134,10 @@ mod agent_loop_tests {
         assert_eq!(
             steps[1].get("text"),
             Some(&serde_json::json!("Resposta final em duas frases."))
+        );
+        assert_eq!(
+            steps[1].get("reasoning"),
+            Some(&serde_json::json!("penso no passo final"))
         );
         assert_eq!(steps[1].get("state"), Some(&final_state));
         assert_eq!(steps[1].get("toolCallIds"), Some(&serde_json::json!([])));
@@ -7115,11 +7181,19 @@ mod agent_loop_tests {
             "histórico por passo: {history:?}"
         );
         assert_eq!(history[1].text, "Vou consultar a ferramenta.");
+        assert_eq!(
+            history[1].reasoning.as_deref(),
+            Some("penso no passo 1")
+        );
         assert_eq!(history[1].provider_state.as_ref(), Some(&first_state));
         assert_eq!(history[1].tool_calls.len(), 1);
         assert_eq!(history[1].tool_calls[0].id, "call-1");
         assert_eq!(history[2].tool_call_id.as_deref(), Some("call-1"));
         assert_eq!(history[3].text, "Resposta final em duas frases.");
+        assert_eq!(
+            history[3].reasoning.as_deref(),
+            Some("penso no passo final")
+        );
         assert_eq!(history[3].provider_state.as_ref(), Some(&final_state));
         assert!(history[3].tool_calls.is_empty());
         assert_eq!(history[4].text, "E agora, resuma em uma frase.");
@@ -7641,6 +7715,96 @@ mod agent_loop_tests {
         );
         assert!(result.error.is_none());
         assert!(!has_event(&events, "error"));
+    }
+
+    #[tokio::test]
+    async fn stream_stall_retries_an_empty_attempt_once() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, sink| {
+                let current = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current == 0 {
+                        return Err(anyhow::Error::new(ProviderError::StreamStalled(
+                            "sem evento".to_string(),
+                        )));
+                    }
+                    text_stream(&sink, "Resposta final após retry.");
+                    Ok(())
+                })
+            })
+        };
+
+        let (channel, events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn should complete after the stall retry");
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "stall without output → exactly one retry"
+        );
+        assert_eq!(
+            result.assistant_message.content,
+            "Resposta final após retry."
+        );
+        assert!(result.error.is_none());
+        assert!(!has_event(&events, "error"));
+    }
+
+    #[tokio::test]
+    async fn stream_stall_after_partial_output_is_not_retried() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, sink| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    emit(&sink, ProviderEvent::TextDelta("parcial".to_string()));
+                    Err(anyhow::Error::new(ProviderError::StreamStalled(
+                        "sem evento após delta".to_string(),
+                    )))
+                })
+            })
+        };
+
+        let (channel, _events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a retry after partial output would duplicate the UI stream"
+        );
+        assert!(
+            result.as_ref().is_err() || result.as_ref().expect("turn").error.is_some(),
+            "a partial stall must surface as a turn failure: {result:?}"
+        );
     }
 
     #[tokio::test]

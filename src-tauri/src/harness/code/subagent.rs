@@ -277,6 +277,7 @@ fn forwardable_event(event: &TurnEvent) -> Option<TurnEvent> {
         | TurnEvent::ReasoningDone
         | TurnEvent::TextDelta { .. }
         | TurnEvent::ToolCallStarted { .. }
+        | TurnEvent::ToolCallExecuting { .. }
         | TurnEvent::ToolCallArgs { .. }
         | TurnEvent::ToolCallFinished { .. }
         | TurnEvent::ToolProgress { .. }

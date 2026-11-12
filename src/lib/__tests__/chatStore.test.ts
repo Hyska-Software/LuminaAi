@@ -344,6 +344,69 @@ describe('chatStore.send', () => {
     });
   });
 
+  it('uses the server execution timestamps for live tool durations', async () => {
+    mocks.api.listConversations.mockResolvedValue([
+      conversation({ title: 'Timestamps', messageCount: 2 }),
+    ]);
+    let executingStartedAt: number | null = null;
+    let finishedAt: number | null = null;
+
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({
+          type: 'tool_call_started',
+          toolCall: {
+            id: 'tool-1',
+            name: 'read_file',
+            arguments: '',
+            status: 'running',
+            startedAt: 1,
+          },
+        });
+        onEvent({ type: 'tool_call_executing', id: 'tool-1', startedAt: 1_000 });
+        executingStartedAt =
+          useChatStore
+            .getState()
+            .messagesByConversation['conv-1']
+            ?.find((message) => message.id === 'assistant-1')
+            ?.toolCalls.find((tool) => tool.id === 'tool-1')?.startedAt ?? null;
+        onEvent({
+          type: 'tool_call_finished',
+          id: 'tool-1',
+          status: 'done',
+          result: 'ok',
+          finishedAt: 2_500,
+        });
+        finishedAt =
+          useChatStore
+            .getState()
+            .messagesByConversation['conv-1']
+            ?.find((message) => message.id === 'assistant-1')
+            ?.toolCalls.find((tool) => tool.id === 'tool-1')?.finishedAt ?? null;
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: assistantMessage({ content: 'ok' }),
+          usage: { inputTokens: 1, outputTokens: 1 },
+          error: null,
+          conversation: conversation({ title: 'Timestamps', messageCount: 2 }),
+        };
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    await useChatStore.getState().send('Oi');
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+    expect(executingStartedAt).toBe(1_000);
+    expect(finishedAt).toBe(2_500);
+  });
+
   const streamedAssistant = () =>
     useChatStore.getState().messagesByConversation['conv-1'][1];
 
