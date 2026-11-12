@@ -23,9 +23,16 @@ use crate::tools::registry::{ParallelClass, ToolSpec};
 /// Chamadas paralelas por lote (TOOLS.md §4: até 4 em paralelo).
 pub const DEFAULT_MAX_PARALLEL: usize = 4;
 
-/// Lembretes de repetição: o modelo recebe o aviso quando a mesma tool+args
-/// aparece pela terceira vez (TOOLS.md §4).
+/// Lembretes de repetição: o modelo recebe o aviso quando o mesmo lote de
+/// tool calls aparece pela terceira vez consecutiva (TOOLS.md §4).
 pub const REPEAT_THRESHOLD: usize = 3;
+
+/// Tools whose identical consecutive calls are expected while waiting.
+pub const REPEAT_EXEMPT_TOOLS: &[&str] = &["ask_user", "job_output", "task_wait"];
+
+pub fn is_repeat_exempt(name: &str) -> bool {
+    REPEAT_EXEMPT_TOOLS.contains(&name)
+}
 
 /// Uma chamada pronta para escalonar, com a spec resolvida do catálogo.
 #[derive(Debug, Clone)]
@@ -175,30 +182,29 @@ fn tool_target_path(call: &ToolCallRecord) -> Option<String> {
     Some(path.replace('\\', "/"))
 }
 
-/// Lembrete de repetição para o próximo passo.
-///
-/// `last_calls` são as chamadas anteriores relevantes (normalmente as do passo
-/// atual ou da janela recente). Devolve `Some` a partir da terceira chamada
-/// idêntica (mesma tool + mesmos argumentos normalizados) — nunca bloqueia:
-/// o loop injeta o texto como contexto e segue.
-pub fn interrupt_reason(call: &ToolCallRecord, last_calls: &[ToolCallRecord]) -> Option<String> {
-    let current = normalize_arguments(&call.arguments);
-    let repetitions = last_calls
+/// Canonical signature of one assistant step's tool batch, ignoring exempt
+/// tools. `None` when the batch has no eligible call (waiting/polling only).
+pub fn step_signature(calls: &[ToolCallRecord]) -> Option<String> {
+    let mut parts: Vec<String> = calls
         .iter()
-        .filter(|previous| {
-            previous.name == call.name && normalize_arguments(&previous.arguments) == current
-        })
-        .count();
-    let total = repetitions + 1;
-    if total < REPEAT_THRESHOLD {
+        .filter(|call| !is_repeat_exempt(&call.name))
+        .map(|call| format!("{}:{}", call.name, normalize_arguments(&call.arguments)))
+        .collect();
+    if parts.is_empty() {
         return None;
     }
-    Some(format!(
-        "A chamada `{}` com os mesmos argumentos já se repetiu {total} vezes e o resultado \
-         provavelmente não mudou. Inspecione a saída anterior e mude de abordagem (ou conclua) \
-         em vez de repetir a mesma chamada.",
+    parts.sort();
+    Some(parts.join("\n"))
+}
+
+/// Model-facing corrective for a repeated step.
+pub fn repeat_reminder(call: &ToolCallRecord, count: u32) -> String {
+    format!(
+        "[loop-guard] `{}` was called with identical arguments {count} steps in a row. \
+         The result is already in this conversation; do not repeat it. Use different \
+         arguments, choose another tool, or finish with what you have.",
         call.name
-    ))
+    )
 }
 
 /// Normaliza os argumentos para comparar JSON semanticamente igual.
@@ -306,33 +312,48 @@ mod tests {
     }
 
     #[test]
-    fn repeated_identical_calls_trigger_the_reminder_on_the_third_time() {
-        let first = request("read_file", "{\"path\":\"src/a.ts\"}").call;
-        let second = request("read_file", "{\"path\":\"src/a.ts\"}").call;
-        let current = request("read_file", "{\"path\":\"src/a.ts\"}").call;
-        assert!(interrupt_reason(&second, &[first.clone()]).is_none());
-        let reason = interrupt_reason(&current, &[first, second]).expect("terceira repetição");
-        assert!(reason.contains("read_file"));
-        assert!(reason.contains("3 vezes"));
-    }
-
-    #[test]
-    fn different_arguments_or_tool_never_trigger_the_reminder() {
-        let a = request("read_file", "{\"path\":\"a.ts\"}").call;
-        let b = request("read_file", "{\"path\":\"b.ts\"}").call;
-        let c = request("search_text", "{\"query\":\"a.ts\"}").call;
-        assert!(interrupt_reason(&b, &[a.clone(), a]).is_none());
-        assert!(interrupt_reason(&c, &[b.clone(), b]).is_none());
-    }
-
-    #[test]
-    fn argument_normalization_ignores_whitespace_and_key_order() {
+    fn identical_steps_produce_the_same_signature_even_with_key_order_changes() {
         let first = request("edit_file", "{\"path\":\"a\",\"old_string\":\"x\",\"new_string\":\"y\"}").call;
         let compact = request("edit_file", "{\"new_string\":\"y\",\"old_string\":\"x\",\"path\":\"a\"}").call;
         let third = request("edit_file", "{ \"path\": \"a\", \"old_string\": \"x\", \"new_string\": \"y\" }").call;
-        assert_eq!(normalize_arguments(&first.arguments), normalize_arguments(&compact.arguments));
-        let reason = interrupt_reason(&third, &[first, compact]);
-        assert!(reason.is_some(), "JSON equivalente deve contar como repetição");
+        let signature = step_signature(&[first]).expect("assinatura");
+        assert_eq!(signature, step_signature(&[compact]).expect("assinatura"));
+        assert_eq!(signature, step_signature(&[third]).expect("assinatura"));
+    }
+
+    #[test]
+    fn different_arguments_or_tools_change_the_signature() {
+        let a = request("read_file", "{\"path\":\"a.ts\"}").call;
+        let b = request("read_file", "{\"path\":\"b.ts\"}").call;
+        let c = request("search_text", "{\"query\":\"a.ts\"}").call;
+        let a_signature = step_signature(&[a]);
+        let b_signature = step_signature(&[b]);
+        let c_signature = step_signature(&[c]);
+        assert_ne!(a_signature, b_signature);
+        assert_ne!(b_signature, c_signature);
+    }
+
+    #[test]
+    fn exempt_tools_do_not_form_a_signature() {
+        for tool in REPEAT_EXEMPT_TOOLS {
+            let mut call = ToolCallRecord::running(format!("call-{tool}"), *tool);
+            call.arguments = "{}".to_string();
+            assert!(step_signature(&[call]).is_none(), "{tool}");
+        }
+        let mixed = [
+            request("read_file", "{\"path\":\"a.ts\"}").call,
+            ToolCallRecord::running("call-job", "job_output"),
+        ];
+        assert!(step_signature(&mixed).is_some());
+    }
+
+    #[test]
+    fn reminder_names_the_tool_and_count() {
+        let call = request("read_file", "{\"path\":\"a.ts\"}").call;
+        let reminder = repeat_reminder(&call, 3);
+        assert!(reminder.starts_with("[loop-guard]"));
+        assert!(reminder.contains("read_file"));
+        assert!(reminder.contains('3'));
     }
 
     #[test]

@@ -965,11 +965,19 @@ async fn read_file(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         )
     };
     let size_kb = metadata.len() as f64 / 1024.0;
-    let content = format!(
+    let mut content = format!(
         "{relative} · linhas {}-{} de {total} · {size_kb:.1} KB · {encoding}\n{body}{footer}",
         if total == 0 { 0 } else { start + 1 },
         end
     );
+    if let Some(observed) = &ctx.observed {
+        let hash = observed_hash(content.as_bytes());
+        if let Some(count) = observed.note_read_output(&ctx.conversation_id, &path, &hash) {
+            content.push_str(&format!(
+                "\n\n[Identical output received {count} times. Re-reading `{relative}` will not change it; proceed with the edit or narrow the range.]"
+            ));
+        }
+    }
     let first_line = if total == 0 { 0 } else { start + 1 };
     finish(
         ctx,
@@ -3929,6 +3937,30 @@ mod tests {
             fixture.observed.check(&path, &std::fs::read(&path).expect("ler")),
             ObservationState::Fresh
         );
+    }
+
+    #[tokio::test]
+    async fn read_file_third_identical_read_appends_a_hint() {
+        let fixture = Fixture::new();
+        fixture.write("a.txt", "conteudo\n");
+        let ctx = fixture.ctx();
+
+        let first = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        let second = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        assert!(!first.content.contains("Identical output"), "{}", first.content);
+        assert!(!second.content.contains("Identical output"), "{}", second.content);
+
+        let third = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        assert!(
+            third.content.contains("Identical output received 3 times"),
+            "{}",
+            third.content
+        );
+        assert!(third.content.contains("Re-reading `a.txt`"), "{}", third.content);
+
+        fixture.write("a.txt", "outro\n");
+        let fourth = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        assert!(!fourth.content.contains("Identical output"), "{}", fourth.content);
     }
 
     #[tokio::test]

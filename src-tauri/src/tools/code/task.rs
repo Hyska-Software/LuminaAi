@@ -19,16 +19,16 @@ pub static TASK_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `task` for broad, independent exploration instead of reading everything \
-               yourself. When two or more areas can be investigated separately, launch 2-4 \
-               `task` calls in the same step — they run in parallel; give each a self-contained \
-               question and the exact report you need. `subagent_type`: `explore` (map/answer), \
-               `review` (critique the diff), `general`, or `worker` (autonomous edits and \
-               commands; requires the parent Autonomous mode and its changes appear in the parent \
-               Changes panel). Read-only children cannot edit, run shell, use MCP, ask or \
-               delegate; `worker` can edit and run commands but cannot ask or delegate. Optional \
-               `model` and `effort`. Keep your own reads targeted; never delegate a task you can \
-               finish with one or two reads.",
+    guidance: "Scope inline first. Use `task` only when 2+ independent slices each cost more \
+               than a few of your own calls, or the read set would flood the context; never \
+               open with a scout, delegate a single read, or delegate a slice you already have \
+               open. Fan genuine slices in the same step — they run in parallel — each with a \
+               self-contained question and the exact report needed. `subagent_type`: `explore` \
+               (map/answer), `review` (critique the diff), `general`, or `worker` (autonomous \
+               edits/commands; parent must be Autonomous; changes appear in the parent Changes \
+               panel). Read-only children cannot edit, run shell, use MCP, ask or delegate; \
+               `worker` can edit and run commands but cannot ask or delegate. Optional `model` \
+               and `effort`.",
 };
 
 pub fn definition() -> ToolDefinition {

@@ -19,7 +19,7 @@ pub static RUN_COMMAND_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `run_command` to compile, test, run linters and run read-only inspection commands (`git status/log/diff/show`, `ls`, `cat`/`Get-Content`, `head`/`tail`, `rg`/`grep`). In Plan and Read-only modes only known read-only commands run without approval; writing or composed commands (`;`, `&`, `|`, redirection, `find -exec/-delete`, `fd -x`, `rg --pre`, `git -c/--output`) are denied. Prefer the project's verification commands in editable modes; never run destructive commands without need. Long output comes back truncated with a spill id.",
+    guidance: "Use `run_command` to compile, test, run linters and run read-only inspection commands (`git status/log/diff/show`, `ls`, `cat`/`Get-Content`, `head`/`tail`, `rg`/`grep`). In Plan and Read-only modes only known read-only commands run without approval; writing or composed commands (`;`, `&`, `|`, redirection, `find -exec/-delete`, `fd -x`, `rg --pre`, `git -c/--output`) are denied. Prefer the project's verification commands in editable modes; never run destructive commands without need. A tool result already in this conversation is evidence; do not re-run the same command to confirm it. Long output comes back truncated with a spill id.",
 };
 
 pub static RUN_CHECKS_SPEC: ToolSpec = ToolSpec {
@@ -31,7 +31,7 @@ pub static RUN_CHECKS_SPEC: ToolSpec = ToolSpec {
     mutating: true,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `run_checks` to run the project's detected verification (test/lint/build). Without `check`, it runs the first one (test). The ids/labels appear in the project context; the result includes the exit code and output. Custom commands still go through `run_command`.",
+    guidance: "Use `run_checks` to run the project's detected verification (test/lint/build) once after the last behavioral edit. Without `check`, it runs the first one (test). The ids/labels appear in the project context; the result includes the exit code and output. Do not repeat a passing check or run the full suite for a localized change. Custom commands still go through `run_command`.",
 };
 
 pub fn run_checks_definition() -> ToolDefinition {

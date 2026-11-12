@@ -43,10 +43,22 @@ pub enum ObservationState {
     Fresh,
 }
 
+/// Identical read outputs tolerated before the loop hint is appended.
+const REPEAT_READ_HINT_THRESHOLD: u32 = 3;
+/// Per-app cap on tracked reads; the map resets when exceeded.
+const REPEAT_READ_TRACKER_CAP: usize = 128;
+
+#[derive(Debug, Clone)]
+struct ReadRepeat {
+    hash: String,
+    count: u32,
+}
+
 /// Arquivos observados nesta execução do app (compartilhado no `AppState`).
 #[derive(Default)]
 pub struct ObservedFiles {
     entries: Mutex<HashMap<PathBuf, ObservedVersion>>,
+    reads: Mutex<HashMap<(String, PathBuf), ReadRepeat>>,
 }
 
 impl ObservedFiles {
@@ -76,6 +88,42 @@ impl ObservedFiles {
                 } else {
                     ObservationState::Stale
                 }
+            }
+        }
+    }
+
+    /// Counts byte-identical `read_file` outputs per conversation/path and
+    /// returns the count once the hint threshold is reached.
+    pub fn note_read_output(
+        &self,
+        conversation_id: &str,
+        path: &Path,
+        content_hash: &str,
+    ) -> Option<u32> {
+        let mut reads = self.reads.lock();
+        if reads.len() > REPEAT_READ_TRACKER_CAP {
+            reads.clear();
+        }
+        let key = (conversation_id.to_string(), path.to_path_buf());
+        match reads.get_mut(&key) {
+            Some(entry) if entry.hash == content_hash => {
+                entry.count = entry.count.saturating_add(1);
+                (entry.count >= REPEAT_READ_HINT_THRESHOLD).then_some(entry.count)
+            }
+            Some(entry) => {
+                entry.hash = content_hash.to_string();
+                entry.count = 1;
+                None
+            }
+            None => {
+                reads.insert(
+                    key,
+                    ReadRepeat {
+                        hash: content_hash.to_string(),
+                        count: 1,
+                    },
+                );
+                None
             }
         }
     }
@@ -122,6 +170,34 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         assert_eq!(hash_bytes(b"abc").len(), 64);
+    }
+
+    #[test]
+    fn identical_reads_hint_on_the_third_output() {
+        let observed = ObservedFiles::new();
+        let path = Path::new("C:/proj/a.ts");
+        assert_eq!(observed.note_read_output("conv", path, "hash-a"), None);
+        assert_eq!(observed.note_read_output("conv", path, "hash-a"), None);
+        assert_eq!(observed.note_read_output("conv", path, "hash-a"), Some(3));
+    }
+
+    #[test]
+    fn changed_content_resets_the_read_counter() {
+        let observed = ObservedFiles::new();
+        let path = Path::new("C:/proj/a.ts");
+        assert_eq!(observed.note_read_output("conv", path, "hash-a"), None);
+        assert_eq!(observed.note_read_output("conv", path, "hash-a"), None);
+        assert_eq!(observed.note_read_output("conv", path, "hash-b"), None);
+        assert_eq!(observed.note_read_output("conv", path, "hash-a"), None);
+    }
+
+    #[test]
+    fn read_counter_is_scoped_per_conversation() {
+        let observed = ObservedFiles::new();
+        let path = Path::new("C:/proj/a.ts");
+        assert_eq!(observed.note_read_output("conv-a", path, "hash-a"), None);
+        assert_eq!(observed.note_read_output("conv-a", path, "hash-a"), None);
+        assert_eq!(observed.note_read_output("conv-b", path, "hash-a"), None);
     }
 
     #[test]

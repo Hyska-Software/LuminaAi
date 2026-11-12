@@ -2647,6 +2647,10 @@ pub async fn run_turn(
     let mut stop_progress = completion::TurnProgress::default();
     let mut stop_continuations = 0u32;
     let mut stop_incomplete: Option<completion::ContinueReason> = None;
+    // Anti-loop: assinatura do lote de tool calls do passo anterior e quantas
+    // vezes o mesmo lote se repetiu em passos consecutivos.
+    let mut repeat_signature: Option<String> = None;
+    let mut repeat_steps: u32 = 0;
     // Telemetria de cache de prompt (F1.1, PLAN §4.7): restaura o estado
     // persistido da conversa (epoch/prefixo/totais) e emite+persiste uma
     // `CacheSample` por request de wire (abaixo), nos dois perfis. O watermark
@@ -3242,6 +3246,35 @@ pub async fn run_turn(
                 result.images = history_tool_images(&call.images);
             }
             history.push(result);
+        }
+        if profile == TurnProfile::Code {
+            let calls: Vec<ToolCallRecord> =
+                paired.iter().map(|(call, _)| call.clone()).collect();
+            match crate::tools::pipeline::step_signature(&calls) {
+                Some(signature) if repeat_signature.as_deref() == Some(signature.as_str()) => {
+                    repeat_steps = repeat_steps.saturating_add(1);
+                    if repeat_steps == crate::tools::pipeline::REPEAT_THRESHOLD as u32 {
+                        if let Some(call) = calls
+                            .iter()
+                            .find(|call| !crate::tools::pipeline::is_repeat_exempt(&call.name))
+                        {
+                            history.push(HistoryMessage::user(
+                                crate::tools::pipeline::repeat_reminder(call, repeat_steps),
+                            ));
+                        }
+                        repeat_signature = None;
+                        repeat_steps = 0;
+                    }
+                }
+                Some(signature) => {
+                    repeat_signature = Some(signature);
+                    repeat_steps = 1;
+                }
+                None => {
+                    repeat_signature = None;
+                    repeat_steps = 0;
+                }
+            }
         }
         let step_call_ids: Vec<String> = paired.iter().map(|(call, _)| call.id.clone()).collect();
         for (call, _) in paired {
@@ -8807,6 +8840,71 @@ mod agent_loop_tests {
         assert!(result.error.is_none());
 
         let _ = workspace_dir;
+    }
+
+    /// Anti-loop: three identical tool-call steps inject a corrective user
+    /// message before the next model step, without ending the turn.
+    #[tokio::test]
+    async fn code_turn_injects_a_loop_guard_reminder_on_identical_steps() {
+        let temp = TempDb::new();
+        let (_workspace_dir, conversation) = code_workspace(&temp);
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current < 3 {
+                        tool_call_json_stream(
+                            &sink,
+                            &format!("call-read-{current}"),
+                            "read_file",
+                            r#"{"path":"src/app.ts"}"#,
+                        );
+                    } else {
+                        text_stream(&sink, "Concluído.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.observed = Some(Arc::new(code::observed::ObservedFiles::new()));
+        let (channel, _events) = channel();
+        let mut payload = payload(&conversation, 6);
+        payload.profile = TurnProfile::Code;
+        payload.options.max_steps_override = Some(6);
+        payload.content = "Leia o arquivo e confirme.".to_string();
+
+        let result = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code completo");
+
+        let requests = requests.lock().expect("requests lock").clone();
+        assert_eq!(requests.len(), 4, "três leituras → corretivo → resposta final");
+        let guard = requests[3]
+            .history
+            .iter()
+            .find(|message| {
+                message.role == HistoryRole::User && message.text.starts_with("[loop-guard]")
+            })
+            .expect("lembrete do loop guard no request seguinte");
+        assert!(guard.text.contains("read_file"), "{}", guard.text);
+        assert_eq!(result.assistant_message.content, "Concluído.");
+        assert!(result.error.is_none());
     }
 
     /// The gate cap is bounded: after `MAX_STOP_CONTINUATIONS` rejected stops

@@ -404,7 +404,10 @@ Mesmo loop do Chat, com `TurnPayload.profile = "code"` (só em sessão do Code).
    behind/dirty), perfil do projeto (comandos de test/lint/build detectados), instruções do
    projeto (`AGENTS.md`/`CLAUDE.md` + `.zylara/instructions.md`, raiz, cap 32 KiB, só em
    workspace confiável), árvore resumida (2 níveis) e estado da
-   sessão (plano/tarefas/contexto) projetado de `code_events`.
+   sessão (plano/tarefas/contexto) projetado de `code_events`. O loop injeta `[loop-guard]`
+   após 3 lotes idênticos consecutivos de tool calls (exceto `ask_user`, `job_output` e
+   `task_wait`); `read_file` com saída idêntica 3 vezes anexa um aviso; e o gate de conclusão só
+   exige novo check após mudança comportamental (docs não invalidam um check verde).
 2. **Prompt próprio** (`harness/code/prompt.rs`): identidade de agente de código, ambiente,
    política de permissões, orientações das tools (geradas do registry — fonte única),
    regras de edição/verificação, projeto, formato de resposta e **UI generativa** (notas do

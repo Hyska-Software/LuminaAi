@@ -37,6 +37,8 @@ pub struct CheckReceipt {
     pub exit_code: Option<i32>,
     /// `TurnProgress::mutations` at the moment the check finished.
     pub mutations_at: u32,
+    /// `TurnProgress::behavioral_mutations` at the moment the check finished.
+    pub behavioral_at: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +51,9 @@ pub struct AskReceipt {
 #[derive(Debug, Clone, Default)]
 pub struct TurnProgress {
     pub mutations: u32,
+    /// Mutations that can invalidate a check (code/test/config). Documentation
+    /// edits increment `mutations` but not this counter.
+    pub behavioral_mutations: u32,
     /// Set by a successful `todo_write`; value = mutations when it ran.
     pub todos_written_at: Option<u32>,
     /// Set by a successful `submit_plan`; value = mutations when it ran.
@@ -84,6 +89,11 @@ impl TurnProgress {
         // edit_file and future mutating tools share this presentation kind).
         if presentation_str(outcome, "kind") == Some("file_change") {
             self.mutations = self.mutations.saturating_add(1);
+            let behavioral = presentation_str(outcome, "path")
+                .map_or(true, is_behavioral_change);
+            if behavioral {
+                self.behavioral_mutations = self.behavioral_mutations.saturating_add(1);
+            }
         }
         match name {
             "todo_write" => self.todos_written_at = Some(self.mutations),
@@ -106,6 +116,7 @@ impl TurnProgress {
                         command: "run_checks".to_string(),
                         exit_code: Some(exit_code),
                         mutations_at: self.mutations,
+                        behavioral_at: self.behavioral_mutations,
                     });
                 }
             }
@@ -117,6 +128,7 @@ impl TurnProgress {
                             command: truncate_command(&command),
                             exit_code: Some(exit_code),
                             mutations_at: self.mutations,
+                            behavioral_at: self.behavioral_mutations,
                         });
                     }
                 }
@@ -127,30 +139,47 @@ impl TurnProgress {
                 // children count nothing.
                 if presentation_str(outcome, "subagentType") == Some("worker") {
                     self.mutations = self.mutations.saturating_add(1);
+                    self.behavioral_mutations = self.behavioral_mutations.saturating_add(1);
                 }
             }
             _ => {}
         }
     }
 
-    /// A verification ran after the last file mutation.
-    pub fn verified_after_last_mutation(&self) -> bool {
+    /// A verification ran after the last behavioral mutation.
+    pub fn verified_after_last_behavioral_change(&self) -> bool {
         self.last_check
             .as_ref()
-            .is_some_and(|check| check.mutations_at == self.mutations)
+            .is_some_and(|check| check.behavioral_at == self.behavioral_mutations)
     }
 
-    /// The verification after the last mutation failed. Read-only turns (no
-    /// mutations) never count a pre-existing failure against the agent.
+    /// The verification after the last behavioral mutation failed. Read-only
+    /// turns (no mutations) never count a pre-existing failure against the
+    /// agent.
     pub fn last_check_failed(&self) -> bool {
-        self.mutations > 0
-            && self
-                .last_check
-                .as_ref()
-                .is_some_and(|check| {
-                    check.mutations_at == self.mutations && check.exit_code != Some(0)
-                })
+        self.behavioral_mutations > 0
+            && self.last_check.as_ref().is_some_and(|check| {
+                check.behavioral_at == self.behavioral_mutations && check.exit_code != Some(0)
+            })
     }
+}
+
+/// Documentation-only edits do not invalidate a passing check. Everything
+/// else (code, tests, configs, manifests, assets) is behavioral by default.
+fn is_behavioral_change(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    let name = normalized.rsplit('/').next().unwrap_or(normalized.as_str());
+    if matches!(
+        name,
+        "agents.md" | "claude.md" | "license" | "license.md" | "changelog.md"
+    ) {
+        return false;
+    }
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .unwrap_or("");
+    !matches!(extension, "md" | "mdx" | "txt" | "rst" | "adoc" | "log")
 }
 
 /// Decide whether a stop attempt may end the turn.
@@ -190,9 +219,9 @@ pub fn decide(evidence: StopEvidence<'_>) -> StopDecision {
         return StopDecision::Continue(ContinueReason::FailedCheck);
     }
 
-    if progress.mutations > 0
+    if progress.behavioral_mutations > 0
         && evidence.project_has_checks
-        && !progress.verified_after_last_mutation()
+        && !progress.verified_after_last_behavioral_change()
     {
         return StopDecision::Continue(ContinueReason::MissingVerification);
     }
@@ -272,7 +301,8 @@ pub fn continuation_prompt(
              verified them since the last change. Run the narrowest check that covers the change \
              (the project typecheck/lint or the related test file with `run_command`; \
              `run_checks` when the full suite is the right scope), read the exit code, and fix \
-             what it reports before answering."
+             what it reports before answering. Documentation-only edits do not invalidate a \
+             passing check; rerun only after a behavioral edit."
             .to_string(),
         ContinueReason::MissingTodoLedger => "You changed files without a `todo_write` list, so \
              the app cannot verify that the work is complete. Call `todo_write` with the \
@@ -458,10 +488,12 @@ mod tests {
     fn continues_after_a_failed_check_following_a_mutation() {
         let progress = TurnProgress {
             mutations: 1,
+            behavioral_mutations: 1,
             last_check: Some(CheckReceipt {
                 command: "cargo check".into(),
                 exit_code: Some(1),
                 mutations_at: 1,
+                behavioral_at: 1,
             }),
             ..Default::default()
         };
@@ -475,11 +507,13 @@ mod tests {
     fn accepts_a_passing_check_following_a_mutation() {
         let progress = TurnProgress {
             mutations: 2,
+            behavioral_mutations: 2,
             todos_written_at: Some(2),
             last_check: Some(CheckReceipt {
                 command: "run_checks".into(),
                 exit_code: Some(0),
                 mutations_at: 2,
+                behavioral_at: 2,
             }),
             ..Default::default()
         };
@@ -490,10 +524,12 @@ mod tests {
     fn continues_when_a_later_edit_invalidated_the_check() {
         let progress = TurnProgress {
             mutations: 2,
+            behavioral_mutations: 2,
             last_check: Some(CheckReceipt {
                 command: "run_checks".into(),
                 exit_code: Some(0),
                 mutations_at: 1,
+                behavioral_at: 1,
             }),
             ..Default::default()
         };
@@ -506,9 +542,70 @@ mod tests {
     }
 
     #[test]
+    fn doc_only_change_after_a_passing_check_is_accepted() {
+        let progress = TurnProgress {
+            mutations: 2,
+            behavioral_mutations: 1,
+            todos_written_at: Some(2),
+            last_check: Some(CheckReceipt {
+                command: "run_checks".into(),
+                exit_code: Some(0),
+                mutations_at: 1,
+                behavioral_at: 1,
+            }),
+            ..Default::default()
+        };
+        let mut evidence = evidence(&[], &progress);
+        evidence.project_has_checks = true;
+        assert_eq!(decide(evidence), StopDecision::Accept);
+    }
+
+    #[test]
+    fn source_change_after_a_passing_check_requires_another_check() {
+        let progress = TurnProgress {
+            mutations: 2,
+            behavioral_mutations: 2,
+            todos_written_at: Some(2),
+            last_check: Some(CheckReceipt {
+                command: "run_checks".into(),
+                exit_code: Some(0),
+                mutations_at: 1,
+                behavioral_at: 1,
+            }),
+            ..Default::default()
+        };
+        let mut evidence = evidence(&[], &progress);
+        evidence.project_has_checks = true;
+        assert_eq!(
+            decide(evidence),
+            StopDecision::Continue(ContinueReason::MissingVerification)
+        );
+    }
+
+    #[test]
+    fn failed_check_after_a_behavioral_change_still_continues() {
+        let progress = TurnProgress {
+            mutations: 1,
+            behavioral_mutations: 1,
+            last_check: Some(CheckReceipt {
+                command: "run_checks".into(),
+                exit_code: Some(1),
+                mutations_at: 1,
+                behavioral_at: 1,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            decide(evidence(&[], &progress)),
+            StopDecision::Continue(ContinueReason::FailedCheck)
+        );
+    }
+
+    #[test]
     fn continues_when_project_checks_were_never_run() {
         let progress = TurnProgress {
             mutations: 1,
+            behavioral_mutations: 1,
             ..Default::default()
         };
         let mut evidence = evidence(&[], &progress);
@@ -523,6 +620,7 @@ mod tests {
     fn continues_when_mutations_have_no_task_ledger() {
         let progress = TurnProgress {
             mutations: 1,
+            behavioral_mutations: 1,
             ..Default::default()
         };
         assert_eq!(
@@ -612,6 +710,7 @@ mod tests {
             &outcome(json!({ "kind": "subagent", "subagentType": "worker" }), false),
         );
         assert_eq!(worker.mutations, 1);
+        assert_eq!(worker.behavioral_mutations, 1);
 
         let mut explorer = TurnProgress::default();
         explorer.observe(
@@ -620,12 +719,14 @@ mod tests {
             &outcome(json!({ "kind": "subagent", "subagentType": "explore" }), false),
         );
         assert_eq!(explorer.mutations, 0);
+        assert_eq!(explorer.behavioral_mutations, 0);
     }
 
     #[test]
     fn worker_forces_verification_when_the_project_has_checks() {
         let progress = TurnProgress {
             mutations: 1,
+            behavioral_mutations: 1,
             ..Default::default()
         };
         let mut evidence = evidence(&[], &progress);
@@ -655,6 +756,24 @@ mod tests {
             &outcome(json!({ "kind": "output" }), false),
         );
         assert_eq!(progress.mutations, 1);
+        assert_eq!(progress.behavioral_mutations, 1);
+    }
+
+    #[test]
+    fn observe_classifies_documentation_paths_as_non_behavioral() {
+        let mut progress = TurnProgress::default();
+        progress.observe(
+            "write_file",
+            "{}",
+            &outcome(json!({ "kind": "file_change", "path": "README.md" }), false),
+        );
+        progress.observe(
+            "write_file",
+            "{}",
+            &outcome(json!({ "kind": "file_change", "path": "src/a.ts" }), false),
+        );
+        assert_eq!(progress.mutations, 2);
+        assert_eq!(progress.behavioral_mutations, 1);
     }
 
     #[test]

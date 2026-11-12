@@ -21,7 +21,7 @@ pub static READ_FILE_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `read_file` — not shell commands like `cat` — to inspect files. Continue with `offset`/`limit` on large files; read a file before editing it.",
+    guidance: "Use `read_file` — not shell commands like `cat` — to inspect files. Read small files whole; use `offset`/`limit` only for large files. Read a file before editing it, and never re-read a file whose content is already in this conversation.",
 };
 
 pub static LIST_DIR_SPEC: ToolSpec = ToolSpec {
@@ -33,7 +33,7 @@ pub static LIST_DIR_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `list_dir` to discover the structure before searching or editing; prefer `search_files`/`search_text` when you already know the target.",
+    guidance: "The runtime context already includes a 2-level workspace tree. Use `list_dir` only for a subtree it does not show (specific `path`, `depth` 1-2); do not list the repository root to get oriented. Prefer `search_files`/`search_text` when you already know the target.",
 };
 
 pub static SEARCH_FILES_SPEC: ToolSpec = ToolSpec {
@@ -45,7 +45,7 @@ pub static SEARCH_FILES_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `search_files` to locate files by name/pattern and `search_text` to locate content; set `path` to a directory or a specific file. Results are relative to the workspace, or absolute outside it.",
+    guidance: "Use `search_files` to locate a file by name or pattern when you know part of the path; start from the narrowest directory. Use `search_text` to locate content.",
 };
 
 pub static SEARCH_TEXT_SPEC: ToolSpec = ToolSpec {
@@ -57,7 +57,7 @@ pub static SEARCH_TEXT_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `search_text` with a short literal snippet or a regex to find the relevant code; set `path` to a specific file to search only it, or narrow a directory with `glob` instead of scanning the whole repository.",
+    guidance: "Use `search_text` with one short literal or regex for the symbol/string you need; set `path` to a specific file or narrow it with `glob`. Start narrow; widen only after the targeted search returns nothing useful.",
 };
 
 pub static READ_TOOL_OUTPUT_SPEC: ToolSpec = ToolSpec {
