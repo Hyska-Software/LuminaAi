@@ -382,50 +382,69 @@ M  src/app.ts           (staged)
   detectado → `NO_CHECKS`; id inválido → `CHECK_NOT_FOUND`.
 - **Testes**: sem checks, modo Plano (deny), execução real de `npm run test` (pulado sem shell).
 
-#### `task` (subagente somente leitura)
+#### `task` (subagente: explorar/revisar ou trabalhador autônomo)
 
 ```json
 { "description": "Explorar o módulo de pagamentos", "prompt": "Liste os arquivos…", "subagent_type": "explore", "model": "openai/gpt-6-luna", "effort": "high" }
+{ "description": "Implementar a fatia A", "prompt": "Crie src/a.ts e rode pnpm typecheck…", "subagent_type": "worker" }
 ```
 
-- Cria uma conversa filha **retida para auditoria** com o workspace do pai e permissão
-  `read_only`, roda o perfil Code com orçamento curto (24 passos) e catálogo reduzido a leitura
-  (`read_file`, `list_dir`, `search_*`, `read_tool_output`, `git_status/diff/log`); devolve o
-  resumo final. A conversa filha fica oculta da sidebar (`parent_conversation_id`), é consultável
-  por `get_conversation` e é apagada em cascata quando o pai é excluído. `usage_log` do filho é
-  removido (o consumo é agregado ao pai, sem dupla contagem).
-- `subagent_type`: `explore` (mapear/responder), `review` (criticar o diff) ou `general`; valor
-  desconhecido → `SUBAGENT_INVALID_TYPE`; omitido → `explore`.
+- Cria uma conversa filha **retida para auditoria** com o workspace do pai, roda o perfil Code com
+  catálogo reduzido e devolve o resumo final. A conversa filha fica oculta da sidebar
+  (`parent_conversation_id`), é consultável por `get_conversation` e é apagada em cascata quando o
+  pai é excluído. `usage_log` do filho é removido (o consumo é agregado ao pai, sem dupla contagem).
+- `subagent_type`: `explore` (mapear/responder), `review` (criticar o diff), `general` ou
+  `worker`; valor desconhecido → `SUBAGENT_INVALID_TYPE`; omitido → `explore`.
+- Kinds de investigação (`explore`/`review`/`general`): permissão `read_only`, orçamento de **24
+  passos / 15 min** e catálogo `readonly_tools()` (`read_file`, `list_dir`, `search_*`,
+  `read_tool_output`, `git_status/diff/log`); não editam, não rodam shell, não usam MCP, não
+  perguntam nem delegam.
+- `worker`: permissão `Autonomous`, orçamento de **48 passos / 30 min** e catálogo
+  `worker_tools()` (leitura acima + `write_file`/`edit_file` + `run_command`/`run_checks` +
+  `todo_write`). Não recebe MCP, `ask_user`, `task`, `goal`, plano, UI generativa,
+  computer/browser nem jobs; `run_in_background` responde `JOB_UNAVAILABLE`. Exige o **modo
+  Autônomo no pai** e o modo Plano inativo no momento do launch
+  (`SUBAGENT_MODE_REQUIRED`/`PLAN_MODE_ACTIVE`) — sem canal de aprovação, um `Ask` falha fechado.
+  Comandos rodam em foreground e **não são sandbox** (o Docker configurado se aplica normalmente);
+  ferramentas de arquivo continuam confinadas ao workspace.
 - `model` (opcional): `provider/model` ou id de modelo do provedor pai; validado no runner
   (`SUBAGENT_MODEL_INVALID`). `effort` (opcional): valor declarado pelo modelo, ou `off`/`auto`;
   validado contra `reasoningOptions` (`SUBAGENT_REASONING_*`). Sem ambos, herda a rota do pai.
 - Profundidade máxima **1**: o filho não recebe `task` e o runner recusa aninhamento
-  (`DELEGATION_DEPTH`). O filho não pode editar, rodar shell, usar MCP, perguntar ao usuário ou
-  delegar; a política `read_only` e o catálogo efetivo (`enabled_tools`) são defesa em
+  (`DELEGATION_DEPTH`); a política e o catálogo efetivo (`enabled_tools`) são defesa em
   profundidade.
 - **Política**: `Read` no pai (a delegação em si não muta); `task` é `Safe`, então chamadas
   independentes no mesmo passo rodam em paralelo (semáforo de 4; teto de 4 delegações por turno).
   No layout Agentes, lotes em que **todas** as chamadas são `Safe`+`Read` do registry também rodam
   em paralelo; escrita, shell, MCP, tools de agente e nomes fora do registry mantêm a ordem.
+  **Um `worker` no passo serializa o passo inteiro** (`plan_with_limit(...,1)` no Code e queda
+  para a ordem no layout Agentes), porque ele edita e roda comandos que escapam do journal.
   Eventos filtrados do filho são encaminhados como `subagent_started`/`subagent_event`/
-  `subagent_finished` para o card ao vivo do “Thinking”. Timeout de 15 min; cancelamento do pai
-  propaga o token ao filho e espera a limpeza (período de graça).
+  `subagent_finished` para o card ao vivo do “Thinking”. Cancelamento do pai propaga o token ao
+  filho e espera a limpeza (período de graça).
+- **Journal**: mutações de arquivo do `worker` são gravadas com o `conversation_id`/`turn_id` do
+  **pai** (`journal_owner`), então o painel Alterações, o diff e o reverter turno incluem as
+  edições do filho. O completion gate do pai conta um `worker` como uma mutação, forçando a
+  verificação depois dele; mudanças feitas por comandos não entram no journal e devem constar no
+  relatório do filho.
 - **Prompt/cache**: o pedido do pai vai **uma vez** na mensagem de usuário; o
-  `system_prompt_override` contém só as instruções constantes do tipo (prompt-base read-only, sem
-  edição/`ask_user`). O filho usa o `conversation_id` do pai como `x-opencode-session` (F4.3b) e
-  seus tokens/custo entram no `usage` do turno pai.
+  `system_prompt_override` contém só as instruções constantes do tipo (prompt-base read-only ou
+  worker, sem edição/`ask_user` no primeiro). O filho usa o `conversation_id` do pai como
+  `x-opencode-session` (F4.3b) e seus tokens/custo entram no `usage` do turno pai.
 - **UI**: linha ao vivo no bloco “Thinking” (status, passos, modelo/effort, texto recente) e botão
-  “Abrir chat”, que abre o subagente como uma aba de chat read-only no centro do Workbench
+  “Abrir chat”, que abre o subagente como uma aba de transcript no centro do Workbench
   (Markdown, Thinking, tools; sem Composer, edição/regeneração/feedback nem cards de
-  aprovação/plano). Cada subagente tem sua própria aba, identificada por `Bot`; abrir a mesma
-  conversa de novo não duplica a aba — apenas a ativa e mostra um aviso. O popover do composer
-  tem uma seção “Subagentes” com todos os transcripts retidos do pai (inclusive
-  erro/cancelamento), que também abrem a aba. A `presentation` `subagent` persiste
+  aprovação/plano). O badge é “Read-only” para os kinds de investigação e “Autonomous” para
+  `worker`. Cada subagente tem sua própria aba, identificada por `Bot`; abrir a mesma conversa de
+  novo não duplica a aba — apenas a ativa e mostra um aviso. O popover do composer tem uma seção
+  “Subagentes” com todos os transcripts retidos do pai (inclusive erro/cancelamento), que também
+  abrem a aba. A `presentation` `subagent` persiste
   `conversationId`/`providerId`/`modelId`/`effort`/`steps`/`durationMs`/`usage`.
-- **Testes**: kinds/parse, catálogo reduzido sem MCP, guarda de profundidade, execução de um turno
-  filho real com provider falso, prompt não duplicado, session id do pai, uso agregado, erro do
-  provider não mascarado, retenção/cascata, eventos ao vivo, modelo/effort, paralelismo e tool fora
-  do catálogo recusada.
+- **Testes**: kinds/parse, catálogos reduzido e worker, guarda de profundidade, execução de turnos
+  filhos reais com provider falso (incluindo escrita + journal no pai), prompt não duplicado,
+  session id do pai, uso agregado, erro do provider não mascarado, retenção/cascata, eventos ao
+  vivo, modelo/effort, paralelismo de scouts, serialização de workers e tool fora do catálogo
+  recusada.
 
 #### Servidores MCP (`mcp__<servidor>__<tool>`)
 
@@ -460,7 +479,7 @@ conteúdo antes de gravar.
 | `create_file` | **fora** do perfil Code (arquivos vão para o workspace) | — |
 | `run_code` | **fora** do perfil Code (substituído por `run_command`) | — |
 | `list_artifacts` / `read_artifact` | opcional, para reaproveitar material da Biblioteca | leitura |
-| `validate_ui` | validação do JSON de blocos `ui` (mesmo contrato do Chat) — sempre disponível, exceto no subagente read-only | leitura, sem aprovação |
+| `validate_ui` | validação do JSON de blocos `ui` (mesmo contrato do Chat) — sempre disponível, exceto em subagentes | leitura, sem aprovação |
 
 #### `validate_ui`
 

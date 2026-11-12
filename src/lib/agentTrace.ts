@@ -1015,6 +1015,8 @@ function subagentKindLabel(type: string | null | undefined): string {
       return t('chat:trace.subagentKind.review');
     case 'general':
       return t('chat:trace.subagentKind.general');
+    case 'worker':
+      return t('chat:trace.subagentKind.worker');
     case 'explore':
     default:
       return t('chat:trace.subagentKind.explore');

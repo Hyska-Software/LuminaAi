@@ -121,6 +121,14 @@ impl TurnProgress {
                     }
                 }
             }
+            "task" => {
+                // A worker can edit files and run commands (which bypass the
+                // journal), so the parent must verify after it. Read-only
+                // children count nothing.
+                if presentation_str(outcome, "subagentType") == Some("worker") {
+                    self.mutations = self.mutations.saturating_add(1);
+                }
+            }
             _ => {}
         }
     }
@@ -593,6 +601,39 @@ mod tests {
         let mut evidence = evidence(&todos, &progress);
         evidence.todo_tool_available = false;
         assert_eq!(decide(evidence), StopDecision::Accept);
+    }
+
+    #[test]
+    fn worker_task_counts_as_a_mutation() {
+        let mut worker = TurnProgress::default();
+        worker.observe(
+            "task",
+            "{}",
+            &outcome(json!({ "kind": "subagent", "subagentType": "worker" }), false),
+        );
+        assert_eq!(worker.mutations, 1);
+
+        let mut explorer = TurnProgress::default();
+        explorer.observe(
+            "task",
+            "{}",
+            &outcome(json!({ "kind": "subagent", "subagentType": "explore" }), false),
+        );
+        assert_eq!(explorer.mutations, 0);
+    }
+
+    #[test]
+    fn worker_forces_verification_when_the_project_has_checks() {
+        let progress = TurnProgress {
+            mutations: 1,
+            ..Default::default()
+        };
+        let mut evidence = evidence(&[], &progress);
+        evidence.project_has_checks = true;
+        assert_eq!(
+            decide(evidence),
+            StopDecision::Continue(ContinueReason::MissingVerification)
+        );
     }
 
     #[test]

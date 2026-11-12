@@ -1245,9 +1245,10 @@ fn code_tool_definitions_with_mcp(
     ctx: &code::context::CodeTurnContext,
     settings: &Settings,
     delegation_depth: u32,
+    subagent_write: bool,
     mcp_tools: &[crate::mcp::McpToolInfo],
 ) -> Vec<crate::providers::ToolDefinition> {
-    let mut definitions = code_tool_definitions(ctx, settings, delegation_depth);
+    let mut definitions = code_tool_definitions(ctx, settings, delegation_depth, subagent_write);
     // MCP server tools come after the static ones (wire name) and the catalog
     // is canonicalized so replay deserializes identically. Subagents are
     // read-only: they ignore MCP even if the caller passes a list.
@@ -2079,6 +2080,7 @@ pub async fn run_turn(
     if let Some(context) = code_context.as_mut() {
         context.goal_request = payload.goal_request;
         context.subagent = options.delegation_depth > 0;
+        context.subagent_writable = options.subagent_write;
     }
     // O evento inicial do perfil Code carrega o estado **real** da sessão
     // (B-05: o modo Plano era enviado como `false` fixo e o chip dessincronizava
@@ -2177,7 +2179,14 @@ pub async fn run_turn(
     // Definições/prompts de tools do Code: entram na key/hashes do snapshot.
     let mut code_tool_prompts_list = code_context
         .as_ref()
-        .map(|ctx| code_tool_prompts(ctx, &settings, options.delegation_depth))
+        .map(|ctx| {
+            code_tool_prompts(
+                ctx,
+                &settings,
+                options.delegation_depth,
+                options.subagent_write,
+            )
+        })
         .unwrap_or_default();
     code_tool_prompts_list.retain(|prompt| tools::tool_allowed(&options, prompt.name));
     let mut code_tool_definitions_canonical: Vec<crate::providers::ToolDefinition> =
@@ -2186,6 +2195,7 @@ pub async fn run_turn(
                 code_ctx,
                 &settings,
                 options.delegation_depth,
+                options.subagent_write,
                 &mcp_tools,
             ),
             _ => Vec::new(),
@@ -2512,6 +2522,7 @@ pub async fn run_turn(
                     .as_ref()
                     .map(|workspace| workspace.id.clone())
                     .or_else(|| conversation.workspace_id.clone()),
+                turn_id: tool_turn_id.clone(),
             };
             Some(crate::tools::registry::ToolCtx {
                 db: deps.db.clone(),
@@ -2533,6 +2544,7 @@ pub async fn run_turn(
                     deps.approvals.clone()
                 },
                 observed: deps.observed.clone(),
+                journal_owner: options.journal_owner.clone(),
                 emit: Some(on_event.clone()),
                 rules,
                 jobs: if subagent_turn {
@@ -4644,6 +4656,7 @@ fn code_enabled_specs(
     ctx: &code::context::CodeTurnContext,
     settings: &Settings,
     delegation_depth: u32,
+    subagent_write: bool,
 ) -> Vec<&'static crate::tools::registry::ToolSpec> {
     let has_workspace = ctx.root.is_some();
     let subagent = delegation_depth > 0;
@@ -4652,8 +4665,15 @@ fn code_enabled_specs(
         .filter(|spec| has_workspace || !spec.requires_workspace)
         .filter(|spec| settings.shell_enabled || spec.name != "run_command")
         .filter(|spec| settings.web_search_enabled || spec.name != "web_search")
-        // Subagente: só leitura (sem shell/escrita/plano/perguntas/delegação).
-        .filter(|spec| !subagent || code::subagent::readonly_tools().contains(&spec.name))
+        // Subagents: read-only scouts or autonomous workers (write + shell).
+        .filter(|spec| {
+            !subagent
+                || if subagent_write {
+                    code::subagent::worker_tools().contains(&spec.name)
+                } else {
+                    code::subagent::readonly_tools().contains(&spec.name)
+                }
+        })
         .collect()
 }
 
@@ -4662,8 +4682,9 @@ fn code_tool_definitions(
     ctx: &code::context::CodeTurnContext,
     settings: &Settings,
     delegation_depth: u32,
+    subagent_write: bool,
 ) -> Vec<crate::providers::ToolDefinition> {
-    code_enabled_specs(ctx, settings, delegation_depth)
+    code_enabled_specs(ctx, settings, delegation_depth, subagent_write)
         .into_iter()
         .map(|spec| crate::providers::ToolDefinition {
             name: spec.name.to_string(),
@@ -4678,8 +4699,9 @@ fn code_tool_prompts(
     ctx: &code::context::CodeTurnContext,
     settings: &Settings,
     delegation_depth: u32,
+    subagent_write: bool,
 ) -> Vec<code::prompt::ToolPrompt> {
-    code_enabled_specs(ctx, settings, delegation_depth)
+    code_enabled_specs(ctx, settings, delegation_depth, subagent_write)
         .into_iter()
         .map(|spec| code::prompt::ToolPrompt {
             name: spec.name,
@@ -4828,6 +4850,9 @@ fn agent_call_is_parallel_read(call: &ToolCallRecord) -> bool {
     use crate::domain::RiskClass;
     use crate::tools::registry::{find_spec, ParallelClass};
     if matches!(call.name.as_str(), "create_file" | "run_code") {
+        return false;
+    }
+    if call.name == "task" && crate::harness::code::subagent::is_worker_call(&call.arguments) {
         return false;
     }
     find_spec(TurnProfile::Code, &call.name)
@@ -10883,7 +10908,8 @@ mod agent_loop_tests {
             .provider("opencode-go")
             .cloned()
             .expect("provider");
-        let tools = cache::snapshot::canonical_tools(&code_tool_definitions(&ctx, &settings, 0));
+        let tools =
+            cache::snapshot::canonical_tools(&code_tool_definitions(&ctx, &settings, 0, false));
         let key = code_snapshot_key_for(
             &conversation,
             &ctx,
@@ -10949,6 +10975,7 @@ mod agent_loop_tests {
             &ctx,
             &settings,
             options.delegation_depth,
+            options.subagent_write,
         ));
         let key = code_snapshot_key_for(
             &conversation,
@@ -13061,14 +13088,14 @@ mod agent_loop_tests {
         let mut context = code::context::CodeTurnContext::default();
         context.root = Some(PathBuf::from("C:/workspace"));
         let settings = Settings::default();
-        let top_level: Vec<&str> = code_enabled_specs(&context, &settings, 0)
+        let top_level: Vec<&str> = code_enabled_specs(&context, &settings, 0, false)
             .iter()
             .map(|spec| spec.name)
             .collect();
         assert!(top_level.contains(&"goal"));
         assert!(top_level.contains(&"validate_ui"));
         assert_eq!(top_level.len(), 25, "catálogo Code: 25 tools");
-        let subagent: Vec<&str> = code_enabled_specs(&context, &settings, 1)
+        let subagent: Vec<&str> = code_enabled_specs(&context, &settings, 1, false)
             .iter()
             .map(|spec| spec.name)
             .collect();
@@ -13079,6 +13106,36 @@ mod agent_loop_tests {
             "subagente não emite UI generativa"
         );
         assert!(subagent.contains(&"read_file"));
+    }
+
+    #[test]
+    fn worker_catalog_adds_write_and_shell_tools() {
+        let mut context = code::context::CodeTurnContext::default();
+        context.root = Some(PathBuf::from("C:/workspace"));
+        let settings = Settings::default();
+        let worker: Vec<&str> = code_enabled_specs(&context, &settings, 1, true)
+            .iter()
+            .map(|spec| spec.name)
+            .collect();
+        for name in [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "run_command",
+            "run_checks",
+            "todo_write",
+        ] {
+            assert!(worker.contains(&name), "faltou {name}: {worker:?}");
+        }
+        for name in ["ask_user", "task", "goal", "submit_plan", "validate_ui"] {
+            assert!(!worker.contains(&name), "sobrou {name}: {worker:?}");
+        }
+        let scout: Vec<&str> = code_enabled_specs(&context, &settings, 1, false)
+            .iter()
+            .map(|spec| spec.name)
+            .collect();
+        assert!(!scout.contains(&"write_file"));
+        assert!(!scout.contains(&"run_command"));
     }
 
     #[test]
@@ -13097,6 +13154,7 @@ mod agent_loop_tests {
             &context,
             &settings,
             0,
+            false,
             std::slice::from_ref(&mcp_tool),
         );
         assert!(top_level.iter().any(|tool| tool.name == "mcp__fake__echo"));
@@ -13104,6 +13162,7 @@ mod agent_loop_tests {
             &context,
             &settings,
             1,
+            false,
             std::slice::from_ref(&mcp_tool),
         );
         assert!(!subagent.iter().any(|tool| tool.name == "mcp__fake__echo"));
@@ -13150,6 +13209,7 @@ mod agent_loop_tests {
             data_dir: std::env::temp_dir().join("zylara-agent-tools-test"),
             approval: None,
             observed: None,
+            journal_owner: None,
             jobs: None,
             questions: None,
             turn_kind: TurnKind::User,
@@ -13176,6 +13236,12 @@ mod agent_loop_tests {
                 "{name} deveria ser paralelo"
             );
         }
+        let mut explorer = ToolCallRecord::running("task-explore", "task");
+        explorer.arguments = "{\"subagent_type\":\"explore\"}".to_string();
+        assert!(agent_call_is_parallel_read(&explorer));
+        let mut worker = ToolCallRecord::running("task-worker", "task");
+        worker.arguments = "{\"subagent_type\":\"worker\"}".to_string();
+        assert!(!agent_call_is_parallel_read(&worker));
         for name in [
             "write_file",
             "edit_file",

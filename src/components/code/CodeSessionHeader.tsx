@@ -86,6 +86,7 @@ const SUBAGENT_TYPE_KEYS = {
   explore: 'code:header.subagent.explore',
   review: 'code:header.subagent.review',
   general: 'code:header.subagent.general',
+  worker: 'code:header.subagent.worker',
 } as const;
 
 /** DOM id da aba de um arquivo aberto. */

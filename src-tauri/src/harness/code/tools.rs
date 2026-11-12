@@ -207,7 +207,7 @@ fn run_delegation(ctx: &ToolCtx, tool: &str, args: Value) -> ToolOutcome {
 /// devolve os resultados na ordem original das chamadas.
 pub async fn execute_batch(ctx: &ToolCtx, calls: &[ToolCallRecord]) -> Vec<ToolOutcome> {
     use crate::domain::TurnProfile;
-    use crate::tools::pipeline::{plan, ToolCallRequest};
+    use crate::tools::pipeline::{plan, plan_with_limit, ToolCallRequest};
     use crate::tools::registry::find_spec;
 
     let mut indexed: Vec<(usize, ToolCallRequest)> = Vec::new();
@@ -219,7 +219,17 @@ pub async fn execute_batch(ctx: &ToolCtx, calls: &[ToolCallRecord]) -> Vec<ToolO
     let mut outcomes: Vec<Option<ToolOutcome>> = vec![None; calls.len()];
     let requests: Vec<ToolCallRequest> =
         indexed.iter().map(|(_, request)| request.clone()).collect();
-    for batch in plan(&requests) {
+    // A worker edits files and runs commands (which can bypass the journal), so
+    // it must not overlap another read, write, command or worker in the step.
+    let serial = calls.iter().any(|call| {
+        call.name == "task" && crate::harness::code::subagent::is_worker_call(&call.arguments)
+    });
+    let batches = if serial {
+        plan_with_limit(&requests, 1)
+    } else {
+        plan(&requests)
+    };
+    for batch in batches {
         let batch_futures = batch.iter().map(|&request_index| {
             let call = indexed[request_index].1.call.clone();
             async move { (request_index, execute(ctx, &call).await) }
@@ -329,6 +339,7 @@ mod tests {
             data_dir: std::env::temp_dir().join("zylara-code-tools-test"),
             approval: None,
             observed: None,
+            journal_owner: None,
             jobs: None,
             questions: None,
             turn_kind: crate::domain::TurnKind::User,

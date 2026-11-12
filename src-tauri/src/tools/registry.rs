@@ -106,6 +106,8 @@ pub struct ToolCtx {
     pub approval: Option<Arc<crate::policy::approval::ApprovalRegistry>>,
     /// Arquivos lidos nesta execução do app (read-before-write/CAS).
     pub observed: Option<Arc<crate::harness::code::observed::ObservedFiles>>,
+    /// Parent conversation/turn that owns a writable subagent's journal rows.
+    pub journal_owner: Option<crate::domain::JournalOwner>,
     /// Emissor de eventos do turno (aprovação, diff, tarefas, jobs).
     pub emit: Option<Arc<dyn crate::harness::EventEmitter>>,
     /// Regras "sempre permitir/negar" aplicáveis a esta sessão/workspace.
@@ -867,6 +869,7 @@ mod tests {
             data_dir: std::env::temp_dir().join("zylara-registry-test"),
             approval: None,
             observed: None,
+            journal_owner: None,
             emit: None,
             rules: Vec::new(),
             jobs: None,

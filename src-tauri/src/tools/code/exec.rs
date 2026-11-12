@@ -1541,9 +1541,13 @@ fn commit_mutation(
     let diff = journal::unified_diff(relative, &before_text, &after_text);
     let diff_short: String = diff.chars().take(MAX_DIFF_CHARS).collect();
 
+    let (journal_conversation, journal_turn) = match &ctx.journal_owner {
+        Some(owner) => (owner.conversation_id.clone(), owner.turn_id.clone()),
+        None => (ctx.conversation_id.clone(), ctx.turn_id.clone()),
+    };
     let entry = crate::db::FileJournalEntry::new(
-        ctx.conversation_id.clone(),
-        ctx.turn_id.clone(),
+        journal_conversation,
+        journal_turn,
         relative.to_string(),
         kind,
     )
@@ -1992,11 +1996,37 @@ fn subagent_failure(error: anyhow::Error) -> ToolOutcome {
     err("SUBAGENT_FAILED", message)
 }
 
+/// Autonomous worker children cannot escalate: the parent must be autonomous
+/// and outside Plan mode at launch time.
+fn ensure_worker_allowed(ctx: &ToolCtx) -> Result<(), ToolOutcome> {
+    let mode = ctx
+        .db
+        .get_conversation(&ctx.conversation_id)
+        .ok()
+        .flatten()
+        .map(|conversation| conversation.permission_mode)
+        .or_else(|| ctx.workspace.as_ref().map(|workspace| workspace.permission_mode));
+    if mode != Some(PermissionMode::Autonomous) {
+        return Err(err(
+            "SUBAGENT_MODE_REQUIRED",
+            crate::i18n::t("tools.exec.subagent.workerAutonomous"),
+        ));
+    }
+    if crate::harness::code::session::plan_mode_active(&ctx.db, &ctx.conversation_id)
+        .unwrap_or(true)
+    {
+        return Err(err(
+            "PLAN_MODE_ACTIVE",
+            crate::i18n::t("policy.reasons.planMode"),
+        ));
+    }
+    Ok(())
+}
+
 /// `task`: delega exploração/revisão a um subagente somente leitura.
 async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
     use crate::harness::code::subagent::{
         SubagentKind, SubagentRequest, MAX_DELEGATIONS_PER_TURN, SUBAGENT_CANCEL_GRACE_SECS,
-        SUBAGENT_TIMEOUT_SECS,
     };
 
     let Some(runner) = ctx.subagent.clone() else {
@@ -2031,6 +2061,12 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             }
         },
     };
+    if kind.is_writable() {
+        if let Err(outcome) = ensure_worker_allowed(ctx) {
+            return outcome;
+        }
+    }
+    let timeout_secs = kind.timeout_secs();
     if !ctx.try_consume_subagent_budget() {
         return err(
             "SUBAGENT_LIMIT",
@@ -2079,7 +2115,7 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
             return err("SUBAGENT_CANCELLED", crate::i18n::t("tools.exec.turn.cancelled"));
         }
         result = tokio::time::timeout(
-            Duration::from_secs(SUBAGENT_TIMEOUT_SECS),
+            Duration::from_secs(timeout_secs),
             &mut run,
         ) => match result {
             Ok(Ok(outcome)) => outcome,
@@ -2112,14 +2148,14 @@ async fn run_task(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
                     duration_ms: 0,
                     error: Some(crate::i18n::t_args(
                         "tools.exec.subagent.timeout",
-                        &[("minutes", &(SUBAGENT_TIMEOUT_SECS / 60).to_string())],
+                        &[("minutes", &(timeout_secs / 60).to_string())],
                     )),
                 });
                 return err(
                     "SUBAGENT_TIMEOUT",
                     crate::i18n::t_args(
                         "tools.exec.subagent.timeout",
-                        &[("minutes", &(SUBAGENT_TIMEOUT_SECS / 60).to_string())],
+                        &[("minutes", &(timeout_secs / 60).to_string())],
                     ),
                 );
             }
@@ -3784,6 +3820,7 @@ mod tests {
                 data_dir: self.data_dir.clone(),
                 approval: Some(self.approvals.clone()),
                 observed: Some(self.observed.clone()),
+                journal_owner: None,
                 emit: Some(emit),
                 rules: Vec::new(),
                 jobs: Some(self.jobs.clone()),
@@ -5205,6 +5242,140 @@ mod tests {
         )
         .await;
         assert_eq!(error_code(&outcome), "SUBAGENT_UNAVAILABLE");
+    }
+
+    #[tokio::test]
+    async fn worker_requires_the_parent_autonomous_mode() {
+        let fixture = Fixture::new();
+        fixture.attach_workspace();
+        fixture.set_permission_mode(PermissionMode::Edit);
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(std::sync::Arc::new(NoopRunner));
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({ "description": "Implementar", "prompt": "Crie a.txt", "subagent_type": "worker" }),
+        )
+        .await;
+        assert_eq!(error_code(&outcome), "SUBAGENT_MODE_REQUIRED");
+
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({ "description": "Implementar", "prompt": "Crie a.txt", "subagent_type": "worker" }),
+        )
+        .await;
+        assert!(!outcome.is_error, "{}", outcome.content);
+    }
+
+    #[tokio::test]
+    async fn worker_is_blocked_in_plan_mode() {
+        let fixture = Fixture::new();
+        fixture.attach_workspace();
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        fixture.set_plan_mode(true);
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(std::sync::Arc::new(NoopRunner));
+        let outcome = call(
+            &ctx,
+            "task",
+            json!({ "description": "Implementar", "prompt": "Crie a.txt", "subagent_type": "worker" }),
+        )
+        .await;
+        assert_eq!(error_code(&outcome), "PLAN_MODE_ACTIVE");
+    }
+
+    #[tokio::test]
+    async fn worker_task_calls_do_not_overlap() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct OverlapRunner {
+            active: Arc<AtomicUsize>,
+            max_active: Arc<AtomicUsize>,
+        }
+        impl crate::harness::code::subagent::SubagentRunner for OverlapRunner {
+            fn run(
+                &self,
+                _request: crate::harness::code::subagent::SubagentRequest,
+                _cancel: tokio_util::sync::CancellationToken,
+                _progress: Option<std::sync::Arc<dyn crate::harness::EventEmitter>>,
+            ) -> futures_util::future::BoxFuture<
+                'static,
+                anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
+            > {
+                let active = self.active.clone();
+                let max_active = self.max_active.clone();
+                Box::pin(async move {
+                    let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    Ok(crate::harness::code::subagent::SubagentOutcome {
+                        conversation_id: "child-conv".to_string(),
+                        provider_id: "opencode-go".to_string(),
+                        model_id: "deepseek-v4.1-flash".to_string(),
+                        effort: None,
+                        text: "ok".to_string(),
+                        usage: None,
+                        steps: 1,
+                        duration_ms: 1,
+                    })
+                })
+            }
+        }
+
+        let fixture = Fixture::new();
+        fixture.attach_workspace();
+        fixture.set_permission_mode(PermissionMode::Autonomous);
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let mut ctx = fixture.ctx();
+        ctx.subagent = Some(Arc::new(OverlapRunner {
+            active: active.clone(),
+            max_active: max_active.clone(),
+        }));
+        let mut first = crate::domain::ToolCallRecord::running("task-1", "task");
+        first.arguments =
+            json!({ "description": "A", "prompt": "A", "subagent_type": "worker" }).to_string();
+        let mut second = crate::domain::ToolCallRecord::running("task-2", "task");
+        second.arguments =
+            json!({ "description": "B", "prompt": "B", "subagent_type": "worker" }).to_string();
+        let outcomes = crate::harness::code::tools::execute_batch(&ctx, &[first, second]).await;
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes.iter().all(|outcome| !outcome.is_error), "{outcomes:?}");
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn write_file_journals_under_the_owner_turn() {
+        let fixture = Fixture::new();
+        fixture.attach_workspace();
+        fixture.write("a.txt", "original\n");
+        let mut ctx = fixture.ctx();
+        ctx.journal_owner = Some(crate::domain::JournalOwner {
+            conversation_id: "parent-conv".to_string(),
+            turn_id: "parent-turn".to_string(),
+        });
+        let read = call(&ctx, "read_file", json!({ "path": "a.txt" })).await;
+        assert!(!read.is_error, "{}", read.content);
+        let write = call(
+            &ctx,
+            "write_file",
+            json!({ "path": "a.txt", "content": "novo\n" }),
+        )
+        .await;
+        assert!(!write.is_error, "{}", write.content);
+        let parent = fixture
+            .db
+            .list_file_journal_for_turn("parent-conv", "parent-turn")
+            .expect("journal do pai");
+        assert!(parent.iter().any(|entry| entry.path == "a.txt"), "{parent:?}");
+        let child = fixture
+            .db
+            .list_file_journal_for_turn(fixture.conv(), "turn-1")
+            .expect("journal do filho");
+        assert!(child.is_empty(), "{child:?}");
     }
 
     #[tokio::test]

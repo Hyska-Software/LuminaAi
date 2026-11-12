@@ -655,8 +655,13 @@ pub async fn summarize_manual_for_conversation(
     if let Some(agent) = agent.as_ref() {
         options.allowed_tools = Some(crate::harness::code_agent_allowed_tools(agent, &mcp_tools));
     }
-    let mut tool_definitions =
-        code_tool_definitions_with_mcp(&ctx, settings, options.delegation_depth, &mcp_tools);
+    let mut tool_definitions = code_tool_definitions_with_mcp(
+        &ctx,
+        settings,
+        options.delegation_depth,
+        options.subagent_write,
+        &mcp_tools,
+    );
     tool_definitions.retain(|tool| crate::tools::tool_allowed(&options, &tool.name));
     if agent
         .as_ref()
@@ -702,7 +707,12 @@ pub async fn summarize_manual_for_conversation(
         }
     }
     let mcp_prompt_section = mcp_tools_prompt_section(&mcp_tools, options.delegation_depth);
-    let mut tool_prompts = super::code_tool_prompts(&ctx, settings, options.delegation_depth);
+    let mut tool_prompts = super::code_tool_prompts(
+        &ctx,
+        settings,
+        options.delegation_depth,
+        options.subagent_write,
+    );
     tool_prompts.retain(|prompt| crate::tools::tool_allowed(&options, prompt.name));
     let snapshot = code_prompt_snapshot(
         &deps.db,

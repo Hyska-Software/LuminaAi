@@ -97,6 +97,30 @@ describe('SubagentChatView', () => {
     expect(mocks.getConversation).toHaveBeenCalledWith('child-1');
   });
 
+  it('renders the worker kind with the autonomous badge', async () => {
+    mocks.getConversation.mockResolvedValue({
+      ...detail,
+      conversation: {
+        ...detail.conversation,
+        subagentType: 'worker',
+        permissionMode: 'autonomous',
+      },
+    });
+    render(
+      <SubagentChatView
+        target={{
+          ...target,
+          subagentType: 'worker',
+          description: 'Implementar a fatia',
+        }}
+      />,
+    );
+
+    expect(await screen.findByText('Subagente · executor')).toBeTruthy();
+    expect(screen.getByText('Autônomo')).toBeTruthy();
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
   it('shows the live child stream and updates from the store', async () => {
     mocks.getConversation.mockResolvedValue(detail);
     useChatStore.setState({

@@ -81,6 +81,8 @@ export function subagentTypeLabel(type: string): string {
       return t('agents:subagent.type.review');
     case 'general':
       return t('agents:subagent.type.general');
+    case 'worker':
+      return t('agents:subagent.type.worker');
     default:
       return type;
   }

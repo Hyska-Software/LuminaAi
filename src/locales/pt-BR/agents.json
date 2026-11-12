@@ -102,6 +102,7 @@
     "alreadyOpen": "Este subagente já está aberto em uma aba.",
     "header": "Subagente · {{type}}",
     "readOnly": "Somente leitura",
+    "autonomous": "Autônomo",
     "effort": " · esforço {{effort}}",
     "loadingTranscript": "Carregando transcript…",
     "transcriptUnavailable": "Transcript deste subagente não está disponível.",
@@ -117,7 +118,8 @@
     "type": {
       "explore": "exploração",
       "review": "revisão",
-      "general": "geral"
+      "general": "geral",
+      "worker": "executor"
     }
   },
   "askUser": {

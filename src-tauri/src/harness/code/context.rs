@@ -65,6 +65,9 @@ pub struct CodeTurnContext {
     /// Read-only subagent turn (`delegation_depth > 0`): switches the base
     /// prompt to an investigator identity without editing/`ask_user` sections.
     pub subagent: bool,
+    /// Autonomous worker subagent: keeps the editing/verification rules and
+    /// the write+shell catalog.
+    pub subagent_writable: bool,
 }
 
 impl CodeTurnContext {
@@ -93,6 +96,7 @@ impl CodeTurnContext {
             turn_kind: self.turn_kind,
             goal_request: self.goal_request,
             subagent: self.subagent,
+            subagent_writable: self.subagent_writable,
         }
     }
 

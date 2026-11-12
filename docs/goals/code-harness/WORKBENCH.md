@@ -156,7 +156,7 @@ operacionais ficam concentrados no popover do composer (`CodeSessionControls`):
 | Jobs em segundo plano (status/comando/tempo/parar) | mesma popover, seção "Trabalhos em segundo plano", com contador de jobs no pill (§7.4) |
 | Alterações de arquivos (diff, `+N −M`, reverter) | painel Alterações + fecho do turno (§5.1, §7.2) |
 | Aprovação e pergunta ao usuário | cards inline (§5.3/§5.5), pois bloqueiam o turno |
-| `ask_user` respondido, subagente e saídas longas | apenas no resumo do "Thinking"/resultados, sem card extra. Subagente tem linha ao vivo (`status`, passos, modelo/effort, texto recente) e botão “Abrir chat”, que abre uma aba de chat read-only (uma por subagente; abrir a mesma conversa duas vezes só ativa a aba existente e mostra um aviso). O popover do composer lista os transcripts retidos (inclusive erro/cancelamento). A `presentation` guarda `conversationId`/`steps`/`durationMs`/`usage` |
+| `ask_user` respondido, subagente e saídas longas | apenas no resumo do "Thinking"/resultados, sem card extra. Subagente tem linha ao vivo (`status`, passos, modelo/effort, texto recente) e botão “Abrir chat”, que abre uma aba de transcript sem composer (uma por subagente; abrir a mesma conversa duas vezes só ativa a aba existente e mostra um aviso). O badge é “Read-only” para scouts e “Autonomous” para `worker`. O popover do composer lista os transcripts retidos (inclusive erro/cancelamento). A `presentation` guarda `conversationId`/`steps`/`durationMs`/`usage` |
 
 O popover "Plano e tarefas" tem **um único contêiner de rolagem**: `PlanCard` e `TodoCard`
 entram com `scrollable={false}` ali, para que o wheel sobre o plano ou sobre a lista de tarefas

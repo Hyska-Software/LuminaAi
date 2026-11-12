@@ -102,6 +102,7 @@
     "alreadyOpen": "This subagent is already open in a tab.",
     "header": "Subagent · {{type}}",
     "readOnly": "Read-only",
+    "autonomous": "Autonomous",
     "effort": " · effort {{effort}}",
     "loadingTranscript": "Loading transcript…",
     "transcriptUnavailable": "The transcript for this subagent is not available.",
@@ -117,7 +118,8 @@
     "type": {
       "explore": "exploration",
       "review": "review",
-      "general": "general"
+      "general": "general",
+      "worker": "worker"
     }
   },
   "askUser": {

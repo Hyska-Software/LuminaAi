@@ -217,7 +217,8 @@
     "subagentKind": {
       "review": "review",
       "general": "general",
-      "explore": "exploration"
+      "explore": "exploration",
+      "worker": "worker"
     },
     "group": {
       "web_search": {

@@ -122,6 +122,18 @@ describe('buildAgentTrace', () => {
       }),
     );
     expect(review.verb).toBe('Delegou revisão a um subagente');
+
+    const worker = describeCodeTool(
+      tool({
+        name: 'task',
+        arguments: JSON.stringify({
+          description: 'Implementar',
+          prompt: 'Crie a fatia',
+          subagent_type: 'worker',
+        }),
+      }),
+    );
+    expect(worker.verb).toBe('Delegou executor a um subagente');
   });
 
   it('describes the generative UI validation row in the Code timeline', () => {

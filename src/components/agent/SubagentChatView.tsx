@@ -156,7 +156,9 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
   const providerId = live?.providerId ?? target.providerId ?? detail?.conversation.providerId;
   const modelId = live?.modelId ?? target.modelId ?? detail?.conversation.modelId;
   const effort = live?.effort ?? target.effort;
-  const type = subagentTypeLabel(live?.subagentType ?? target.subagentType);
+  const rawType = live?.subagentType ?? target.subagentType;
+  const isWorker = rawType === 'worker';
+  const type = subagentTypeLabel(rawType);
   const description = live?.description ?? target.description ?? detail?.conversation.title ?? '';
   const unavailable = !live && !detail && !loading && !error;
 
@@ -206,7 +208,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
                 {t(STATUS_LABEL_KEY[status])}
               </span>
               <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-foreground-subtle">
-                {t('subagent.readOnly')}
+                {t(isWorker ? 'subagent.autonomous' : 'subagent.readOnly')}
               </span>
             </div>
             <p className="truncate text-[11.5px] text-foreground-muted">{description}</p>

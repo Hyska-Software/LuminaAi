@@ -32,8 +32,14 @@ use crate::policy::approval::ApprovalRegistry;
 
 /// Short child budget (the parent configures `Settings::code_max_steps`).
 pub const SUBAGENT_MAX_STEPS: u32 = 24;
+/// Budget of an autonomous worker child: implementing + verifying needs more
+/// steps than a read-only investigation.
+pub const WORKER_MAX_STEPS: u32 = 48;
 /// Maximum delegation time before the parent gives up.
 pub const SUBAGENT_TIMEOUT_SECS: u64 = 15 * 60;
+/// Autonomous workers run commands and tests, so they get a larger wall-clock
+/// budget than read-only scouts.
+pub const WORKER_TIMEOUT_SECS: u64 = 30 * 60;
 /// Grace period for the child to unwind after cancellation (cleanup).
 pub const SUBAGENT_CANCEL_GRACE_SECS: u64 = 5;
 /// Hard cap of delegations per turn (cost/loop guardrail).
@@ -52,6 +58,8 @@ pub enum SubagentKind {
     Review,
     /// General read/investigation work.
     General,
+    /// Autonomous worker: edits files and runs commands/checks.
+    Worker,
 }
 
 impl SubagentKind {
@@ -61,6 +69,7 @@ impl SubagentKind {
             "explore" | "explorar" | "exploração" | "exploracao" => Some(Self::Explore),
             "review" | "revisor" | "revisão" | "revisao" => Some(Self::Review),
             "general" | "geral" => Some(Self::General),
+            "worker" | "executor" | "trabalhador" => Some(Self::Worker),
             _ => None,
         }
     }
@@ -70,6 +79,30 @@ impl SubagentKind {
             Self::Explore => "explore",
             Self::Review => "review",
             Self::General => "general",
+            Self::Worker => "worker",
+        }
+    }
+
+    /// `worker` edits files and runs commands; the other kinds are read-only.
+    pub fn is_writable(self) -> bool {
+        matches!(self, Self::Worker)
+    }
+
+    /// Model-step budget of the child turn.
+    pub fn max_steps(self) -> u32 {
+        if self.is_writable() {
+            WORKER_MAX_STEPS
+        } else {
+            SUBAGENT_MAX_STEPS
+        }
+    }
+
+    /// Wall-clock timeout enforced by `run_task`.
+    pub fn timeout_secs(self) -> u64 {
+        if self.is_writable() {
+            WORKER_TIMEOUT_SECS
+        } else {
+            SUBAGENT_TIMEOUT_SECS
         }
     }
 
@@ -97,6 +130,17 @@ impl SubagentKind {
                  Batch independent reads/searches in one step and stop as soon as the parent's \
                  question is answerable."
             }
+            Self::Worker => {
+                "You are an autonomous worker subagent. Implement the parent's brief in the \
+                 workspace: read the relevant files, edit them, and run commands/checks without \
+                 asking for confirmation. You CANNOT ask the user, request approval, delegate, use \
+                 MCP, or use computer/browser tools. Batch independent reads in one step, keep \
+                 changes scoped to the brief, run the relevant verification (commands run in the \
+                 foreground; `run_in_background` is unavailable), and return a concise report with \
+                 the files you changed and the command/exit-code evidence. Report changes made by \
+                 commands too: they are not journaled. Do not stop at analysis or wait for the \
+                 parent."
+            }
         }
     }
 }
@@ -110,6 +154,8 @@ pub struct ParentTurnContext {
     pub provider_id: String,
     pub model_id: String,
     pub workspace_id: Option<String>,
+    /// Turn id of the parent request; writable children journal under it.
+    pub turn_id: String,
 }
 
 /// Delegation request coming from the `task` tool.
@@ -480,9 +526,15 @@ async fn run_child(
         retain: false,
     };
     db.set_conversation_workspace(&child.id, parent.workspace_id.as_deref())?;
-    // The child is read-only: policy denies writes/shell; the catalog is also
-    // narrowed to read tools (defense in depth).
-    db.set_conversation_permission_mode(&child.id, PermissionMode::ReadOnly)?;
+    // The child is read-only for investigation kinds; a worker inherits the
+    // parent's autonomous envelope (the caller already verified the parent
+    // mode) and gets write/shell tools. The catalog is the execution boundary.
+    let child_mode = if request.kind.is_writable() {
+        PermissionMode::Autonomous
+    } else {
+        PermissionMode::ReadOnly
+    };
+    db.set_conversation_permission_mode(&child.id, child_mode)?;
 
     // The parent request goes **once** in the user message. The override has
     // only the constant kind instructions, so the child prefix stays stable and
@@ -499,11 +551,18 @@ async fn run_child(
         model_id: model_id.clone(),
         reasoning,
         options: TurnOptions {
-            max_steps: SUBAGENT_MAX_STEPS,
+            max_steps: request.kind.max_steps(),
             delegation_depth: depth,
             web_search: false,
             create_files: false,
             run_code: false,
+            subagent_write: request.kind.is_writable(),
+            journal_owner: request.kind.is_writable().then(|| {
+                crate::domain::JournalOwner {
+                    conversation_id: parent.conversation_id.clone(),
+                    turn_id: parent.turn_id.clone(),
+                }
+            }),
             system_prompt_override: Some(instructions),
             wire_session_id: Some(parent.conversation_id.clone()),
             ..Default::default()
@@ -652,6 +711,41 @@ pub fn readonly_tools() -> &'static [&'static str] {
     ]
 }
 
+/// Tool names of an autonomous worker subagent: read tools + workspace
+/// mutation + shell/checks + the task ledger. No MCP, `ask_user`, plan/goal,
+/// nested delegation, UI validation, computer/browser or background jobs.
+pub fn worker_tools() -> &'static [&'static str] {
+    &[
+        "read_file",
+        "list_dir",
+        "search_files",
+        "search_text",
+        "read_tool_output",
+        "git_status",
+        "git_diff",
+        "git_log",
+        "write_file",
+        "edit_file",
+        "run_command",
+        "run_checks",
+        "todo_write",
+    ]
+}
+
+/// True when a `task` call's `subagent_type` parses to `worker`.
+pub fn is_worker_call(arguments: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("subagent_type")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .and_then(|value| SubagentKind::parse(&value))
+        .is_some_and(SubagentKind::is_writable)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +795,7 @@ mod tests {
             provider_id: parent.provider_id.clone(),
             model_id: parent.model_id.clone(),
             workspace_id: None,
+            turn_id: "parent-turn".into(),
         }
     }
 
@@ -770,6 +865,7 @@ mod tests {
                 provider_id: parent.provider_id.clone(),
                 model_id: parent.model_id.clone(),
                 workspace_id: None,
+                turn_id: "parent-turn".into(),
             },
             0,
             usage,
@@ -1088,6 +1184,97 @@ mod tests {
         assert!(resolve_route(&deps, &context, Some("nope/model")).is_err());
     }
 
+    #[tokio::test]
+    async fn worker_child_writes_files_and_journals_under_the_parent_turn() {
+        use crate::domain::Settings;
+        use crate::providers::ProviderEvent;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let first_tools = Arc::new(Mutex::new(Vec::<String>::new()));
+        let streamer: crate::harness::ProviderStreamer = {
+            let calls = calls.clone();
+            let first_tools = first_tools.clone();
+            Arc::new(move |request, sink| {
+                let calls = calls.clone();
+                let first_tools = first_tools.clone();
+                Box::pin(async move {
+                    if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        *first_tools.lock() =
+                            request.tools.iter().map(|tool| tool.name.clone()).collect();
+                        let args = r#"{"path":"a.txt","content":"oi"}"#;
+                        let _ = sink.send(ProviderEvent::ToolCallStart {
+                            index: 0,
+                            id: "write-1".to_string(),
+                            name: "write_file".to_string(),
+                        });
+                        let _ = sink.send(ProviderEvent::ToolCallArgsDelta {
+                            index: 0,
+                            delta: args.to_string(),
+                        });
+                        let _ = sink.send(ProviderEvent::ToolCallDone {
+                            index: 0,
+                            arguments: args.to_string(),
+                        });
+                    } else {
+                        let _ =
+                            sink.send(ProviderEvent::TextDelta("arquivo criado".to_string()));
+                    }
+                    let _ = sink.send(ProviderEvent::Done);
+                    Ok(())
+                })
+            })
+        };
+        let (db, deps, parent) = fixture(streamer);
+        let workspace_dir =
+            std::env::temp_dir().join(format!("zylara-worker-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace_dir).expect("workspace dir");
+        let workspace = db
+            .create_workspace("worker-test", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        db.set_workspace_trusted(&workspace.id, true).expect("trusted");
+        db.set_conversation_workspace(&parent.id, Some(&workspace.id))
+            .expect("workspace da conversa");
+        let context = ParentTurnContext {
+            conversation_id: parent.id.clone(),
+            provider_id: parent.provider_id.clone(),
+            model_id: parent.model_id.clone(),
+            workspace_id: Some(workspace.id.clone()),
+            turn_id: "parent-turn".into(),
+        };
+        let usage = Arc::new(Mutex::new(UsageInfo::default()));
+        let runner = runner(&deps, &Settings::default(), context, 0, usage);
+        let mut request = request("Crie a.txt com oi");
+        request.kind = SubagentKind::Worker;
+        let outcome = runner
+            .run(request, CancellationToken::new(), None)
+            .await
+            .expect("worker");
+        assert_eq!(
+            std::fs::read_to_string(workspace_dir.join("a.txt")).expect("a.txt"),
+            "oi"
+        );
+        let journal = db
+            .list_file_journal_for_turn(&parent.id, "parent-turn")
+            .expect("journal");
+        assert!(
+            journal.iter().any(|entry| entry.path == "a.txt"),
+            "{journal:?}"
+        );
+        let child = db
+            .get_conversation(&outcome.conversation_id)
+            .expect("conversa")
+            .expect("filho");
+        assert_eq!(child.permission_mode, PermissionMode::Autonomous);
+        let tools = first_tools.lock().clone();
+        for name in ["write_file", "run_command"] {
+            assert!(tools.iter().any(|tool| tool == name), "faltou {name}: {tools:?}");
+        }
+        for name in ["ask_user", "task"] {
+            assert!(!tools.iter().any(|tool| tool == name), "sobrou {name}: {tools:?}");
+        }
+    }
+
     #[test]
     fn depth_guard_allows_only_the_top_level() {
         assert!(can_delegate(0));
@@ -1100,14 +1287,47 @@ mod tests {
         assert_eq!(SubagentKind::parse("review"), Some(SubagentKind::Review));
         assert_eq!(SubagentKind::parse("explore"), Some(SubagentKind::Explore));
         assert_eq!(SubagentKind::parse("geral"), Some(SubagentKind::General));
+        assert_eq!(SubagentKind::parse("worker"), Some(SubagentKind::Worker));
+        assert_eq!(SubagentKind::parse("executor"), Some(SubagentKind::Worker));
         assert_eq!(SubagentKind::parse("x"), None);
         assert!(SubagentKind::Review.instructions().contains("reviewer"));
-        for kind in [SubagentKind::Explore, SubagentKind::Review, SubagentKind::General] {
+        assert!(SubagentKind::Worker.instructions().contains("autonomous worker"));
+        assert!(!SubagentKind::Explore.is_writable());
+        assert!(SubagentKind::Worker.is_writable());
+        assert_eq!(SubagentKind::Worker.max_steps(), WORKER_MAX_STEPS);
+        assert_eq!(SubagentKind::Worker.timeout_secs(), WORKER_TIMEOUT_SECS);
+        assert_eq!(SubagentKind::Explore.max_steps(), SUBAGENT_MAX_STEPS);
+        for kind in [
+            SubagentKind::Explore,
+            SubagentKind::Review,
+            SubagentKind::General,
+            SubagentKind::Worker,
+        ] {
             assert!(
                 kind.instructions().contains("one step"),
                 "{kind:?} sem orientação de economia de passos"
             );
         }
+    }
+
+    #[test]
+    fn worker_tools_add_mutation_and_shell_without_interaction() {
+        let tools = worker_tools();
+        for name in ["read_file", "write_file", "edit_file", "run_command", "run_checks", "todo_write"] {
+            assert!(tools.contains(&name), "{name} deveria estar no worker");
+        }
+        for name in ["ask_user", "task", "goal", "submit_plan", "validate_ui", "mcp__fake__echo", "job_list"] {
+            assert!(!tools.contains(&name), "{name} não deveria estar no worker");
+        }
+    }
+
+    #[test]
+    fn worker_call_detection_reads_the_subagent_type() {
+        assert!(is_worker_call(r#"{"subagent_type":"worker"}"#));
+        assert!(is_worker_call(r#"{"subagent_type":"executor"}"#));
+        assert!(!is_worker_call(r#"{"subagent_type":"explore"}"#));
+        assert!(!is_worker_call(r#"{"description":"x","prompt":"y"}"#));
+        assert!(!is_worker_call("not json"));
     }
 
     #[test]

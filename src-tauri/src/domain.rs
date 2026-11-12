@@ -674,6 +674,17 @@ pub const MAX_STEPS_LIMIT: u32 = 1_000;
 /// Default number of agent loop steps per turn (fresh installs).
 pub const MAX_STEPS_DEFAULT: u32 = 64;
 
+/// Parent conversation/turn that owns a writable subagent's journal rows.
+///
+/// A `worker` child executes in its own conversation; attributing its file
+/// mutations to the parent turn is what makes the Changes panel, diff and
+/// revert see them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JournalOwner {
+    pub conversation_id: String,
+    pub turn_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TurnOptions {
@@ -708,6 +719,13 @@ pub struct TurnOptions {
     /// Subagentes nao recebem a tool `task` (max. 1 nivel).
     #[serde(default)]
     pub delegation_depth: u32,
+    /// Writable subagent: its file mutations are journaled under the parent
+    /// turn so the Changes panel and revert include them. Internal only.
+    #[serde(skip)]
+    pub subagent_write: bool,
+    /// Parent conversation/turn that owns a writable subagent's journal rows.
+    #[serde(skip)]
+    pub journal_owner: Option<JournalOwner>,
     /// Stable id sent as `x-opencode-session` for gateway affinity/cache.
     /// Internal field: never accepted from the renderer; the subagent runner
     /// fills it with the parent conversation id. `None` uses the turn's
@@ -755,6 +773,8 @@ impl Default for TurnOptions {
             event_context: None,
             regenerate: false,
             delegation_depth: 0,
+            subagent_write: false,
+            journal_owner: None,
             wire_session_id: None,
             allowed_tools: None,
             allowed_skills: None,

@@ -357,7 +357,7 @@ os.chmod(p,0o755)"#;
                 db: db.clone(), http: reqwest::Client::new(), conversation_id: conversation.clone(),
                 message_id: "rfb-message".into(), tool_call_id: "rfb-call".into(), turn_id: "rfb-turn".into(),
                 workspace: None, settings: settings.clone(), cancel: tokio_util::sync::CancellationToken::new(), agent_hooks: None,
-                data_dir: dir.path().to_path_buf(), approval: None, observed: None, emit: None,
+                data_dir: dir.path().to_path_buf(), approval: None, observed: None, journal_owner: None, emit: None,
                 rules: Vec::new(), jobs: None, questions: None, turn_kind: crate::domain::TurnKind::User,
                 mcp: None, subagent: None, enabled_tools: Arc::new(Default::default()),
                 subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
