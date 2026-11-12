@@ -19,7 +19,14 @@ pub static TASK_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: true,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `task` when you need to explore/review a large area without polluting your context (e.g. `subagent_type: \"explore\"` to map files, `\"review\"` to review the diff). The child is read-only: no edits, shell, MCP, user questions or nested delegation; for changes, use your own tools. You may pass `model` (`provider/model`) and `effort` to route that delegation to another model/effort. Independent `task` calls in the same step run in parallel (max 4 per turn). Do not delegate trivial tasks.",
+    guidance: "Use `task` for broad, independent exploration instead of reading everything \
+               yourself. When two or more areas can be investigated separately (layers, modules, \
+               docs), launch 2-4 `task` calls in the same step — they run in parallel; give each \
+               a self-contained question and the exact report you need. `subagent_type`: \
+               `explore` (map/answer), `review` (critique the diff) or `general`. The child is \
+               read-only: no edits, shell, MCP, questions or nested delegation; you implement its \
+               findings. Optional `model` (`provider/model`) and `effort`. Keep your own reads \
+               targeted; never delegate a task you can finish with one or two targeted reads.",
 };
 
 pub fn definition() -> ToolDefinition {
@@ -74,6 +81,14 @@ mod tests {
         assert_eq!(
             TASK_SPEC.parallel,
             crate::tools::registry::ParallelClass::Safe
+        );
+        assert!(TASK_SPEC.guidance.contains("in the same step"));
+        assert!(TASK_SPEC.guidance.contains("run in parallel"));
+        assert!(
+            TASK_SPEC.guidance.chars().count()
+                <= crate::harness::code::prompt::MAX_TOOL_GUIDANCE_CHARS,
+            "guidance acima do cap do prompt: {} chars",
+            TASK_SPEC.guidance.chars().count()
         );
     }
 }

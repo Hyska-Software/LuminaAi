@@ -34,7 +34,7 @@ pub static SUBMIT_PLAN_SPEC: ToolSpec = ToolSpec {
     mutating: false,
     requires_workspace: false,
     profiles: &[TurnProfile::Code],
-    guidance: "Use `submit_plan` only in Plan mode, once the plan is implementation-ready. Investigate the repository first; never invent paths. Required: goal, current context with exact files/symbols, in/out scope, changes per file, ordered steps with observable completion criteria, tests/commands with expected results, risks/rollback and an acceptance checklist. Be concise (2-6k chars typical; 20k max, 300 min): no filler, no restating the request, no full implementation or diff; code only for ambiguous interfaces (max 10 lines). On feedback, address every point and resubmit.",
+    guidance: "Use `submit_plan` only in Plan mode, once the plan is implementation-ready. Investigate enough to name exact files/symbols (delegate broad mapping to parallel `task` subagents); never invent paths. Required: goal, current context with exact files/symbols, in/out scope, changes per file, ordered steps with observable completion criteria, tests/commands with expected results, risks/rollback and an acceptance checklist. Be concise (2-6k chars typical; 20k max, 300 min): no filler, no restating the request, no full implementation or diff; code only for ambiguous interfaces (max 10 lines). On feedback, address every point and resubmit.",
 };
 
 pub static ASK_USER_SPEC: ToolSpec = ToolSpec {

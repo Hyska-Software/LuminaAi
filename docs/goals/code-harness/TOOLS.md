@@ -405,6 +405,8 @@ M  src/app.ts           (staged)
   profundidade.
 - **Política**: `Read` no pai (a delegação em si não muta); `task` é `Safe`, então chamadas
   independentes no mesmo passo rodam em paralelo (semáforo de 4; teto de 4 delegações por turno).
+  No layout Agentes, lotes em que **todas** as chamadas são `Safe`+`Read` do registry também rodam
+  em paralelo; escrita, shell, MCP, tools de agente e nomes fora do registry mantêm a ordem.
   Eventos filtrados do filho são encaminhados como `subagent_started`/`subagent_event`/
   `subagent_finished` para o card ao vivo do “Thinking”. Timeout de 15 min; cancelamento do pai
   propaga o token ao filho e espera a limpeza (período de graça).

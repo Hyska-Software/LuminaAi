@@ -261,9 +261,10 @@ pub fn continuation_prompt(
             )
         }
         ContinueReason::MissingVerification => "You changed files in this turn but have not \
-             verified the project since the last change. Run `run_checks` (or the project's check \
-             command with `run_command`), read the exit code, and fix what it reports before \
-             answering."
+             verified them since the last change. Run the narrowest check that covers the change \
+             (the project typecheck/lint or the related test file with `run_command`; \
+             `run_checks` when the full suite is the right scope), read the exit code, and fix \
+             what it reports before answering."
             .to_string(),
         ContinueReason::MissingTodoLedger => "You changed files without a `todo_write` list, so \
              the app cannot verify that the work is complete. Call `todo_write` with the \
@@ -721,6 +722,19 @@ mod tests {
         assert!(budget_notice(4, 4).is_none(), "short budgets are skipped");
         assert!(budget_notice(96, 120).is_some());
         assert_eq!(budget_notice(95, 120), None);
+    }
+
+    #[test]
+    fn missing_verification_prompt_asks_for_the_narrowest_check() {
+        let prompt = continuation_prompt(
+            ContinueReason::MissingVerification,
+            &[],
+            &TurnProgress::default(),
+            1,
+        );
+        assert!(prompt.starts_with("[completion-gate] "), "{prompt}");
+        assert!(prompt.contains("narrowest check"), "{prompt}");
+        assert!(prompt.contains("`run_command`"), "{prompt}");
     }
 
     #[test]

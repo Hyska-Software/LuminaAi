@@ -79,18 +79,23 @@ impl SubagentKind {
                 "You are an exploration subagent. Read the relevant files, answer the \
                  question with concrete paths and line numbers, and return an objective summary. You \
                  CANNOT edit files, run shell commands, ask the user or delegate — the parent will \
-                 make the changes. Return a concise report (lead with the answer, then evidence)."
+                 make the changes. Return a concise report (lead with the answer, then evidence). \
+                 Investigate only what the parent's question needs: batch independent reads/searches \
+                 in one step and stop as soon as you can answer."
             }
             Self::Review => {
                 "You are a reviewer subagent. Examine the repository changes (git diff/status) \
                  and the parent's request, point out bugs, risks, missing tests and concrete \
                  suggestions. You CANNOT edit files, run shell commands, ask the user or delegate. \
-                 Return findings ordered by severity, each with path:line and a concrete fix."
+                 Return findings ordered by severity, each with path:line and a concrete fix. \
+                 Batch git/read calls in one step and stop when the risks are covered."
             }
             Self::General => {
                 "You are a support subagent. Investigate the workspace and answer with a summary \
                  useful to another agent. You CANNOT edit files, run shell commands, ask the user \
-                 or delegate. State assumptions and return a concise, self-contained report."
+                 or delegate. State assumptions and return a concise, self-contained report. \
+                 Batch independent reads/searches in one step and stop as soon as the parent's \
+                 question is answerable."
             }
         }
     }
@@ -1097,6 +1102,12 @@ mod tests {
         assert_eq!(SubagentKind::parse("geral"), Some(SubagentKind::General));
         assert_eq!(SubagentKind::parse("x"), None);
         assert!(SubagentKind::Review.instructions().contains("reviewer"));
+        for kind in [SubagentKind::Explore, SubagentKind::Review, SubagentKind::General] {
+            assert!(
+                kind.instructions().contains("one step"),
+                "{kind:?} sem orientação de economia de passos"
+            );
+        }
     }
 
     #[test]

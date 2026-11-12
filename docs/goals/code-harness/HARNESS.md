@@ -550,12 +550,13 @@ pub struct ContextStats { pub used: u32, pub window: u32, pub output_cap: u32, p
 | identidade + regras de comunicação | 0,8k |
 | ambiente (OS/shell/workspace/git/data) | 0,6k |
 | política (modo, plano, segredos, untrusted) | 0,8k |
+| estilo de trabalho (esforço proporcional, paralelismo, delegação) | 0,5k |
 | orientações das tools (geradas por `ToolSpec`) | 3–4k |
 | regras de edição/verificação | 1,2k |
 | projeto (AGENTS.md + manifests + comandos + árvore resumida + git resumo) | 3–5k |
 | formato de resposta/citações | 0,6k |
 | UI generativa (notas do Code + seção gerada do contrato) | 2–3k |
-| **total** | **~12–16k tokens** |
+| **total** | **~12–17k tokens** |
 
 - Prefixo estável primeiro (identidade/ambiente/política/tools) em um **snapshot persistido por
   sessão** (`prompt_snapshots`); nada que muda em um turno normal entra no system prompt. O volátil

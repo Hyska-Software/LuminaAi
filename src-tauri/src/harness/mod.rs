@@ -4778,50 +4778,80 @@ async fn execute_tools(runtime: &ToolRuntime, calls: &[ToolCallRecord]) -> Vec<T
     join_all(futures).await
 }
 
+/// One agent-turn tool call, dispatched to the Chat or Code executor.
+async fn dispatch_agent_tool(
+    ctx: &crate::tools::registry::ToolCtx,
+    runtime: &ToolRuntime,
+    call: &ToolCallRecord,
+) -> ToolOutcome {
+    if matches!(call.name.as_str(), "create_file" | "run_code" | "list_artifacts" | "read_artifact") {
+        if !ctx.is_tool_enabled(&call.name) {
+            return ToolOutcome::error(format!("TOOL_NOT_ENABLED: a ferramenta `{}` não está habilitada neste turno", call.name));
+        }
+        let policy = match call.name.as_str() {
+            "create_file" => Some((crate::domain::RiskClass::Write, "Criar arquivo")),
+            "run_code" => Some((crate::domain::RiskClass::Shell, "Executar código")),
+            _ => None,
+        };
+        if let Some((risk, title)) = policy {
+            let mut call_ctx = ctx.clone();
+            call_ctx.tool_call_id = call.id.clone();
+            let detail = crate::domain::ApprovalDetail::Other {
+                text: format!("Ferramenta `{}` solicitada pelo agente.", call.name),
+            };
+            if let Err(outcome) = crate::tools::code::exec::policy_check(
+                &call_ctx,
+                &call.name,
+                risk,
+                true,
+                None,
+                false,
+                None,
+                detail,
+                title,
+            )
+            .await
+            {
+                return outcome;
+            }
+        }
+        tools::execute(runtime, call).await
+    } else {
+        code::tools::execute(ctx, call).await
+    }
+}
+
+/// Whether a batch can run concurrently: every call is a registry-declared
+/// `Safe` + `Read` tool (no mutation, shell, approval-bearing action, MCP or
+/// unknown dispatch).
+fn agent_call_is_parallel_read(call: &ToolCallRecord) -> bool {
+    use crate::domain::RiskClass;
+    use crate::tools::registry::{find_spec, ParallelClass};
+    if matches!(call.name.as_str(), "create_file" | "run_code") {
+        return false;
+    }
+    find_spec(TurnProfile::Code, &call.name)
+        .or_else(|| find_spec(TurnProfile::Chat, &call.name))
+        .is_some_and(|spec| spec.parallel == ParallelClass::Safe && spec.risk == RiskClass::Read)
+}
+
 async fn execute_agent_tools(ctx: &crate::tools::registry::ToolCtx, runtime: &ToolRuntime, calls: &[ToolCallRecord]) -> Vec<ToolOutcome> {
-    // Preserve request order across desktop/browser actions, filesystem writes,
-    // and Chat tools. Running a mixed batch concurrently can race approvals and
-    // make the observed state differ from the state an action operates on.
+    // Mutating, shell, MCP, agent-only and unknown tools stay ordered: running
+    // them concurrently can race approvals and make the observed state differ
+    // from the state an action operates on. An all-read batch has no such
+    // hazard, so it runs together (the same contract the Code profile already
+    // applies in `code::tools::execute_batch`).
+    if calls.len() > 1 && calls.iter().all(agent_call_is_parallel_read) {
+        return join_all(
+            calls
+                .iter()
+                .map(|call| dispatch_agent_tool(ctx, runtime, call)),
+        )
+        .await;
+    }
     let mut outcomes = Vec::with_capacity(calls.len());
     for call in calls {
-        let outcome = if matches!(call.name.as_str(), "create_file" | "run_code" | "list_artifacts" | "read_artifact") {
-            if !ctx.is_tool_enabled(&call.name) {
-                ToolOutcome::error(format!("TOOL_NOT_ENABLED: a ferramenta `{}` não está habilitada neste turno", call.name))
-            } else {
-                let policy = match call.name.as_str() {
-                    "create_file" => Some((crate::domain::RiskClass::Write, "Criar arquivo")),
-                    "run_code" => Some((crate::domain::RiskClass::Shell, "Executar código")),
-                    _ => None,
-                };
-                if let Some((risk, title)) = policy {
-                    let mut call_ctx = ctx.clone();
-                    call_ctx.tool_call_id = call.id.clone();
-                    let detail = crate::domain::ApprovalDetail::Other {
-                        text: format!("Ferramenta `{}` solicitada pelo agente.", call.name),
-                    };
-                    if let Err(outcome) = crate::tools::code::exec::policy_check(
-                        &call_ctx,
-                        &call.name,
-                        risk,
-                        true,
-                        None,
-                        false,
-                        None,
-                        detail,
-                        title,
-                    )
-                    .await
-                    {
-                        outcomes.push(outcome);
-                        continue;
-                    }
-                }
-                tools::execute(runtime, call).await
-            }
-        } else {
-            code::tools::execute(ctx, call).await
-        };
-        outcomes.push(outcome);
+        outcomes.push(dispatch_agent_tool(ctx, runtime, call).await);
     }
     outcomes
 }
@@ -13081,5 +13111,141 @@ mod agent_loop_tests {
             .contains("mcp__fake__echo"));
         assert!(mcp_tools_prompt_section(std::slice::from_ref(&mcp_tool), 0)
             .contains("mcp__fake__echo"));
+    }
+
+    fn agent_test_runtime() -> ToolRuntime {
+        ToolRuntime {
+            db: Arc::new(crate::db::Db::open_in_memory().expect("db")),
+            http: reqwest::Client::new(),
+            conversation_id: "conv-1".into(),
+            message_id: "msg-1".into(),
+            options: TurnOptions::default(),
+            settings: Settings::default(),
+            cancel: CancellationToken::new(),
+            agent_hooks: None,
+            data_dir: std::env::temp_dir().join("zylara-agent-tools-test"),
+            skills_roots: Vec::new(),
+        }
+    }
+
+    fn agent_test_ctx(
+        subagent: Arc<dyn crate::harness::code::subagent::SubagentRunner>,
+    ) -> crate::tools::registry::ToolCtx {
+        crate::tools::registry::ToolCtx {
+            db: Arc::new(crate::db::Db::open_in_memory().expect("db")),
+            http: reqwest::Client::new(),
+            conversation_id: "conv-1".into(),
+            message_id: "msg-1".into(),
+            tool_call_id: "call-1".into(),
+            turn_id: "turn-1".into(),
+            workspace: Some(crate::tools::registry::WorkspaceHandle {
+                root: std::env::temp_dir(),
+                trusted: true,
+                internal: false,
+                permission_mode: crate::domain::PermissionMode::Autonomous,
+            }),
+            settings: Settings::default(),
+            cancel: CancellationToken::new(),
+            agent_hooks: None,
+            data_dir: std::env::temp_dir().join("zylara-agent-tools-test"),
+            approval: None,
+            observed: None,
+            jobs: None,
+            questions: None,
+            turn_kind: TurnKind::User,
+            mcp: None,
+            subagent: Some(subagent),
+            enabled_tools: Arc::new(["task".to_string()].into_iter().collect()),
+            subagent_budget: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            subagent_slots: Arc::new(tokio::sync::Semaphore::new(
+                code::subagent::MAX_CONCURRENT_SUBAGENTS,
+            )),
+            skills_roots: Vec::new(),
+            allowed_skills: None,
+            emit: None,
+            rules: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn parallel_read_predicate_only_accepts_safe_read_tools() {
+        let call = |name: &str| ToolCallRecord::running(format!("c-{name}"), name);
+        for name in ["task", "read_file", "search_text", "git_log", "read_artifact"] {
+            assert!(
+                agent_call_is_parallel_read(&call(name)),
+                "{name} deveria ser paralelo"
+            );
+        }
+        for name in [
+            "write_file",
+            "edit_file",
+            "run_command",
+            "run_checks",
+            "create_file",
+            "run_code",
+            "mcp__fs__read",
+            "memory",
+            "ask_user",
+        ] {
+            assert!(
+                !agent_call_is_parallel_read(&call(name)),
+                "{name} não deveria ser paralelo"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_read_only_batches_run_in_parallel() {
+        struct BarrierRunner {
+            barrier: Arc<tokio::sync::Barrier>,
+        }
+        impl crate::harness::code::subagent::SubagentRunner for BarrierRunner {
+            fn run(
+                &self,
+                _request: crate::harness::code::subagent::SubagentRequest,
+                _cancel: CancellationToken,
+                _progress: Option<Arc<dyn EventEmitter>>,
+            ) -> BoxFuture<
+                'static,
+                anyhow::Result<crate::harness::code::subagent::SubagentOutcome>,
+            > {
+                let barrier = self.barrier.clone();
+                Box::pin(async move {
+                    barrier.wait().await;
+                    Ok(crate::harness::code::subagent::SubagentOutcome {
+                        conversation_id: "child-conv".to_string(),
+                        provider_id: "opencode-go".to_string(),
+                        model_id: "deepseek-v4.1-flash".to_string(),
+                        effort: None,
+                        text: "ok".to_string(),
+                        usage: None,
+                        steps: 1,
+                        duration_ms: 1,
+                    })
+                })
+            }
+        }
+
+        let ctx = agent_test_ctx(Arc::new(BarrierRunner {
+            barrier: Arc::new(tokio::sync::Barrier::new(2)),
+        }));
+        let runtime = agent_test_runtime();
+        let mut first = ToolCallRecord::running("task-1", "task");
+        first.arguments =
+            serde_json::json!({ "description": "Explorar A", "prompt": "Mapeie A" }).to_string();
+        let mut second = ToolCallRecord::running("task-2", "task");
+        second.arguments =
+            serde_json::json!({ "description": "Explorar B", "prompt": "Mapeie B" }).to_string();
+        let outcomes = tokio::time::timeout(
+            Duration::from_secs(3),
+            execute_agent_tools(&ctx, &runtime, &[first, second]),
+        )
+        .await
+        .expect("as duas tasks devem rodar em paralelo");
+        assert_eq!(outcomes.len(), 2);
+        assert!(
+            outcomes.iter().all(|outcome| !outcome.is_error),
+            "{outcomes:?}"
+        );
     }
 }

@@ -9,8 +9,9 @@
 //! na cauda, nunca no head cacheável.
 //!
 //! Ordem das seções é estável (prefixo cacheável no provedor): identidade →
-//! ambiente → política → ferramentas → edição/verificação → workspace →
-//! instruções do projeto → formato → UI generativa.
+//! ambiente → política → estilo de trabalho → autonomia → ferramentas →
+//! edição/verificação → workspace → instruções do projeto → formato → UI
+//! generativa.
 //!
 //! Contrato e orçamento: `docs/goals/code-harness/HARNESS.md` §10.4 e §12;
 //! cache de prefixo: `docs/goals/prompt-cache/PLAN.md` §4.2/§4.3/§4.4.
@@ -26,7 +27,7 @@ use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
-pub const PROMPT_VERSION: u32 = 8;
+pub const PROMPT_VERSION: u32 = 9;
 
 /// Orientação de uma ferramenta habilitada no turno (gerada pelo registry).
 #[derive(Debug, Clone, Copy)]
@@ -198,6 +199,42 @@ fn autonomy_section() -> &'static str {
      - Never claim a command, test or build passed unless you ran it in this turn and saw the \
        exit code.\n\
      - Leave the workspace consistent: do not stop with code that you know does not compile.\n"
+}
+
+/// How much investigation and verification a change deserves (stable system
+/// prompt).
+///
+/// The autonomy section and the completion gate still require an end-to-end
+/// finish; this section only removes self-imposed over-investigation:
+/// sequential reconnaissance, repeated reads and full-suite checks for a
+/// localized edit.
+fn working_style_section() -> &'static str {
+    "# Working style\n\n\
+     Effort matches the task: move fast on small, well-scoped changes; go deep only when the \
+     request is ambiguous, cross-cutting or risky. Project instructions (`AGENTS.md`) still \
+     apply.\n\
+     - **Fast path** (one file or a clear, localized change): read the target file, its direct \
+       callers and the nearest test, then edit and verify. Do not map the architecture, read \
+       broad documentation or re-derive context already in the conversation.\n\
+     - **Deep path** (unclear surface, cross-cutting change, migration, security or performance \
+       work): map the affected areas and plan the steps first. Depth here is an investment, not \
+       a default.\n\
+     - **Batch independent work in one step**: request the `read_file`/`search_text`/`list_dir`/\
+       `git_*` calls you need together, not one per step. Reuse results already in the \
+       conversation; never repeat a read or a passing check.\n\
+     - **Delegate broad, independent exploration**: when two or more areas can be investigated \
+       separately (layers, modules, docs), launch 2-4 `task` subagents (`subagent_type: \
+       \"explore\"`) in the same step — each with a self-contained question and the exact report \
+       you need. Implement yourself; do not delegate a change you can already scope.\n\
+     - Stop investigating once the evidence is enough to implement; extra reconnaissance is a \
+       cost, not a safety net.\n\
+     - **Verify in proportion**: run the narrowest check that exercises the change (typecheck, \
+       the related test file, the relevant lint) once; use the full suite only for \
+       cross-cutting or release-level work.\n\
+     - Never ask what the repository, the docs or this conversation already answers; ask only \
+       when a decision changes what you build.\n\
+     - Do not expand scope: implement the request and leave unrelated code, formatting and \
+       refactors alone.\n"
 }
 
 /// Nome curto do modo de permissão (contexto volátil do turno).
@@ -508,8 +545,9 @@ pub fn build_runtime_context(ctx: &CodeContext, has_todo_write: bool) -> String 
              delete, install or compose with `;`/`&`/`|`/redirection are denied with \
              `PLAN_MODE_ACTIVE`. Use `read_file` for normal files, `search_text`/`search_files` \
              with a specific file path to inspect one file, and a read-only command for large \
-             logs. Read the relevant entry points, modules, tests and docs before planning, and \
-             never invent paths or symbols. When ready, call `submit_plan` with an \
+             logs. Read the relevant entry points, modules, tests and docs before planning \
+             (delegate broad mapping to parallel `task` subagents), and never invent paths or \
+             symbols. When ready, call `submit_plan` with an \
              implementation-ready plan (goal, exact files/symbols, scope, per-file changes, \
              ordered steps with done criteria, tests/commands, risks/rollback and acceptance \
              criteria). Keep it concise and grounded in evidence; on feedback, address every \
@@ -560,10 +598,12 @@ fn editing_section() -> &'static str {
        unrelated to the task.\n\
      - If an `edit_file` fails due to ambiguity, include more context in `old_string` instead of \
        using `replace_all` blindly.\n\
-     - **Verify**: run the project's test/lint/build command when it exists and read the exit \
-       code; do not claim something works without evidence (`[exit code: 0]`, green tests).\n\
-     - **Finish the job**: implement, then run the project's verification (`run_checks` when \
-       available, or the detected check command) and fix what it reports. Summarize what \
+     - **Verify**: run the narrowest check that exercises the change (the project's typecheck/\
+       lint or the related test file) and read the exit code; do not claim something works \
+       without evidence (`[exit code: 0]`, green tests).\n\
+     - **Finish the job**: implement, then run the verification that covers the change \
+       (`run_checks` when the project suite is the right scope, otherwise the detected narrow \
+       check) and fix what it reports. Summarize what \
        changed per file (`path:line` when useful) and list remaining work only when the user \
        or an external blocker must act. Do not paste entire diffs in the response: the user \
        sees the Changes panel.\n\
@@ -681,6 +721,8 @@ pub fn build_system_prompt(
     out.push_str(permission_section(ctx));
     out.push('\n');
     if !ctx.subagent {
+        out.push_str(working_style_section());
+        out.push('\n');
         out.push_str(autonomy_section());
         out.push('\n');
     }
@@ -844,6 +886,7 @@ mod tests {
         for needle in [
             "# Environment",
             "# Permission policy",
+            "# Working style",
             "# Autonomy and completion",
             "# Available tools",
             "## `read_file`",
@@ -889,6 +932,34 @@ mod tests {
         let child =
             build_system_prompt(&model(), &subagent, &[], "Windows", "2026-10-27", "pt-BR");
         assert!(!child.contains("# Autonomy and completion"), "{child}");
+    }
+
+    #[test]
+    fn working_style_section_is_proportional_and_only_in_the_top_level_prompt() {
+        let top = build_system_prompt(&model(), &ctx(), &[], "Windows", "2026-10-27", "pt-BR");
+        for needle in [
+            "# Working style",
+            "**Fast path**",
+            "**Deep path**",
+            "Delegate broad, independent exploration",
+            "Verify in proportion",
+        ] {
+            assert!(top.contains(needle), "trecho ausente: {needle}");
+        }
+        let permission = top.find("# Permission policy").expect("política");
+        let style = top.find("# Working style").expect("estilo");
+        let autonomy = top.find("# Autonomy and completion").expect("autonomia");
+        assert!(
+            permission < style && style < autonomy,
+            "ordem das seções instável: política={permission} estilo={style} autonomia={autonomy}"
+        );
+
+        let mut subagent = ctx();
+        subagent.subagent = true;
+        let child =
+            build_system_prompt(&model(), &subagent, &[], "Windows", "2026-10-27", "pt-BR");
+        assert!(!child.contains("# Working style"), "{child}");
+        assert!(!child.contains("**Fast path**"), "{child}");
     }
 
     #[test]
@@ -1064,8 +1135,9 @@ mod tests {
         assert!(prompt.contains("…[truncated]"));
         // O prompt estável não carrega a árvore (volátil) e não explode.
         assert!(!prompt.contains("yyyy"));
-        // AGENTS.md truncado + seções fixas + contrato de UI generativa.
-        assert!(prompt.chars().count() < MAX_AGENTS_MD_CHARS + 24_000);
+        // AGENTS.md truncado + seções fixas + estilo de trabalho + contrato de
+        // UI generativa (~0,5k tokens a mais que o teto antigo de 24k chars).
+        assert!(prompt.chars().count() < MAX_AGENTS_MD_CHARS + 26_000);
         // A árvore truncada vai para o contexto volátil do turno.
         let runtime = build_runtime_context(&context, true);
         assert!(runtime.contains("…[truncated]"));
