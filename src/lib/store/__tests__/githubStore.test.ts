@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  githubAccount: vi.fn(),
   githubSetToken: vi.fn(),
   githubClearToken: vi.fn(),
   githubConnection: vi.fn(),
@@ -37,6 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   useGitHubStore.setState({
     account: { data: null, loading: false, error: null },
+    accountLoadedAt: null,
     connections: {},
     pullRequests: {},
     pullRequestDetails: {},
@@ -66,6 +68,36 @@ describe('githubStore', () => {
 
     expect(Object.keys(useGitHubStore.getState().pullRequests)).toEqual(['ws-2\u0000{"page":1}']);
     expect(Object.keys(useGitHubStore.getState().issues)).toEqual(['ws-2\u0000{"page":1}']);
+  });
+
+  it('sonda a conta uma única vez enquanto a resposta está fresca', async () => {
+    mocks.githubAccount.mockResolvedValue(account);
+
+    await useGitHubStore.getState().loadAccount();
+    await useGitHubStore.getState().loadAccount();
+
+    expect(mocks.githubAccount).toHaveBeenCalledTimes(1);
+    expect(useGitHubStore.getState().account.data).toEqual(account);
+  });
+
+  it('refresh força uma nova sondagem mesmo com a conta em cache', async () => {
+    mocks.githubAccount.mockResolvedValue(account);
+
+    await useGitHubStore.getState().loadAccount();
+    await useGitHubStore.getState().loadAccount({ refresh: true });
+
+    expect(mocks.githubAccount).toHaveBeenCalledTimes(2);
+  });
+
+  it('duas sondagens concorrentes compartilham a mesma chamada', async () => {
+    mocks.githubAccount.mockResolvedValue(account);
+
+    await Promise.all([
+      useGitHubStore.getState().loadAccount(),
+      useGitHubStore.getState().loadAccount(),
+    ]);
+
+    expect(mocks.githubAccount).toHaveBeenCalledTimes(1);
   });
 
   it('conectar outra conta descarta caches e recarrega as conexões abertas', async () => {

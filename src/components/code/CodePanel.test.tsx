@@ -608,6 +608,50 @@ describe('CodePanel — histórico de commits', () => {
     await user.click(within(menu).getByRole('menuitem', { name: /Enviar \(push\)/ }));
     await waitFor(() => expect(apiMock.gitPush).toHaveBeenCalledWith('ws-1'));
   });
+
+  it('mantém o menu do Git montado quando o status volta desconhecido', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ id: 'conv-1', workspaceId: 'ws-1' })],
+      activeId: 'conv-1',
+    });
+    apiMock.listWorkspaces.mockResolvedValue([workspace()]);
+    apiMock.refreshWorkspaceTree.mockResolvedValue({
+      files: [],
+      dirs: {},
+      gitStatus: {
+        isRepo: true,
+        root: 'C:/projetos/zylara',
+        branch: 'main',
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+      },
+    });
+
+    render(<CodePanel />);
+
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole('button', { name: 'Ações do git' });
+    await waitFor(() => expect(watchEvents.handlers.length).toBe(1));
+    await user.click(trigger);
+    await screen.findByRole('menu');
+
+    // Recarga automática falhando: o hook devolve `gitStatus: null` (desconhecido).
+    apiMock.refreshWorkspaceTree.mockRejectedValueOnce(new Error('disco ocupado'));
+    act(() => {
+      watchEvents.handlers[0]?.({
+        payload: { workspaceId: 'ws-1', paths: ['src/a.ts'], overflow: false },
+      });
+    });
+    await waitFor(() => expect(apiMock.refreshWorkspaceTree).toHaveBeenCalledTimes(2));
+
+    const stillMounted = await screen.findByRole('button', { name: 'Ações do git' });
+    // Mesmo nó: a barra do git mantém o último estado conhecido (repositório)
+    // em vez de desmontar — e o menu aberto sobrevive à recarga.
+    expect(stillMounted).toBe(trigger);
+    expect(screen.getByRole('menu')).toBeTruthy();
+  });
 });
 describe('CodePanel — árvore lazy', () => {
   it('carrega os filhos ao abrir um diretório mais profundo e abre o arquivo', async () => {

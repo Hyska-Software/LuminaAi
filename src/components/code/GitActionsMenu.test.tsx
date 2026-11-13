@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mocks = vi.hoisted(() => ({
+  githubAccount: vi.fn(),
   gitFetch: vi.fn(),
   gitPull: vi.fn(),
   gitPush: vi.fn(),
@@ -13,6 +14,7 @@ const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('@/lib/api', () => ({ api: mocks }));
 vi.mock('sonner', () => ({ toast: toastMocks }));
 
+import { useGitHubStore } from '@/lib/store';
 import { GitActionsMenu } from './GitActionsMenu';
 
 const status = {
@@ -30,9 +32,19 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.githubAccount.mockResolvedValue({
+    authenticated: false,
+    login: null,
+    source: 'none',
+    scopes: [],
+  });
   mocks.gitFetch.mockResolvedValue(status);
   mocks.gitPull.mockResolvedValue(status);
   mocks.gitPush.mockResolvedValue(status);
+  useGitHubStore.setState({
+    account: { data: null, loading: false, error: null },
+    accountLoadedAt: null,
+  });
 });
 
 describe('GitActionsMenu', () => {
@@ -102,5 +114,41 @@ describe('GitActionsMenu', () => {
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(mocks.gitFetch).not.toHaveBeenCalled();
+  });
+
+  it('sonda a conta uma única vez para aberturas consecutivas', async () => {
+    const user = userEvent.setup();
+    render(<GitActionsMenu workspaceId="ws-1" isRepo />);
+
+    for (let open = 0; open < 2; open += 1) {
+      await user.click(screen.getByRole('button', { name: 'Ações do git' }));
+      await screen.findByRole('menu');
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    }
+
+    // A sondagem da conta pode resolver o token pelo CLI `gh` (processo novo a
+    // cada chamada): o menu reaberto não pode repetir o IPC.
+    expect(mocks.githubAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it('não fecha quando a janela perde o foco', async () => {
+    const user = userEvent.setup();
+    render(<GitActionsMenu workspaceId="ws-1" isRepo />);
+
+    await user.click(screen.getByRole('button', { name: 'Ações do git' }));
+    await screen.findByRole('menu');
+
+    // Foco indo para fora do app (janela nativa, CLI, outro aplicativo): a
+    // camada do Radix não pode dispensar o menu por causa disso.
+    window.dispatchEvent(new Event('blur'));
+    const outside = document.createElement('button');
+    outside.textContent = 'outside';
+    document.body.appendChild(outside);
+    fireEvent.focusIn(outside);
+    window.dispatchEvent(new Event('focus'));
+
+    expect(screen.getByRole('menu')).toBeTruthy();
+    outside.remove();
   });
 });

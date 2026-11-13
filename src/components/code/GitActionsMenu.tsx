@@ -170,7 +170,7 @@ export function GitActionsMenu({
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
@@ -186,7 +186,14 @@ export function GitActionsMenu({
             {busy ? t(BUSY_KEYS[busy]) : 'Git'}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-56">
+        {/* Non-modal + focus-outside ignored: the menu must survive the app
+            losing focus (a native dialog, a spawned CLI window, another app).
+            Clicking outside still dismisses it. */}
+        <DropdownMenuContent
+          align="end"
+          className="min-w-56"
+          onFocusOutside={(event) => event.preventDefault()}
+        >
           <DropdownMenuLabel>{t('code:git.sync')}</DropdownMenuLabel>
           <DropdownMenuItem
             icon={<RefreshCw aria-hidden className="size-4" strokeWidth={1.75} />}

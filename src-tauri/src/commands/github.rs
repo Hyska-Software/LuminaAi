@@ -5,7 +5,8 @@
 //! workspace remote and the token from `secrets.json` → environment → `gh` CLI;
 //! the renderer never sees a token.
 
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use serde::de::DeserializeOwned;
@@ -40,6 +41,9 @@ const COLLECTION_PER_PAGE: &str = "100";
 const COLLECTION_PAGES_MAX: u32 = 10;
 /// GitHub CLI token probe must never block a command for long.
 const GH_CLI_TIMEOUT: Duration = Duration::from_secs(4);
+/// How long the `gh auth token` answer is reused. Every GitHub command resolves
+/// the token and the probe spawns a process, so the answer is kept briefly.
+const GH_CLI_CACHE_TTL: Duration = Duration::from_secs(60);
 
 fn to_error(error: GitHubError) -> String {
     error.message()
@@ -172,16 +176,48 @@ fn issue_update_body(
 /* Credentials and repository                                          */
 /* ------------------------------------------------------------------ */
 
+/// Last `gh auth token` probe (`None` = the CLI has no token or is not
+/// installed). Shared by every command so the CLI is not spawned per call.
+static GH_CLI_CACHE: OnceLock<tokio::sync::Mutex<Option<(Option<String>, Instant)>>> = OnceLock::new();
+
+fn gh_cli_cache() -> &'static tokio::sync::Mutex<Option<(Option<String>, Instant)>> {
+    GH_CLI_CACHE.get_or_init(|| tokio::sync::Mutex::new(None))
+}
+
+/// A cached probe is reusable while it is younger than [`GH_CLI_CACHE_TTL`].
+fn cache_age_is_fresh(age: Duration) -> bool {
+    age < GH_CLI_CACHE_TTL
+}
+
+/// Drops the cached probe: storing or clearing a token changes the answer.
+async fn invalidate_gh_cli_cache() {
+    *gh_cli_cache().lock().await = None;
+}
+
+/// The app is a GUI binary, so a console child spawned without this flag gets a
+/// visible window that steals the focus — and with it the open menus.
+fn hide_console(command: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// `gh auth token` — the last credential fallback (same order as API keys).
 async fn gh_cli_token() -> Option<String> {
     use tokio::process::Command;
-    let output = tokio::time::timeout(
-        GH_CLI_TIMEOUT,
-        Command::new("gh").args(["auth", "token"]).output(),
-    )
-    .await
-    .ok()?
-    .ok()?;
+    let mut command = Command::new("gh");
+    command
+        .args(["auth", "token"])
+        .stdin(std::process::Stdio::null());
+    hide_console(&mut command);
+    let output = tokio::time::timeout(GH_CLI_TIMEOUT, command.output())
+        .await
+        .ok()?
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -189,21 +225,41 @@ async fn gh_cli_token() -> Option<String> {
     (!token.is_empty()).then_some(token)
 }
 
-/// Token plus its source (`settings`, `env`, `gh-cli`).
-async fn resolve_token(app: &AppHandle) -> (Option<String>, &'static str) {
-    let secrets = config::github_secrets(app);
-    let env = config::github_token_from_env();
-    let has_cheap_source = secrets
+/// Cached [`gh_cli_token`]: repeated commands reuse the probe for
+/// [`GH_CLI_CACHE_TTL`] instead of spawning the CLI again. Concurrent callers
+/// wait on the same probe, so an opening menu never starts extra processes.
+async fn gh_cli_token_cached() -> Option<String> {
+    let mut cached = gh_cli_cache().lock().await;
+    if let Some((token, at)) = cached.as_ref() {
+        if cache_age_is_fresh(at.elapsed()) {
+            return token.clone();
+        }
+    }
+    let probe = gh_cli_token().await;
+    *cached = Some((probe.clone(), Instant::now()));
+    probe
+}
+
+/// Whether the token can be resolved without spawning the CLI (`gh`). A cheap
+/// source means no process on the UI path — and therefore no console window.
+fn has_cheap_token_source(secrets: &config::GitHubSecrets, env: Option<&str>) -> bool {
+    secrets
         .token
         .as_deref()
         .map(str::trim)
         .filter(|token| !token.is_empty())
         .is_some()
-        || env.is_some();
-    if has_cheap_source {
+        || env.is_some()
+}
+
+/// Token plus its source (`settings`, `env`, `gh-cli`).
+async fn resolve_token(app: &AppHandle) -> (Option<String>, &'static str) {
+    let secrets = config::github_secrets(app);
+    let env = config::github_token_from_env();
+    if has_cheap_token_source(&secrets, env.as_deref()) {
         return config::resolve_github_token(&secrets, env, || None);
     }
-    let cli = gh_cli_token().await;
+    let cli = gh_cli_token_cached().await;
     config::resolve_github_token(&secrets, env, || cli)
 }
 
@@ -312,6 +368,7 @@ pub async fn github_set_token(
     let login = user.login.trim().to_string();
     config::set_github_credentials(&app, Some(token), Some(&login), &scopes)
         .map_err(|error| format!("{error:#}"))?;
+    invalidate_gh_cli_cache().await;
     Ok(account_view(Some(login), "settings", scopes))
 }
 
@@ -319,6 +376,7 @@ pub async fn github_set_token(
 pub async fn github_clear_token(app: AppHandle) -> Result<GitHubAccount, String> {
     config::set_github_credentials(&app, None, None, &[])
         .map_err(|error| format!("{error:#}"))?;
+    invalidate_gh_cli_cache().await;
     let (token, source) = resolve_token(&app).await;
     Ok(GitHubAccount {
         authenticated: token.is_some(),
@@ -1246,6 +1304,35 @@ mod tests {
             reviewer_delta(&current, &current),
             (Vec::new(), Vec::new())
         );
+    }
+
+    #[test]
+    fn gh_cli_cache_is_reused_only_inside_the_ttl() {
+        assert!(cache_age_is_fresh(Duration::ZERO));
+        assert!(cache_age_is_fresh(Duration::from_secs(59)));
+        assert!(!cache_age_is_fresh(GH_CLI_CACHE_TTL));
+        assert!(!cache_age_is_fresh(Duration::from_secs(600)));
+    }
+
+    #[test]
+    fn cheap_token_sources_never_spawn_the_cli() {
+        let from_settings = config::GitHubSecrets {
+            token: Some("  ghp_settings  ".to_string()),
+            ..config::GitHubSecrets::default()
+        };
+        assert!(has_cheap_token_source(&from_settings, None));
+        assert!(has_cheap_token_source(&from_settings, Some("ghp_env")));
+
+        let from_env = config::GitHubSecrets::default();
+        assert!(has_cheap_token_source(&from_env, Some("ghp_env")));
+        // Neither settings nor env: only then the `gh` CLI probe is allowed.
+        assert!(!has_cheap_token_source(&from_env, None));
+
+        let blank = config::GitHubSecrets {
+            token: Some("   ".to_string()),
+            ..config::GitHubSecrets::default()
+        };
+        assert!(!has_cheap_token_source(&blank, None));
     }
 
     #[test]

@@ -44,8 +44,23 @@ interface LoadOptions {
   refresh?: boolean;
 }
 
+/** Options of the account probe (the menu opens it on every open, so it is cached). */
+export interface LoadAccountOptions {
+  /** Probe again even when the cached answer is still fresh. */
+  refresh?: boolean;
+}
+
+/**
+ * Fresh window of the cached account probe. Every probe can resolve the token
+ * through the `gh` CLI, which spawns a process — far too expensive to repeat on
+ * each dropdown open.
+ */
+export const GITHUB_ACCOUNT_TTL_MS = 60_000;
+
 interface GitHubState {
   account: AsyncData<GitHubAccount>;
+  /** When the cached `account` was resolved (`null` = never / dropped). */
+  accountLoadedAt: number | null;
   connections: Record<string, AsyncData<GitHubConnectionView>>;
   pullRequests: Record<string, AsyncData<GitHubPullRequestList>>;
   pullRequestDetails: Record<string, AsyncData<GitHubPullRequestDetail>>;
@@ -57,7 +72,7 @@ interface GitHubState {
   /** Increments when the account changes and caches are dropped. */
   cacheEpoch: number;
 
-  loadAccount: () => Promise<GitHubAccount | null>;
+  loadAccount: (options?: LoadAccountOptions) => Promise<GitHubAccount | null>;
   connect: (token: string, workspaceId?: string | null) => Promise<GitHubAccount>;
   disconnect: () => Promise<void>;
   loadConnection: (workspaceId: string, options?: LoadOptions) => Promise<void>;
@@ -131,6 +146,7 @@ function emptyCaches() {
 
 export const useGitHubStore = create<GitHubState>()((set, get) => ({
   account: empty(),
+  accountLoadedAt: null,
   connections: {},
   pullRequests: {},
   pullRequestDetails: {},
@@ -141,14 +157,22 @@ export const useGitHubStore = create<GitHubState>()((set, get) => ({
   metas: {},
   cacheEpoch: 0,
 
-  loadAccount: async () => {
-    set((state) => ({ account: start(state.account) }));
+  loadAccount: async (options = {}) => {
+    const state = get();
+    // A probe is already running: never start a second one (the menu can open
+    // again before the first answer arrives).
+    if (!options.refresh && state.account.loading) return state.account.data;
+    const fresh =
+      state.accountLoadedAt !== null &&
+      Date.now() - state.accountLoadedAt < GITHUB_ACCOUNT_TTL_MS;
+    if (!options.refresh && state.account.data && fresh) return state.account.data;
+    set((current) => ({ account: start(current.account) }));
     try {
       const account = await api.githubAccount();
-      set({ account: { data: account, loading: false, error: null } });
+      set({ account: { data: account, loading: false, error: null }, accountLoadedAt: Date.now() });
       return account;
     } catch (error) {
-      set((state) => ({ account: fail(state.account, error, 'github:account') }));
+      set((current) => ({ account: fail(current.account, error, 'github:account') }));
       return null;
     }
   },
@@ -160,6 +184,7 @@ export const useGitHubStore = create<GitHubState>()((set, get) => ({
     const workspaces = Object.keys(get().connections);
     set({
       account: { data: account, loading: false, error: null },
+      accountLoadedAt: Date.now(),
       ...emptyCaches(),
       cacheEpoch: get().cacheEpoch + 1,
       connections: Object.fromEntries(
@@ -175,6 +200,7 @@ export const useGitHubStore = create<GitHubState>()((set, get) => ({
     const workspaces = Object.keys(get().connections);
     set({
       account: { data: account, loading: false, error: null },
+      accountLoadedAt: Date.now(),
       ...emptyCaches(),
       cacheEpoch: get().cacheEpoch + 1,
       connections: Object.fromEntries(

@@ -173,16 +173,20 @@ pnpm installer --platform windows --require-clean
 No Windows, `scripts/build-windows.ps1` encapsula o job `windows` do workflow
 para uso local: valida Node/pnpm/cargo, instala do lockfile e chama
 `pnpm installer --platform windows` — nunca tenta macOS/Linux. Por padrão exige
-árvore limpa e roda a suíte de testes; o CI usa `--skip-tests`.
+árvore limpa e **pula a suíte de testes** (rebuild rápido); use `-RunTests` para
+rodar typecheck, Vitest, testes de scripts e `cargo test` antes de compilar. O
+CI usa `--skip-tests` diretamente.
 
 ```powershell
-.\scripts\build-windows.ps1                    # build de produção + instalador
+.\scripts\build-windows.ps1                    # build de produção + instalador (sem testes)
+.\scripts\build-windows.ps1 -RunTests          # com a suíte completa
 .\scripts\build-windows.ps1 -DryRun            # valida versão, git e assets
-.\scripts\build-windows.ps1 -SkipTests         # rebuild rápido, sem a suíte
 .\scripts\build-windows.ps1 -AllowDirty        # árvore não commitada
 .\scripts\build-windows.ps1 -CertThumbprint <thumbprint> [-TimestampUrl <url>]
 .\scripts\build-windows.ps1 -Version 0.9.1     # bump + build
 ```
+
+`-SkipTests` continua aceito, mas virou no-op (pular testes já é o padrão).
 
 Aceita ainda `-Arch host|x64|arm64`, `-Channel <canal>`, `-NoSign` e
 `-SkipInstall`. O artefato sai em `release/<versão>/windows-<arch>/` com

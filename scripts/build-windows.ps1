@@ -7,8 +7,11 @@
 .DESCRIPTION
     Wrapper around scripts/build-installer.mjs with --platform windows. It
     validates the toolchain, installs the JS dependencies from the lockfile and
-    runs the release build: catalog sync, typecheck, tests, Tauri release
-    compilation and installer artifact collection.
+    runs the release build: catalog sync, Tauri release compilation and
+    installer artifact collection.
+
+    The test suite (typecheck, Vitest, script tests and cargo test) is skipped by
+    default for fast local rebuilds; pass -RunTests to include it.
 
     Output:
       release/<version>/windows-<arch>/
@@ -22,9 +25,13 @@
 .PARAMETER Version
     Writes this version to all five version sources before building.
 
+.PARAMETER RunTests
+    Runs typecheck, Vitest, script tests and cargo tests before compiling.
+    Tests are skipped by default; this switch opts back into the full suite.
+
 .PARAMETER SkipTests
-    Skips typecheck, Vitest, script tests and cargo tests. The release workflow
-    uses this flag; local production builds run the full suite by default.
+    Deprecated no-op: tests are already skipped by default. Kept so existing
+    invocations keep working. When combined with -RunTests, -RunTests wins.
 
 .PARAMETER SkipInstall
     Skips "pnpm install --frozen-lockfile" (node_modules must be present).
@@ -57,7 +64,7 @@
     .\scripts\build-windows.ps1
 
 .EXAMPLE
-    .\scripts\build-windows.ps1 -SkipTests -AllowDirty
+    .\scripts\build-windows.ps1 -RunTests -AllowDirty
 
 .EXAMPLE
     .\scripts\build-windows.ps1 -Version 0.9.1 -CertThumbprint <thumbprint>
@@ -65,6 +72,7 @@
 [CmdletBinding()]
 param(
     [string]$Version,
+    [switch]$RunTests,
     [switch]$SkipTests,
     [switch]$SkipInstall,
     [switch]$AllowDirty,
@@ -119,7 +127,7 @@ Push-Location $root
 try {
     $packageVersion = (Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
     $versionLabel = if ($Version) { "$packageVersion -> $Version" } else { $packageVersion }
-    $testLabel = if ($SkipTests) { 'skipped (-SkipTests)' } else { 'typecheck + vitest + script tests + cargo test' }
+    $testLabel = if ($RunTests) { 'typecheck + vitest + script tests + cargo test (-RunTests)' } else { 'skipped (default); use -RunTests to enable' }
     $signLabel = if ($NoSign) { 'disabled (-NoSign)' } elseif ($CertThumbprint) { 'Authenticode' } else { 'unsigned (no certificate thumbprint)' }
     $gitLabel = if ($AllowDirty) { 'dirty tree allowed' } else { 'clean tree required' }
 
@@ -132,6 +140,11 @@ try {
     Write-Host "  signing  : $signLabel"
     Write-Host "  git      : $gitLabel"
     Write-Host "  output   : release\<version>\windows-<arch>\"
+
+    if ($SkipTests -and -not $RunTests) {
+        Write-Host ''
+        Write-Host '[build-windows] -SkipTests is the default now and is ignored.' -ForegroundColor DarkGray
+    }
 
     if ($CertThumbprint) { $env:ZYLARA_WINDOWS_CERT_THUMBPRINT = $CertThumbprint }
     if ($TimestampUrl) { $env:ZYLARA_TIMESTAMP_URL = $TimestampUrl }
@@ -153,7 +166,7 @@ try {
         '--channel', $Channel
     )
     if ($Version) { $installerArguments += @('--version', $Version) }
-    if ($SkipTests) { $installerArguments += '--skip-tests' }
+    if (-not $RunTests) { $installerArguments += '--skip-tests' }
     if (-not $AllowDirty) { $installerArguments += '--require-clean' }
     if ($NoSign) { $installerArguments += '--no-sign' }
     if ($DryRun) { $installerArguments += '--dry-run' }

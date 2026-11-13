@@ -175,6 +175,12 @@ export function CodePanel() {
   /** Width previewed while dragging; `null` means "use the persisted width". */
   const [previewWidth, setPreviewWidth] = useState<number | null>(null);
   const tabRefs = useRef(new Map<CodePanelTab, HTMLButtonElement>());
+  /**
+   * Last known "this workspace is a git repo" flag. A reload can resolve the
+   * status back to `null` (error or a superseded load) and a transient `null`
+   * used to unmount the git toolbar — closing an open dropdown with it.
+   */
+  const repoKnownRef = useRef(false);
   /* Expansão sob demanda: o backend lista a árvore até 2 níveis; diretórios
      mais profundos carregam os filhos quando o usuário abre. */
   const [lazyChildren, setLazyChildren] = useState<Record<string, WorkspaceFileEntry[]>>({});
@@ -183,6 +189,7 @@ export function CodePanel() {
   useEffect(() => {
     setLazyChildren({});
     setLazyLoading(new Set());
+    repoKnownRef.current = false;
   }, [workspaceId]);
 
   const loadDirectory = useCallback(
@@ -353,6 +360,8 @@ export function CodePanel() {
   };
 
   const branch = panel.gitStatus?.branch ?? workspace?.git?.branch ?? null;
+  if (panel.gitStatus) repoKnownRef.current = panel.gitStatus.isRepo;
+  const repoKnown = panel.gitStatus?.isRepo ?? repoKnownRef.current;
   // Icon-only tabs below this width keep the three labels + actions from
   // colliding at the minimum docked panel width (360–430px).
   const compactTabs = layout.width < 430;
@@ -476,14 +485,14 @@ export function CodePanel() {
               <span className="min-w-0 flex-1 truncate">
                 {workspace ? workspace.name : t('code:panel.workspaceNone')}
               </span>
-              {workspaceId && panel.gitStatus?.isRepo ? (
+              {workspaceId && repoKnown ? (
                 <>
                   <BranchPicker
                     workspaceId={workspaceId}
-                    isRepo={panel.gitStatus.isRepo}
+                    isRepo={repoKnown}
                     currentBranch={branch}
-                    ahead={panel.gitStatus.ahead ?? 0}
-                    behind={panel.gitStatus.behind ?? 0}
+                    ahead={panel.gitStatus?.ahead ?? 0}
+                    behind={panel.gitStatus?.behind ?? 0}
                     compact={compactTabs}
                     onChanged={handleBranchChanged}
                     onRefresh={refreshAll}
@@ -500,9 +509,9 @@ export function CodePanel() {
                   </Button>
                   <GitActionsMenu
                     workspaceId={workspaceId}
-                    isRepo={panel.gitStatus.isRepo}
-                    ahead={panel.gitStatus.ahead ?? 0}
-                    behind={panel.gitStatus.behind ?? 0}
+                    isRepo={repoKnown}
+                    ahead={panel.gitStatus?.ahead ?? 0}
+                    behind={panel.gitStatus?.behind ?? 0}
                     onRefresh={refreshAll}
                   />
                 </>

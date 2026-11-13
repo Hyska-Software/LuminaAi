@@ -79,10 +79,10 @@ pnpm installer --dry-run       # valida versão, git e assets sem compilar
 ```
 
 No Windows, `.\scripts\build-windows.ps1` faz o release só para Windows (como o
-job `windows` do CI): instala do lockfile, exige árvore limpa, roda a suíte e
-gera o instalador em `release/<versão>/windows-<arch>/`. Use `-SkipTests` para
-rebuilds rápidos, `-AllowDirty` para uma árvore não commitada e `-DryRun` para
-validar sem compilar.
+job `windows` do CI): instala do lockfile, exige árvore limpa e gera o
+instalador em `release/<versão>/windows-<arch>/`. Os testes são pulados por
+padrão; use `-RunTests` para rodar a suíte completa, `-AllowDirty` para uma
+árvore não commitada e `-DryRun` para validar sem compilar.
 
 Saída em `release/<versão>/`: `Zylara-Setup-<versão>-windows-x64.exe` no
 Windows; `.dmg` no macOS; `.deb`/`.rpm`/`.AppImage` no Linux, com
