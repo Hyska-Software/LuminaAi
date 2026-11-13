@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generatedAt": "2026-11-12T03:36:47.290Z",
+ "generatedAt": "2026-11-13T13:26:10.373Z",
  "sources": {
   "docs": [
    "https://opencode.ai/v2/docs/console/go/",
@@ -3706,6 +3706,57 @@
      "knowledge": "2026-03",
      "openWeights": false,
      "description": "Google's most capable reasoning model for complex software engineering, deep math and science, high factual accuracy, and long-horizon autonomous agents",
+     "tags": [
+      "fast",
+      "reasoning",
+      "vision"
+     ],
+     "status": "stable"
+    },
+    {
+     "id": "gemini-4-hydrogen",
+     "name": "Gemini 4 Hydrogen",
+     "family": "gemini",
+     "protocols": [
+      "google"
+     ],
+     "reasoning": true,
+     "reasoningOptions": [
+      {
+       "type": "effort",
+       "values": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+       ]
+      }
+     ],
+     "attachment": true,
+     "modalities": {
+      "input": [
+       "text",
+       "image",
+       "video",
+       "audio",
+       "pdf"
+      ],
+      "output": [
+       "text"
+      ]
+     },
+     "contextWindow": 1048576,
+     "maxOutput": 65536,
+     "cost": {
+      "input": 1.5,
+      "output": 7.5,
+      "cache_read": 0.075,
+      "input_audio": 1.5
+     },
+     "releaseDate": "2026-11-12",
+     "knowledge": "2026-03",
+     "openWeights": false,
+     "description": "Google's Gemini 4 model for everyday coding and agentic workflows, with four thinking levels and a 1M-token context window",
      "tags": [
       "fast",
       "reasoning",
