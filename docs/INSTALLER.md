@@ -170,6 +170,25 @@ pnpm installer --ci --skip-tests
 pnpm installer --platform windows --require-clean
 ```
 
+No Windows, `scripts/build-windows.ps1` encapsula o job `windows` do workflow
+para uso local: valida Node/pnpm/cargo, instala do lockfile e chama
+`pnpm installer --platform windows` — nunca tenta macOS/Linux. Por padrão exige
+árvore limpa e roda a suíte de testes; o CI usa `--skip-tests`.
+
+```powershell
+.\scripts\build-windows.ps1                    # build de produção + instalador
+.\scripts\build-windows.ps1 -DryRun            # valida versão, git e assets
+.\scripts\build-windows.ps1 -SkipTests         # rebuild rápido, sem a suíte
+.\scripts\build-windows.ps1 -AllowDirty        # árvore não commitada
+.\scripts\build-windows.ps1 -CertThumbprint <thumbprint> [-TimestampUrl <url>]
+.\scripts\build-windows.ps1 -Version 0.9.1     # bump + build
+```
+
+Aceita ainda `-Arch host|x64|arm64`, `-Channel <canal>`, `-NoSign` e
+`-SkipInstall`. O artefato sai em `release/<versão>/windows-<arch>/` com
+`release.json` e `SHA256SUMS.txt`; no fim o script imprime a pasta, o estado de
+assinatura e o SHA-256 do instalador.
+
 O script:
 
 1. Exige Node 20+, pnpm e cargo.

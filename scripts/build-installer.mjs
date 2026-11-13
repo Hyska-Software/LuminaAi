@@ -122,7 +122,9 @@ function commandSpec(command, args) {
   if (process.platform === 'win32') {
     // Node 24 rejects spawning .cmd files directly on Windows. A single shell
     // command string avoids the deprecated (and unsafe) args+shell combination.
-    return { file: [command, ...args.map(windowsQuote)].join(' '), args: [], shell: true };
+    // Quote the command too: node.exe typically lives under "C:\Program Files",
+    // and cmd.exe would otherwise stop at the first space.
+    return { file: [command, ...args].map(windowsQuote).join(' '), args: [], shell: true };
   }
   return { file: command, args, shell: false };
 }

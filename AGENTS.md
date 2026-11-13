@@ -14,6 +14,7 @@ pnpm build                   # build do renderer (Vite)
 pnpm app:dev                 # Tauri dev (janela + HMR)
 pnpm app:build               # binário + instalador
 .\scripts\bump-version.ps1    # bump interativo local de versão (sem build)
+.\scripts\build-windows.ps1   # release só para Windows + instalador (local)
 cd src-tauri && cargo check  # backend
 cd src-tauri && cargo test --lib   # testes Rust (TDD)
 cd src-tauri && cargo build  # binário de debug
