@@ -26,7 +26,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use crate::domain::{ProviderKeyStatus, Settings, MAX_STEPS_LIMIT};
+use crate::domain::{ProviderKeyStatus, Settings};
 
 /* ------------------------------------------------------------------ */
 /* Paths                                                               */
@@ -117,8 +117,6 @@ pub(crate) fn normalize_disabled_skills(names: Vec<String>) -> Vec<String> {
 fn normalize_settings(mut settings: Settings) -> Settings {
     let defaults = Settings::default();
 
-    settings.max_steps = settings.max_steps.clamp(1, MAX_STEPS_LIMIT);
-
     if !settings.font_scale.is_finite() {
         settings.font_scale = defaults.font_scale;
     }
@@ -157,11 +155,6 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     if settings.default_model.trim().is_empty() {
         settings.default_model = defaults.default_model;
     }
-    match settings.temperature {
-        Some(value) if !value.is_finite() => settings.temperature = None,
-        Some(value) => settings.temperature = Some(value.clamp(0.0, 2.0)),
-        None => {}
-    }
     settings.code_timeout_secs = settings
         .code_timeout_secs
         .clamp(CODE_TIMEOUT_MIN_SECS, CODE_TIMEOUT_MAX_SECS);
@@ -176,7 +169,6 @@ fn normalize_settings(mut settings: Settings) -> Settings {
     // como vieram (o default seguro de cada um já está em `Settings::default`).
     // `code_default_permission_mode` é enum tipado: valores inválidos no JSON
     // são tratados na leitura (`parse_settings_json`).
-    settings.code_max_steps = settings.code_max_steps.clamp(1, MAX_STEPS_LIMIT);
     settings.execution_environment = match settings
         .execution_environment
         .trim()
@@ -493,7 +485,8 @@ const REDACTED: &str = "<redacted>";
 ///         }
 ///       }
 ///     }
-///   }
+///   },
+///   "github": { "token": "ghp_…", "login": "octocat", "scopes": ["repo"] }
 /// }
 /// ```
 #[derive(Clone, Serialize, Deserialize)]
@@ -502,6 +495,9 @@ pub struct SecretsFile {
     pub version: u32,
     pub providers: BTreeMap<String, String>,
     pub oauth: OAuthStore,
+    /// GitHub account used by the PR/Issue tabs. Additive block: builds that do
+    /// not know it simply ignore the key (`#[serde(default)]`).
+    pub github: GitHubSecrets,
 }
 
 impl Default for SecretsFile {
@@ -510,6 +506,7 @@ impl Default for SecretsFile {
             version: SECRETS_VERSION,
             providers: BTreeMap::new(),
             oauth: OAuthStore::default(),
+            github: GitHubSecrets::default(),
         }
     }
 }
@@ -520,6 +517,34 @@ impl std::fmt::Debug for SecretsFile {
             .field("version", &self.version)
             .field("providers", &self.providers.keys().collect::<Vec<_>>())
             .field("oauth", &self.oauth)
+            .field("github", &self.github)
+            .finish()
+    }
+}
+
+/// GitHub personal access token plus the metadata resolved when it was saved.
+///
+/// The token is only ever read by the backend: IPC commands expose `login` and
+/// `scopes`, never the secret itself.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GitHubSecrets {
+    pub token: Option<String>,
+    /// Login returned by `GET /user` during validation.
+    pub login: Option<String>,
+    /// Scopes reported by the `x-oauth-scopes` header.
+    pub scopes: Vec<String>,
+    /// Unix ms of the last successful validation (`0` = unknown).
+    pub saved_at: i64,
+}
+
+impl std::fmt::Debug for GitHubSecrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitHubSecrets")
+            .field("token", &self.token.as_ref().map(|_| REDACTED))
+            .field("login", &self.login)
+            .field("scopes", &self.scopes)
+            .field("saved_at", &self.saved_at)
             .finish()
     }
 }
@@ -1122,6 +1147,75 @@ pub fn set_api_key(app: &AppHandle, provider_id: &str, key: Option<&str>) -> any
     set_api_key_at(&secrets_path(app), provider_id, key)
 }
 
+/* ------------------------------------------------------------------ */
+/* GitHub credentials                                                  */
+/* ------------------------------------------------------------------ */
+
+/// Token resolution shared by the commands: secrets file → env → `gh` CLI.
+///
+/// The CLI lookup is passed as a closure so the process call stays in the async
+/// command layer and this function stays pure for tests.
+pub fn resolve_github_token(
+    secrets: &GitHubSecrets,
+    env: Option<String>,
+    cli: impl FnOnce() -> Option<String>,
+) -> (Option<String>, &'static str) {
+    if let Some(token) = clean_key(secrets.token.as_ref()) {
+        return (Some(token), "settings");
+    }
+    if let Some(token) = env.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+        return (Some(token), "env");
+    }
+    match cli().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+        Some(token) => (Some(token), "gh-cli"),
+        None => (None, "none"),
+    }
+}
+
+/// `GH_TOKEN` first, then the legacy `GITHUB_TOKEN` (gh CLI precedence).
+pub fn github_token_from_env() -> Option<String> {
+    env_key("GH_TOKEN").or_else(|| env_key("GITHUB_TOKEN"))
+}
+
+/// Credentials stored in `secrets.json` (no env/CLI fallback).
+pub fn github_secrets(app: &AppHandle) -> GitHubSecrets {
+    load_secrets(app).github
+}
+
+fn set_github_credentials_at(
+    path: &Path,
+    token: Option<&str>,
+    login: Option<&str>,
+    scopes: &[String],
+) -> anyhow::Result<()> {
+    let _guard = credentials_lock().lock();
+    let mut secrets = read_secrets_for_write_at(path)?;
+    match token.map(str::trim).filter(|token| !token.is_empty()) {
+        Some(token) => {
+            secrets.github.token = Some(token.to_string());
+            secrets.github.login = login
+                .map(str::trim)
+                .filter(|login| !login.is_empty())
+                .map(str::to_string);
+            secrets.github.scopes = scopes.to_vec();
+            secrets.github.saved_at = crate::domain::now_ms();
+        }
+        None => secrets.github = GitHubSecrets::default(),
+    }
+    secrets.version = SECRETS_VERSION;
+    save_secrets_at(path, &secrets)
+}
+
+/// Stores/removes the GitHub token. Providers and OAuth registrations are kept.
+pub fn set_github_credentials(
+    app: &AppHandle,
+    token: Option<&str>,
+    login: Option<&str>,
+    scopes: &[String],
+) -> anyhow::Result<()> {
+    set_github_credentials_at(&secrets_path(app), token, login, scopes)
+}
+
 /// Masked identifier shown in the UI. Keys are never logged or returned whole.
 fn mask_key(key: &str) -> String {
     let chars: Vec<char> = key.chars().collect();
@@ -1499,6 +1593,88 @@ mod tests {
     }
 
     #[test]
+    fn github_credentials_are_additive_and_preserve_other_blocks() {
+        let temp = TempDir::new();
+        let path = temp.secrets();
+
+        save_oauth_registration_at(&path, "openai", registration("oaiapp_1"))
+            .expect("salvar login");
+        set_api_key_at(&path, "opencode-go", Some("sk-go-1234567890abcdef")).expect("salvar chave");
+
+        set_github_credentials_at(
+            &path,
+            Some("ghp_1234567890abcdef"),
+            Some("octocat"),
+            &["repo".to_string(), "read:org".to_string()],
+        )
+        .expect("salvar token do GitHub");
+
+        let secrets = read_secrets_at(&path)
+            .expect("ler credenciais")
+            .expect("arquivo existe");
+        assert_eq!(secrets.providers.get("opencode-go").map(String::as_str), Some("sk-go-1234567890abcdef"));
+        assert!(secrets.oauth.active_registration("openai").is_some());
+        assert_eq!(secrets.github.token.as_deref(), Some("ghp_1234567890abcdef"));
+        assert_eq!(secrets.github.login.as_deref(), Some("octocat"));
+        assert_eq!(secrets.github.scopes, vec!["repo", "read:org"]);
+        assert!(secrets.github.saved_at > 0);
+
+        // Signing out clears only the GitHub block.
+        set_github_credentials_at(&path, None, None, &[]).expect("remover token");
+        let secrets = read_secrets_at(&path)
+            .expect("ler credenciais")
+            .expect("arquivo existe");
+        assert!(secrets.github.token.is_none());
+        assert!(secrets.github.login.is_none());
+        assert!(secrets.github.scopes.is_empty());
+        assert_eq!(secrets.providers.get("opencode-go").map(String::as_str), Some("sk-go-1234567890abcdef"));
+        assert!(secrets.oauth.active_registration("openai").is_some());
+    }
+
+    #[test]
+    fn github_token_debug_never_leaks_the_secret() {
+        let secrets = GitHubSecrets {
+            token: Some("ghp_supersecretvalue".to_string()),
+            login: Some("octocat".to_string()),
+            scopes: vec!["repo".to_string()],
+            saved_at: 1,
+        };
+        let rendered = format!("{secrets:?}");
+        assert!(!rendered.contains("ghp_supersecretvalue"));
+        assert!(rendered.contains(REDACTED));
+        assert!(format!("{:?}", SecretsFile { github: secrets, ..SecretsFile::default() })
+            .contains(REDACTED));
+    }
+
+    #[test]
+    fn github_token_resolution_prefers_secrets_then_env_then_cli() {
+        let saved = GitHubSecrets {
+            token: Some("  ghp_settings  ".to_string()),
+            ..GitHubSecrets::default()
+        };
+        let (token, source) = resolve_github_token(&saved, Some("ghp_env".to_string()), || {
+            Some("ghp_cli".to_string())
+        });
+        assert_eq!(token.as_deref(), Some("ghp_settings"));
+        assert_eq!(source, "settings");
+
+        let empty = GitHubSecrets::default();
+        let (token, source) = resolve_github_token(&empty, Some("ghp_env".to_string()), || None);
+        assert_eq!(token.as_deref(), Some("ghp_env"));
+        assert_eq!(source, "env");
+
+        let (token, source) = resolve_github_token(&empty, Some("   ".to_string()), || {
+            Some(" ghp_cli ".to_string())
+        });
+        assert_eq!(token.as_deref(), Some("ghp_cli"));
+        assert_eq!(source, "gh-cli");
+
+        let (token, source) = resolve_github_token(&empty, None, || None);
+        assert!(token.is_none());
+        assert_eq!(source, "none");
+    }
+
+    #[test]
     fn host_id_is_stable_and_well_formed() {
         let temp = TempDir::new();
         let path = temp.secrets();
@@ -1733,15 +1909,6 @@ mod tests {
     }
 
     #[test]
-    fn defaults_to_64_steps() {
-        assert_eq!(
-            Settings::default().max_steps,
-            crate::domain::MAX_STEPS_DEFAULT
-        );
-        assert_eq!(Settings::default().max_steps, 64);
-    }
-
-    #[test]
     fn terminal_settings_default_to_theme_font_and_12px() {
         let settings = parse_settings_json("{}").expect("parse empty settings");
         assert_eq!(settings.terminal_font_family, "");
@@ -1751,7 +1918,6 @@ mod tests {
     #[test]
     fn normalizes_out_of_range_settings() {
         let settings = Settings {
-            max_steps: 5_000,
             font_scale: 4.0,
             terminal_font_family: format!("  Fira Code\n  {}", "x".repeat(300)),
             terminal_font_size: 99,
@@ -1761,7 +1927,6 @@ mod tests {
             reasoning_default: "turbo".into(),
             default_provider: "  ".into(),
             default_model: String::new(),
-            temperature: Some(9.0),
             code_execution_enabled: true,
             code_timeout_secs: 5_000,
             code_python_path: "  C:\\Python313\\python.exe  ".into(),
@@ -1772,7 +1937,6 @@ mod tests {
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
-        assert_eq!(normalized.max_steps, MAX_STEPS_LIMIT);
         assert_eq!(normalized.font_scale, 1.3);
         assert!(normalized.terminal_font_family.starts_with("Fira Code"));
         assert!(!normalized.terminal_font_family.contains('\n'));
@@ -1787,7 +1951,6 @@ mod tests {
         assert_eq!(normalized.reasoning_default, "max");
         assert_eq!(normalized.default_provider, "opencode-go");
         assert_eq!(normalized.default_model, "deepseek-v4.1-flash");
-        assert_eq!(normalized.temperature, Some(2.0));
         assert!(normalized.code_execution_enabled);
         assert_eq!(normalized.code_timeout_secs, CODE_TIMEOUT_MAX_SECS);
         assert_eq!(normalized.code_python_path, "C:\\Python313\\python.exe");
@@ -1843,14 +2006,12 @@ mod tests {
     #[test]
     fn normalizes_low_out_of_range_settings() {
         let settings = Settings {
-            max_steps: 0,
             font_scale: 0.1,
             terminal_font_size: 0,
             code_timeout_secs: 1,
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
-        assert_eq!(normalized.max_steps, 1);
         assert_eq!(normalized.font_scale, 0.85);
         assert_eq!(normalized.terminal_font_size, TERMINAL_FONT_SIZE_MIN);
         assert_eq!(normalized.code_timeout_secs, CODE_TIMEOUT_MIN_SECS);
@@ -1874,7 +2035,6 @@ mod tests {
         let parsed: Settings = serde_json::from_str(raw).expect("desserializar settings antigos");
         let normalized = normalize_settings(parsed);
         assert_eq!(normalized.theme, "dark");
-        assert_eq!(normalized.max_steps, 10);
         assert!(!normalized.web_search_enabled);
         assert!(!normalized.code_execution_enabled);
         assert_eq!(normalized.code_timeout_secs, 120);
@@ -2011,7 +2171,6 @@ mod tests {
     #[test]
     fn code_harness_settings_default_to_safe_values() {
         let defaults = Settings::default();
-        assert_eq!(defaults.code_max_steps, 120);
         // Shell é opt-in por sessão, mas o default do app já vem ligado: cada
         // comando fora do workspace continua passando pela política de aprovação.
         assert!(defaults.shell_enabled);
@@ -2050,13 +2209,11 @@ mod tests {
     #[test]
     fn normalizes_out_of_range_code_harness_settings() {
         let settings = Settings {
-            code_max_steps: 5_000,
             spill_retention_days: 9_999,
             approval_timeout_secs: 1,
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
-        assert_eq!(normalized.code_max_steps, MAX_STEPS_LIMIT);
         assert_eq!(
             normalized.spill_retention_days,
             SPILL_RETENTION_MAX_DAYS
@@ -2067,13 +2224,11 @@ mod tests {
         );
 
         let settings = Settings {
-            code_max_steps: 0,
             spill_retention_days: 0,
             approval_timeout_secs: 0,
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
-        assert_eq!(normalized.code_max_steps, 1);
         assert_eq!(
             normalized.spill_retention_days,
             SPILL_RETENTION_MIN_DAYS
@@ -2087,13 +2242,11 @@ mod tests {
     #[test]
     fn code_harness_settings_accept_their_boundaries() {
         let settings = Settings {
-            code_max_steps: 1,
             spill_retention_days: SPILL_RETENTION_MIN_DAYS,
             approval_timeout_secs: APPROVAL_TIMEOUT_MAX_SECS,
             ..Settings::default()
         };
         let normalized = normalize_settings(settings);
-        assert_eq!(normalized.code_max_steps, 1);
         assert_eq!(
             normalized.spill_retention_days,
             SPILL_RETENTION_MIN_DAYS
@@ -2120,9 +2273,6 @@ mod tests {
         let parsed = parse_settings_json(raw).expect("desserializar settings antigos");
         let normalized = normalize_settings(parsed);
         assert_eq!(normalized.theme, "dark");
-        assert_eq!(normalized.max_steps, 10);
-        // Campo presente no arquivo: normalizado normalmente.
-        assert_eq!(normalized.code_max_steps, MAX_STEPS_LIMIT);
         // Campos ausentes: defaults do harness.
         assert!(normalized.shell_enabled);
         assert!(normalized.auto_compact);
@@ -2320,7 +2470,6 @@ mod tests {
     fn code_harness_settings_round_trip_with_camel_case_keys() {
         let value =
             serde_json::to_value(Settings::default()).expect("serializar settings do harness");
-        assert_eq!(value["codeMaxSteps"], 120);
         assert_eq!(value["shellEnabled"], true);
         assert_eq!(value["autoCompact"], true);
         assert_eq!(value["spillRetentionDays"], 30);
@@ -2329,12 +2478,13 @@ mod tests {
         assert_eq!(value["codeDefaultPermissionMode"], "autonomous");
         assert_eq!(value["trustWorkspacesByDefault"], false);
         assert_eq!(value["diffOpenMode"], "tab");
-        assert!(value.get("code_max_steps").is_none());
+        assert!(value.get("maxSteps").is_none());
+        assert!(value.get("temperature").is_none());
+        assert!(value.get("codeMaxSteps").is_none());
 
         // Reler o JSON gravado devolve os mesmos valores (contrato IPC).
         let parsed: Settings =
             serde_json::from_value(value).expect("reler settings serializados");
-        assert_eq!(parsed.code_max_steps, 120);
         assert_eq!(
             parsed.code_default_permission_mode,
             crate::domain::PermissionMode::Autonomous

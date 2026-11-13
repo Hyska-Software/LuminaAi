@@ -667,13 +667,6 @@ pub struct ReasoningSelection {
     pub budget: Option<u32>,
 }
 
-/// Upper bound accepted for the agent loop steps per turn. The renderer,
-/// the settings file and the harness all clamp to this value.
-pub const MAX_STEPS_LIMIT: u32 = 1_000;
-
-/// Default number of agent loop steps per turn (fresh installs).
-pub const MAX_STEPS_DEFAULT: u32 = 64;
-
 /// Parent conversation/turn that owns a writable subagent's journal rows.
 ///
 /// A `worker` child executes in its own conversation; attributing its file
@@ -693,12 +686,10 @@ pub struct TurnOptions {
     /// Execução de código (`run_code`); o harness ainda aplica o gate global
     /// `Settings::code_execution_enabled`.
     pub run_code: bool,
-    pub max_steps: u32,
-    /// Internal per-turn cap. Background tasks set this to a small value while
-    /// `settings.code_max_steps` remains the interactive default.
+    /// Internal step budget for background/child turns. `None` = unbounded.
+    /// Never accepted from the renderer.
     #[serde(skip)]
-    pub max_steps_override: Option<u32>,
-    pub temperature: Option<f32>,
+    pub max_steps: Option<u32>,
     /// Internal subagent instructions. Never accepted from the renderer.
     #[serde(skip)]
     pub system_prompt_override: Option<String>,
@@ -764,9 +755,7 @@ impl Default for TurnOptions {
             web_search: true,
             create_files: true,
             run_code: true,
-            max_steps: MAX_STEPS_DEFAULT,
-            max_steps_override: None,
-            temperature: None,
+            max_steps: None,
             system_prompt_override: None,
             channel_context: None,
             channel_leader: false,
@@ -1311,7 +1300,6 @@ pub struct Settings {
     pub system_prompt: String,
     pub web_search_enabled: bool,
     pub file_creation_enabled: bool,
-    pub max_steps: u32,
     pub send_key: String,
     pub show_token_usage: bool,
     pub reduce_motion: bool,
@@ -1324,7 +1312,6 @@ pub struct Settings {
     pub terminal_font_family: String,
     /// Integrated terminal font size in px (TERMINAL_FONT_SIZE_MIN..=MAX).
     pub terminal_font_size: u32,
-    pub temperature: Option<f32>,
     pub include_attachments: bool,
     pub auto_title: bool,
     /// Opt-in: permite ao agente executar código (`run_code`) no computador.
@@ -1341,8 +1328,6 @@ pub struct Settings {
     /// Nomes de skills desativadas; o agente as ignora no prompt e nas tools.
     pub disabled_skills: Vec<String>,
     /* ---- harness de código (docs/goals/code-harness/PLAN.md §7) ---- */
-    /// Máximo de passos por turno no perfil Code (1..=MAX_STEPS_LIMIT).
-    pub code_max_steps: u32,
     /// Permite ao agente executar comandos de shell (`run_command`).
     pub shell_enabled: bool,
     /// Onde os comandos do perfil Code rodam: `local` (máquina do usuário) ou
@@ -1469,7 +1454,6 @@ impl Default for Settings {
             system_prompt: String::new(),
             web_search_enabled: true,
             file_creation_enabled: true,
-            max_steps: MAX_STEPS_DEFAULT,
             send_key: "enter".into(),
             show_token_usage: true,
             reduce_motion: false,
@@ -1477,7 +1461,6 @@ impl Default for Settings {
             font_scale: 1.0,
             terminal_font_family: String::new(),
             terminal_font_size: default_terminal_font_size(),
-            temperature: None,
             include_attachments: true,
             auto_title: true,
             code_execution_enabled: false,
@@ -1486,7 +1469,6 @@ impl Default for Settings {
             code_node_path: String::new(),
             skills_panel_enabled: true,
             disabled_skills: Vec::new(),
-            code_max_steps: 120,
             shell_enabled: true,
             execution_environment: default_execution_environment(),
             docker_image: default_docker_image(),
@@ -2520,6 +2502,280 @@ impl ToolCallRecord {
         self.presentation = presentation;
         self
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* GitHub (pull requests and issues)                                   */
+/* ------------------------------------------------------------------ */
+
+/// Account exposed to the renderer: login/scopes only, never the token.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubAccount {
+    pub authenticated: bool,
+    pub login: Option<String>,
+    /// `settings`, `env`, `gh-cli` or `none`.
+    pub source: String,
+    pub scopes: Vec<String>,
+}
+
+/// Repository resolved from the workspace remote.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubRepoInfo {
+    pub host: String,
+    pub owner: String,
+    pub name: String,
+    pub full_name: String,
+    pub html_url: String,
+    pub default_branch: Option<String>,
+    /// `true` when the token can push/create branches in this repository.
+    pub can_push: bool,
+    /// GraphQL actions (draft ↔ ready) are only offered on github.com.
+    pub graphql: bool,
+}
+
+/// Everything the PR/Issue tabs need before rendering a list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubConnectionView {
+    pub account: GitHubAccount,
+    pub repo: Option<GitHubRepoInfo>,
+    /// Localized reason when the repository cannot be used (no remote, 404…).
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubUser {
+    pub login: String,
+    pub avatar_url: Option<String>,
+    pub html_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubLabel {
+    pub name: String,
+    pub color: Option<String>,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubMilestone {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub open_issues: u32,
+    pub closed_issues: u32,
+    pub due_on: Option<String>,
+}
+
+/// Aggregated state of the commit statuses + check runs of the PR head.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubChecksSummary {
+    /// `success`, `failure`, `pending`, `neutral` or `none`.
+    pub state: String,
+    pub total: u32,
+    pub passed: u32,
+    pub failed: u32,
+    pub pending: u32,
+}
+
+/// Row of the PR list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubPullRequestSummary {
+    pub number: u64,
+    pub title: String,
+    /// `open` or `closed`.
+    pub state: String,
+    pub draft: bool,
+    pub merged: bool,
+    pub author: GitHubUser,
+    pub head_ref: String,
+    pub head_sha: String,
+    pub base_ref: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub comments: u32,
+    pub additions: u32,
+    pub deletions: u32,
+    pub changed_files: u32,
+    pub labels: Vec<GitHubLabel>,
+    pub html_url: String,
+    /// `true` when the head branch lives in a fork.
+    pub cross_repository: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubPullRequestList {
+    pub items: Vec<GitHubPullRequestSummary>,
+    pub page: u32,
+    pub per_page: u32,
+    pub has_next: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubComment {
+    pub id: u64,
+    pub author: GitHubUser,
+    pub body: String,
+    pub created_at: String,
+    pub updated_at: Option<String>,
+    pub html_url: Option<String>,
+    pub author_association: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubReview {
+    pub id: u64,
+    pub author: GitHubUser,
+    /// `APPROVED`, `CHANGES_REQUESTED`, `COMMENTED`, `DISMISSED` or `PENDING`.
+    pub state: String,
+    pub body: String,
+    pub submitted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubPullRequestDetail {
+    pub summary: GitHubPullRequestSummary,
+    pub body: String,
+    pub mergeable: Option<bool>,
+    pub mergeable_state: Option<String>,
+    pub merged_at: Option<String>,
+    pub merged_by: Option<GitHubUser>,
+    pub requested_reviewers: Vec<GitHubUser>,
+    pub assignees: Vec<GitHubUser>,
+    pub milestone: Option<GitHubMilestone>,
+    /// GraphQL node id (draft ↔ ready for review).
+    pub node_id: Option<String>,
+    pub checks: GitHubChecksSummary,
+    pub reviews: Vec<GitHubReview>,
+    pub comments: Vec<GitHubComment>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubPullRequestFile {
+    pub path: String,
+    pub previous_path: Option<String>,
+    pub status: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub changes: u32,
+    pub patch: Option<String>,
+    /// Patch omitted by the API (binary or too large) or clipped by the budget.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubPullRequestFiles {
+    pub files: Vec<GitHubPullRequestFile>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubPullRequestCommit {
+    pub sha: String,
+    pub message: String,
+    pub author: String,
+    pub author_login: Option<String>,
+    pub avatar_url: Option<String>,
+    pub date: Option<String>,
+}
+
+/// Row of the Issue list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubIssueSummary {
+    pub number: u64,
+    pub title: String,
+    /// `open` or `closed`.
+    pub state: String,
+    /// `completed`, `not_planned` or `null`.
+    pub state_reason: Option<String>,
+    pub author: GitHubUser,
+    pub created_at: String,
+    pub updated_at: String,
+    pub comments: u32,
+    pub labels: Vec<GitHubLabel>,
+    pub assignees: Vec<GitHubUser>,
+    pub milestone: Option<String>,
+    pub html_url: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubIssueList {
+    pub items: Vec<GitHubIssueSummary>,
+    pub page: u32,
+    pub per_page: u32,
+    pub has_next: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubIssueDetail {
+    pub summary: GitHubIssueSummary,
+    pub body: String,
+    pub locked: bool,
+    pub closed_at: Option<String>,
+    pub milestone: Option<GitHubMilestone>,
+    pub comments: Vec<GitHubComment>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubMergeResult {
+    pub merged: bool,
+    pub message: String,
+    pub sha: Option<String>,
+}
+
+/// List filters of the PR tab (all optional; the backend clamps/normalizes).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GitHubPullRequestFilter {
+    pub state: Option<String>,
+    pub search: Option<String>,
+    pub label: Option<String>,
+    pub author: Option<String>,
+    pub assignee: Option<String>,
+    /// `owner:branch` for the REST `head` parameter; search receives the bare
+    /// branch (the qualifier has no owner form).
+    pub head: Option<String>,
+    pub base: Option<String>,
+    pub sort: Option<String>,
+    pub direction: Option<String>,
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
+}
+
+/// List filters of the Issue tab.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct GitHubIssueFilter {
+    pub state: Option<String>,
+    pub search: Option<String>,
+    pub label: Option<String>,
+    pub assignee: Option<String>,
+    pub author: Option<String>,
+    pub milestone: Option<String>,
+    /// Milestone title used by the search qualifier (the API takes the name).
+    pub milestone_title: Option<String>,
+    pub sort: Option<String>,
+    pub direction: Option<String>,
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
 }
 
 /* ------------------------------------------------------------------ */

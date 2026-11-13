@@ -10,6 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import {
   Bot,
+  CircleDot,
   Copy,
   ExternalLink,
   FileDiff,
@@ -17,6 +18,7 @@ import {
   FolderGit2,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   History,
   PanelRight,
   Plus,
@@ -49,11 +51,14 @@ import { filterConversationsForLayout } from '@/lib/conversations';
 import { goalIsRunning, goalPauseReasonLabel } from '@/lib/goalRunner';
 import {
   codeFileTabKey,
+  codeRepoItemTabKey,
   codeSubagentTabKey,
   useChatStore,
   useCodeStore,
   useUiStore,
   type CodeFileTab,
+  type CodeIssueTab,
+  type CodePullRequestTab,
   type CodeSubagentTab,
 } from '@/lib/store';
 import type { Conversation, GoalView, Workspace } from '@/lib/types';
@@ -76,6 +81,10 @@ const CODE_COMMITS_TAB_ID = '__code_commits__';
 const CODE_PLAN_TAB_ID = '__code_plan__';
 /** Synthetic center tab for the session goal (GoalPanel). */
 const CODE_GOAL_TAB_ID = '__code_goal__';
+/** Synthetic center tab with the repository pull requests list. */
+const CODE_PULL_REQUESTS_TAB_ID = '__code_prs__';
+/** Synthetic center tab with the repository issues list. */
+const CODE_ISSUES_TAB_ID = '__code_issues__';
 /**
  * Prefixo dos ids das abas centrais de arquivo (§7.1) — cada arquivo aberto tem
  * a própria aba. O sufixo é a chave estável `codeFileTabKey` codificada para o
@@ -84,6 +93,10 @@ const CODE_GOAL_TAB_ID = '__code_goal__';
 const CODE_FILE_TAB_PREFIX = '__code_file__:';
 /** Prefix for retained subagent chat tabs (one per child conversation). */
 const CODE_SUBAGENT_TAB_PREFIX = '__code_subagent__:';
+/** Prefix for pull request tabs (one per PR). */
+const CODE_PULL_REQUEST_TAB_PREFIX = '__code_pr__:';
+/** Prefix for issue tabs (one per issue). */
+const CODE_ISSUE_TAB_PREFIX = '__code_issue__:';
 
 const SUBAGENT_TYPE_KEYS = {
   explore: 'code:header.subagent.explore',
@@ -91,6 +104,29 @@ const SUBAGENT_TYPE_KEYS = {
   general: 'code:header.subagent.general',
   worker: 'code:header.subagent.worker',
 } as const;
+
+/** DOM id da aba de um pull request aberto. */
+function codePullRequestTabDomId(tab: CodePullRequestTab): string {
+  return `${CODE_PULL_REQUEST_TAB_PREFIX}${encodeURIComponent(codeRepoItemTabKey(tab))}`;
+}
+
+/** DOM id da aba de uma issue aberta. */
+function codeIssueTabDomId(tab: CodeIssueTab): string {
+  return `${CODE_ISSUE_TAB_PREFIX}${encodeURIComponent(codeRepoItemTabKey(tab))}`;
+}
+
+function findCodePullRequestTab(id: string): CodePullRequestTab | null {
+  if (!id.startsWith(CODE_PULL_REQUEST_TAB_PREFIX)) return null;
+  return (
+    useUiStore.getState().codePullRequestTabs.find((tab) => codePullRequestTabDomId(tab) === id) ??
+    null
+  );
+}
+
+function findCodeIssueTab(id: string): CodeIssueTab | null {
+  if (!id.startsWith(CODE_ISSUE_TAB_PREFIX)) return null;
+  return useUiStore.getState().codeIssueTabs.find((tab) => codeIssueTabDomId(tab) === id) ?? null;
+}
 
 /** DOM id da aba de um arquivo aberto. */
 function codeFileTabDomId(tab: CodeFileTab): string {
@@ -373,6 +409,16 @@ export function CodeSessionHeader() {
   const codeGoalOpen = useUiStore((state) => state.codeGoalOpen);
   const codeFileTab = useUiStore((state) => state.codeFileTab);
   const closeCodeFile = useUiStore((state) => state.closeCodeFile);
+  const codePullRequestsTab = useUiStore((state) => state.codePullRequestsTab);
+  const closeCodePullRequests = useUiStore((state) => state.closeCodePullRequests);
+  const codePullRequestTabs = useUiStore((state) => state.codePullRequestTabs);
+  const codePullRequestTab = useUiStore((state) => state.codePullRequestTab);
+  const closeCodePullRequest = useUiStore((state) => state.closeCodePullRequest);
+  const codeIssuesTab = useUiStore((state) => state.codeIssuesTab);
+  const closeCodeIssues = useUiStore((state) => state.closeCodeIssues);
+  const codeIssueTabs = useUiStore((state) => state.codeIssueTabs);
+  const codeIssueTab = useUiStore((state) => state.codeIssueTab);
+  const closeCodeIssue = useUiStore((state) => state.closeCodeIssue);
   const codeTabOrder = useUiStore((state) => state.codeTabOrder);
   const setCodeTabOrder = useUiStore((state) => state.setCodeTabOrder);
   const liveSubagents = useChatStore((state) => state.streaming?.subagents);
@@ -523,6 +569,24 @@ export function CodeSessionHeader() {
       useUiStore.getState().openCodeGoal();
       return;
     }
+    if (id === CODE_PULL_REQUESTS_TAB_ID) {
+      useUiStore.getState().setCodeView('prs');
+      return;
+    }
+    if (id === CODE_ISSUES_TAB_ID) {
+      useUiStore.getState().setCodeView('issues');
+      return;
+    }
+    if (id.startsWith(CODE_PULL_REQUEST_TAB_PREFIX)) {
+      const target = findCodePullRequestTab(id);
+      if (target) useUiStore.getState().openCodePullRequest(target);
+      return;
+    }
+    if (id.startsWith(CODE_ISSUE_TAB_PREFIX)) {
+      const target = findCodeIssueTab(id);
+      if (target) useUiStore.getState().openCodeIssue(target);
+      return;
+    }
     if (id.startsWith(CODE_SUBAGENT_TAB_PREFIX)) {
       const subagentTarget = findCodeSubagentTab(id);
       if (subagentTarget) useUiStore.getState().openCodeSubagent(subagentTarget);
@@ -583,6 +647,34 @@ export function CodeSessionHeader() {
     if (id === CODE_GOAL_TAB_ID) {
       useUiStore.getState().closeCodeGoal();
       focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id === CODE_PULL_REQUESTS_TAB_ID) {
+      closeCodePullRequests();
+      focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id === CODE_ISSUES_TAB_ID) {
+      closeCodeIssues();
+      focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id.startsWith(CODE_PULL_REQUEST_TAB_PREFIX)) {
+      const target = findCodePullRequestTab(id);
+      if (!target) return;
+      closeCodePullRequest(target);
+      const next = useUiStore.getState().codePullRequestTab;
+      if (next) focusTab(codePullRequestTabDomId(next));
+      else focusTab(activeId ?? undefined);
+      return;
+    }
+    if (id.startsWith(CODE_ISSUE_TAB_PREFIX)) {
+      const target = findCodeIssueTab(id);
+      if (!target) return;
+      closeCodeIssue(target);
+      const next = useUiStore.getState().codeIssueTab;
+      if (next) focusTab(codeIssueTabDomId(next));
+      else focusTab(activeId ?? undefined);
       return;
     }
     if (id.startsWith(CODE_SUBAGENT_TAB_PREFIX)) {
@@ -1370,6 +1462,208 @@ export function CodeSessionHeader() {
                   </button>
                 </div>
               ) : null}
+              {codePullRequestsTab ? (
+                <div
+                  role="presentation"
+                  {...middleClickClose(CODE_PULL_REQUESTS_TAB_ID)}
+                  className={cn(
+                    'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                    codeView === 'prs'
+                      ? 'bg-surface-active text-foreground'
+                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  )}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-label={t('code:header.pullRequestsTab.label')}
+                    aria-selected={codeView === 'prs'}
+                    aria-controls="code-prs-panel"
+                    title={t('code:header.pullRequestsTab.label')}
+                    tabIndex={codeView === 'prs' ? 0 : -1}
+                    ref={addTabRef(CODE_PULL_REQUESTS_TAB_ID)}
+                    onClick={() => selectTab(CODE_PULL_REQUESTS_TAB_ID)}
+                    onKeyDown={(event) => handleTabKeyDown(event, CODE_PULL_REQUESTS_TAB_ID)}
+                    className={cn(
+                      'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                      'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <GitPullRequest aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="truncate">{t('code:header.pullRequestsTab.visible')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t('code:header.pullRequestsTab.close')}
+                    tabIndex={-1}
+                    onClick={() => closeTab(CODE_PULL_REQUESTS_TAB_ID)}
+                    className={cn(
+                      'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                      'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </button>
+                </div>
+              ) : null}
+              {codePullRequestTabs.map((item) => {
+                const id = codePullRequestTabDomId(item);
+                const selected =
+                  codeView === 'pr' &&
+                  codePullRequestTab !== null &&
+                  codeRepoItemTabKey(codePullRequestTab) === codeRepoItemTabKey(item);
+                const label = `#${item.number} ${item.title}`;
+                return (
+                  <div
+                    key={id}
+                    role="presentation"
+                    {...middleClickClose(id)}
+                    className={cn(
+                      'group flex h-8 max-w-48 shrink-0 items-center rounded-lg transition-colors duration-150',
+                      selected
+                        ? 'bg-surface-active text-foreground'
+                        : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-label={t('code:header.pullRequestTab.label', { number: item.number })}
+                      aria-selected={selected}
+                      aria-controls="code-pr-panel"
+                      title={label}
+                      tabIndex={selected ? 0 : -1}
+                      ref={addTabRef(id)}
+                      onClick={() => selectTab(id)}
+                      onKeyDown={(event) => handleTabKeyDown(event, id)}
+                      className={cn(
+                        'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                        'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <GitPullRequest aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                      <span className="truncate">
+                        #{item.number} {item.title}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={t('code:header.closeTab', { title: label })}
+                      tabIndex={-1}
+                      onClick={() => closeTab(id)}
+                      className={cn(
+                        'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                        'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <X aria-hidden className="size-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+              {codeIssuesTab ? (
+                <div
+                  role="presentation"
+                  {...middleClickClose(CODE_ISSUES_TAB_ID)}
+                  className={cn(
+                    'group flex h-8 max-w-44 shrink-0 items-center rounded-lg transition-colors duration-150',
+                    codeView === 'issues'
+                      ? 'bg-surface-active text-foreground'
+                      : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                  )}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-label={t('code:header.issuesTab.label')}
+                    aria-selected={codeView === 'issues'}
+                    aria-controls="code-issues-panel"
+                    title={t('code:header.issuesTab.label')}
+                    tabIndex={codeView === 'issues' ? 0 : -1}
+                    ref={addTabRef(CODE_ISSUES_TAB_ID)}
+                    onClick={() => selectTab(CODE_ISSUES_TAB_ID)}
+                    onKeyDown={(event) => handleTabKeyDown(event, CODE_ISSUES_TAB_ID)}
+                    className={cn(
+                      'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                      'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <CircleDot aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="truncate">{t('code:header.issuesTab.visible')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t('code:header.issuesTab.close')}
+                    tabIndex={-1}
+                    onClick={() => closeTab(CODE_ISSUES_TAB_ID)}
+                    className={cn(
+                      'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                      'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                    )}
+                  >
+                    <X aria-hidden className="size-3.5" />
+                  </button>
+                </div>
+              ) : null}
+              {codeIssueTabs.map((item) => {
+                const id = codeIssueTabDomId(item);
+                const selected =
+                  codeView === 'issue' &&
+                  codeIssueTab !== null &&
+                  codeRepoItemTabKey(codeIssueTab) === codeRepoItemTabKey(item);
+                const label = `#${item.number} ${item.title}`;
+                return (
+                  <div
+                    key={id}
+                    role="presentation"
+                    {...middleClickClose(id)}
+                    className={cn(
+                      'group flex h-8 max-w-48 shrink-0 items-center rounded-lg transition-colors duration-150',
+                      selected
+                        ? 'bg-surface-active text-foreground'
+                        : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-label={t('code:header.issueTab.label', { number: item.number })}
+                      aria-selected={selected}
+                      aria-controls="code-issue-panel"
+                      title={label}
+                      tabIndex={selected ? 0 : -1}
+                      ref={addTabRef(id)}
+                      onClick={() => selectTab(id)}
+                      onKeyDown={(event) => handleTabKeyDown(event, id)}
+                      className={cn(
+                        'flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-l-lg pl-2.5 text-left text-[12px]',
+                        'outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <CircleDot aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+                      <span className="truncate">
+                        #{item.number} {item.title}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={t('code:header.closeTab', { title: label })}
+                      tabIndex={-1}
+                      onClick={() => closeTab(id)}
+                      className={cn(
+                        'mr-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-subtle',
+                        'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+                      )}
+                    >
+                      <X aria-hidden className="size-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </SortableList>

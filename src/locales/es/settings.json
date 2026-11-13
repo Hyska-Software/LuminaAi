@@ -380,22 +380,6 @@
         "day": "24 horas"
       }
     },
-    "execution": {
-      "title": "Ejecución",
-      "description": "Límites del bucle del agente y creatividad del modelo.",
-      "maxSteps": {
-        "label": "Máximo de pasos",
-        "description_one": "El agente ejecuta hasta {{count}} paso (herramienta → respuesta) por turno.",
-        "description_other": "El agente ejecuta hasta {{count}} pasos (herramienta → respuesta) por turno.",
-        "aria": "Máximo de pasos del agente"
-      },
-      "temperature": {
-        "label": "Personalizar temperatura",
-        "description": "Cuando está desactivado, cada proveedor usa su propio valor predeterminado.",
-        "sliderDescription": "Los valores bajos son más deterministas; los altos, más creativos.",
-        "aria": "Temperatura"
-      }
-    },
     "codeExecution": {
       "title": "Ejecución de código",
       "description": "Permite al agente ejecutar scripts para crear documentos, hojas de cálculo, presentaciones e imágenes.",

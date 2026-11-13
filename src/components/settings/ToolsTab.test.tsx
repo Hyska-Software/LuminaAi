@@ -40,13 +40,11 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     systemPrompt: '',
     webSearchEnabled: true,
     fileCreationEnabled: true,
-    maxSteps: 64,
     sendKey: 'enter',
     showTokenUsage: true,
     reduceMotion: false,
     thinkingCollapsedByDefault: false,
     fontScale: 1,
-    temperature: null,
     includeAttachments: true,
     autoTitle: true,
     codeExecutionEnabled: false,
@@ -100,10 +98,6 @@ function codeEnvironment(overrides: Partial<CodeEnvironmentStatus> = {}): CodeEn
   };
 }
 
-function maxStepsSlider(): HTMLInputElement {
-  return screen.getByLabelText('Máximo de passos do agente') as HTMLInputElement;
-}
-
 function timeoutSlider(): HTMLInputElement {
   return screen.getByLabelText('Tempo limite de execução') as HTMLInputElement;
 }
@@ -126,35 +120,12 @@ beforeEach(() => {
   useUiStore.setState({ activeView: 'chat', settingsOpen: false });
 });
 
-describe('ToolsTab — máximo de passos', () => {
-  it('começa em 64 passos', () => {
+describe('ToolsTab — execução', () => {
+  it('não expõe limites de passos nem temperatura', () => {
     render(<ToolsTab />);
 
-    expect(maxStepsSlider().value).toBe('64');
-    expect(screen.getByText(/até 64 passos/)).toBeTruthy();
-  });
-
-  it('permite escolher até 1000 passos', () => {
-    render(<ToolsTab />);
-
-    expect(maxStepsSlider().min).toBe('1');
-    expect(maxStepsSlider().max).toBe('1000');
-  });
-
-  it('salva 1000 passos ao levar o slider ao máximo', async () => {
-    render(<ToolsTab />);
-
-    const slider = maxStepsSlider();
-    fireEvent.change(slider, { target: { value: '1000' } });
-    fireEvent.pointerUp(slider);
-
-    await waitFor(() => {
-      expect(mocks.saveSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ maxSteps: 1000 }),
-      );
-    });
-    expect(useAppStore.getState().settings.maxSteps).toBe(1000);
-    expect(screen.getByText(/até 1000 passos/)).toBeTruthy();
+    expect(screen.queryByText('Máximo de passos')).toBeNull();
+    expect(screen.queryByText('Personalizar temperatura')).toBeNull();
   });
 });
 

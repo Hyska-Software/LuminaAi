@@ -40,6 +40,21 @@ export type { CodeTurnSummaryProps } from './CodeTurnSummary';
 export { CodeCommitHistoryView } from './CodeCommitHistoryView';
 export type { CodeCommitHistoryViewProps, CodeCommitsTabTarget } from './CodeCommitHistoryView';
 
+export {
+  GitHubIssueView,
+  GitHubIssuesView,
+  GitHubPullRequestsView,
+  GitHubPullRequestView,
+} from './github';
+export type {
+  GitHubIssueViewProps,
+  GitHubIssuesViewProps,
+  GitHubNewIssueDialogProps,
+  GitHubNewPullRequestDialogProps,
+  GitHubPullRequestsViewProps,
+  GitHubPullRequestViewProps,
+} from './github';
+
 export { WorkspaceTrustDialog } from './WorkspaceTrustDialog';
 export type { WorkspaceTrustDialogProps } from './WorkspaceTrustDialog';
 

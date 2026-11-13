@@ -380,22 +380,6 @@
         "day": "24 horas"
       }
     },
-    "execution": {
-      "title": "Execução",
-      "description": "Limites do loop de agente e criatividade do modelo.",
-      "maxSteps": {
-        "label": "Máximo de passos",
-        "description_one": "O agente executa até {{count}} passo (ferramenta → resposta) por turno.",
-        "description_other": "O agente executa até {{count}} passos (ferramenta → resposta) por turno.",
-        "aria": "Máximo de passos do agente"
-      },
-      "temperature": {
-        "label": "Personalizar temperatura",
-        "description": "Quando desligado, cada provedor usa o próprio padrão.",
-        "sliderDescription": "Valores baixos são mais determinísticos; altos, mais criativos.",
-        "aria": "Temperatura"
-      }
-    },
     "codeExecution": {
       "title": "Execução de código",
       "description": "Permite ao agente executar scripts para criar documentos, planilhas, apresentações e imagens.",

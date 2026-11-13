@@ -22,12 +22,6 @@ import type {
   SettingsView,
 } from '../types';
 
-/** Upper bound accepted for the agent loop steps per turn. */
-export const MAX_STEPS_LIMIT = 1000;
-
-/** Default number of agent loop steps per turn (fresh installs). */
-export const MAX_STEPS_DEFAULT = 64;
-
 const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   themeId: 'zylara',
@@ -38,7 +32,6 @@ const DEFAULT_SETTINGS: Settings = {
   systemPrompt: '',
   webSearchEnabled: true,
   fileCreationEnabled: true,
-  maxSteps: MAX_STEPS_DEFAULT,
   sendKey: 'enter',
   showTokenUsage: true,
   reduceMotion: false,
@@ -46,7 +39,6 @@ const DEFAULT_SETTINGS: Settings = {
   fontScale: 1,
   terminalFontFamily: '',
   terminalFontSize: 12,
-  temperature: null,
   includeAttachments: true,
   autoTitle: true,
   codeExecutionEnabled: false,

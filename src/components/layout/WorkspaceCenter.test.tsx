@@ -72,6 +72,22 @@ vi.mock('@/components/code', () => ({
       {conversationId}
     </div>
   ),
+  GitHubPullRequestsView: ({ tab }: { tab: { workspaceId: string } }) => (
+    <div data-testid="github-prs-view">{tab.workspaceId}</div>
+  ),
+  GitHubPullRequestView: ({ tab }: { tab: { workspaceId: string; number: number } }) => (
+    <div data-testid="github-pr-view">
+      {tab.workspaceId}#{tab.number}
+    </div>
+  ),
+  GitHubIssuesView: ({ tab }: { tab: { workspaceId: string } }) => (
+    <div data-testid="github-issues-view">{tab.workspaceId}</div>
+  ),
+  GitHubIssueView: ({ tab }: { tab: { workspaceId: string; number: number } }) => (
+    <div data-testid="github-issue-view">
+      {tab.workspaceId}#{tab.number}
+    </div>
+  ),
 }));
 
 vi.mock('@/components/agent/SubagentChatView', () => ({
@@ -108,6 +124,12 @@ beforeEach(() => {
     codePlanTab: null,
     codeSubagentTabs: [],
     codeSubagentTab: null,
+    codePullRequestsTab: null,
+    codePullRequestTabs: [],
+    codePullRequestTab: null,
+    codeIssuesTab: null,
+    codeIssueTabs: [],
+    codeIssueTab: null,
     codeGoalOpen: false,
     goalDialog: null,
   });
@@ -344,6 +366,40 @@ describe('WorkspaceCenter - aba central de subagente', () => {
 
     expect(screen.getByTestId('subagent-chat-view').textContent).toBe('Revisar o diff');
     expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+  });
+});
+
+describe('WorkspaceCenter - superfícies do GitHub', () => {
+  it('renderiza as listas e os detalhes no centro e oculta a conversa', () => {
+    useUiStore.setState({
+      layoutMode: 'code',
+      codeView: 'prs',
+      codePullRequestsTab: { workspaceId: 'ws-1' },
+    });
+
+    render(<WorkspaceCenter />);
+
+    expect(screen.getByTestId('github-prs-view').textContent).toBe('ws-1');
+    expect(screen.getByTestId('code-session-header')).toBeTruthy();
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+
+    act(() => {
+      useUiStore.getState().openCodePullRequest({ workspaceId: 'ws-1', number: 42, title: 'PR' });
+    });
+    expect(screen.getByTestId('github-pr-view').textContent).toBe('ws-1#42');
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+
+    act(() => {
+      useUiStore.getState().openCodeIssues('ws-1');
+    });
+    expect(screen.getByTestId('github-issues-view').textContent).toBe('ws-1');
+    expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
+
+    act(() => {
+      useUiStore.getState().openCodeIssue({ workspaceId: 'ws-1', number: 9, title: 'Issue' });
+    });
+    expect(screen.getByTestId('github-issue-view').textContent).toBe('ws-1#9');
     expect(screen.getByTestId('chat-view').parentElement?.className).toContain('hidden');
   });
 });

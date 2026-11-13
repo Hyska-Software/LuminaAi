@@ -478,8 +478,6 @@ function turnOptionsFromSettings(overrides?: Partial<TurnOptions>): TurnOptions 
     webSearch: settings.webSearchEnabled,
     createFiles: settings.fileCreationEnabled,
     runCode: settings.codeExecutionEnabled,
-    maxSteps: settings.maxSteps,
-    temperature: settings.temperature ?? null,
     systemPromptOverride: null,
     regenerate: false,
     ...overrides,

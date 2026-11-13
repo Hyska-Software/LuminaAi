@@ -21,6 +21,7 @@ mod db;
 mod documents;
 mod domain;
 mod events;
+mod github;
 mod harness;
 mod http;
 mod i18n;
@@ -458,6 +459,35 @@ fn run_app(context: tauri::Context<tauri::Wry>) {
             commands::git::git_log,
             commands::git::git_commit_detail,
             commands::git::suggest_commit_message,
+            /* -------- GitHub: PRs e Issues -------- */
+            commands::github::github_account,
+            commands::github::github_set_token,
+            commands::github::github_clear_token,
+            commands::github::github_connection,
+            commands::github::github_list_pull_requests,
+            commands::github::github_list_issues,
+            commands::github::github_pull_request,
+            commands::github::github_pull_request_files,
+            commands::github::github_pull_request_commits,
+            commands::github::github_issue,
+            commands::github::github_labels,
+            commands::github::github_assignable_users,
+            commands::github::github_milestones,
+            commands::github::github_branches,
+            commands::github::github_create_pull_request,
+            commands::github::github_update_pull_request,
+            commands::github::github_merge_pull_request,
+            commands::github::github_request_reviewers,
+            commands::github::github_mark_pull_request_ready,
+            commands::github::github_submit_review,
+            commands::github::github_checkout_pull_request,
+            commands::github::github_create_issue,
+            commands::github::github_update_issue,
+            commands::github::github_add_comment,
+            commands::github::github_update_comment,
+            commands::github::github_delete_comment,
+            commands::github::github_set_labels,
+            commands::github::github_set_assignees,
             /* -------- terminal PTY -------- */
             commands::terminal::open_terminal,
             commands::terminal::write_terminal,

@@ -146,12 +146,10 @@ describe('defaultSelection', () => {
     systemPrompt: '',
     webSearchEnabled: true,
     fileCreationEnabled: true,
-    maxSteps: 64,
     sendKey: 'enter',
     showTokenUsage: true,
     reduceMotion: false,
     fontScale: 1,
-    temperature: null,
     includeAttachments: true,
     autoTitle: true,
   } as const;

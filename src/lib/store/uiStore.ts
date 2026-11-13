@@ -45,8 +45,10 @@ export type AgentEditorState =
  * workspace na mesma faixa de abas (código, imagem ou PDF); `plan` mostra o
  * plano aprovado da sessão em Markdown na mesma faixa (ver `codePlanTab`);
  * `goal` mostra o painel do objetivo persistente (docs/goals/code-goals);
- * `subagent` mostra o chat read-only de um subagente em uma aba própria.
- * Os alvos vivem em `codeDiffTab`/`codeFileTab`/`codePlanTab`/`codeSubagentTab`.
+ * `subagent` mostra o chat read-only de um subagente em uma aba própria;
+ * `prs`/`issues` mostram as listas do GitHub e `pr`/`issue` cada item aberto.
+ * Os alvos vivem em `codeDiffTab`/`codeFileTab`/`codePlanTab`/`codeSubagentTab`
+ * e nos campos `codePullRequest*`/`codeIssue*`.
  */
 export type CodeView =
   | 'session'
@@ -57,7 +59,28 @@ export type CodeView =
   | 'plan'
   | 'goal'
   | 'subagent'
-  | 'terminal';
+  | 'terminal'
+  | 'prs'
+  | 'pr'
+  | 'issues'
+  | 'issue';
+
+/** Views válidas do centro (usado por `setCodeView` e pelas abas). */
+const CODE_VIEWS: readonly CodeView[] = [
+  'session',
+  'skills',
+  'diff',
+  'commits',
+  'file',
+  'plan',
+  'goal',
+  'subagent',
+  'terminal',
+  'prs',
+  'pr',
+  'issues',
+  'issue',
+];
 
 /** Diff aberto como aba central (alvo é volátil; não persiste entre sessões). */
 export interface CodeDiffTab {
@@ -122,6 +145,36 @@ export interface CodeSubagentTab {
 export function codeSubagentTabKey(tab: CodeSubagentTab): string {
   const conversation = tab.conversationId.trim();
   return conversation.length > 0 ? conversation : tab.taskCallId.trim();
+}
+
+/** Lista de pull requests do workspace aberta como aba central. */
+export interface CodePullRequestsTab {
+  workspaceId: string;
+}
+
+/** Lista de issues do workspace aberta como aba central. */
+export interface CodeIssuesTab {
+  workspaceId: string;
+}
+
+/** Pull request aberto como aba central (uma aba por PR, como os arquivos). */
+export interface CodePullRequestTab {
+  workspaceId: string;
+  number: number;
+  /** Título congelado na abertura; o detalhe recarrega o resto. */
+  title: string;
+}
+
+/** Issue aberta como aba central (uma aba por issue). */
+export interface CodeIssueTab {
+  workspaceId: string;
+  number: number;
+  title: string;
+}
+
+/** Chave estável de uma aba de PR/issue (workspace + número). */
+export function codeRepoItemTabKey(tab: { workspaceId: string; number: number }): string {
+  return `${tab.workspaceId}\u0000${tab.number}`;
 }
 
 /** Tabs of the Code right panel (Arquivos | Alterações). */
@@ -260,6 +313,18 @@ interface UiState {
   codeSubagentTabs: CodeSubagentTab[];
   /** Aba ativa de subagente (`null` = nenhuma; sempre presente na lista). */
   codeSubagentTab: CodeSubagentTab | null;
+  /** Lista de pull requests do workspace aberta como aba central. */
+  codePullRequestsTab: CodePullRequestsTab | null;
+  /** Pull requests abertos como abas centrais, na ordem de abertura. */
+  codePullRequestTabs: CodePullRequestTab[];
+  /** Aba ativa de pull request (`null` = nenhuma; sempre presente na lista). */
+  codePullRequestTab: CodePullRequestTab | null;
+  /** Lista de issues do workspace aberta como aba central. */
+  codeIssuesTab: CodeIssuesTab | null;
+  /** Issues abertas como abas centrais, na ordem de abertura. */
+  codeIssueTabs: CodeIssueTab[];
+  /** Aba ativa de issue (`null` = nenhuma; sempre presente na lista). */
+  codeIssueTab: CodeIssueTab | null;
   /** Aba "Objetivo" aberta no centro (volátil, como a do plano). */
   codeGoalOpen: boolean;
   /** Diálogo de criação/edição do objetivo (`null` = fechado). */
@@ -354,6 +419,22 @@ interface UiState {
   openCodeSubagent: (target: CodeSubagentTab) => 'opened' | 'exists';
   /** Closes one subagent tab (default: the active one). */
   closeCodeSubagent: (target?: CodeSubagentTab) => void;
+  /** Abre (ou ativa) a aba da lista de pull requests do workspace. */
+  openCodePullRequests: (workspaceId: string) => void;
+  /** Fecha a aba da lista de pull requests; volta para a sessão se era a ativa. */
+  closeCodePullRequests: () => void;
+  /** Abre (ou ativa) um pull request em uma aba central própria. */
+  openCodePullRequest: (target: CodePullRequestTab) => void;
+  /** Fecha a aba do PR (por padrão, a ativa) e ativa a vizinha. */
+  closeCodePullRequest: (target?: CodePullRequestTab) => void;
+  /** Abre (ou ativa) a aba da lista de issues do workspace. */
+  openCodeIssues: (workspaceId: string) => void;
+  /** Fecha a aba da lista de issues; volta para a sessão se era a ativa. */
+  closeCodeIssues: () => void;
+  /** Abre (ou ativa) uma issue em uma aba central própria. */
+  openCodeIssue: (target: CodeIssueTab) => void;
+  /** Fecha a aba da issue (por padrão, a ativa) e ativa a vizinha. */
+  closeCodeIssue: (target?: CodeIssueTab) => void;
   /** Abre a aba central "Objetivo" (`codeView` vira goal). */
   openCodeGoal: () => void;
   /** Fecha a aba do objetivo; se ela era a ativa, volta para a sessão. */
@@ -421,10 +502,19 @@ interface UiState {
   applyTheme: () => void;
 }
 
-/** Aba central aberta no centro (as três abas convivem na faixa de abas). */
+/** Aba central aberta no centro (todas convivem na faixa de abas). */
 type CentralCodeView = Extract<
   CodeView,
-  'diff' | 'file' | 'commits' | 'plan' | 'goal' | 'subagent'
+  | 'diff'
+  | 'file'
+  | 'commits'
+  | 'plan'
+  | 'goal'
+  | 'subagent'
+  | 'prs'
+  | 'pr'
+  | 'issues'
+  | 'issue'
 >;
 
 /**
@@ -479,6 +569,12 @@ export const useUiStore = create<UiState>()(
       codePlanTab: null,
       codeSubagentTabs: [],
       codeSubagentTab: null,
+      codePullRequestsTab: null,
+      codePullRequestTabs: [],
+      codePullRequestTab: null,
+      codeIssuesTab: null,
+      codeIssueTabs: [],
+      codeIssueTab: null,
       codeGoalOpen: false,
       goalDialog: null,
       codeFileWrap: false,
@@ -554,26 +650,7 @@ export const useUiStore = create<UiState>()(
       openAgentAvatarEditor: (agentAvatarEditor) => set({ agentAvatarEditor }),
       closeAgentAvatarEditor: () => set({ agentAvatarEditor: null }),
       setCodeView: (codeView) =>
-        set({
-          codeView:
-            codeView === 'skills'
-              ? 'skills'
-              : codeView === 'diff'
-                ? 'diff'
-                : codeView === 'commits'
-                  ? 'commits'
-                  : codeView === 'file'
-                    ? 'file'
-                    : codeView === 'plan'
-                      ? 'plan'
-                      : codeView === 'goal'
-                        ? 'goal'
-                      : codeView === 'subagent'
-                        ? 'subagent'
-                        : codeView === 'terminal'
-                          ? 'terminal'
-                          : 'session',
-        }),
+        set({ codeView: CODE_VIEWS.includes(codeView) ? codeView : 'session' }),
       openCodeDiff: (codeDiffTab) => set({ codeDiffTab, codeView: 'diff' }),
       closeCodeDiff: () =>
         set((state) => ({ codeDiffTab: null, ...keepCenterViewUnlessActive(state, 'diff') })),
@@ -680,6 +757,100 @@ export const useUiStore = create<UiState>()(
               neighbor === null && state.codeView === 'subagent'
                 ? 'session'
                 : state.codeView,
+          };
+        }),
+      openCodePullRequests: (workspaceId) =>
+        set({ codePullRequestsTab: { workspaceId }, codeView: 'prs' }),
+      closeCodePullRequests: () =>
+        set((state) => ({
+          codePullRequestsTab: null,
+          ...keepCenterViewUnlessActive(state, 'prs'),
+        })),
+      openCodePullRequest: (target) =>
+        set((state) => {
+          const key = codeRepoItemTabKey(target);
+          const alreadyOpen = state.codePullRequestTabs.some(
+            (tab) => codeRepoItemTabKey(tab) === key,
+          );
+          return {
+            codePullRequestTabs: alreadyOpen
+              ? state.codePullRequestTabs.map((tab) =>
+                  codeRepoItemTabKey(tab) === key ? target : tab,
+                )
+              : [...state.codePullRequestTabs, target],
+            codePullRequestTab: target,
+            codeView: 'pr',
+          };
+        }),
+      closeCodePullRequest: (target) =>
+        set((state) => {
+          const closing = target ?? state.codePullRequestTab;
+          if (!closing) return {};
+          const closingKey = codeRepoItemTabKey(closing);
+          const index = state.codePullRequestTabs.findIndex(
+            (tab) => codeRepoItemTabKey(tab) === closingKey,
+          );
+          if (index < 0) return {};
+          const remaining = state.codePullRequestTabs.filter(
+            (_, tabIndex) => tabIndex !== index,
+          );
+          const activeKey = state.codePullRequestTab
+            ? codeRepoItemTabKey(state.codePullRequestTab)
+            : null;
+          if (activeKey !== closingKey) {
+            return { codePullRequestTabs: remaining };
+          }
+          const neighbor = remaining[Math.min(index, remaining.length - 1)] ?? null;
+          return {
+            codePullRequestTabs: remaining,
+            codePullRequestTab: neighbor,
+            codeView:
+              neighbor === null && state.codeView === 'pr' ? 'session' : state.codeView,
+          };
+        }),
+      openCodeIssues: (workspaceId) =>
+        set({ codeIssuesTab: { workspaceId }, codeView: 'issues' }),
+      closeCodeIssues: () =>
+        set((state) => ({
+          codeIssuesTab: null,
+          ...keepCenterViewUnlessActive(state, 'issues'),
+        })),
+      openCodeIssue: (target) =>
+        set((state) => {
+          const key = codeRepoItemTabKey(target);
+          const alreadyOpen = state.codeIssueTabs.some(
+            (tab) => codeRepoItemTabKey(tab) === key,
+          );
+          return {
+            codeIssueTabs: alreadyOpen
+              ? state.codeIssueTabs.map((tab) =>
+                  codeRepoItemTabKey(tab) === key ? target : tab,
+                )
+              : [...state.codeIssueTabs, target],
+            codeIssueTab: target,
+            codeView: 'issue',
+          };
+        }),
+      closeCodeIssue: (target) =>
+        set((state) => {
+          const closing = target ?? state.codeIssueTab;
+          if (!closing) return {};
+          const closingKey = codeRepoItemTabKey(closing);
+          const index = state.codeIssueTabs.findIndex(
+            (tab) => codeRepoItemTabKey(tab) === closingKey,
+          );
+          if (index < 0) return {};
+          const remaining = state.codeIssueTabs.filter((_, tabIndex) => tabIndex !== index);
+          const activeKey = state.codeIssueTab ? codeRepoItemTabKey(state.codeIssueTab) : null;
+          if (activeKey !== closingKey) {
+            return { codeIssueTabs: remaining };
+          }
+          const neighbor = remaining[Math.min(index, remaining.length - 1)] ?? null;
+          return {
+            codeIssueTabs: remaining,
+            codeIssueTab: neighbor,
+            codeView:
+              neighbor === null && state.codeView === 'issue' ? 'session' : state.codeView,
           };
         }),
       openCodeGoal: () => set({ codeGoalOpen: true, codeView: 'goal' }),

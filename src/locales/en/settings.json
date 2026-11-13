@@ -380,22 +380,6 @@
         "day": "24 hours"
       }
     },
-    "execution": {
-      "title": "Execution",
-      "description": "Limits of the agent loop and model creativity.",
-      "maxSteps": {
-        "label": "Maximum steps",
-        "description_one": "The agent runs up to {{count}} step (tool → response) per turn.",
-        "description_other": "The agent runs up to {{count}} steps (tool → response) per turn.",
-        "aria": "Maximum agent steps"
-      },
-      "temperature": {
-        "label": "Customize temperature",
-        "description": "When off, each provider uses its own default.",
-        "sliderDescription": "Low values are more deterministic; high values are more creative.",
-        "aria": "Temperature"
-      }
-    },
     "codeExecution": {
       "title": "Code execution",
       "description": "Lets the agent run scripts to create documents, spreadsheets, presentations and images.",

@@ -802,6 +802,96 @@ pub async fn fetch(root: &Path) -> Result<(), ExecError> {
     Ok(())
 }
 
+/// URL of the remote used by the GitHub surfaces: `origin` first, then the
+/// first configured remote. `None` outside a repo or without remotes.
+pub async fn remote_url(root: &Path) -> Option<String> {
+    if let Ok(output) = run_git_checked(root, &["remote", "get-url", "origin"], TEXT_CAP).await {
+        let value = output.stdout.trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    let output = run_git_checked(root, &["remote"], TEXT_CAP).await.ok()?;
+    let name = output
+        .stdout
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .to_string();
+    let output = run_git_checked(root, &["remote", "get-url", &name], TEXT_CAP)
+        .await
+        .ok()?;
+    let value = output.stdout.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// Remote used to fetch pull request refs (`origin` by default).
+pub async fn default_remote(root: &Path) -> String {
+    let output = run_git_capture(root, &["remote"], TEXT_CAP).await;
+    if let Ok(output) = output {
+        let names: Vec<&str> = output
+            .stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        if names.iter().any(|name| *name == "origin") {
+            return "origin".to_string();
+        }
+        if let Some(first) = names.first() {
+            return (*first).to_string();
+        }
+    }
+    "origin".to_string()
+}
+
+/// Local branch checked out for a pull request (`pr-<number>`).
+pub fn pull_request_branch(number: u32) -> String {
+    format!("pr-{number}")
+}
+
+/// Fetches `refs/pull/<number>/head` and switches the working tree to a local
+/// `pr-<number>` branch (created on first use).
+///
+/// The PR ref is used instead of the author's branch: forks and deleted
+/// branches keep working, and no force-push history is rewritten.
+pub async fn fetch_pull_request(
+    root: &Path,
+    remote: &str,
+    number: u32,
+) -> Result<String, ExecError> {
+    let remote = remote.trim();
+    let valid = !remote.is_empty()
+        && remote
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'));
+    if !valid {
+        return Err(branch_error(crate::i18n::t("git.errors.invalidRemote")));
+    }
+    let remote_ref = format!("refs/pull/{number}/head");
+    run_git_network(root, &["fetch", "--no-tags", remote, &remote_ref])
+        .await
+        .map_err(with_network_hint)?;
+    let branch = pull_request_branch(number);
+    if ref_exists(root, &format!("refs/heads/{branch}")).await {
+        checkout_local(root, &branch).await?;
+        // The local branch may be behind the PR head; bring it forward without
+        // rewriting local commits or creating a merge commit.
+        run_git_checked(root, &["merge", "--ff-only", "FETCH_HEAD"], TEXT_CAP)
+            .await
+            .map(|_| ())
+    } else {
+        run_git_checked(
+            root,
+            &["switch", "--create", &branch, "FETCH_HEAD"],
+            TEXT_CAP,
+        )
+        .await
+        .map(|_| ())
+    }?;
+    Ok(branch)
+}
+
 /// `git pull --no-edit`: respeita a configuração do usuário (merge/rebase) e
 /// nunca abre editor para a mensagem do merge.
 pub async fn pull(root: &Path) -> Result<(), ExecError> {

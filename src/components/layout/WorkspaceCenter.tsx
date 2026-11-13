@@ -10,6 +10,10 @@ import {
   CodePlanView,
   CodeSessionHeader,
   CodeWelcomeScreen,
+  GitHubIssueView,
+  GitHubIssuesView,
+  GitHubPullRequestView,
+  GitHubPullRequestsView,
   GoalDialog,
   GoalPanel,
   TerminalPanel,
@@ -40,6 +44,10 @@ export function WorkspaceCenter() {
   const codePlanTab = useUiStore((state) => state.codePlanTab);
   const codeCommitsTab = useUiStore((state) => state.codeCommitsTab);
   const codeSubagentTab = useUiStore((state) => state.codeSubagentTab);
+  const codePullRequestsTab = useUiStore((state) => state.codePullRequestsTab);
+  const codePullRequestTab = useUiStore((state) => state.codePullRequestTab);
+  const codeIssuesTab = useUiStore((state) => state.codeIssuesTab);
+  const codeIssueTab = useUiStore((state) => state.codeIssueTab);
   const selectCodeCommit = useUiStore((state) => state.selectCodeCommit);
   const activeView = useUiStore((state) => state.activeView);
   const setActiveView = useUiStore((state) => state.setActiveView);
@@ -68,6 +76,10 @@ export function WorkspaceCenter() {
   const showCommits = isCode && codeView === 'commits' && codeCommitsTab !== null;
   const showSubagent = isCode && codeView === 'subagent' && codeSubagentTab !== null;
   const showTerminal = isCode && codeView === 'terminal' && activeId !== null;
+  const showPullRequests = isCode && codeView === 'prs' && codePullRequestsTab !== null;
+  const showPullRequest = isCode && codeView === 'pr' && codePullRequestTab !== null;
+  const showIssues = isCode && codeView === 'issues' && codeIssuesTab !== null;
+  const showIssue = isCode && codeView === 'issue' && codeIssueTab !== null;
   const showChat =
     !showSkills &&
     !showLibrary &&
@@ -77,7 +89,11 @@ export function WorkspaceCenter() {
     !showPlan &&
     !showGoal &&
     !showSubagent &&
-    !showTerminal;
+    !showTerminal &&
+    !showPullRequests &&
+    !showPullRequest &&
+    !showIssues &&
+    !showIssue;
   const showHeader =
     isCode &&
     (showChat ||
@@ -87,7 +103,11 @@ export function WorkspaceCenter() {
       showPlan ||
       showGoal ||
       showSubagent ||
-      showTerminal);
+      showTerminal ||
+      showPullRequests ||
+      showPullRequest ||
+      showIssues ||
+      showIssue);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -189,6 +209,56 @@ export function WorkspaceCenter() {
           o `GoalPanel` é dono da region/id (`code-goal-panel`) e do scroll; aqui
           ele só ocupa o centro no lugar da conversa. */}
       {showGoal && activeId ? <GoalPanel conversationId={activeId} /> : null}
+
+      {showPullRequests && codePullRequestsTab ? (
+        <div
+          id="code-prs-panel"
+          role="region"
+          aria-label={t('code:github.prs.title')}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <GitHubPullRequestsView key={codePullRequestsTab.workspaceId} tab={codePullRequestsTab} />
+        </div>
+      ) : null}
+
+      {showPullRequest && codePullRequestTab ? (
+        <div
+          id="code-pr-panel"
+          role="region"
+          aria-label={t('code:github.pr.aria', { number: codePullRequestTab.number })}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <GitHubPullRequestView
+            key={`${codePullRequestTab.workspaceId}:${codePullRequestTab.number}`}
+            tab={codePullRequestTab}
+          />
+        </div>
+      ) : null}
+
+      {showIssues && codeIssuesTab ? (
+        <div
+          id="code-issues-panel"
+          role="region"
+          aria-label={t('code:github.issues.title')}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <GitHubIssuesView key={codeIssuesTab.workspaceId} tab={codeIssuesTab} />
+        </div>
+      ) : null}
+
+      {showIssue && codeIssueTab ? (
+        <div
+          id="code-issue-panel"
+          role="region"
+          aria-label={t('code:github.issue.aria', { number: codeIssueTab.number })}
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <GitHubIssueView
+            key={`${codeIssueTab.workspaceId}:${codeIssueTab.number}`}
+            tab={codeIssueTab}
+          />
+        </div>
+      ) : null}
 
       {showSkills ? (
         <SkillsView

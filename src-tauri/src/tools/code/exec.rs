@@ -1961,7 +1961,6 @@ async fn bridge_chat_tool(ctx: &ToolCtx, name: &str, args: &Value) -> ToolOutcom
     options.create_files = false;
     options.run_code = false;
     options.allowed_skills = ctx.allowed_skills.clone();
-    options.max_steps = 1;
     let runtime = crate::tools::ToolRuntime {
         db: ctx.db.clone(),
         http: ctx.http.clone(),

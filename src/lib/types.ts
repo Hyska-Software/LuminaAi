@@ -682,6 +682,228 @@ export interface WorkspaceTreeSnapshot {
   gitStatus: WorkspaceGitStatus;
 }
 
+/* ------------------------------------------------------------------ */
+/* GitHub — pull requests e issues                                     */
+/* ------------------------------------------------------------------ */
+
+/** Conta exposta pela API: login/scopes apenas, nunca o token. */
+export interface GitHubAccount {
+  authenticated: boolean;
+  login?: string | null;
+  /** `settings`, `env`, `gh-cli` ou `none`. */
+  source: string;
+  scopes: string[];
+}
+
+/** Repositório resolvido a partir do remote git do workspace. */
+export interface GitHubRepoInfo {
+  host: string;
+  owner: string;
+  name: string;
+  fullName: string;
+  htmlUrl: string;
+  defaultBranch?: string | null;
+  canPush: boolean;
+  /** Ações GraphQL (draft ⇄ ready) só existem no github.com. */
+  graphql: boolean;
+}
+
+/** Estado da conexão do workspace com o GitHub. */
+export interface GitHubConnectionView {
+  account: GitHubAccount;
+  repo?: GitHubRepoInfo | null;
+  /** Motivo localizado quando o repositório não pode ser usado. */
+  message?: string | null;
+}
+
+export interface GitHubUser {
+  login: string;
+  avatarUrl?: string | null;
+  htmlUrl?: string | null;
+}
+
+export interface GitHubLabel {
+  name: string;
+  color?: string | null;
+  description?: string | null;
+}
+
+export interface GitHubMilestone {
+  number: number;
+  title: string;
+  state: string;
+  openIssues: number;
+  closedIssues: number;
+  dueOn?: string | null;
+}
+
+export interface GitHubChecksSummary {
+  state: 'success' | 'failure' | 'pending' | 'neutral' | 'none';
+  total: number;
+  passed: number;
+  failed: number;
+  pending: number;
+}
+
+export interface GitHubPullRequestSummary {
+  number: number;
+  title: string;
+  state: 'open' | 'closed';
+  draft: boolean;
+  merged: boolean;
+  author: GitHubUser;
+  headRef: string;
+  headSha: string;
+  baseRef: string;
+  createdAt: string;
+  updatedAt: string;
+  comments: number;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  labels: GitHubLabel[];
+  htmlUrl: string;
+  crossRepository: boolean;
+}
+
+export interface GitHubPullRequestList {
+  items: GitHubPullRequestSummary[];
+  page: number;
+  perPage: number;
+  hasNext: boolean;
+}
+
+export interface GitHubComment {
+  id: number;
+  author: GitHubUser;
+  body: string;
+  createdAt: string;
+  updatedAt?: string | null;
+  htmlUrl?: string | null;
+  authorAssociation?: string | null;
+}
+
+export interface GitHubReview {
+  id: number;
+  author: GitHubUser;
+  state: 'APPROVED' | 'CHANGES_REQUESTED' | 'COMMENTED' | 'DISMISSED' | 'PENDING' | string;
+  body: string;
+  submittedAt?: string | null;
+}
+
+export interface GitHubPullRequestDetail {
+  summary: GitHubPullRequestSummary;
+  body: string;
+  mergeable?: boolean | null;
+  mergeableState?: string | null;
+  mergedAt?: string | null;
+  mergedBy?: GitHubUser | null;
+  requestedReviewers: GitHubUser[];
+  assignees: GitHubUser[];
+  milestone?: GitHubMilestone | null;
+  nodeId?: string | null;
+  checks: GitHubChecksSummary;
+  reviews: GitHubReview[];
+  comments: GitHubComment[];
+}
+
+export interface GitHubPullRequestFile {
+  path: string;
+  previousPath?: string | null;
+  status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string | null;
+  /** Patch omitido pela API (binário/grande) ou cortado pelo orçamento. */
+  truncated: boolean;
+}
+
+export interface GitHubPullRequestFiles {
+  files: GitHubPullRequestFile[];
+  truncated: boolean;
+}
+
+export interface GitHubPullRequestCommit {
+  sha: string;
+  message: string;
+  author: string;
+  authorLogin?: string | null;
+  avatarUrl?: string | null;
+  date?: string | null;
+}
+
+export interface GitHubIssueSummary {
+  number: number;
+  title: string;
+  state: 'open' | 'closed';
+  stateReason?: 'completed' | 'not_planned' | string | null;
+  author: GitHubUser;
+  createdAt: string;
+  updatedAt: string;
+  comments: number;
+  labels: GitHubLabel[];
+  assignees: GitHubUser[];
+  milestone?: string | null;
+  htmlUrl: string;
+}
+
+export interface GitHubIssueList {
+  items: GitHubIssueSummary[];
+  page: number;
+  perPage: number;
+  hasNext: boolean;
+}
+
+export interface GitHubIssueDetail {
+  summary: GitHubIssueSummary;
+  body: string;
+  locked: boolean;
+  closedAt?: string | null;
+  milestone?: GitHubMilestone | null;
+  comments: GitHubComment[];
+}
+
+export interface GitHubMergeResult {
+  merged: boolean;
+  message: string;
+  sha?: string | null;
+}
+
+export type GitHubItemState = 'open' | 'closed' | 'all';
+export type GitHubMergeMethod = 'merge' | 'squash' | 'rebase';
+export type GitHubReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+
+export interface GitHubPullRequestFilter {
+  state?: GitHubItemState;
+  search?: string;
+  label?: string;
+  author?: string;
+  assignee?: string;
+  /** `owner:branch` (REST `head`); search receives the bare branch. */
+  head?: string;
+  base?: string;
+  sort?: string;
+  direction?: 'asc' | 'desc';
+  page?: number;
+  perPage?: number;
+}
+
+export interface GitHubIssueFilter {
+  state?: GitHubItemState;
+  search?: string;
+  label?: string;
+  assignee?: string;
+  author?: string;
+  milestone?: string;
+  /** Title used by `/search/issues` (`milestone:` takes the name, not the id). */
+  milestoneTitle?: string;
+  sort?: string;
+  direction?: 'asc' | 'desc';
+  page?: number;
+  perPage?: number;
+}
+
 /** Lote coalescido de mudanças de arquivo do workspace. */
 export interface WorkspaceChangedEvent {
   workspaceId: string;
@@ -1468,8 +1690,6 @@ export interface TurnOptions {
   createFiles: boolean;
   /** Execução de código (`run_code`); o backend ainda aplica o gate global. */
   runCode: boolean;
-  maxSteps: number;
-  temperature?: number | null;
   systemPromptOverride?: string | null;
   regenerate?: boolean;
 }
@@ -1918,7 +2138,6 @@ export interface Settings {
   systemPrompt: string;
   webSearchEnabled: boolean;
   fileCreationEnabled: boolean;
-  maxSteps: number;
   sendKey: 'enter' | 'ctrl+enter';
   showTokenUsage: boolean;
   reduceMotion: boolean;
@@ -1933,7 +2152,6 @@ export interface Settings {
   terminalFontFamily?: string;
   /** Terminal font size in px (8–32). */
   terminalFontSize?: number;
-  temperature?: number | null;
   includeAttachments: boolean;
   autoTitle: boolean;
   /** Opt-in: permite ao agente executar código (`run_code`). */
@@ -1949,8 +2167,6 @@ export interface Settings {
   /** Nomes de skills desativadas; o agente as ignora. */
   disabledSkills: string[];
   /* ---- harness de código (docs/goals/code-harness/PLAN.md §7) ---- */
-  /** Máximo de passos por turno no perfil Code (o backend sempre envia). */
-  codeMaxSteps?: number;
   /** Permite ao agente executar comandos de shell (`run_command`). */
   shellEnabled?: boolean;
   /** `local` (máquina do usuário) ou `docker` para os comandos do Code. */

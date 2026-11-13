@@ -676,7 +676,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
             model_id: agent.model_id.clone(),
             reasoning: agent.reasoning.clone(),
             options: TurnOptions {
-                max_steps_override: Some(16),
+                max_steps: Some(16),
                 ..TurnOptions::default()
             },
             profile: TurnProfile::Code,

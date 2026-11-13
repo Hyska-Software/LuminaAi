@@ -10,7 +10,7 @@ import type {
   PermissionMode,
 } from '@/lib/types';
 import { AUTONOMOUS_MODE_WARNING_KEY } from '@/lib/permissionModes';
-import { MAX_STEPS_LIMIT, useAppStore, useUiStore } from '@/lib/store';
+import { useAppStore, useUiStore } from '@/lib/store';
 import { cn, copyText } from '@/lib/utils';
 import { Badge, Button, IconButton, Input, NativeSelect, Slider, Spinner, Switch } from '@/components/ui';
 import { countSkillsByOrigin, localizedSkillMeta, skillSourceMeta } from '@/components/skills/sources';
@@ -56,8 +56,6 @@ export function ToolsTab() {
   const saveSettings = useAppStore((state) => state.saveSettings);
   const setActiveView = useUiStore((state) => state.setActiveView);
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
-  const [maxSteps, setMaxSteps] = useState(settings.maxSteps);
-  const [temperature, setTemperature] = useState(settings.temperature ?? 0.7);
   const [timeoutSecs, setTimeoutSecs] = useState(settings.codeTimeoutSecs);
   const [dockerImage, setDockerImage] = useState(settings.dockerImage ?? 'node:22-bookworm');
   const [dockerInfo, setDockerInfo] = useState<string | null>(null);
@@ -68,10 +66,6 @@ export function ToolsTab() {
   const [environmentAttempt, setEnvironmentAttempt] = useState(0);
   const [openingSkills, setOpeningSkills] = useState(false);
 
-  useEffect(() => setMaxSteps(settings.maxSteps), [settings.maxSteps]);
-  useEffect(() => {
-    if (settings.temperature != null) setTemperature(settings.temperature);
-  }, [settings.temperature]);
   useEffect(() => setTimeoutSecs(settings.codeTimeoutSecs), [settings.codeTimeoutSecs]);
   useEffect(
     () => setDockerImage(settings.dockerImage ?? 'node:22-bookworm'),
@@ -100,7 +94,6 @@ export function ToolsTab() {
     };
   }, [environmentAttempt]);
 
-  const temperatureEnabled = settings.temperature != null;
   const executionEnvironment = settings.executionEnvironment ?? 'local';
   const codeDefaultPermissionMode: PermissionMode =
     settings.codeDefaultPermissionMode ?? CODE_DEFAULT_PERMISSION_FALLBACK;
@@ -237,51 +230,6 @@ export function ToolsTab() {
             <option value="24h">{t('tools.cache.openaiRetention.day')}</option>
           </NativeSelect>
         </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection title={t('tools.execution.title')} description={t('tools.execution.description')}>
-        <SettingRow
-          vertical
-          label={t('tools.execution.maxSteps.label')}
-          description={t('tools.execution.maxSteps.description', { count: maxSteps })}
-        >
-          <Slider
-            min={1}
-            max={MAX_STEPS_LIMIT}
-            step={1}
-            value={maxSteps}
-            valueLabel={String(maxSteps)}
-            onValueChange={setMaxSteps}
-            onValueCommit={(value) => void saveSettings({ maxSteps: value })}
-            aria-label={t('tools.execution.maxSteps.aria')}
-          />
-        </SettingRow>
-
-        <SettingsBlock>
-          <div className="flex flex-col gap-3">
-            <Switch
-              checked={temperatureEnabled}
-              onCheckedChange={(checked) =>
-                void saveSettings({ temperature: checked ? temperature : null })
-              }
-              label={t('tools.execution.temperature.label')}
-              description={t('tools.execution.temperature.description')}
-            />
-            {temperatureEnabled ? (
-              <Slider
-                min={0}
-                max={1.5}
-                step={0.05}
-                value={temperature}
-                valueLabel={temperature.toFixed(2)}
-                onValueChange={setTemperature}
-                onValueCommit={(value) => void saveSettings({ temperature: value })}
-                description={t('tools.execution.temperature.sliderDescription')}
-                aria-label={t('tools.execution.temperature.aria')}
-              />
-            ) : null}
-          </div>
-        </SettingsBlock>
       </SettingsSection>
 
       <SettingsSection

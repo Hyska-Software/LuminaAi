@@ -1,4 +1,4 @@
-export { useAppStore, MAX_STEPS_DEFAULT, MAX_STEPS_LIMIT } from './appStore';
+export { useAppStore } from './appStore';
 export {
   useUpdateStore,
   initialUpdateState,
@@ -22,6 +22,13 @@ export {
 } from './agentStore';
 export { useCodeStore, emptyCodeSession, applyCodeEvent, isCodeEvent } from './codeStore';
 export type { CodeSessionUi } from './codeStore';
+export {
+  useGitHubStore,
+  gitHubListKey,
+  gitHubItemKey,
+  describeGitHubError,
+} from './githubStore';
+export type { AsyncData, GitHubMeta } from './githubStore';
 export { useMessageQueueStore, compactMessageQueue } from './messageQueueStore';
 export type { MessageQueueItem } from './messageQueueStore';
 export {
@@ -46,6 +53,7 @@ export {
   sortArtifacts,
   codeFileTabKey,
   codeSubagentTabKey,
+  codeRepoItemTabKey,
   normalizeCodePanelTabOrder,
   CODE_PANEL_TAB_ORDER_DEFAULT,
   clampSidebarWidth,
@@ -68,8 +76,12 @@ export type {
   ArtifactPanelView,
   CodeDiffTab,
   CodeFileTab,
+  CodeIssueTab,
+  CodeIssuesTab,
   CodePanelTab,
   CodePlanTab,
+  CodePullRequestTab,
+  CodePullRequestsTab,
   CodeSubagentTab,
   CodeView,
   LayoutMode,

@@ -59,6 +59,26 @@ import type {
   DockerImageInfo,
   DockerStatus,
   FileChange,
+  GitHubAccount,
+  GitHubComment,
+  GitHubConnectionView,
+  GitHubIssueDetail,
+  GitHubIssueFilter,
+  GitHubIssueList,
+  GitHubIssueSummary,
+  GitHubLabel,
+  GitHubMergeMethod,
+  GitHubMergeResult,
+  GitHubMilestone,
+  GitHubPullRequestCommit,
+  GitHubPullRequestDetail,
+  GitHubPullRequestFiles,
+  GitHubPullRequestFilter,
+  GitHubPullRequestList,
+  GitHubPullRequestSummary,
+  GitHubReview,
+  GitHubReviewEvent,
+  GitHubUser,
   GoalAction,
   GoalContinuation,
   GoalRound,
@@ -659,6 +679,157 @@ export const api = {
       target,
       paths: paths ?? null,
     }),
+
+  /* -------- GitHub (pull requests e issues) -------- */
+  githubAccount: () => invoke<GitHubAccount>('github_account'),
+  githubSetToken: (token: string, workspaceId?: string | null) =>
+    invoke<GitHubAccount>('github_set_token', { token, workspaceId: workspaceId ?? null }),
+  githubClearToken: () => invoke<GitHubAccount>('github_clear_token'),
+  githubConnection: (workspaceId: string) =>
+    invoke<GitHubConnectionView>('github_connection', { workspaceId }),
+  githubListPullRequests: (workspaceId: string, filter?: GitHubPullRequestFilter) =>
+    invoke<GitHubPullRequestList>('github_list_pull_requests', {
+      workspaceId,
+      filter: filter ?? null,
+    }),
+  githubPullRequest: (workspaceId: string, number: number) =>
+    invoke<GitHubPullRequestDetail>('github_pull_request', { workspaceId, number }),
+  githubPullRequestFiles: (workspaceId: string, number: number) =>
+    invoke<GitHubPullRequestFiles>('github_pull_request_files', { workspaceId, number }),
+  githubPullRequestCommits: (workspaceId: string, number: number) =>
+    invoke<GitHubPullRequestCommit[]>('github_pull_request_commits', { workspaceId, number }),
+  githubListIssues: (workspaceId: string, filter?: GitHubIssueFilter) =>
+    invoke<GitHubIssueList>('github_list_issues', { workspaceId, filter: filter ?? null }),
+  githubIssue: (workspaceId: string, number: number) =>
+    invoke<GitHubIssueDetail>('github_issue', { workspaceId, number }),
+  githubLabels: (workspaceId: string) =>
+    invoke<GitHubLabel[]>('github_labels', { workspaceId }),
+  githubAssignableUsers: (workspaceId: string) =>
+    invoke<GitHubUser[]>('github_assignable_users', { workspaceId }),
+  githubMilestones: (workspaceId: string) =>
+    invoke<GitHubMilestone[]>('github_milestones', { workspaceId }),
+  githubBranches: (workspaceId: string) => invoke<string[]>('github_branches', { workspaceId }),
+  githubCreatePullRequest: (
+    workspaceId: string,
+    payload: { title: string; head: string; base: string; body?: string | null; draft?: boolean | null },
+  ) =>
+    invoke<GitHubPullRequestSummary>('github_create_pull_request', {
+      workspaceId,
+      title: payload.title,
+      head: payload.head,
+      base: payload.base,
+      body: payload.body ?? null,
+      draft: payload.draft ?? null,
+    }),
+  githubUpdatePullRequest: (
+    workspaceId: string,
+    number: number,
+    patch: {
+      title?: string | null;
+      body?: string | null;
+      stateValue?: 'open' | 'closed' | null;
+      base?: string | null;
+    },
+  ) =>
+    invoke<GitHubPullRequestSummary>('github_update_pull_request', {
+      workspaceId,
+      number,
+      title: patch.title ?? null,
+      body: patch.body ?? null,
+      stateValue: patch.stateValue ?? null,
+      base: patch.base ?? null,
+    }),
+  githubMergePullRequest: (
+    workspaceId: string,
+    number: number,
+    options: {
+      method?: GitHubMergeMethod;
+      commitTitle?: string | null;
+      commitMessage?: string | null;
+      /** Expected head SHA; the merge fails if the branch moved. */
+      sha?: string | null;
+      deleteBranch?: boolean;
+    } = {},
+  ) =>
+    invoke<GitHubMergeResult>('github_merge_pull_request', {
+      workspaceId,
+      number,
+      method: options.method ?? null,
+      commitTitle: options.commitTitle ?? null,
+      commitMessage: options.commitMessage ?? null,
+      sha: options.sha ?? null,
+      deleteBranch: options.deleteBranch ?? null,
+    }),
+  githubRequestReviewers: (workspaceId: string, number: number, reviewers: string[]) =>
+    invoke<void>('github_request_reviewers', { workspaceId, number, reviewers }),
+  githubMarkPullRequestReady: (workspaceId: string, nodeId: string) =>
+    invoke<void>('github_mark_pull_request_ready', { workspaceId, nodeId }),
+  githubSubmitReview: (
+    workspaceId: string,
+    number: number,
+    event: GitHubReviewEvent,
+    body?: string | null,
+  ) =>
+    invoke<GitHubReview>('github_submit_review', {
+      workspaceId,
+      number,
+      event,
+      body: body ?? null,
+    }),
+  githubCheckoutPullRequest: (workspaceId: string, number: number) =>
+    invoke<string>('github_checkout_pull_request', { workspaceId, number }),
+  githubCreateIssue: (
+    workspaceId: string,
+    payload: {
+      title: string;
+      body?: string | null;
+      labels?: string[];
+      assignees?: string[];
+    },
+  ) =>
+    invoke<GitHubIssueSummary>('github_create_issue', {
+      workspaceId,
+      title: payload.title,
+      body: payload.body ?? null,
+      labels: payload.labels ?? null,
+      assignees: payload.assignees ?? null,
+    }),
+  githubUpdateIssue: (
+    workspaceId: string,
+    number: number,
+    patch: {
+      title?: string | null;
+      body?: string | null;
+      stateValue?: 'open' | 'closed' | null;
+      stateReason?: 'completed' | 'not_planned' | null;
+      labels?: string[];
+      assignees?: string[];
+      milestone?: number | null;
+      clearMilestone?: boolean;
+    },
+  ) =>
+    invoke<GitHubIssueSummary>('github_update_issue', {
+      workspaceId,
+      number,
+      title: patch.title ?? null,
+      body: patch.body ?? null,
+      stateValue: patch.stateValue ?? null,
+      stateReason: patch.stateReason ?? null,
+      labels: patch.labels ?? null,
+      assignees: patch.assignees ?? null,
+      milestone: patch.milestone ?? null,
+      clearMilestone: patch.clearMilestone ?? false,
+    }),
+  githubAddComment: (workspaceId: string, number: number, body: string) =>
+    invoke<GitHubComment>('github_add_comment', { workspaceId, number, body }),
+  githubUpdateComment: (workspaceId: string, commentId: number, body: string) =>
+    invoke<GitHubComment>('github_update_comment', { workspaceId, commentId, body }),
+  githubDeleteComment: (workspaceId: string, commentId: number) =>
+    invoke<void>('github_delete_comment', { workspaceId, commentId }),
+  githubSetLabels: (workspaceId: string, number: number, labels: string[]) =>
+    invoke<GitHubLabel[]>('github_set_labels', { workspaceId, number, labels }),
+  githubSetAssignees: (workspaceId: string, number: number, assignees: string[]) =>
+    invoke<GitHubIssueSummary>('github_set_assignees', { workspaceId, number, assignees }),
 
   /* -------- jobs (processos em background) -------- */
   listJobs: (conversationId: string) => invoke<JobView[]>('list_jobs', { conversationId }),

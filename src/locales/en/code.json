@@ -682,6 +682,22 @@
       "visible": "Commits",
       "close": "Close commit history"
     },
+    "pullRequestsTab": {
+      "label": "Pull requests",
+      "visible": "Pull requests",
+      "close": "Close pull requests"
+    },
+    "pullRequestTab": {
+      "label": "Pull request #{{number}}"
+    },
+    "issuesTab": {
+      "label": "Issues",
+      "visible": "Issues",
+      "close": "Close issues"
+    },
+    "issueTab": {
+      "label": "Issue #{{number}}"
+    },
     "toast": {
       "bindWorkspaceError": "Could not switch the session workspace",
       "pathCopied": "Path copied",
@@ -1038,5 +1054,228 @@
     "fileReverted": "File reverted: {{path}}",
     "fileRevertError": "Could not revert the file",
     "compactError": "Could not compact the context"
+  },
+  "github": {
+    "actionError": "GitHub action failed",
+    "actions": "Actions",
+    "apply": "Apply",
+    "cancel": "Cancel",
+    "checks": {
+      "failure": "Checks failed",
+      "neutral": "Checks neutral",
+      "none": "No checks",
+      "pending": "Checks running",
+      "success": "Checks passed"
+    },
+    "comments": {
+      "delete": "Delete comment",
+      "deleted": "Comment deleted",
+      "empty": "No comments yet",
+      "error": "Could not send the comment",
+      "placeholder": "Write a comment…",
+      "submit": "Comment",
+      "updated": "Comment updated",
+      "confirmDelete": "Delete this comment?",
+      "edit": "Edit",
+      "save": "Save"
+    },
+    "connect": {
+      "createToken": "Create a token",
+      "description": "Zylara talks to GitHub from the backend; the token is stored in this machine's credentials file.",
+      "disconnected": "GitHub not connected",
+      "error": "Could not connect to GitHub",
+      "placeholder": "ghp_… or github_pat_…",
+      "requiredDescription": "Connect a GitHub account to list the pull requests and issues of this repository.",
+      "scopes": "Needs the repo scope (plus read:org for teams).",
+      "submit": "Connect",
+      "success": "Connected as {{login}}",
+      "title": "Connect GitHub",
+      "tokenLabel": "Personal access token"
+    },
+    "emptyOptions": "Nothing to select",
+    "filters": {
+      "all": "All",
+      "anyLabel": "Any label",
+      "anyMilestone": "Any milestone",
+      "closed": "Closed",
+      "label": "Label",
+      "milestone": "Milestone",
+      "mine": "Mine",
+      "open": "Open",
+      "searchPlaceholder": "Search by title…",
+      "state": "State"
+    },
+    "issue": {
+      "aria": "Issue #{{number}}",
+      "closeAction": "Close issue",
+      "closeCompleted": "Completed",
+      "closed": "Issue closed",
+      "closeDescription": "The reason is recorded in the issue history.",
+      "closeNotPlanned": "Not planned",
+      "closeReason": "Reason",
+      "edit": "Edit issue",
+      "editDescription": "Update the title and the description.",
+      "locked": "Locked",
+      "milestone": "Milestone",
+      "noBody": "No description",
+      "notFound": "Issue not found",
+      "reopenAction": "Reopen issue",
+      "reopened": "Issue reopened",
+      "updateError": "Could not update the issue"
+    },
+    "issues": {
+      "emptyDescription": "No issue matches these filters.",
+      "emptyTitle": "No issues",
+      "new": "New issue",
+      "title": "Issues"
+    },
+    "loading": "Loading from GitHub…",
+    "menu": {
+      "account": "Account",
+      "connect": "Connect GitHub…",
+      "disconnect": "Disconnect",
+      "issues": "Issues",
+      "newIssue": "New issue…",
+      "newPullRequest": "New pull request…",
+      "pullRequests": "Pull requests",
+      "title": "GitHub"
+    },
+    "newIssue": {
+      "assignees": "Assignees",
+      "assigneesCount": "{{count}} selected",
+      "body": "Description",
+      "bodyPlaceholder": "Describe the problem or the suggestion (Markdown)",
+      "description": "Creates the issue in this repository.",
+      "error": "Could not create the issue",
+      "labels": "Labels",
+      "labelsCount": "{{count}} selected",
+      "submit": "Create issue",
+      "success": "Issue #{{number}} created",
+      "title": "New issue"
+    },
+    "newPr": {
+      "base": "Base branch",
+      "body": "Description",
+      "bodyPlaceholder": "Explain the change (Markdown)",
+      "description": "Opens a pull request from a branch already pushed to the remote.",
+      "draft": "Create as draft",
+      "error": "Could not create the pull request",
+      "fieldTitle": "Title",
+      "head": "Head branch",
+      "missing": "Push the head branch before opening the pull request",
+      "submit": "Create pull request",
+      "success": "Pull request #{{number}} created",
+      "title": "New pull request",
+      "titlePlaceholder": "Short summary of the change"
+    },
+    "openOnGitHub": "Open on GitHub",
+    "pagination": {
+      "next": "Next",
+      "page": "Page {{page}}",
+      "previous": "Previous"
+    },
+    "pr": {
+      "aria": "Pull request #{{number}}",
+      "assignees": "Assignees",
+      "checkout": "Checkout branch",
+      "checkoutSuccess": "Checked out {{branch}}",
+      "checks": {
+        "empty": "No checks reported",
+        "summary": "{{passed}} passed · {{failed}} failed · {{pending}} pending"
+      },
+      "clearAssignees": "Clear assignees",
+      "clearLabels": "Clear labels",
+      "clearReviewers": "Clear reviewers",
+      "closeAction": "Close pull request",
+      "closed": "Pull request closed",
+      "commits": {
+        "empty": "No commits"
+      },
+      "edit": "Edit pull request",
+      "editDescription": "Update the title, the description and the base branch.",
+      "fileCount": "{{count}} files",
+      "files": {
+        "binary": "Binary or too large to show",
+        "empty": "No changed files",
+        "truncated": "Some changed files or diffs are hidden (file limit or size budget)"
+      },
+      "labels": "Labels",
+      "merge": {
+        "commitMessage": "Commit message",
+        "commitTitle": "Commit title",
+        "conflicts": "This pull request has conflicts",
+        "deleteBranch": "Delete the head branch after merging",
+        "merge": "Create a merge commit",
+        "method": "Method",
+        "notMergeable": "GitHub reports this pull request as not mergeable",
+        "options": "Merge options",
+        "rebase": "Rebase and merge",
+        "squash": "Squash and merge",
+        "submit": "Merge",
+        "success": "Pull request merged"
+      },
+      "noBody": "No description",
+      "notFound": "Pull request not found",
+      "ready": "Mark ready for review",
+      "readySuccess": "Pull request ready for review",
+      "reopenAction": "Reopen pull request",
+      "reopened": "Pull request reopened",
+      "review": "Review",
+      "reviewApprove": "Approve",
+      "reviewBody": "Review comment",
+      "reviewComment": "Comment only",
+      "reviewDescription": "Submit a review to this pull request.",
+      "reviewError": "Could not submit the review",
+      "reviewers": "Reviewers",
+      "reviewRequestChanges": "Request changes",
+      "reviewsTitle": "Reviews",
+      "reviewSubmit": "Submit review",
+      "reviewSuccess": "Review submitted",
+      "saved": "Saved",
+      "sections": "Pull request sections",
+      "tabs": {
+        "checks": "Checks",
+        "commits": "Commits",
+        "conversation": "Conversation",
+        "files": "Files"
+      },
+      "tabTitle": "Pull request",
+      "updateError": "Could not update the pull request"
+    },
+    "prs": {
+      "emptyDescription": "No pull request matches these filters.",
+      "emptyTitle": "No pull requests",
+      "new": "New pull request",
+      "title": "Pull requests"
+    },
+    "refresh": "Refresh",
+    "repoUnknown": "No GitHub repository",
+    "retry": "Try again",
+    "review": {
+      "approved": "Approved",
+      "changesRequested": "Changes requested",
+      "commented": "Commented",
+      "dismissed": "Dismissed",
+      "pending": "Pending"
+    },
+    "save": "Save",
+    "state": {
+      "closed": "Closed",
+      "completed": "Completed",
+      "draft": "Draft",
+      "merged": "Merged",
+      "notPlanned": "Not planned",
+      "open": "Open"
+    },
+    "users": {
+      "empty": "No user available"
+    },
+    "form": {
+      "title": "Title",
+      "body": "Description"
+    },
+    "pickers": {
+      "clear": "Clear selection"
+    }
   }
 }

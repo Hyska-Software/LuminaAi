@@ -30,7 +30,7 @@ use crate::harness::code::questions::QuestionRegistry;
 use crate::harness::{self, EventEmitter, HarnessDeps};
 use crate::policy::approval::ApprovalRegistry;
 
-/// Short child budget (the parent configures `Settings::code_max_steps`).
+/// Short child budget (the parent leaves user turns unbounded).
 pub const SUBAGENT_MAX_STEPS: u32 = 24;
 /// Budget of an autonomous worker child: implementing + verifying needs more
 /// steps than a read-only investigation.
@@ -552,7 +552,7 @@ async fn run_child(
         model_id: model_id.clone(),
         reasoning,
         options: TurnOptions {
-            max_steps: request.kind.max_steps(),
+            max_steps: Some(request.kind.max_steps()),
             delegation_depth: depth,
             web_search: false,
             create_files: false,

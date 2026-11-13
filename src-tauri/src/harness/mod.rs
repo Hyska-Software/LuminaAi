@@ -18,7 +18,7 @@ use crate::domain::{
     now_ms, AttachmentInfo, CacheBreakReason, CacheSample, CacheSettings, ChatMessage, Citation,
     Conversation, MessageRole, MessageStatus, PrefixDigest, ReasoningMode, ReasoningSelection,
     Settings, ToolCallRecord, ToolCallStatus, ToolImageRef, TraceStep, TurnKind, TurnOptions,
-    TurnPayload, TurnProfile, TurnResult, UsageInfo, MAX_STEPS_LIMIT,
+    TurnPayload, TurnProfile, TurnResult, UsageInfo,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -1855,23 +1855,13 @@ pub async fn run_turn(
     // `run_code` is opt-in: the turn option is further gated by the global
     // setting, so the tool/prompt section disappears when code execution is off.
     options.run_code = options.run_code && settings.code_execution_enabled;
-    options.max_steps = match profile {
-        // O perfil Code tem orçamento próprio de passos (default 120) e o
-        // usuário o configura em Configurações → Ferramentas; subagentes têm
-        // orçamento curto por definição (F8).
-        TurnProfile::Code => {
-            let budget = options
-                .max_steps_override
-                .unwrap_or(settings.code_max_steps)
-                .clamp(1, MAX_STEPS_LIMIT);
-            if options.delegation_depth > 0 {
-                budget.min(code::subagent::SUBAGENT_MAX_STEPS)
-            } else {
-                budget
-            }
-        }
-        TurnProfile::Chat => options.max_steps.clamp(1, MAX_STEPS_LIMIT),
-    };
+    // Child turns keep a short internal budget; user turns stay unbounded.
+    // The renderer cannot set this field (serde(skip)).
+    if profile == TurnProfile::Code && options.delegation_depth > 0 {
+        options.max_steps = options
+            .max_steps
+            .map(|budget| budget.min(code::subagent::SUBAGENT_MAX_STEPS));
+    }
     // Gateway session/cache affinity: subagents use the stable parent
     // conversation id (F4.3b); normal turns use their own id.
     let wire_session_id = options
@@ -2466,7 +2456,6 @@ pub async fn run_turn(
         }
     }
     let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
-    let temperature = temperature_request(&options, &settings, &model);
     let max_output_tokens = Some(model.max_output.clamp(1_024, 32_768));
 
     let agent_hooks: Option<Arc<dyn crate::tools::AgentHooks>> = deps
@@ -2675,7 +2664,7 @@ pub async fn run_turn(
             tools: tool_definitions.clone(),
             reasoning: reasoning.clone(),
             max_output_tokens,
-            temperature,
+            temperature: None,
             cancel: cancel.clone(),
             cache_plan: None,
         };
@@ -2754,7 +2743,10 @@ pub async fn run_turn(
         }
     }
 
-    while step_number < options.max_steps {
+    while options
+        .max_steps
+        .map_or(true, |budget| step_number < budget)
+    {
         if cancel.is_cancelled() {
             cancelled = true;
             break;
@@ -2770,7 +2762,7 @@ pub async fn run_turn(
                 tools: tool_definitions.clone(),
                 reasoning: reasoning.clone(),
                 max_output_tokens,
-                temperature,
+                temperature: None,
                 cancel: cancel.clone(),
                 cache_plan: None,
             };
@@ -2815,8 +2807,10 @@ pub async fn run_turn(
             && options.delegation_depth == 0
             && todo_tool_available
         {
-            if let Some(note) = completion::budget_notice(step_number, options.max_steps) {
-                history.push(HistoryMessage::user(note));
+            if let Some(budget) = options.max_steps {
+                if let Some(note) = completion::budget_notice(step_number, budget) {
+                    history.push(HistoryMessage::user(note));
+                }
             }
         }
 
@@ -2901,7 +2895,7 @@ pub async fn run_turn(
                 tools: tool_definitions.clone(),
                 reasoning: reasoning.clone(),
                 max_output_tokens,
-                temperature,
+                temperature: None,
                 cancel: cancel.clone(),
                 // F4: preenchido logo abaixo pelo helper (plan_with_caps).
                 cache_plan: None,
@@ -3126,7 +3120,9 @@ pub async fn run_turn(
                     plan_mode: observed_plan_mode,
                 });
                 if let completion::StopDecision::Continue(reason) = decision {
-                    if step_number < options.max_steps
+                    if options
+                        .max_steps
+                        .map_or(true, |budget| step_number < budget)
                         && stop_continuations < completion::MAX_STOP_CONTINUATIONS
                     {
                         stop_continuations += 1;
@@ -3320,7 +3316,10 @@ pub async fn run_turn(
             &citations,
         );
 
-        if step_number >= options.max_steps {
+        if options
+            .max_steps
+            .is_some_and(|budget| step_number >= budget)
+        {
             // Force the final-answer pass below instead of ending the turn with
             // only intermediate narration.
             break;
@@ -3364,7 +3363,7 @@ pub async fn run_turn(
                 tools: tool_definitions.clone(),
                 reasoning: reasoning.clone(),
                 max_output_tokens,
-                temperature,
+                temperature: None,
                 cancel: cancel.clone(),
                 cache_plan: None,
             };
@@ -5040,25 +5039,6 @@ fn reasoning_request(
     }
 }
 
-/// Temperature is only sent to model families that accept it. Claude/GPT
-/// reasoning models reject (or silently ignore) the parameter.
-fn temperature_request(
-    options: &TurnOptions,
-    settings: &Settings,
-    model: &ModelInfo,
-) -> Option<f32> {
-    let family = model.family.to_ascii_lowercase();
-    let id = model.id.to_ascii_lowercase();
-    let rejects_temperature = family.contains("claude")
-        || family.contains("gpt")
-        || id.contains("claude")
-        || id.contains("gpt");
-    if rejects_temperature {
-        return None;
-    }
-    options.temperature.or(settings.temperature)
-}
-
 fn supports_images(model: &ModelInfo) -> bool {
     if !model.attachment {
         return false;
@@ -5346,21 +5326,6 @@ mod tests {
             ),
             ReasoningRequest::Budget(value) if value == 1_024
         ));
-    }
-
-    #[test]
-    fn temperature_is_omitted_for_claude_and_gpt() {
-        let options = TurnOptions {
-            temperature: Some(0.3),
-            ..Default::default()
-        };
-        let settings = Settings::default();
-        let mut model = model();
-        assert_eq!(temperature_request(&options, &settings, &model), Some(0.3));
-        model.family = "claude".into();
-        assert_eq!(temperature_request(&options, &settings, &model), None);
-        model.family = "gpt".into();
-        assert_eq!(temperature_request(&options, &settings, &model), None);
     }
 
     #[test]
@@ -5767,7 +5732,7 @@ mod agent_loop_tests {
             model_id: model_id.to_string(),
             reasoning: None,
             options: TurnOptions {
-                max_steps: 2,
+                max_steps: Some(2),
                 ..Default::default()
             },
             profile: TurnProfile::Chat,
@@ -5796,7 +5761,7 @@ mod agent_loop_tests {
             model_id: "deepseek-v4.1-flash".to_string(),
             reasoning: None,
             options: TurnOptions {
-                max_steps,
+                max_steps: Some(max_steps),
                 ..Default::default()
             },
             profile: TurnProfile::Chat,
@@ -5912,9 +5877,7 @@ mod agent_loop_tests {
             model_id: model_id.to_string(),
             reasoning: None,
             options: TurnOptions {
-                // The user asked for a temperature; Claude models must not get it.
-                temperature: Some(0.3),
-                max_steps: 2,
+                max_steps: Some(2),
                 ..Default::default()
             },
             profile: TurnProfile::Chat,
@@ -6066,7 +6029,7 @@ mod agent_loop_tests {
                 model_id: conversation.model_id.clone(),
                 reasoning: None,
                 options: TurnOptions {
-                    max_steps: 2,
+                    max_steps: Some(2),
                     ..Default::default()
                 },
                 profile: TurnProfile::Chat,
@@ -6365,6 +6328,74 @@ mod agent_loop_tests {
             prompt::PROMPT_VERSION,
             &config,
         )
+    }
+
+    /// User turns have no step cap: 65 tool steps must not stop at the old
+    /// 64-step default before the model can answer.
+    #[tokio::test]
+    async fn chat_turn_without_step_budget_runs_past_old_default() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current < 65 {
+                        tool_call_json_stream(
+                            &sink,
+                            &format!("call-skills-{current}"),
+                            "list_skills",
+                            "{}",
+                        );
+                    } else {
+                        text_stream(&sink, "Pronto.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let (channel, _events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            TurnPayload {
+                conversation_id: conversation.id.clone(),
+                content: "Liste as skills.".to_string(),
+                attachment_ids: Vec::new(),
+                provider_id: conversation.provider_id.clone(),
+                model_id: conversation.model_id.clone(),
+                reasoning: None,
+                options: TurnOptions::default(),
+                profile: TurnProfile::Chat,
+                turn_kind: crate::domain::TurnKind::User,
+                goal_request: false,
+                turn_id: Some(uuid::Uuid::new_v4().to_string()),
+            },
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno sem orçamento");
+
+        assert_eq!(
+            requests.lock().expect("requests lock").len(),
+            66,
+            "65 passos de tool + resposta final"
+        );
+        assert_eq!(result.assistant_message.content, "Pronto.");
+        assert_eq!(result.assistant_message.status, MessageStatus::Complete);
     }
 
     fn deps_for_key(temp: &TempDb) -> HarnessDeps {
@@ -8656,20 +8687,6 @@ mod agent_loop_tests {
         );
     }
 
-    #[test]
-    fn anthropic_claude_fixture_omits_temperature() {
-        let options = TurnOptions {
-            temperature: Some(0.4),
-            ..Default::default()
-        };
-        let settings = Settings::default();
-        assert_eq!(
-            temperature_request(&options, &settings, &anthropic_model("claude-sonnet-5-5")),
-            None,
-            "Claude rejeita temperature (família/id)"
-        );
-    }
-
     #[tokio::test]
     async fn claude_request_keeps_static_headers_and_omits_temperature() {
         let temp = TempDb::new();
@@ -8694,9 +8711,7 @@ mod agent_loop_tests {
             })
         };
 
-        let mut settings = Settings::default();
-        // Even with a global temperature configured, Claude must not receive it.
-        settings.temperature = Some(0.9);
+        let settings = Settings::default();
         let (channel, _events) = channel();
         let result = run_turn(
             anthropic_deps(temp.db.clone(), streamer),
@@ -8963,7 +8978,7 @@ mod agent_loop_tests {
         let (channel, _events) = channel();
         let mut payload = payload(&conversation, 5);
         payload.profile = TurnProfile::Code;
-        payload.options.max_steps_override = Some(5);
+        payload.options.max_steps = Some(5);
         payload.content = "Implemente o backend.".to_string();
 
         let result = run_turn(
@@ -9044,7 +9059,7 @@ mod agent_loop_tests {
         let (channel, _events) = channel();
         let mut payload = payload(&conversation, 6);
         payload.profile = TurnProfile::Code;
-        payload.options.max_steps_override = Some(6);
+        payload.options.max_steps = Some(6);
         payload.content = "Leia o arquivo e confirme.".to_string();
 
         let result = run_turn(
@@ -9131,7 +9146,7 @@ mod agent_loop_tests {
         let (channel, _events) = channel();
         let mut payload = payload(&conversation, 8);
         payload.profile = TurnProfile::Code;
-        payload.options.max_steps_override = Some(8);
+        payload.options.max_steps = Some(8);
         payload.content = "Implemente o backend.".to_string();
 
         let result = run_turn(

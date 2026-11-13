@@ -682,6 +682,22 @@
       "visible": "Commits",
       "close": "Cerrar historial de commits"
     },
+    "pullRequestsTab": {
+      "label": "Pull requests",
+      "visible": "Pull requests",
+      "close": "Cerrar pull requests"
+    },
+    "pullRequestTab": {
+      "label": "Pull request #{{number}}"
+    },
+    "issuesTab": {
+      "label": "Issues",
+      "visible": "Issues",
+      "close": "Cerrar issues"
+    },
+    "issueTab": {
+      "label": "Issue #{{number}}"
+    },
     "toast": {
       "bindWorkspaceError": "No se pudo cambiar el espacio de trabajo de la sesión",
       "pathCopied": "Ruta copiada",
@@ -1038,5 +1054,228 @@
     "fileReverted": "Archivo revertido: {{path}}",
     "fileRevertError": "No se pudo revertir el archivo",
     "compactError": "No se pudo compactar el contexto"
+  },
+  "github": {
+    "actionError": "La acción de GitHub falló",
+    "actions": "Acciones",
+    "apply": "Aplicar",
+    "cancel": "Cancelar",
+    "checks": {
+      "failure": "Las verificaciones fallaron",
+      "neutral": "Verificaciones neutras",
+      "none": "Sin verificaciones",
+      "pending": "Verificaciones en curso",
+      "success": "Verificaciones aprobadas"
+    },
+    "comments": {
+      "delete": "Eliminar comentario",
+      "deleted": "Comentario eliminado",
+      "empty": "Todavía no hay comentarios",
+      "error": "No se pudo enviar el comentario",
+      "placeholder": "Escribe un comentario…",
+      "submit": "Comentar",
+      "updated": "Comentario actualizado",
+      "confirmDelete": "¿Eliminar este comentario?",
+      "edit": "Editar",
+      "save": "Guardar"
+    },
+    "connect": {
+      "createToken": "Crear un token",
+      "description": "Zylara habla con GitHub desde el backend; el token queda en el archivo de credenciales de esta máquina.",
+      "disconnected": "GitHub no conectado",
+      "error": "No se pudo conectar con GitHub",
+      "placeholder": "ghp_… o github_pat_…",
+      "requiredDescription": "Conecta una cuenta de GitHub para listar los pull requests y las issues de este repositorio.",
+      "scopes": "Necesita el alcance repo (y read:org para equipos).",
+      "submit": "Conectar",
+      "success": "Conectado como {{login}}",
+      "title": "Conectar GitHub",
+      "tokenLabel": "Token de acceso personal"
+    },
+    "emptyOptions": "Nada para seleccionar",
+    "filters": {
+      "all": "Todos",
+      "anyLabel": "Cualquier label",
+      "anyMilestone": "Cualquier milestone",
+      "closed": "Cerrados",
+      "label": "Label",
+      "milestone": "Milestone",
+      "mine": "Míos",
+      "open": "Abiertos",
+      "searchPlaceholder": "Buscar por título…",
+      "state": "Estado"
+    },
+    "issue": {
+      "aria": "Issue #{{number}}",
+      "closeAction": "Cerrar issue",
+      "closeCompleted": "Completada",
+      "closed": "Issue cerrada",
+      "closeDescription": "El motivo queda registrado en el historial de la issue.",
+      "closeNotPlanned": "No planificada",
+      "closeReason": "Motivo",
+      "edit": "Editar issue",
+      "editDescription": "Actualiza el título y la descripción.",
+      "locked": "Bloqueada",
+      "milestone": "Milestone",
+      "noBody": "Sin descripción",
+      "notFound": "Issue no encontrada",
+      "reopenAction": "Reabrir issue",
+      "reopened": "Issue reabierta",
+      "updateError": "No se pudo actualizar la issue"
+    },
+    "issues": {
+      "emptyDescription": "Ninguna issue coincide con estos filtros.",
+      "emptyTitle": "Ninguna issue",
+      "new": "Nueva issue",
+      "title": "Issues"
+    },
+    "loading": "Cargando desde GitHub…",
+    "menu": {
+      "account": "Cuenta",
+      "connect": "Conectar GitHub…",
+      "disconnect": "Desconectar",
+      "issues": "Issues",
+      "newIssue": "Nueva issue…",
+      "newPullRequest": "Nuevo pull request…",
+      "pullRequests": "Pull requests",
+      "title": "GitHub"
+    },
+    "newIssue": {
+      "assignees": "Responsables",
+      "assigneesCount": "{{count}} seleccionados",
+      "body": "Descripción",
+      "bodyPlaceholder": "Describe el problema o la sugerencia (Markdown)",
+      "description": "Crea la issue en este repositorio.",
+      "error": "No se pudo crear la issue",
+      "labels": "Labels",
+      "labelsCount": "{{count}} seleccionadas",
+      "submit": "Crear issue",
+      "success": "Issue #{{number}} creada",
+      "title": "Nueva issue"
+    },
+    "newPr": {
+      "base": "Rama base",
+      "body": "Descripción",
+      "bodyPlaceholder": "Explica el cambio (Markdown)",
+      "description": "Abre un pull request desde una rama ya enviada al remoto.",
+      "draft": "Crear como borrador",
+      "error": "No se pudo crear el pull request",
+      "fieldTitle": "Título",
+      "head": "Rama de origen",
+      "missing": "Envía la rama de origen antes de abrir el pull request",
+      "submit": "Crear pull request",
+      "success": "Pull request #{{number}} creado",
+      "title": "Nuevo pull request",
+      "titlePlaceholder": "Resumen corto del cambio"
+    },
+    "openOnGitHub": "Ver en GitHub",
+    "pagination": {
+      "next": "Siguiente",
+      "page": "Página {{page}}",
+      "previous": "Anterior"
+    },
+    "pr": {
+      "aria": "Pull request #{{number}}",
+      "assignees": "Responsables",
+      "checkout": "Cambiar a la rama",
+      "checkoutSuccess": "Rama {{branch}} en checkout",
+      "checks": {
+        "empty": "Ninguna verificación informada",
+        "summary": "{{passed}} ok · {{failed}} fallos · {{pending}} pendientes"
+      },
+      "clearAssignees": "Quitar responsables",
+      "clearLabels": "Quitar labels",
+      "clearReviewers": "Quitar revisores",
+      "closeAction": "Cerrar pull request",
+      "closed": "Pull request cerrado",
+      "commits": {
+        "empty": "Ningún commit"
+      },
+      "edit": "Editar pull request",
+      "editDescription": "Actualiza el título, la descripción y la rama base.",
+      "fileCount": "{{count}} archivos",
+      "files": {
+        "binary": "Binario o demasiado grande para mostrarlo",
+        "empty": "Ningún archivo modificado",
+        "truncated": "Algunos archivos modificados o diffs están ocultos (límite de archivos o de tamaño)"
+      },
+      "labels": "Labels",
+      "merge": {
+        "commitMessage": "Mensaje del commit",
+        "commitTitle": "Título del commit",
+        "conflicts": "Este pull request tiene conflictos",
+        "deleteBranch": "Eliminar la rama de origen después del merge",
+        "merge": "Crear commit de merge",
+        "method": "Método",
+        "notMergeable": "GitHub informa que este pull request no se puede fusionar",
+        "options": "Opciones de merge",
+        "rebase": "Rebase y merge",
+        "squash": "Squash y merge",
+        "submit": "Fusionar",
+        "success": "Pull request fusionado"
+      },
+      "noBody": "Sin descripción",
+      "notFound": "Pull request no encontrado",
+      "ready": "Marcar listo para revisión",
+      "readySuccess": "Pull request listo para revisión",
+      "reopenAction": "Reabrir pull request",
+      "reopened": "Pull request reabierto",
+      "review": "Revisar",
+      "reviewApprove": "Aprobar",
+      "reviewBody": "Comentario de la revisión",
+      "reviewComment": "Solo comentar",
+      "reviewDescription": "Envía una revisión a este pull request.",
+      "reviewError": "No se pudo enviar la revisión",
+      "reviewers": "Revisores",
+      "reviewRequestChanges": "Solicitar cambios",
+      "reviewsTitle": "Revisiones",
+      "reviewSubmit": "Enviar revisión",
+      "reviewSuccess": "Revisión enviada",
+      "saved": "Guardado",
+      "sections": "Secciones del pull request",
+      "tabs": {
+        "checks": "Verificaciones",
+        "commits": "Commits",
+        "conversation": "Conversación",
+        "files": "Archivos"
+      },
+      "tabTitle": "Pull request",
+      "updateError": "No se pudo actualizar el pull request"
+    },
+    "prs": {
+      "emptyDescription": "Ningún pull request coincide con estos filtros.",
+      "emptyTitle": "Ningún pull request",
+      "new": "Nuevo pull request",
+      "title": "Pull requests"
+    },
+    "refresh": "Actualizar",
+    "repoUnknown": "Ningún repositorio de GitHub",
+    "retry": "Intentar de nuevo",
+    "review": {
+      "approved": "Aprobado",
+      "changesRequested": "Cambios solicitados",
+      "commented": "Comentó",
+      "dismissed": "Descartado",
+      "pending": "Pendiente"
+    },
+    "save": "Guardar",
+    "state": {
+      "closed": "Cerrado",
+      "completed": "Completada",
+      "draft": "Borrador",
+      "merged": "Fusionado",
+      "notPlanned": "No planificada",
+      "open": "Abierto"
+    },
+    "users": {
+      "empty": "Ningún usuario disponible"
+    },
+    "form": {
+      "title": "Título",
+      "body": "Descripción"
+    },
+    "pickers": {
+      "clear": "Limpiar selección"
+    }
   }
 }

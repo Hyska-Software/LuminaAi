@@ -17,6 +17,7 @@ pub mod code;
 pub mod conversations;
 pub mod docker;
 pub mod git;
+pub mod github;
 pub mod models;
 pub mod notifications;
 pub mod oauth;
