@@ -46,7 +46,7 @@ export function MessageQueueBar({
   return (
     <div
       className={cn(
-        'mb-2 rounded-xl border border-border bg-surface-raised/80 px-2.5 py-2',
+        'mb-2 rounded-xl bg-surface-hover px-2.5 py-2',
         className,
       )}
       aria-label={t('queue.aria')}
@@ -94,7 +94,7 @@ export function MessageQueueBar({
         {items.slice(0, 3).map((item, index) => (
           <li
             key={item.id}
-            className="flex min-w-0 items-center gap-2 rounded-lg bg-surface/70 px-2 py-1"
+            className="flex min-w-0 items-center gap-2 rounded-lg bg-surface px-2 py-1"
           >
             <span className="w-4 shrink-0 text-center text-[10px] tabular-nums text-foreground-subtle">
               {index + 1}

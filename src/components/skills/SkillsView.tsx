@@ -70,7 +70,7 @@ function SkillGroup({
           </p>
         ) : null}
       </div>
-      <ul className="flex flex-col divide-y divide-border rounded-xl border border-border bg-surface-raised px-3">
+      <ul className="flex flex-col divide-y divide-border rounded-xl bg-surface-hover px-3">
         {skills.map((skill) => {
           const busy = busySkill === skill.name;
           const askingDelete = confirming === skill.name;
@@ -361,7 +361,7 @@ export function SkillsView({ onBack, backLabel }: SkillsViewProps = {}) {
               {hasDisabled ? (
                 <p
                   role="note"
-                  className="rounded-lg border border-border bg-surface px-3 py-2 text-[11px] leading-relaxed text-foreground-muted"
+                  className="rounded-lg bg-surface px-3 py-2 text-[11px] leading-relaxed text-foreground-muted"
                 >
                   {t('library:skills.view.disabledNote')}
                 </p>
@@ -383,7 +383,7 @@ export function SkillsView({ onBack, backLabel }: SkillsViewProps = {}) {
                 />
               ))}
 
-              <p className="mt-1 flex items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-[11px] leading-relaxed text-foreground-muted">
+              <p className="mt-1 flex items-start gap-2 rounded-xl bg-surface px-3 py-2.5 text-[11px] leading-relaxed text-foreground-muted">
                 <BookOpen aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground-subtle" />
                 <span>
                   <Trans

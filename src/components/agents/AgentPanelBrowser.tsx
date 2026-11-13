@@ -535,10 +535,10 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
                 <span
                   key={tab.id}
                   className={cn(
-                    'group inline-flex max-w-40 items-center gap-1 rounded-lg border px-2 py-1 text-[10px]',
+                    'group inline-flex max-w-40 items-center gap-1 rounded-lg px-2 py-1 text-[10px]',
                     tab.active
-                      ? 'border-accent/40 bg-accent-soft text-accent'
-                      : 'border-border bg-surface-raised text-foreground-muted hover:bg-surface-hover',
+                      ? ' bg-accent-soft text-accent'
+                      : ' bg-surface-hover text-foreground-muted hover:bg-surface-active',
                   )}
                 >
                   <button
@@ -577,14 +577,14 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
         {!conversationId ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised/30 p-6 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl bg-surface-hover p-6 text-center">
             <Globe2 className="size-6 text-foreground-subtle" />
             <p className="text-[12px] text-foreground-muted">
               {t('browser.openConversation', { name: agent.name })}
             </p>
           </div>
         ) : !enabled ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-raised/30 p-6 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl bg-surface-hover p-6 text-center">
             <ShieldAlert className="size-6 text-foreground-subtle" />
             <p className="text-[12px] text-foreground-muted">
               {t('browser.disabledHint')}
@@ -594,7 +594,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
             </Button>
           </div>
         ) : !status?.running ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-surface-raised/20 p-6 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border-dashed bg-surface-hover p-6 text-center">
             <Globe2 className="size-6 text-foreground-subtle" />
             <p className="text-[12px] text-foreground-muted">
               {t('browser.noSession')}
@@ -609,7 +609,7 @@ export function AgentPanelBrowser({ context }: { context: AgentPanelContext }) {
           </div>
         ) : (
           <>
-            <div className={cn('relative flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-background', paused && 'focus-within:ring-2 focus-within:ring-accent', expanded && 'fixed inset-2 z-[100] flex-col shadow-2xl')}>
+            <div className={cn('relative flex min-h-48 flex-1 items-center justify-center overflow-hidden rounded-xl bg-background', paused && 'focus-within:ring-2 focus-within:ring-accent', expanded && 'fixed inset-2 z-[100] flex-col shadow-2xl')}>
               {expanded ? <div className="flex h-10 w-full shrink-0 items-center gap-2 border-b border-border px-3">
                 <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{t('browser.expandedTitle', { name: agent.name })}</span>
                 <span className="text-[11px] text-foreground-muted">

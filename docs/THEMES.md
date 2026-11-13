@@ -112,6 +112,8 @@ Obrigatórios nos dois modos (todos cores):
 | Estados | `success`, `success-soft`, `warning`, `warning-soft`, `danger`, `danger-soft` |
 | Chat/código/terminal | `user-bubble`, `code-bg`, `terminal-selection` |
 
+As cores de borda (`border`, `border-strong`) **não desenham molduras**: o app não usa contorno fechado em nenhum elemento. Elas alimentam divisores de 1px (`divide-*`, `border-b`, `hr`, `Separator`), barras de rolagem, o trilho do slider e o grid do calendário. A separação entre blocos vem do contraste de superfície, então `background`, `surface`, `surface-raised` e `surface-hover` precisam ser visivelmente distintas entre si nos dois modos — um tema com superfícies iguais deixa os blocos sem contorno visível.
+
 Opcionais:
 
 - Cores: `accent-ring`, `context-system`, `context-tools`, `context-messages`, `assistant-bubble`, `terminal-ansi-{black,red,green,yellow,blue,magenta,cyan,white}` e `terminal-ansi-bright-{black,red,green,yellow,blue,magenta,cyan,white}`.

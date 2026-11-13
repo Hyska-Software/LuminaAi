@@ -77,8 +77,8 @@ function WorkspaceRecents({ workspaces, disabled, onSelect }: WorkspaceRecentsPr
                 disabled={disabled}
                 onClick={() => onSelect(workspace)}
                 className={
-                  'flex w-full min-w-0 items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 text-left ' +
-                  'transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover ' +
+                  'flex w-full min-w-0 items-center gap-2.5 rounded-xl bg-surface px-3 py-2 text-left ' +
+                  'transition-colors duration-150 hover:bg-surface-hover ' +
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ' +
                   'disabled:cursor-not-allowed disabled:opacity-60'
                 }
@@ -163,7 +163,7 @@ export function CodeWelcomeScreen() {
         initial={reduceMotion ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduceMotion ? 0 : 0.24, ease: EASE_OUT_SOFT }}
-        className="flex size-14 items-center justify-center rounded-2xl border border-border bg-surface-raised text-accent shadow-sm"
+        className="flex size-14 items-center justify-center rounded-2xl bg-surface-raised text-accent shadow-sm"
       >
         <ActiveIcon aria-hidden className="size-7" strokeWidth={1.75} />
       </motion.div>
@@ -177,7 +177,7 @@ export function CodeWelcomeScreen() {
             {t('code:welcome.active.description')}
           </p>
 
-          <div className="mt-4 flex max-w-full items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-[12px] text-foreground-muted">
+          <div className="mt-4 flex max-w-full items-center gap-1.5 rounded-full bg-surface px-3 py-1.5 text-[12px] text-foreground-muted">
             <ActiveIcon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
             <span className="truncate font-medium text-foreground">{activeWorkspace.name}</span>
             {activeWorkspace.git ? (
@@ -223,12 +223,12 @@ export function CodeWelcomeScreen() {
                     ease: EASE_OUT_SOFT,
                   }}
                   className={
-                    'group flex h-full flex-col items-start gap-2 rounded-2xl border border-border bg-surface px-3.5 py-3.5 text-left ' +
-                    'transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover ' +
+                    'group flex h-full flex-col items-start gap-2 rounded-2xl bg-surface px-3.5 py-3.5 text-left ' +
+                    'transition-colors duration-150 hover:bg-surface-hover ' +
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40'
                   }
                 >
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-raised text-foreground-muted transition-colors duration-150 group-hover:text-accent">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-foreground-muted transition-colors duration-150 group-hover:text-accent">
                     <Icon aria-hidden className="size-4" strokeWidth={1.75} />
                   </span>
                   <span className="min-w-0">
@@ -274,7 +274,7 @@ export function CodeWelcomeScreen() {
           {error ? (
             <p
               role="alert"
-              className="mt-4 flex max-w-md items-start gap-1.5 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-left text-[12px] leading-relaxed text-danger"
+              className="mt-4 flex max-w-md items-start gap-1.5 rounded-lg bg-danger-soft px-3 py-2 text-left text-[12px] leading-relaxed text-danger"
             >
               <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
               <span>{t('code:welcome.loadError', { error })}</span>

@@ -35,9 +35,9 @@ export function CitationChips({ citations, className }: CitationChipsProps) {
             onClick={() => void openExternalUrl(citation.url)}
             title={citation.title || domain}
             className={cn(
-              'group flex h-6 max-w-60 items-center gap-1.5 rounded-full border border-border bg-surface px-2',
+              'group flex h-6 max-w-60 items-center gap-1.5 rounded-full bg-surface px-2',
               'text-[11px] text-foreground-muted transition-colors duration-150',
-              'hover:border-border-strong hover:bg-surface-hover hover:text-foreground',
+              ' hover:bg-surface-hover hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             )}
           >
@@ -63,9 +63,9 @@ export function CitationChips({ citations, className }: CitationChipsProps) {
           onClick={() => useUiStore.getState().openSourcesPanel()}
           aria-label={t('citations.openHidden', { count: hidden })}
           className={cn(
-            'flex h-6 items-center gap-1 rounded-full border border-dashed border-border bg-transparent px-2',
+            'flex h-6 items-center gap-1 rounded-full border-dashed bg-transparent px-2',
             'text-[11px] font-medium text-foreground-subtle transition-colors duration-150',
-            'hover:border-border-strong hover:text-foreground',
+            ' hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
           )}
         >

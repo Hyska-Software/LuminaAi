@@ -24,7 +24,7 @@ function SlideCard({ slide, position }: { slide: SlidePreview; position: number 
   const notes = slide.notes?.trim();
 
   return (
-    <li className="overflow-hidden rounded-xl border border-border bg-background">
+    <li className="overflow-hidden rounded-xl bg-background">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-1.5">
         <span className="text-[11px] font-medium tabular-nums text-foreground-muted">
           {t('artifacts:pptx.slide', { position })}
@@ -87,7 +87,7 @@ export function PptxPreview({ content, className }: ArtifactViewProps) {
     <div className={cn('h-full overflow-auto bg-surface p-3', className)}>
       <p
         role="note"
-        className="mb-3 flex items-start gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-[11px] leading-relaxed text-foreground-muted"
+        className="mb-3 flex items-start gap-2 rounded-lg bg-surface-hover px-3 py-2 text-[11px] leading-relaxed text-foreground-muted"
       >
         <Info aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground-subtle" />
         {translate('artifacts:pptx.simplified')}

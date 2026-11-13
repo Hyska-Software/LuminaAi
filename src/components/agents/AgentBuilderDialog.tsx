@@ -92,7 +92,7 @@ export function AgentBuilderDialog({
                   key={key}
                   type="button"
                   onClick={() => setPrompt(example)}
-                  className="max-w-full rounded-full border border-border bg-surface-raised px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  className="max-w-full rounded-full bg-surface-hover px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
                   <span className="line-clamp-1">{example}</span>
                 </button>

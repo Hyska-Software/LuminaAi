@@ -64,9 +64,9 @@ export function ArtifactCard({
     <div
       data-active={active || undefined}
       className={cn(
-        'group/artifact flex min-w-0 items-center gap-2.5 rounded-xl border border-border bg-surface-raised p-2',
-        'transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover',
-        active && 'border-accent/40 bg-accent-soft/60 hover:border-accent/50 hover:bg-accent-soft/70',
+        'group/artifact flex min-w-0 items-center gap-2.5 rounded-xl bg-surface-hover p-2',
+        'transition-colors duration-150 hover:bg-surface-hover',
+        active && ' bg-accent-soft/60 hover:bg-accent-soft/70',
         compact && 'gap-2 p-1.5',
         className,
       )}

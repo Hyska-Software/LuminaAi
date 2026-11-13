@@ -109,7 +109,7 @@ export function AgentRoutineRunsDialog({
           ) : error ? (
             <div
               role="alert"
-              className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+              className="rounded-xl bg-danger-soft px-3 py-2 text-[12px] text-danger"
             >
               <p>{t('routineRuns.loadError')}</p>
               <p className="mt-1 text-[11px] opacity-80">{error}</p>
@@ -124,7 +124,7 @@ export function AgentRoutineRunsDialog({
               </Button>
             </div>
           ) : runs.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border px-3 py-8 text-center text-[12px] text-foreground-muted">
+            <p className="rounded-xl border-dashed px-3 py-8 text-center text-[12px] text-foreground-muted">
               {t('routineRuns.empty')}
             </p>
           ) : (
@@ -133,7 +133,7 @@ export function AgentRoutineRunsDialog({
               return (
                 <article
                   key={run.id}
-                  className="flex items-center gap-2 rounded-xl border border-border bg-surface/40 px-3 py-2.5"
+                  className="flex items-center gap-2 rounded-xl bg-surface px-3 py-2.5"
                 >
                   {meta ? <Badge tone={meta.tone}>{meta.label}</Badge> : null}
                   <span className="min-w-0 flex-1">

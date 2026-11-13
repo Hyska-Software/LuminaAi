@@ -47,7 +47,7 @@ export function TodoCard({ todos, className, scrollable = true }: TodoCardProps)
   return (
     <section
       aria-label={t('todo.aria')}
-      className={cn('flex flex-col gap-2 rounded-xl border border-border bg-surface p-3', className)}
+      className={cn('flex flex-col gap-2 rounded-xl bg-surface p-3', className)}
     >
       <header className="flex flex-wrap items-center gap-2">
         <ListTodo aria-hidden className="size-4 shrink-0 text-foreground-muted" />

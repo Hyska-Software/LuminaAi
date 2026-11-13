@@ -162,7 +162,7 @@ export function FilePreview({
           className,
         )}
       >
-        <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
+        <span className="flex size-9 items-center justify-center rounded-xl bg-danger-soft text-danger">
           <CircleAlert aria-hidden className="size-4" strokeWidth={1.75} />
         </span>
         <p className="text-[12.5px] font-medium text-foreground">{t('code:preview.errorTitle')}</p>
@@ -469,7 +469,7 @@ function PreviewNotice({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center">
-      <span className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
+      <span className="flex size-9 items-center justify-center rounded-xl bg-surface-hover text-foreground-muted">
         {icon}
       </span>
       <p className="text-[12.5px] font-medium text-foreground">{title}</p>

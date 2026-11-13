@@ -60,7 +60,7 @@ export function JobsBar({ jobs, onKill, onOpen, className }: JobsBarProps) {
   const running = jobs.filter((job) => job.status === 'running').length;
 
   return (
-    <section aria-label={t('jobs.aria')} className={cn('rounded-xl border border-border bg-surface', className)}>
+    <section aria-label={t('jobs.aria')} className={cn('rounded-xl bg-surface', className)}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

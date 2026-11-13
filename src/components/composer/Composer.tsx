@@ -618,7 +618,7 @@ export function Composer() {
         <div
           id="composer-credential-notice"
           role="status"
-          className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2"
+          className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl bg-warning-soft px-3 py-2"
         >
           <TriangleAlert aria-hidden className="size-4 shrink-0 text-warning" strokeWidth={2} />
           <span className="min-w-0 flex-1 text-[12px] leading-relaxed text-foreground-muted">
@@ -631,12 +631,7 @@ export function Composer() {
       ) : null}
 
       <div
-        className={cn(
-          'relative rounded-3xl border bg-surface-raised shadow-sm transition-colors duration-150',
-          isStreaming
-            ? 'border-accent/20'
-            : 'border-border focus-within:border-border-strong',
-        )}
+        className="relative rounded-3xl bg-surface-raised shadow-sm transition-colors duration-150"
       >
         <ComposerActivity active={isStreaming} reduceMotion={reduceMotion} />
 
@@ -663,7 +658,7 @@ export function Composer() {
                           textareaRef.current?.focus();
                         }}
                         className={cn(
-                          'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-2.5',
+                          'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent-soft px-2.5',
                           'text-[12px] font-medium text-foreground',
                           'transition-colors duration-150 hover:bg-accent-soft/80',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',

@@ -22,7 +22,7 @@ const VARIANTS: Record<BadgeTone, string> = {
   success: 'bg-success-soft text-success',
   warning: 'bg-warning-soft text-warning',
   danger: 'bg-danger-soft text-danger',
-  outline: 'border border-border text-foreground-muted',
+  outline: 'bg-surface-hover text-foreground-muted',
 };
 
 const SIZES: Record<BadgeSize, string> = {

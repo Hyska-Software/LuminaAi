@@ -333,7 +333,7 @@ export function UpdatePopoverBody({ onClose }: { onClose: () => void }) {
       </div>
 
       {stale ? (
-        <div className="mt-3 flex items-start gap-2 rounded-lg border border-border bg-surface px-2.5 py-2 text-[11px] leading-relaxed text-foreground-muted">
+        <div className="mt-3 flex items-start gap-2 rounded-lg bg-surface px-2.5 py-2 text-[11px] leading-relaxed text-foreground-muted">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" strokeWidth={1.75} />
           <div className="min-w-0 flex-1">
             <p>{t('shell.update.stale')}</p>

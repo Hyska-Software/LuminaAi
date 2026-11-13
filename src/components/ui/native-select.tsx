@@ -18,11 +18,11 @@ export const NativeSelect = React.forwardRef<HTMLSelectElement, NativeSelectProp
         ref={ref}
         aria-invalid={invalid || undefined}
         className={cn(
-          'h-9 w-full appearance-none rounded-lg border border-border bg-surface-raised pl-3 pr-8 text-sm text-foreground',
-          'transition-[border-color,box-shadow] duration-150',
-          'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20',
+          'h-9 w-full appearance-none rounded-lg bg-surface-hover pl-3 pr-8 text-sm text-foreground',
+          'transition-[box-shadow,background-color] duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
           'disabled:cursor-not-allowed disabled:opacity-60',
-          invalid && 'border-danger focus-visible:border-danger',
+          invalid && 'bg-danger-soft focus-visible:ring-danger/40',
           className,
         )}
         {...props}

@@ -143,7 +143,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex flex-col gap-4 p-3">
-        <section className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section className="rounded-xl bg-surface-hover p-3">
           <div className="flex items-start gap-2">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
               <Bot className="size-4" />
@@ -179,7 +179,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
               return (
                 <span
                   key={capability.key}
-                  className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-foreground-muted"
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] text-foreground-muted"
                   title={`${t(capability.labelKey as never)}: ${
                     enabled ? t('panelData.capabilityOn') : t('panelData.capabilityOff')
                   }`}
@@ -196,7 +196,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           </div>
         </section>
 
-        <section aria-label={t('panelData.usageAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.usageAria')} className="rounded-xl bg-surface-hover p-3">
           <div className="flex items-center gap-2">
             <Gauge className="size-4 text-accent" />
             <p className="text-[12px] font-medium text-foreground">{t('panelData.usage')}</p>
@@ -228,7 +228,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           </dl>
         </section>
 
-        <section aria-label={t('panelData.conversationAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.conversationAria')} className="rounded-xl bg-surface-hover p-3">
           <div className="flex items-center gap-2">
             <Database className="size-4 text-accent" />
             <p className="text-[12px] font-medium text-foreground">{t('panelData.conversation')}</p>
@@ -272,7 +272,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           )}
         </section>
 
-        <section aria-label={t('panelData.tasksAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.tasksAria')} className="rounded-xl bg-surface-hover p-3">
           <div className="flex items-center gap-2">
             <ListChecks className="size-4 text-accent" />
             <p className="text-[12px] font-medium text-foreground">{t('panelData.tasks')}</p>
@@ -286,7 +286,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           </Button>
         </section>
 
-        <section aria-label={t('panelData.auditAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.auditAria')} className="rounded-xl bg-surface-hover p-3">
           <div className="flex items-center gap-2">
             <Activity className="size-4 text-accent" />
             <p className="text-[12px] font-medium text-foreground">{t('panelData.audit')}</p>
@@ -317,7 +317,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
           )}
         </section>
 
-        <section aria-label={t('panelData.memoryAria')} className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-label={t('panelData.memoryAria')} className="rounded-xl bg-surface-hover p-3">
           <div className="flex items-center gap-2">
             <Wrench className="size-4 text-accent" />
             <p className="text-[12px] font-medium text-foreground">{t('panelData.memory')}</p>
@@ -332,7 +332,7 @@ export function AgentPanelData({ context }: { context: AgentPanelContext }) {
         </section>
 
         {error ? (
-          <p className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[11px] text-danger">
+          <p className="rounded-xl bg-danger-soft px-3 py-2 text-[11px] text-danger">
             {error}
           </p>
         ) : null}

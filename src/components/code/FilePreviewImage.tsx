@@ -237,7 +237,7 @@ export function FilePreviewImage({
       <div
         role="toolbar"
         aria-label={t('code:image.controls')}
-        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-raised px-2 py-1.5"
+        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-hover px-2 py-1.5"
       >
         <Badge tone="accent" size="sm" title={formatLabel}>
           {formatLabel}
@@ -300,7 +300,7 @@ export function FilePreviewImage({
           role="alert"
           className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center"
         >
-          <span className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-surface-hover text-foreground-muted">
             <FileWarning aria-hidden className="size-4" strokeWidth={1.75} />
           </span>
           <p className="text-[12.5px] font-medium text-foreground">
@@ -334,7 +334,7 @@ export function FilePreviewImage({
               onError={() => setFailed(true)}
               style={customWidth != null ? { width: `${customWidth}px` } : undefined}
               className={cn(
-                'rounded-lg border border-border shadow-sm',
+                'rounded-lg shadow-sm',
                 mode === 'fit' ? 'max-h-full max-w-full object-contain' : 'max-h-none max-w-none',
               )}
             />

@@ -49,7 +49,7 @@ export function LayoutModeSwitch({ className }: { className?: string }) {
           setMenuPoint({ x: event.clientX, y: event.clientY });
         }}
         className={cn(
-          'relative inline-flex items-center gap-0.5 rounded-full border border-border bg-surface-hover p-0.5',
+          'relative inline-flex items-center gap-0.5 rounded-full bg-surface-hover p-0.5',
           className,
         )}
       >

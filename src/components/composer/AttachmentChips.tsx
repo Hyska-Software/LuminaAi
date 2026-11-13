@@ -67,7 +67,7 @@ export function AttachmentChips({ attachments, onRemove, align = 'start', classN
         <div
           key={attachment.id}
           className={cn(
-            'flex max-w-72 items-center gap-1.5 rounded-xl border border-border bg-surface-raised py-1 pl-1.5',
+            'flex max-w-72 items-center gap-1.5 rounded-xl bg-surface-hover py-1 pl-1.5',
             onRemove ? 'pr-0.5' : 'pr-2.5',
           )}
         >

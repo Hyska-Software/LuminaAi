@@ -88,7 +88,7 @@ export function AgentThreadHeader({
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-[13px] font-medium text-foreground">{agent.name}</span>
           {!taskId && turnActive ? (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent">
               <AgentActivityDots label={t('threadHeader.running')} />
               <span aria-hidden>{t('threadHeader.running')}</span>
             </span>
@@ -96,7 +96,7 @@ export function AgentThreadHeader({
           {taskMeta ? (
             <span
               className={cn(
-                'inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface-raised px-1.5 py-0.5 text-[9px] font-medium',
+                'inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-hover px-1.5 py-0.5 text-[9px] font-medium',
                 taskMeta.tone,
               )}
             >

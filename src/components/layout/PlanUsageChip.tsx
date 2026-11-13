@@ -26,7 +26,7 @@ export function PlanUsageChip() {
 
   return (
     <div
-      className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface-raised py-0.5 pl-2 pr-0.5 text-[11px] leading-none"
+      className="flex shrink-0 items-center gap-1 rounded-full bg-surface-hover py-0.5 pl-2 pr-0.5 text-[11px] leading-none"
       title={t('shell.plan.tooltip')}
     >
       <Sparkles aria-hidden className="size-4 shrink-0 text-accent" strokeWidth={1.75} />

@@ -689,7 +689,7 @@ function DomainSources({ domains }: { domains: string[] }) {
           <span
             key={domain}
             title={domain}
-            className="flex size-4 items-center justify-center rounded-full border border-background bg-accent-soft text-[8px] font-semibold uppercase leading-none text-accent"
+            className="flex size-4 items-center justify-center rounded-full bg-accent-soft text-[8px] font-semibold uppercase leading-none text-accent"
           >
             {domain.charAt(0)}
           </span>
@@ -719,7 +719,7 @@ function PageLinks({ pages }: { pages: PageLink[] }) {
           className={cn(
             'group/page flex max-w-full items-center gap-1 border-b border-dashed border-border-strong pb-px text-left',
             'text-[12px] font-medium text-foreground-muted transition-colors duration-150',
-            'hover:border-foreground-subtle hover:text-foreground',
+            ' hover:text-foreground',
             'focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
           )}
         >
@@ -747,7 +747,7 @@ function FileChips({ files }: { files: string[] }) {
         <span
           key={file}
           title={file}
-          className="flex h-6 max-w-60 items-center gap-1.5 rounded-full border border-border bg-surface px-2 text-[11px] text-foreground-muted"
+          className="flex h-6 max-w-60 items-center gap-1.5 rounded-full bg-surface px-2 text-[11px] text-foreground-muted"
         >
           <FileText aria-hidden className="size-3 shrink-0 text-foreground-subtle" />
           <span className="truncate">{truncate(file, 48)}</span>

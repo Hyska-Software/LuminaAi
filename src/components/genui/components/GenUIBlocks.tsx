@@ -441,7 +441,11 @@ export function GenUIBadge({ props }: GenUINodeProps) {
   if (!label) return null;
   return (
     <div data-tone={tone}>
-      <Badge tone={tone} size="md">
+      <Badge
+        tone={tone}
+        size="md"
+        className={tone === 'outline' ? 'border border-border bg-transparent text-foreground-muted' : undefined}
+      >
         {Icon ? <Icon aria-hidden className="size-3 shrink-0" /> : null}
         {label}
       </Badge>

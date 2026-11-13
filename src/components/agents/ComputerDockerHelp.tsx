@@ -59,7 +59,7 @@ export function ComputerDockerHelp({
   return (
     <div role="alert" className="flex w-full flex-col gap-3 p-4 text-left">
       <div className="flex items-start gap-2.5">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-danger/30 bg-danger-soft text-danger">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-danger-soft text-danger">
           <Container aria-hidden className="size-4" strokeWidth={1.75} />
         </span>
         <div className="min-w-0">
@@ -87,7 +87,7 @@ export function ComputerDockerHelp({
         </li>
       </ol>
 
-      <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5">
+      <div className="flex items-center gap-1.5 rounded-lg bg-surface px-2.5 py-1.5">
         <Terminal aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
         <code className="min-w-0 flex-1 break-all font-mono text-[10px] leading-relaxed text-foreground">
           {pullCommand}
@@ -121,14 +121,14 @@ export function ComputerDockerHelp({
         </Button>
       </div>
 
-      <details className="rounded-lg border border-border bg-surface/50 px-2.5 py-2">
+      <details className="rounded-lg bg-surface px-2.5 py-2">
         <summary className="cursor-pointer select-none text-[10px] font-medium text-foreground-subtle">
           {t('dockerHelp.localBuild')}
         </summary>
         <p className="mt-1.5 text-[10px] leading-relaxed text-foreground-muted">
           {t('dockerHelp.localBuildHint')}
         </p>
-        <div className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1.5">
+        <div className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-surface px-2 py-1.5">
           <code className="min-w-0 flex-1 break-all font-mono text-[10px] leading-relaxed text-foreground">
             {buildCommand}
           </code>
@@ -143,7 +143,7 @@ export function ComputerDockerHelp({
         </div>
       </details>
 
-      <details className="rounded-lg border border-border bg-surface/50 px-2.5 py-2">
+      <details className="rounded-lg bg-surface px-2.5 py-2">
         <summary className="cursor-pointer select-none text-[10px] font-medium text-foreground-subtle">
           {t('dockerHelp.technicalDetails')}
         </summary>

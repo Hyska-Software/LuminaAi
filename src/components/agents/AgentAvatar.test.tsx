@@ -33,12 +33,12 @@ describe('AgentAvatar', () => {
     expect(avatar.className).not.toContain('border');
   });
 
-  it('aplica o raio e a moldura do formato círculo', () => {
+  it('aplica o raio e o preenchimento do formato círculo', () => {
     const avatar: AgentAvatarSpec = { ...DEFAULT_AGENT_AVATAR, shape: 'circle' };
     const { container } = render(<AgentAvatar avatar={avatar} />);
     const element = outer(container);
     expect(element.className).toContain('rounded-full');
-    expect(element.className).toContain('border');
+    expect(element.className).not.toContain('border');
     expect(element.className).toContain('bg-surface-active/70');
   });
 

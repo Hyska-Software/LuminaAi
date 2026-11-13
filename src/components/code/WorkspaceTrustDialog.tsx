@@ -70,7 +70,7 @@ export function WorkspaceTrustDialog({
         }}
       >
         <DialogHeader className="gap-2 pr-10">
-          <span className="flex size-10 items-center justify-center rounded-xl border border-border bg-surface-hover text-warning">
+          <span className="flex size-10 items-center justify-center rounded-xl bg-surface-hover text-warning">
             <Folder aria-hidden className="size-5" strokeWidth={1.75} />
           </span>
           <DialogTitle>{t('trust.title')}</DialogTitle>
@@ -79,7 +79,7 @@ export function WorkspaceTrustDialog({
 
         <div className="px-6 pb-1">
           <p
-            className="break-all rounded-lg border border-border bg-surface px-3 py-2 font-mono text-[12px] leading-relaxed text-foreground-muted"
+            className="break-all rounded-lg bg-surface px-3 py-2 font-mono text-[12px] leading-relaxed text-foreground-muted"
             title={workspace.path}
           >
             {workspace.path}

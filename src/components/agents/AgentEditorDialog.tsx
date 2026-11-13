@@ -429,7 +429,7 @@ export function AgentEditorDialog() {
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-5 pt-4"
           >
             <TabsContent value="identity" className="space-y-4">
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3">
+              <div className="flex items-center gap-3 rounded-xl bg-surface p-3">
                 <AgentAvatar avatar={form.avatar} size="md" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[12px] font-medium text-foreground">{t('editor.avatar.title')}</p>
@@ -487,7 +487,7 @@ export function AgentEditorDialog() {
                 />
               </div>
 
-              <div className="rounded-xl border border-border bg-surface/50 p-4">
+              <div className="rounded-xl bg-surface p-4">
                 <div className="flex items-center gap-2 text-[12px] text-foreground-muted">
                   <Bot className="size-4 text-accent" />
                   {t('editor.identityNote')}
@@ -503,7 +503,7 @@ export function AgentEditorDialog() {
             </TabsContent>
 
             <TabsContent value="model" className="space-y-4">
-              <div className="space-y-4 rounded-xl border border-border bg-surface/50 p-4">
+              <div className="space-y-4 rounded-xl bg-surface p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="agent-provider">{t('editor.provider')}</Label>
@@ -566,7 +566,7 @@ export function AgentEditorDialog() {
                 />
               </div>
 
-              <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
+              <div className="space-y-3 rounded-xl bg-surface p-4">
                 <div>
                   <p className="text-[12px] font-medium text-foreground">{t('editor.fallback.title')}</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-subtle">
@@ -655,7 +655,7 @@ export function AgentEditorDialog() {
             </TabsContent>
 
             <TabsContent value="capabilities" className="space-y-4">
-              <div className="space-y-2 rounded-xl border border-border bg-surface/50 p-4">
+              <div className="space-y-2 rounded-xl bg-surface p-4">
                 <p className="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
                   <Sparkles className="size-3.5 text-accent" />
                   {t('editor.basicActions')}
@@ -734,7 +734,7 @@ export function AgentEditorDialog() {
                 />
               </div>
 
-              <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
+              <div className="space-y-3 rounded-xl bg-surface p-4">
                 <div>
                   <p className="text-[12px] font-medium text-foreground">{t('editor.workspace.title')}</p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-foreground-subtle">
@@ -908,7 +908,7 @@ export function AgentEditorDialog() {
           <div className="shrink-0 px-6 pb-3">
             <p
               role="alert"
-              className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+              className="rounded-lg bg-danger-soft px-3 py-2 text-[12px] text-danger"
             >
               {error}
             </p>
@@ -919,7 +919,7 @@ export function AgentEditorDialog() {
           <div className="shrink-0 px-6 pb-3">
             <p
               role="status"
-              className="rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[12px] leading-relaxed text-warning"
+              className="rounded-lg bg-warning-soft px-3 py-2 text-[12px] leading-relaxed text-warning"
             >
               {tc(AUTONOMOUS_MODE_WARNING_KEY)}
             </p>
@@ -963,7 +963,7 @@ function CapabilityList({
 }) {
   const { t } = useTranslation('agents');
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
+    <div className="space-y-3 rounded-xl bg-surface p-4">
       <Switch
         checked={inherit}
         onCheckedChange={onInherit}
@@ -982,8 +982,8 @@ function CapabilityList({
             <label
               key={item.value}
               className={cn(
-                'flex min-w-0 items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[12px]',
-                selected.includes(item.value) ? 'border-accent/40 bg-accent-soft/50' : 'bg-surface-raised',
+                'flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px]',
+                selected.includes(item.value) ? ' bg-accent-soft/50' : 'bg-surface-hover',
               )}
             >
               <input

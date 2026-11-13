@@ -210,7 +210,7 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
       <div
         role="toolbar"
         aria-label={t('artifacts:pdf.toolbarAria')}
-        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-raised px-2 py-1.5"
+        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-hover px-2 py-1.5"
       >
         <IconButton
           label={t('artifacts:pdf.previousPage')}
@@ -288,7 +288,7 @@ export function PdfPreview({ content, className, showArtifactActions }: Artifact
                 total: numPages,
                 name: artifact.name,
               })}
-              className="h-auto max-w-none rounded-md border border-border bg-background shadow-sm"
+              className="h-auto max-w-none rounded-md bg-background shadow-sm"
             />
             {renderError ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background px-4 text-center">

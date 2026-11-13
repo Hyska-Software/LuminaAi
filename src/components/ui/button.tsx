@@ -10,12 +10,12 @@ export const buttonVariants: Record<ButtonVariant, string> = {
   primary:
     'bg-foreground text-background hover:bg-foreground/90 active:bg-foreground/85',
   secondary:
-    'border border-border bg-surface-raised text-foreground hover:border-border-strong hover:bg-surface-hover',
+    'bg-surface-hover text-foreground hover:bg-surface-active',
   ghost: 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
   subtle: 'bg-surface-hover text-foreground hover:bg-surface-active',
   danger: 'bg-danger text-accent-foreground hover:bg-danger/90 active:bg-danger/85',
   outline:
-    'border border-border bg-transparent text-foreground hover:border-border-strong hover:bg-surface-hover',
+    'bg-transparent text-foreground hover:bg-surface-hover',
 };
 
 export const buttonSizes: Record<ButtonSize, string> = {
@@ -38,7 +38,7 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const BASE =
   'relative inline-flex shrink-0 select-none items-center justify-center font-medium tracking-tight ' +
-  'transition-[color,background-color,border-color,opacity] duration-150 ' +
+  'transition-[color,background-color,opacity] duration-150 ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background ' +
   'disabled:pointer-events-none disabled:opacity-50 aria-busy:cursor-progress ' +
   '[&_svg]:pointer-events-none [&_svg]:shrink-0 motion-reduce:transition-none';

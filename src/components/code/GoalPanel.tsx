@@ -144,7 +144,7 @@ function GoalRoundRow({ round }: { round: GoalRound }) {
   const note = round.note?.trim() ?? '';
   const filesChanged = round.filesChanged ?? 0;
   return (
-    <li className="flex min-w-0 flex-col gap-1 rounded-lg border border-border bg-surface px-3 py-2">
+    <li className="flex min-w-0 flex-col gap-1 rounded-lg bg-surface px-3 py-2">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <span className="text-[12px] font-medium text-foreground tabular-nums">
           {translate('code:goal.panel.roundLabel', { index: round.index })}
@@ -293,13 +293,13 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
     >
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
         {sessionLoading && !goal ? (
-          <p role="status" className="rounded-xl border border-border bg-surface p-4 text-[12.5px] text-foreground-muted">
+          <p role="status" className="rounded-xl bg-surface p-4 text-[12.5px] text-foreground-muted">
             {t('code:goal.panel.loading')}
           </p>
         ) : null}
 
         {!sessionLoading && !goal ? (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-surface px-6 py-10 text-center">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-dashed bg-surface px-6 py-10 text-center">
             <span className="flex size-11 items-center justify-center rounded-2xl bg-accent-soft text-accent">
               <Target aria-hidden className="size-5" strokeWidth={1.75} />
             </span>
@@ -332,7 +332,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
               goal={goal}
               busy={disabled}
               onAction={handleCardAction}
-              className="bg-surface-raised"
+              className="bg-surface-hover"
             />
 
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -365,7 +365,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
             </div>
 
             {goal.status === 'paused' || goal.status === 'blocked' ? (
-              <p className="flex items-start gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[11.5px] leading-relaxed text-foreground-muted">
+              <p className="flex items-start gap-1.5 rounded-lg bg-surface px-3 py-2 text-[11.5px] leading-relaxed text-foreground-muted">
                 <TriangleAlert
                   aria-hidden
                   className={cn(
@@ -387,7 +387,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
 
             <section
               aria-labelledby="code-goal-objective-heading"
-              className="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-surface p-3"
+              className="flex min-w-0 flex-col gap-2 rounded-xl bg-surface p-3"
             >
               <div className="flex items-center justify-between gap-2">
                 <h3
@@ -436,7 +436,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
               </div>
 
               {goalRoundsLoading ? (
-                <p role="status" className="rounded-lg border border-border bg-surface px-3 py-2 text-[11.5px] text-foreground-muted">
+                <p role="status" className="rounded-lg bg-surface px-3 py-2 text-[11.5px] text-foreground-muted">
                   {t('code:goal.panel.roundsLoading')}
                 </p>
               ) : null}
@@ -444,7 +444,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
               {goalRoundsError ? (
                 <div
                   role="alert"
-                  className="flex flex-col gap-2 rounded-lg border border-border bg-danger-soft px-3 py-2.5"
+                  className="flex flex-col gap-2 rounded-lg bg-danger-soft px-3 py-2.5"
                 >
                   <p className="min-w-0 break-words text-[11.5px] leading-relaxed text-danger">
                     {t('code:goal.panel.roundsError')}
@@ -463,7 +463,7 @@ export function GoalPanel({ conversationId, className }: GoalPanelProps) {
               ) : null}
 
               {!goalRoundsLoading && !goalRoundsError && goalRounds.length === 0 ? (
-                <p className="rounded-lg border border-border bg-surface px-3 py-2 text-[11.5px] text-foreground-subtle">
+                <p className="rounded-lg bg-surface px-3 py-2 text-[11.5px] text-foreground-subtle">
                   {t('code:goal.panel.roundsEmpty')}
                 </p>
               ) : null}

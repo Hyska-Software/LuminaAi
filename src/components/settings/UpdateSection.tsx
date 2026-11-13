@@ -144,7 +144,7 @@ export function UpdateSection() {
           {available ? <UpdateActions /> : null}
 
           {!available && skipped ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] text-foreground-muted">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-surface px-3 py-2 text-[12px] text-foreground-muted">
               <span>{t('update.skipped', { version: skipped })}</span>
               <Button size="sm" variant="ghost" onClick={() => void unskip()}>
                 {t('update.unskip')}

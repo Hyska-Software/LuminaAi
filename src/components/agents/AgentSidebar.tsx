@@ -394,7 +394,7 @@ function AgentRow({
             <span className="block truncate text-[11px] text-foreground-muted">{agent.role}</span>
           </span>
           {threads.length > 0 ? (
-            <span className="shrink-0 rounded-full bg-surface-raised px-1.5 py-0.5 text-[10px] text-foreground-subtle">
+            <span className="shrink-0 rounded-full bg-surface-hover px-1.5 py-0.5 text-[10px] text-foreground-subtle">
               {threads.length}
             </span>
           ) : null}
@@ -1331,7 +1331,7 @@ export function AgentSidebar({ className, onClose }: AgentSidebarProps) {
           </DialogHeader>
           {deleteThreads > 0 ? (
             <AgentDialogBody>
-              <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
+              <p className="rounded-lg bg-surface px-3 py-2 text-[12px] text-foreground-muted">
                 {t('sidebar.deleteAgentBlocked', { count: deleteThreads })}
               </p>
             </AgentDialogBody>

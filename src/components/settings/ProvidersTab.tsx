@@ -697,7 +697,7 @@ export function ProvidersTab() {
           </div>
 
           {pending ? (
-            <div className="mt-3 rounded-xl border border-border bg-surface px-3 py-3">
+            <div className="mt-3 rounded-xl bg-surface px-3 py-3">
               <p className="flex items-center gap-2 text-[13px] font-medium text-foreground">
                 <Spinner size="sm" label={t('providers.login.pendingSpinner')} />
                 {t('providers.login.pendingTitle')}
@@ -740,7 +740,7 @@ export function ProvidersTab() {
                 </Button>
               </div>
               {challenge?.browserOpened === false ? (
-                <div className="mt-2.5 flex gap-2.5 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-warning">
+                <div className="mt-2.5 flex gap-2.5 rounded-lg bg-warning-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-warning">
                   <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="font-medium">{t('providers.login.browserNotOpenedTitle')}</p>
@@ -766,7 +766,7 @@ export function ProvidersTab() {
               {challenge ? (
                 <details className="mt-1.5 text-[11px] text-foreground-subtle">
                   <summary className="cursor-pointer select-none">{t('providers.login.showLink')}</summary>
-                  <code className="mt-1 block max-h-24 select-all overflow-auto break-all rounded-md bg-surface-raised px-2 py-1.5 font-mono text-[10.5px] leading-relaxed">
+                  <code className="mt-1 block max-h-24 select-all overflow-auto break-all rounded-md bg-surface-hover px-2 py-1.5 font-mono text-[10.5px] leading-relaxed">
                     {challenge.authUrl}
                   </code>
                 </details>
@@ -775,7 +775,7 @@ export function ProvidersTab() {
           ) : null}
 
           {!pending && state === 'plan-disabled' ? (
-            <div className="mt-3 flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-warning">
+            <div className="mt-3 flex gap-2.5 rounded-xl bg-warning-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-warning">
               <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{t('providers.planDisabled.title')}</p>
@@ -818,7 +818,7 @@ export function ProvidersTab() {
           ) : null}
 
           {!pending && state === 'reauth-required' ? (
-            <div className="mt-3 flex gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-danger">
+            <div className="mt-3 flex gap-2.5 rounded-xl bg-danger-soft px-3 py-2.5 text-[11.5px] leading-relaxed text-danger">
               <AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="font-medium">{t('providers.reauth.title')}</p>
@@ -905,7 +905,7 @@ export function ProvidersTab() {
           ) : null}
 
           {!pending && signedIn ? (
-            <details className="mt-3 rounded-xl border border-border bg-surface px-3 py-2 text-[11px] text-foreground-muted">
+            <details className="mt-3 rounded-xl bg-surface px-3 py-2 text-[11px] text-foreground-muted">
               <summary className="cursor-pointer select-none font-medium text-foreground">
                 {t('providers.accountDetails.summary')}
               </summary>
@@ -1004,7 +1004,7 @@ export function ProvidersTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex gap-2.5 rounded-xl border border-border bg-surface px-4 py-3">
+      <div className="flex gap-2.5 rounded-xl bg-surface px-4 py-3">
         <ShieldCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
         <p className="text-[11px] leading-relaxed text-foreground-muted">
           <Trans
@@ -1016,7 +1016,7 @@ export function ProvidersTab() {
       </div>
 
       {storeError ? (
-        <div className="flex gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3">
+        <div className="flex gap-2.5 rounded-xl bg-danger-soft px-4 py-3">
           <AlertCircle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
             <p className="font-medium text-foreground">{t('providers.storeErrorTitle')}</p>
@@ -1029,7 +1029,7 @@ export function ProvidersTab() {
       ) : null}
 
       {secretsError ? (
-        <div className="flex gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3">
+        <div className="flex gap-2.5 rounded-xl bg-danger-soft px-4 py-3">
           <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="min-w-0 flex-1 text-[11px] leading-relaxed">
             <p className="font-medium text-foreground">{t('providers.secretsErrorTitle')}</p>

@@ -207,7 +207,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
               >
                 {t(STATUS_LABEL_KEY[status])}
               </span>
-              <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-foreground-subtle">
+              <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] text-foreground-subtle">
                 {t(isWorker ? 'subagent.autonomous' : 'subagent.readOnly')}
               </span>
             </div>
@@ -234,7 +234,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
               <Spinner size="xs" /> {t('subagent.loadingTranscript')}
             </div>
           ) : error && !live ? (
-            <p role="alert" className="rounded-lg border border-border bg-surface p-3 text-[12px] text-danger">
+            <p role="alert" className="rounded-lg bg-surface p-3 text-[12px] text-danger">
               {error}
             </p>
           ) : unavailable ? (
@@ -261,7 +261,7 @@ export function SubagentChatView({ target, className }: SubagentChatViewProps) {
             type="button"
             onClick={scrollToBottom}
             aria-label={t('subagent.jumpToEnd')}
-            className="pointer-events-auto flex size-9 items-center justify-center rounded-full border border-border bg-surface-raised text-foreground-muted shadow-md transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            className="pointer-events-auto flex size-9 items-center justify-center rounded-full bg-surface-raised text-foreground-muted shadow-md transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             <ArrowDown className="size-4" />
           </button>

@@ -42,7 +42,7 @@ function dayLabel(day: string): string {
 
 function StatCard({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
-    <article className="rounded-2xl border border-border bg-surface-raised/60 p-4">
+    <article className="rounded-2xl bg-surface-hover p-4">
       <p className="text-[11px] font-medium uppercase tracking-wider text-foreground-subtle">
         {label}
       </p>
@@ -145,7 +145,7 @@ export function AgentStatsView() {
           {error ? (
             <div
               role="alert"
-              className="rounded-2xl border border-border bg-surface-raised/60 px-4 py-8 text-center"
+              className="rounded-2xl bg-surface-hover px-4 py-8 text-center"
             >
               <p className="text-[13px] font-medium text-foreground">
                 {t('stats.loadError')}
@@ -164,7 +164,7 @@ export function AgentStatsView() {
               {t('stats.loading')}
             </div>
           ) : stats.totals.turns === 0 ? (
-            <div className="rounded-2xl border border-border bg-surface-raised/60 px-4 py-10 text-center">
+            <div className="rounded-2xl bg-surface-hover px-4 py-10 text-center">
               <p className="text-[13px] font-medium text-foreground">
                 {t('stats.noUsage')}
               </p>
@@ -225,7 +225,7 @@ export function AgentStatsView() {
                 >
                   {t('stats.daily')}
                 </h2>
-                <div className="mt-3 rounded-2xl border border-border bg-surface-raised/60 p-4">
+                <div className="mt-3 rounded-2xl bg-surface-hover p-4">
                   {stats.byDay.length > 0 ? (
                     <ChartSvg
                       spec={{
@@ -261,7 +261,7 @@ export function AgentStatsView() {
                 {stats.byModel.length === 0 ? (
                   <p className="mt-3 text-[12px] text-foreground-subtle">{t('stats.noModels')}</p>
                 ) : (
-                  <div className="mt-3 overflow-x-auto rounded-xl border border-border">
+                  <div className="mt-3 overflow-x-auto rounded-xl ">
                     <table
                       aria-label={t('stats.byModelAria')}
                       className="w-full border-collapse text-left text-[12.5px]"

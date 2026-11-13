@@ -35,9 +35,9 @@ export function LibraryFilters({ filter, counts, onChange }: LibraryFiltersProps
             aria-label={countLabel}
             title={countLabel}
             className={cn(
-              'inline-flex h-7 select-none items-center gap-1.5 rounded-full border border-border bg-surface-raised px-3',
+              'inline-flex h-7 select-none items-center gap-1.5 rounded-full bg-surface-hover px-3',
               'text-[12px] font-medium text-foreground-muted transition-colors duration-150',
-              'hover:border-border-strong hover:text-foreground',
+              ' hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
               'data-[state=checked]:border-transparent data-[state=checked]:bg-accent-soft data-[state=checked]:text-accent',
               'motion-reduce:transition-none',

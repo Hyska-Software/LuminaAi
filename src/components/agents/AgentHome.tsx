@@ -89,7 +89,7 @@ export function AgentWelcome({
         <AgentAvatar avatar={agent.avatar} size="lg" />
         <span
           aria-hidden
-          className="absolute -bottom-1 -right-1 flex size-6 items-center justify-center rounded-full border border-border bg-surface-raised text-foreground-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+          className="absolute -bottom-1 -right-1 flex size-6 items-center justify-center rounded-full bg-surface-hover text-foreground-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
         >
           <Pencil className="size-3" />
         </span>
@@ -107,18 +107,18 @@ export function AgentWelcome({
         </p>
       ) : null}
       <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-        <span className="rounded-full border border-border bg-surface-raised px-3 py-1 text-[11px] text-foreground-muted">
+        <span className="rounded-full bg-surface-hover px-3 py-1 text-[11px] text-foreground-muted">
           {modelLabel(providers, agent.providerId, agent.modelId)}
         </span>
         {agent.workspaceId ? (
-          <span className="rounded-full border border-accent/30 bg-accent-soft px-3 py-1 text-[11px] text-accent">
+          <span className="rounded-full bg-accent-soft px-3 py-1 text-[11px] text-accent">
             {t('home.workspacePermission', {
               permission: permissionLabel(agent.permissionMode, t),
             })}
           </span>
         ) : null}
         {usage && usage.turns > 0 ? (
-          <span className="rounded-full border border-border bg-surface-raised px-3 py-1 text-[11px] text-foreground-muted">
+          <span className="rounded-full bg-surface-hover px-3 py-1 text-[11px] text-foreground-muted">
             {t('home.tokensCost', {
               tokens: formatUsageTokens(usage.totalTokens),
               cost: formatUsageCost(usage.cost),
@@ -158,7 +158,7 @@ export function AgentWelcome({
                 key={starter}
                 type="button"
                 onClick={() => fillComposer(starter)}
-                className="max-w-full rounded-full border border-border bg-surface-raised px-3 py-1.5 text-left text-[12px] text-foreground-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                className="max-w-full rounded-full bg-surface-hover px-3 py-1.5 text-left text-[12px] text-foreground-muted transition-colors hover:bg-surface-active hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
               >
                 <span className="line-clamp-1">{starter}</span>
               </button>
@@ -172,7 +172,7 @@ export function AgentWelcome({
           <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-foreground-subtle">
             {t('home.recentThreads')}
           </p>
-          <div className="overflow-hidden rounded-xl border border-border bg-surface-raised/40">
+          <div className="overflow-hidden rounded-xl bg-surface-hover">
             {threads.slice(0, 4).map((thread) => (
               <button
                 key={thread.id}

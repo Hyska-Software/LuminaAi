@@ -180,11 +180,11 @@ export function AgentChannelDialog({
                       aria-pressed={selected}
                       onClick={() => toggle(agent.id)}
                       className={cn(
-                        'flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-left text-[12px]',
+                        'flex min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px]',
                         'transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                         selected
-                          ? 'border-accent/40 bg-accent-soft/50 text-foreground'
-                          : 'border-border bg-surface-raised/40 text-foreground-muted hover:border-border-strong hover:bg-surface-hover hover:text-foreground',
+                          ? ' bg-accent-soft/50 text-foreground'
+                          : ' bg-surface-hover text-foreground-muted hover:bg-surface-active hover:text-foreground',
                       )}
                     >
                       <AgentAvatar avatar={agent.avatar} size="sm" />
@@ -211,16 +211,16 @@ export function AgentChannelDialog({
                   })}
                   aria-haspopup="listbox"
                   className={cn(
-                    'flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-surface-raised px-2.5 text-left text-sm text-foreground',
-                    'transition-[border-color,box-shadow,background-color] duration-150 hover:bg-surface-hover',
-                    'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20',
+                    'flex h-9 w-full min-w-0 items-center gap-2 rounded-lg bg-surface-hover px-2.5 text-left text-sm text-foreground',
+                    'transition-[box-shadow,background-color] duration-150 hover:bg-surface-active',
+                    ' focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20',
                     'disabled:cursor-not-allowed disabled:opacity-60',
                   )}
                 >
                   {selectedLeader ? (
                     <AgentAvatar avatar={selectedLeader.avatar} size="sm" />
                   ) : (
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-active/70 text-foreground-subtle">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-surface-active/70 text-foreground-subtle">
                       <Users aria-hidden className="size-3.5" />
                     </span>
                   )}
@@ -260,7 +260,7 @@ export function AgentChannelDialog({
                         : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                     )}
                   >
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-xl border border-border bg-surface-active/70 text-foreground-subtle">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-surface-active/70 text-foreground-subtle">
                       <Users aria-hidden className="size-3.5" />
                     </span>
                     <span className="min-w-0 flex-1 truncate">{t('channelDialog.noLeader')}</span>
@@ -302,7 +302,7 @@ export function AgentChannelDialog({
             </p>
           </div>
           {error ? (
-            <p role="alert" className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-danger">
+            <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-[12px] text-danger">
               {error}
             </p>
           ) : null}

@@ -98,7 +98,7 @@ export function VideoPreview({ content, className }: ArtifactViewProps) {
 
   return (
     <div className={cn('flex h-full flex-col', className)}>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface-raised px-3 py-2 text-[11px] text-foreground-muted">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface-hover px-3 py-2 text-[11px] text-foreground-muted">
         <Film aria-hidden className="size-4 shrink-0 text-foreground-subtle" strokeWidth={1.8} />
         <Badge tone="warning" size="sm">
           {format}
@@ -122,7 +122,7 @@ export function VideoPreview({ content, className }: ArtifactViewProps) {
           onError={() =>
             setMediaError(t('artifacts:video.playError'))
           }
-          className="max-h-full max-w-full rounded-lg border border-border bg-surface shadow-sm"
+          className="max-h-full max-w-full rounded-lg bg-surface shadow-sm"
         />
       </div>
     </div>

@@ -154,7 +154,7 @@ export function GoalAttentionCard({
       aria-label={title}
       aria-busy={busy || undefined}
       className={cn(
-        'flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-surface p-3',
+        'flex min-w-0 flex-col gap-2 rounded-xl bg-surface p-3',
         className,
       )}
     >

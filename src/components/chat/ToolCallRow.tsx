@@ -91,7 +91,7 @@ function ExpandedOutput({
   return (
     <div
       id={id}
-      className="mt-1 overflow-hidden rounded-lg border border-border bg-surface"
+      className="mt-1 overflow-hidden rounded-lg bg-surface"
     >
       <div className="flex items-center gap-2 border-b border-border px-2.5 py-1">
         <SquareTerminal aria-hidden className="size-3 shrink-0 text-foreground-subtle" />
@@ -137,7 +137,7 @@ function ToolImageThumb({ image, index }: { image: ToolImageRef; index: number }
   }, [image.path]);
   if (failed) {
     return (
-      <span className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface px-2 text-[10px] text-foreground-subtle">
+      <span className="flex h-24 items-center justify-center rounded-lg bg-surface px-2 text-[10px] text-foreground-subtle">
         {t('tool.imageUnavailable')}
       </span>
     );
@@ -147,7 +147,7 @@ function ToolImageThumb({ image, index }: { image: ToolImageRef; index: number }
       href={src}
       target="_blank"
       rel="noreferrer"
-      className="block overflow-hidden rounded-lg border border-border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      className="block overflow-hidden rounded-lg bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       aria-label={t('tool.openScreenshot', { index: index + 1 })}
     >
       <img
@@ -157,7 +157,7 @@ function ToolImageThumb({ image, index }: { image: ToolImageRef; index: number }
       />
     </a>
   ) : (
-    <span className="flex h-24 items-center justify-center rounded-lg border border-border bg-surface">
+    <span className="flex h-24 items-center justify-center rounded-lg bg-surface">
       <Spinner size="sm" />
     </span>
   );
@@ -363,7 +363,7 @@ export function ToolCallRow({ tool, icon: Icon, className }: ToolCallRowProps) {
           {diff ? (
             <div
               id={detailsId}
-              className="mt-1 overflow-hidden rounded-lg border border-border"
+              className="mt-1 overflow-hidden rounded-lg "
             >
               <DiffView path={change?.path ?? meta.detail ?? 'diff'} diff={diff} />
             </div>

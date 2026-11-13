@@ -137,7 +137,7 @@ export function AgentActivityDialog({
                 return (
                   <article
                     key={stream.turnId}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
+                    className="flex items-center gap-3 rounded-xl bg-surface p-3"
                   >
                     {agent ? <AgentAvatar avatar={agent.avatar} size="sm" /> : null}
                     <div className="min-w-0 flex-1">
@@ -174,7 +174,7 @@ export function AgentActivityDialog({
                 return (
                   <article
                     key={turn.turnId}
-                    className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
+                    className="flex items-center gap-3 rounded-xl bg-surface p-3"
                   >
                     {agent ? <AgentAvatar avatar={agent.avatar} size="sm" /> : null}
                     <div className="min-w-0 flex-1">
@@ -216,7 +216,7 @@ export function AgentActivityDialog({
                   key={approval.id}
                   type="button"
                   onClick={() => focusConversation(conversationId)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-warning/30 bg-warning-soft/40 p-3 text-left hover:bg-warning-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="flex w-full items-center gap-3 rounded-xl bg-warning-soft/40 p-3 text-left hover:bg-warning-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <AlertTriangle className="size-4 shrink-0 text-warning" />
                   <span className="min-w-0 flex-1">
@@ -235,7 +235,7 @@ export function AgentActivityDialog({
                   key={question.id}
                   type="button"
                   onClick={() => focusConversation(conversationId)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface/50 p-3 text-left hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="flex w-full items-center gap-3 rounded-xl bg-surface p-3 text-left hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <MessageSquare className="size-4 shrink-0 text-accent" />
                   <span className="min-w-0 flex-1">
@@ -253,7 +253,7 @@ export function AgentActivityDialog({
           ) : null}
 
           {tasksError ? (
-            <p role="alert" className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger">
+            <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-[12px] text-danger">
               {t('activityDialog.tasksError', { error: tasksError })}
             </p>
           ) : null}
@@ -275,7 +275,7 @@ export function AgentActivityDialog({
                   onClick={() => {
                     if (task.conversationId) focusConversation(task.conversationId);
                   }}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface/50 p-3 text-left hover:bg-surface-hover disabled:cursor-default disabled:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="flex w-full items-center gap-3 rounded-xl bg-surface p-3 text-left hover:bg-surface-hover disabled:cursor-default disabled:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <ListChecks className="size-4 shrink-0 text-accent" />
                   <span className="min-w-0 flex-1">

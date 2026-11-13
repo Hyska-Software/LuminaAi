@@ -164,11 +164,11 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
           aria-label={t('context.usedAria', { percent })}
           aria-describedby={hasCache ? cacheDescriptionId : undefined}
           className={cn(
-            'flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full border px-2 text-[11px] font-medium tabular-nums',
+            'flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2 text-[11px] font-medium tabular-nums',
             hasCache ? 'min-w-[7rem]' : 'min-w-[4.25rem]',
             'text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-            tier.key === 'critical' ? 'border-danger/40' : 'border-border',
+            tier.key === 'critical' ? 'bg-danger-soft text-danger' : '',
             className,
           )}
         >

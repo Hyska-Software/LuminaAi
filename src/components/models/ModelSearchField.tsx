@@ -72,10 +72,10 @@ export const ModelSearchField = React.forwardRef<HTMLInputElement, ModelSearchFi
           autoCorrect="off"
           spellCheck={false}
           className={cn(
-            'h-9 w-full rounded-lg border border-border bg-surface pl-8 text-[13px] text-foreground',
+            'h-9 w-full rounded-lg bg-surface pl-8 text-[13px] text-foreground',
             'placeholder:text-foreground-subtle',
-            'transition-[border-color,box-shadow] duration-150',
-            'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20',
+            'transition-[box-shadow,background-color] duration-150',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             'motion-reduce:transition-none',
             value ? 'pr-8' : hint ? 'pr-14' : 'pr-3',
           )}

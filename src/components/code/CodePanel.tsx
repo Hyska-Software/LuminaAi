@@ -108,7 +108,7 @@ interface EmptyStateProps {
 function PanelEmptyState({ icon: Icon, title, description }: EmptyStateProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-10 text-center">
-      <span className="flex size-10 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
+      <span className="flex size-10 items-center justify-center rounded-xl bg-surface-hover text-foreground-muted">
         <Icon aria-hidden className="size-5" strokeWidth={1.75} />
       </span>
       <p className="text-[13px] font-medium text-foreground">{title}</p>

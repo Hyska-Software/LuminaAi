@@ -103,7 +103,7 @@ export function PrivateDesktopViewer({ conversationId, agentName, interactive, b
   }, [interactive]);
 
   return (
-    <div className={cn('relative flex flex-col overflow-hidden rounded-xl border border-border bg-background', expanded && 'fixed inset-2 z-[100] rounded-xl shadow-2xl')}>
+    <div className={cn('relative flex flex-col overflow-hidden rounded-xl bg-background', expanded && 'fixed inset-2 z-[100] rounded-xl shadow-2xl')}>
       <div className="flex min-h-10 items-center gap-2 border-b border-border px-3">
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-foreground">{t('desktopViewer.screenOf', { name: agentName })}</span>
         <span role="status" className="text-[11px] text-foreground-muted">

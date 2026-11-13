@@ -123,7 +123,7 @@ const UserMessageItem = memo(function UserMessageItem({
         {attachments.length > 0 ? <AttachmentChips attachments={attachments} align="end" /> : null}
 
         {editing ? (
-          <div className="w-72 max-w-[70vw] rounded-2xl border border-border bg-surface-raised p-2 shadow-sm">
+          <div className="w-72 max-w-[70vw] rounded-2xl bg-surface-raised p-2 shadow-sm">
             <textarea
               autoFocus
               value={draft}
@@ -322,7 +322,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
         ) : null}
 
         {failed ? (
-          <div role="alert" className="mt-2 rounded-xl border border-border bg-danger-soft p-3">
+          <div role="alert" className="mt-2 rounded-xl bg-danger-soft p-3">
             <div className="flex items-start gap-2">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
               <div className="min-w-0 flex-1">

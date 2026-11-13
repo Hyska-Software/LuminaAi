@@ -23,7 +23,7 @@ interface LibrarySearchProps {
 function LibrarySearch({ query, onQueryChange }: LibrarySearchProps) {
   const { t } = useTranslation('library');
   return (
-    <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised pl-2.5 pr-0.5 transition-colors focus-within:border-border-strong focus-within:ring-2 focus-within:ring-accent/20 sm:w-64">
+    <div className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-full bg-surface-hover pl-2.5 pr-0.5 transition-colors focus-within:ring-2 focus-within:ring-accent/20 sm:w-64">
       <Search aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
       <input
         type="search"

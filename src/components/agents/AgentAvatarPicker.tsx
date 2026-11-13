@@ -35,11 +35,9 @@ const LABEL = 'text-[11px] font-semibold uppercase tracking-wider text-foregroun
 
 function tileClass(selected: boolean): string {
   return cn(
-    'flex aspect-square items-center justify-center rounded-xl border p-1 transition-colors',
+    'flex aspect-square items-center justify-center rounded-xl p-1 transition-colors',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-    selected
-      ? 'border-accent bg-accent-soft/40 ring-2 ring-accent/30'
-      : 'border-border bg-surface/50 hover:border-border-strong hover:bg-surface-hover',
+    selected ? 'bg-accent-soft/40' : 'bg-surface hover:bg-surface-hover',
   );
 }
 
@@ -184,10 +182,10 @@ export function AgentAvatarPicker({
                     disabled={disabled}
                     onClick={() => onChange(mascotVariant(mascot, { color: spec.value }))}
                     className={cn(
-                      'size-8 rounded-full border border-border transition-transform',
+                      'size-8 rounded-full transition-transform',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                       selected
-                        ? 'ring-2 ring-accent ring-offset-2 ring-offset-surface-raised'
+                        ? 'scale-110 shadow-md'
                         : 'hover:scale-105',
                     )}
                     style={{

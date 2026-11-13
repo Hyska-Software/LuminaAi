@@ -476,7 +476,7 @@ export function AgentChannelView({
             ringClassName="ring-background"
           />
         ) : (
-          <span className="flex size-8 items-center justify-center rounded-xl border border-border bg-surface-active/70 text-[15px]">
+          <span className="flex size-8 items-center justify-center rounded-xl bg-surface-active/70 text-[15px]">
             {isDm ? '@' : '#'}
           </span>
         )}
@@ -486,7 +486,7 @@ export function AgentChannelView({
             {leader ? (
               <span
                 title={t('channel.leaderTitle', { name: leader.name })}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-[9px] font-medium text-accent"
               >
                 <Crown aria-hidden className="size-3" />
                 <span className="max-w-[7rem] truncate">
@@ -539,7 +539,7 @@ export function AgentChannelView({
         {messages.length === 0 ? (
           <div className="flex min-h-full items-center justify-center px-6 py-12">
             <div className="max-w-sm text-center">
-              <span className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl border border-border bg-surface-raised text-[20px] text-foreground-muted">
+              <span className="mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-surface-hover text-[20px] text-foreground-muted">
                 {isDm ? '@' : '#'}
               </span>
               <p className="text-[15px] font-medium text-foreground">
@@ -572,7 +572,7 @@ export function AgentChannelView({
                 if (message.role === 'system') {
                   return (
                     <div key={message.id} className={cn('flex justify-center', spacing)}>
-                      <p className="rounded-full bg-surface-raised px-3 py-1 text-[11px] text-foreground-muted">
+                      <p className="rounded-full bg-surface-hover px-3 py-1 text-[11px] text-foreground-muted">
                         {message.content}
                       </p>
                     </div>
@@ -653,7 +653,7 @@ export function AgentChannelView({
         />
         <div className="relative mx-auto w-full max-w-3xl">
           {activeTasks.length > 0 ? (
-            <div className="mb-2 overflow-hidden rounded-xl border border-accent/25 bg-accent-soft/35">
+            <div className="mb-2 overflow-hidden rounded-xl bg-accent-soft/35">
               <div className="flex items-center gap-2 border-b border-accent/20 px-2.5 py-1.5">
                 <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
                 <span className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-wider text-foreground-muted">
@@ -703,7 +703,7 @@ export function AgentChannelView({
           {errors.length > 0 ? (
             <div
               role="alert"
-              className="mb-2 rounded-xl border border-warning/30 bg-warning-soft px-3 py-2 text-[11px] text-foreground-muted"
+              className="mb-2 rounded-xl bg-warning-soft px-3 py-2 text-[11px] text-foreground-muted"
             >
               {errors.map((error) => (
                 <p key={error} className="truncate">
@@ -713,18 +713,13 @@ export function AgentChannelView({
             </div>
           ) : null}
           {isDm ? (
-            <p className="rounded-xl border border-border bg-surface-raised/60 px-3 py-2 text-center text-[11px] text-foreground-muted">
+            <p className="rounded-xl bg-surface-hover px-3 py-2 text-center text-[11px] text-foreground-muted">
               {t('channel.dmNotice')}
             </p>
           ) : (
             <>
               <div
-                className={cn(
-                  'relative rounded-3xl border bg-surface-raised shadow-sm transition-colors duration-150',
-                  sending
-                    ? 'border-accent/20'
-                    : 'border-border focus-within:border-border-strong',
-                )}
+                className="relative rounded-3xl bg-surface-raised shadow-sm transition-colors duration-150"
               >
                 <ComposerActivity active={sending} reduceMotion={reduceMotion} />
                 <div className="px-3 pb-1 pt-3">
@@ -733,7 +728,7 @@ export function AgentChannelView({
                       role="listbox"
                       id="channel-mention-listbox"
                       aria-label={t('channel.membersAria')}
-                      className="mb-2 grid max-h-56 gap-0.5 overflow-y-auto rounded-xl border border-border bg-surface p-1"
+                      className="mb-2 grid max-h-56 gap-0.5 overflow-y-auto rounded-xl bg-surface p-1"
                     >
                       {mentionCandidates.map((member, index) => (
                         <button
@@ -903,7 +898,7 @@ export function AgentChannelView({
             onClick={() => scrollToBottom(reduceMotion ? 'auto' : 'smooth')}
             aria-label={t('channel.jumpToEnd')}
             className={cn(
-              'pointer-events-auto flex size-9 items-center justify-center rounded-full border border-border',
+              'pointer-events-auto flex size-9 items-center justify-center rounded-full ',
               'bg-surface-raised text-foreground-muted shadow-md',
               'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',

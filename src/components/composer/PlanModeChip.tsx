@@ -55,7 +55,7 @@ export function PlanModeChip({ conversationId, className }: PlanModeChipProps) {
         disabled={pending}
         onClick={() => void deactivate()}
         className={cn(
-          'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-2.5',
+          'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-accent-soft px-2.5',
           'text-[12px] font-medium text-foreground',
           'transition-colors duration-150 hover:bg-accent-soft/80',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',

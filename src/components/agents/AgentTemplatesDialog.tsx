@@ -49,12 +49,12 @@ export function AgentTemplatesDialog({
                   key={template.id}
                   type="button"
                   onClick={() => void onPick(template)}
-                  className="group flex min-h-32 flex-col rounded-xl border border-border bg-surface/50 p-3.5 text-left transition-colors hover:border-border-strong hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  className="group flex min-h-32 flex-col rounded-xl bg-surface p-3.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
                   <span className="flex items-center gap-2">
                     <span
                       aria-hidden
-                      className="flex size-8 items-center justify-center rounded-lg border border-border bg-surface-raised text-[17px]"
+                      className="flex size-8 items-center justify-center rounded-lg bg-surface-hover text-[17px]"
                     >
                       <AgentAvatar avatar={template.avatar} size="sm" />
                     </span>

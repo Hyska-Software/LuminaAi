@@ -121,7 +121,7 @@ export function SkillPreviewDialog({ skill, onClose }: SkillPreviewDialogProps) 
           </div>
           <DialogDescription>{display.description}</DialogDescription>
           {versions.length > 0 ? (
-            <details className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] text-foreground-muted">
+            <details className="rounded-lg bg-surface px-2.5 py-1.5 text-[11px] text-foreground-muted">
               <summary className="cursor-pointer select-none">
                 {t('library:skills.preview.history', { count: versions.length })}
               </summary>

@@ -611,7 +611,7 @@ function FilesSection({
         </p>
       ) : null}
       {data.files.map((file) => (
-        <div key={file.path} className="overflow-hidden rounded-xl border border-border">
+        <div key={file.path} className="overflow-hidden rounded-xl ">
           <div className="flex min-w-0 items-center gap-2 border-b border-border bg-surface px-2.5 py-1.5 text-[11px]">
             <span className="truncate font-mono text-foreground">{file.path}</span>
             <span className="ml-auto shrink-0 text-success">+{file.additions}</span>
@@ -712,7 +712,7 @@ function MergeBox({
   const { t } = useTranslation('code');
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-xl border border-border bg-surface">
+    <div className="rounded-xl bg-surface">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2">
         <Button
           size="sm"

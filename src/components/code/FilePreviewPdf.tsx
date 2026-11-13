@@ -161,7 +161,7 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
           className,
         )}
       >
-        <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
+        <span className="flex size-9 items-center justify-center rounded-xl bg-danger-soft text-danger">
           <AlertTriangle aria-hidden className="size-4" strokeWidth={1.75} />
         </span>
         <p className="text-[13px] font-medium text-foreground">{t('code:pdf.errorTitle')}</p>
@@ -220,7 +220,7 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
       <div
         role="toolbar"
         aria-label={t('code:pdf.toolbar')}
-        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-raised px-2 py-1.5"
+        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border bg-surface-hover px-2 py-1.5"
       >
         <IconButton
           label={t('code:pdf.prev')}
@@ -302,7 +302,7 @@ export function FilePreviewPdf({ path, dataBase64, className }: FilePreviewPdfPr
               ref={canvasRef}
               role="img"
               aria-label={t('code:pdf.canvasAria', { page: pageNumber, total: numPages, path })}
-              className="h-auto max-w-none rounded-md border border-border bg-background shadow-sm"
+              className="h-auto max-w-none rounded-md bg-background shadow-sm"
             />
             {renderError ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background px-4 text-center">

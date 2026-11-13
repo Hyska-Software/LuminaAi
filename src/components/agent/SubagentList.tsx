@@ -86,7 +86,7 @@ export function SubagentList({ conversationId, className }: SubagentListProps) {
                   toast.info(t('subagent.alreadyOpen'));
                 }
               }}
-              className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-2 py-1.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+              className="flex w-full min-w-0 items-center gap-2 rounded-lg bg-background px-2 py-1.5 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
             >
               <Bot aria-hidden className="size-3.5 shrink-0 text-foreground-subtle" />
               <span className="min-w-0 flex-1">

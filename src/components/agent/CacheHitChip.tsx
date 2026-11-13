@@ -442,7 +442,7 @@ export function CacheHitChip({ cache, className }: CacheHitChipProps) {
           aria-label={cacheAriaLabel(cache)}
           aria-describedby={descriptionId}
           className={cn(
-            'flex h-8 min-w-[5.5rem] shrink-0 items-center justify-center gap-1 rounded-full border border-border px-2',
+            'flex h-8 min-w-[5.5rem] shrink-0 items-center justify-center gap-1 rounded-full px-2',
             'text-[11px] font-medium tabular-nums text-foreground-muted',
             'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',

@@ -121,7 +121,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
 
       {error ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center">
-          <span className="flex size-9 items-center justify-center rounded-xl border border-danger/30 bg-danger-soft text-danger">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-danger-soft text-danger">
             <CircleAlert aria-hidden className="size-4" strokeWidth={1.75} />
           </span>
           <p className="text-[12.5px] font-medium text-foreground">{t('code:diff.errorTitle')}</p>
@@ -139,7 +139,7 @@ export function DiffView({ path, diff, loading, error, binary = false, className
         </div>
       ) : isBinary ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center">
-          <span className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
+          <span className="flex size-9 items-center justify-center rounded-xl bg-surface-hover text-foreground-muted">
             <FileExclamationPoint aria-hidden className="size-4" strokeWidth={1.75} />
           </span>
           <p className="text-[12.5px] font-medium text-foreground">{t('code:diff.binaryTitle')}</p>

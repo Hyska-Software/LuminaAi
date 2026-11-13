@@ -450,12 +450,12 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
                   title={option.title}
                   onClick={() => toggleFilter(option.value)}
                   className={cn(
-                    'inline-flex h-8 items-center rounded-full border px-3 text-[12px] font-medium',
+                    'inline-flex h-8 items-center rounded-full px-3 text-[12px] font-medium',
                     'transition-colors duration-150 motion-reduce:transition-none',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                     pressed
-                      ? 'border-accent/40 bg-accent-soft text-accent'
-                      : 'border-border bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                      ? ' bg-accent-soft text-accent'
+                      : ' bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                   )}
                 >
                   {option.label}
@@ -529,7 +529,7 @@ function ModelPickerDialogBody({ onClose }: ModelPickerDialogBodyProps) {
 
         <aside
           aria-label={t('picker.detailsAria')}
-          className="w-[300px] shrink-0 border-l border-border bg-surface/40"
+          className="w-[300px] shrink-0 border-l border-border bg-surface"
         >
           <ModelDetailPanel
             entry={previewEntry}
@@ -624,7 +624,7 @@ function ModelLockedDialog({
           <DialogDescription>{copy.description}</DialogDescription>
         </div>
 
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
+        <div className="flex items-center gap-3 rounded-xl bg-surface px-3 py-2.5">
           <FamilyAvatar family={model?.family} name={modelName} size={32} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-semibold text-foreground" title={modelName}>

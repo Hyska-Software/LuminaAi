@@ -165,7 +165,7 @@ function codeFileTabName(tab: CodeFileTab): string {
 const SESSION_PANEL_ID = 'code-session-panel';
 
 const chipClassName =
-  'inline-flex h-7 max-w-60 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 ' +
+  'inline-flex h-7 max-w-60 shrink-0 items-center gap-1.5 rounded-full bg-surface px-2.5 ' +
   'text-[11.5px] text-foreground-muted transition-colors duration-150 ' +
   'hover:bg-surface-hover hover:text-foreground ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ' +

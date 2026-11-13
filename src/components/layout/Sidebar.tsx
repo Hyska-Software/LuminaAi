@@ -160,7 +160,7 @@ function ConversationRow({
           }}
           aria-label={t('shell.sidebar.renameAria')}
           className={cn(
-            'h-8 w-full min-w-0 rounded-lg border border-accent bg-background px-2',
+            'h-8 w-full min-w-0 rounded-lg bg-background px-2',
             'text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-accent/30',
           )}
         />
@@ -213,7 +213,7 @@ function ConversationRow({
             align="end"
             sideOffset={4}
             className={cn(
-              'z-50 min-w-44 rounded-xl border border-border bg-surface-raised p-1 shadow-lg animate-fade-in',
+              'z-50 min-w-44 rounded-xl bg-surface-raised p-1 shadow-lg animate-fade-in',
             )}
           >
             <MenuEntry

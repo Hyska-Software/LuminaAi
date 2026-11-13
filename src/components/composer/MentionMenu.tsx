@@ -50,7 +50,7 @@ export function MentionMenu({
       {error ? (
         <p
           role="alert"
-          className="mx-1 rounded-lg border border-danger/30 bg-danger-soft px-2.5 py-2 text-[12px] leading-relaxed text-danger"
+          className="mx-1 rounded-lg bg-danger-soft px-2.5 py-2 text-[12px] leading-relaxed text-danger"
         >
           {error}
         </p>

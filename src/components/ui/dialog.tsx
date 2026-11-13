@@ -54,7 +54,7 @@ export const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps
           ref={ref}
           className={cn(
             'pointer-events-auto relative flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden',
-            'rounded-2xl border border-border bg-surface-raised text-foreground shadow-2xl outline-none',
+            'rounded-2xl bg-surface-raised text-foreground shadow-2xl outline-none',
             'data-[state=open]:animate-scale-in motion-reduce:animate-none',
             SIZES[size],
             className,

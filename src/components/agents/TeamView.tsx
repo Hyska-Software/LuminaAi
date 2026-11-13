@@ -54,7 +54,7 @@ function AgentCard({
   const { t } = useTranslation('agents');
   const providers = useAppStore((state) => state.providers);
   return (
-    <article className="group flex min-h-44 flex-col rounded-2xl border border-border bg-surface-raised/60 p-4 transition-colors hover:border-border-strong hover:bg-surface-raised">
+    <article className="group flex min-h-44 flex-col rounded-2xl bg-surface-hover p-4 transition-colors hover:bg-surface-active">
       <button
         type="button"
         onClick={onOpen}
@@ -268,7 +268,7 @@ export function TeamView() {
       {agents.length === 0 ? (
         <div className="flex min-h-[70vh] items-center justify-center px-6 py-10">
           <div className="w-full max-w-2xl text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-border bg-surface-raised text-accent">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-surface-hover text-accent">
               <Sparkles className="size-6" />
             </div>
             <h1 className="mt-5 text-2xl font-semibold tracking-tight">{t('team.emptyTitle')}</h1>
@@ -283,7 +283,7 @@ export function TeamView() {
                     key={template.id}
                     type="button"
                     onClick={() => void createFromTemplate(template)}
-                    className="rounded-xl border border-border bg-surface-raised/60 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    className="rounded-xl bg-surface-hover p-4 text-left transition-colors hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
                     <AgentAvatar avatar={template.avatar} size="md" />
                     <span className="mt-2 block text-[13px] font-medium">{localized.name}</span>
@@ -384,7 +384,7 @@ export function TeamView() {
             {archived.map((agent) => (
               <div
                 key={agent.id}
-                className="flex items-center gap-3 rounded-xl border border-border bg-surface/50 p-3"
+                className="flex items-center gap-3 rounded-xl bg-surface p-3"
               >
                 <AgentAvatar avatar={agent.avatar} size="sm" />
                 <div className="min-w-0 flex-1">
@@ -431,7 +431,7 @@ export function TeamView() {
           </DialogHeader>
           {deleteBlocked ? (
             <AgentDialogBody>
-              <p className="rounded-lg border border-border bg-surface/50 px-3 py-2 text-[12px] text-foreground-muted">
+              <p className="rounded-lg bg-surface px-3 py-2 text-[12px] text-foreground-muted">
                 {t('team.deleteBlocked', { name: deleteTarget?.name, count: deleteThreads })}
               </p>
             </AgentDialogBody>

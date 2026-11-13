@@ -52,7 +52,7 @@ export const Slider = React.forwardRef<HTMLInputElement, SliderProps>(function S
           'h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none',
           'focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           'disabled:cursor-not-allowed disabled:opacity-50',
-          '[&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-border-strong [&::-webkit-slider-thumb]:bg-surface-raised [&::-webkit-slider-thumb]:shadow-sm',
+          '[&::-webkit-slider-thumb]:size-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-surface-raised [&::-webkit-slider-thumb]:shadow-sm',
           'motion-reduce:transition-none',
           controlClassName,
         )}

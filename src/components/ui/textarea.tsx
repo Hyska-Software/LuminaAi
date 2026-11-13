@@ -6,10 +6,10 @@ export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextArea
 }
 
 const BASE =
-  'w-full resize-none rounded-xl border border-border bg-surface-raised px-3 py-2.5 text-sm leading-relaxed text-foreground ' +
+  'w-full resize-none rounded-xl bg-surface-hover px-3 py-2.5 text-sm leading-relaxed text-foreground ' +
   'placeholder:text-foreground-subtle ' +
-  'transition-[border-color,box-shadow] duration-150 ' +
-  'focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20 ' +
+  'transition-[box-shadow,background-color] duration-150 ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ' +
   'disabled:cursor-not-allowed disabled:opacity-60';
 
 export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
@@ -20,7 +20,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
     <textarea
       ref={ref}
       aria-invalid={invalid || undefined}
-      className={cn(BASE, invalid && 'border-danger focus-visible:border-danger focus-visible:ring-danger/20', className)}
+      className={cn(BASE, invalid && 'bg-danger-soft focus-visible:ring-danger/40', className)}
       {...props}
     />
   );

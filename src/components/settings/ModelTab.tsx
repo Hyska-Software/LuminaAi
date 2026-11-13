@@ -206,7 +206,7 @@ export function ModelTab() {
         )}
       </SettingsSection>
 
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 text-[11px] leading-relaxed text-foreground-muted">
+      <div className="flex items-center gap-2 rounded-xl bg-surface px-4 py-3 text-[11px] leading-relaxed text-foreground-muted">
         <Badge tone="muted">{t('model.tip')}</Badge>
         {t('model.tipBody')}
       </div>

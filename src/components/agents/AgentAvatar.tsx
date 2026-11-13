@@ -49,7 +49,7 @@ export function AgentAvatar({
   const frame =
     avatar.shape === 'mascot'
       ? 'bg-transparent'
-      : cn('border border-border bg-surface-active/70', FRAME_RADIUS[avatar.shape]);
+      : cn(' bg-surface-active/70', FRAME_RADIUS[avatar.shape]);
 
   return (
     <span

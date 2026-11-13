@@ -14,6 +14,16 @@ export interface GenUIActionsProps {
 const TONES = ['primary', 'secondary', 'ghost'] as const;
 type ActionTone = (typeof TONES)[number];
 
+/**
+ * GenUI keeps the button look it had before the borderless pass: cards and
+ * actions in generated UI are intentionally framed.
+ */
+const TONE_CLASS: Record<ActionTone, string> = {
+  primary: '',
+  secondary: 'border border-border bg-surface-raised hover:border-border-strong hover:bg-surface-hover',
+  ghost: '',
+};
+
 interface GenUIActionItem {
   label: string;
   kind: 'prompt' | 'copy';
@@ -101,7 +111,7 @@ export function GenUIActions({ props }: GenUIActionsProps) {
             disabled={busyIndex !== null && busyIndex !== index}
             leftIcon={Icon ? <Icon aria-hidden className="size-4" /> : undefined}
             onClick={() => void run(item, index)}
-            className="max-w-full"
+            className={cn('max-w-full', TONE_CLASS[item.tone])}
             title={item.label}
           >
             <span className="truncate">{item.label}</span>

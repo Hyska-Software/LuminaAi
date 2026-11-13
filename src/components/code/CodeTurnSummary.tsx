@@ -65,7 +65,7 @@ export function CodeTurnSummary({ message, workspaceId, className }: CodeTurnSum
       role="group"
       aria-label={t('code:turnSummary.region')}
       className={cn(
-        'mt-3 overflow-hidden rounded-xl border border-border bg-surface-raised',
+        'mt-3 overflow-hidden rounded-xl bg-surface-hover',
         className,
       )}
     >

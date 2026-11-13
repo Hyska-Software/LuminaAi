@@ -262,7 +262,7 @@ export function ApprovalCard({
       aria-busy={busy || undefined}
       onKeyDown={handleKeyDown}
       className={cn(
-        'rounded-xl border border-border bg-surface',
+        'rounded-xl bg-surface',
         resolved ? 'px-3 py-2' : 'p-3',
         !resolved && dangerRing(approval.risk),
         className,
@@ -417,7 +417,7 @@ function riskColor(risk: RiskClass): string {
 }
 
 function dangerRing(risk: RiskClass): string {
-  return risk === 'destroy' ? 'border-danger/30' : '';
+  return risk === 'destroy' ? 'bg-danger-soft/60' : '';
 }
 
 function ComputerActionDetail({
@@ -458,7 +458,7 @@ function ComputerActionDetail({
         </p>
       ) : null}
       {detail.sensitive ? (
-        <p className="rounded-lg border border-warning/30 bg-warning-soft px-2 py-1 text-[11px] text-warning">
+        <p className="rounded-lg bg-warning-soft px-2 py-1 text-[11px] text-warning">
           {t('approval.computer.sensitive')}
         </p>
       ) : null}
@@ -466,7 +466,7 @@ function ComputerActionDetail({
         <img
           src={src}
           alt={t('approval.computer.screenshotAlt')}
-          className="max-h-72 w-full rounded-lg border border-border object-contain"
+          className="max-h-72 w-full rounded-lg object-contain"
         />
       ) : detail.screenshotPath && !error ? (
         <p className="text-[11px] text-foreground-subtle">{t('approval.computer.loadingScreenshot')}</p>
@@ -499,7 +499,7 @@ function ApprovalDetailView({
           <pre
             aria-label={t('approval.commandAria', { title })}
             tabIndex={0}
-            className="max-h-40 overflow-auto rounded-lg border border-border bg-background px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
+            className="max-h-40 overflow-auto rounded-lg bg-background px-2.5 py-2 font-mono text-[12px] leading-relaxed text-foreground [overflow-wrap:anywhere]"
           >
             {detail.command}
           </pre>
@@ -529,7 +529,7 @@ function ApprovalDetailView({
             <pre
               aria-label={t('approval.paths.previewAria')}
               tabIndex={0}
-              className="max-h-40 overflow-auto rounded-lg border border-border bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground-muted [overflow-wrap:anywhere]"
+              className="max-h-40 overflow-auto rounded-lg bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground-muted [overflow-wrap:anywhere]"
             >
               {preview}
             </pre>

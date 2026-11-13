@@ -75,7 +75,7 @@ export function ProviderSelect({
               : t('picker.allProviders')
           }
           className={cn(
-            'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-surface-raised',
+            'inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg bg-surface-hover',
             'font-medium text-foreground transition-colors duration-150 motion-reduce:transition-none',
             'hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             compact ? 'h-7 px-2 text-[12px]' : 'h-8 px-2.5 text-[12.5px]',

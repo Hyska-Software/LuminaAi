@@ -292,7 +292,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
           {existingBlocking ? (
             <div
               role="alert"
-              className="flex flex-col gap-2 rounded-lg border border-border bg-warning-soft px-3 py-2.5"
+              className="flex flex-col gap-2 rounded-lg bg-warning-soft px-3 py-2.5"
             >
               <p className="min-w-0 break-words text-[12px] leading-relaxed text-warning">
                 {t('code:goal.dialog.existingBlocking', {
@@ -308,7 +308,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
           ) : null}
 
           {!editing && goal?.status === 'completed' ? (
-            <p className="min-w-0 break-words rounded-lg border border-border bg-success-soft px-3 py-2 text-[11.5px] leading-relaxed text-success">
+            <p className="min-w-0 break-words rounded-lg bg-success-soft px-3 py-2 text-[11.5px] leading-relaxed text-success">
               {t('code:goal.dialog.completedReplaced')}
             </p>
           ) : null}
@@ -383,7 +383,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="flex flex-col justify-center rounded-xl border border-border bg-surface px-3 py-2.5">
+            <div className="flex flex-col justify-center rounded-xl bg-surface px-3 py-2.5">
               <Switch
                 checked={autoContinue}
                 onCheckedChange={setAutoContinue}
@@ -442,7 +442,7 @@ export function GoalDialog({ conversationId, mode, onClose }: GoalDialogProps) {
           ) : null}
 
           {editing && goal ? (
-            <div className="flex flex-col gap-2 rounded-xl border border-border px-3 py-2.5">
+            <div className="flex flex-col gap-2 rounded-xl px-3 py-2.5">
               <p className="text-[11.5px] font-medium text-danger">{t('code:goal.dialog.danger.heading')}</p>
               {!confirmDelete ? (
                 <div className="flex flex-wrap items-center justify-between gap-2">

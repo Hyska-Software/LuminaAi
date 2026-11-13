@@ -38,7 +38,7 @@ export function AgentComputerControl({ conversationId }: { conversationId: strin
     <div
       role="group"
       aria-label={t('computerControl.aria')}
-      className="flex shrink-0 items-center gap-1.5 rounded-full border border-warning/30 bg-warning-soft py-1 pl-2 pr-1 text-warning"
+      className="flex shrink-0 items-center gap-1.5 rounded-full bg-warning-soft py-1 pl-2 pr-1 text-warning"
       title={t('computerControl.title', { backend: session.backend })}
     >
       <MonitorStop className="size-3.5 shrink-0" aria-hidden />

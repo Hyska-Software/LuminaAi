@@ -382,11 +382,11 @@ export function AgentRoutineEditorDialog({
                       aria-pressed={active}
                       onClick={() => toggleDay(day.bit)}
                       className={cn(
-                        'h-7 rounded-lg border px-2 text-[11px] font-medium transition-colors duration-150',
+                        'h-7 rounded-lg px-2 text-[11px] font-medium transition-colors duration-150',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                         active
-                          ? 'border-accent/40 bg-accent-soft text-accent'
-                          : 'border-border text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                          ? ' bg-accent-soft text-accent'
+                          : ' text-foreground-muted hover:bg-surface-hover hover:text-foreground',
                       )}
                     >
                       {day.short}

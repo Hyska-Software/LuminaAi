@@ -49,14 +49,14 @@ const EMPTY_ROUNDS: GoalRound[] = [];
 
 type GoalTone = 'neutral' | 'accent' | 'warning' | 'danger' | 'success';
 
-/** Fundo/borda do pill por tom do estado (tokens do design system). */
+/** Fundo do pill por tom do estado (tokens do design system). */
 const TONE_PILL: Record<GoalTone, string> = {
   neutral:
-    'border-dashed border-border bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
-  accent: 'border-accent/40 bg-accent-soft text-foreground hover:bg-accent-soft',
-  warning: 'border-warning/30 bg-warning-soft text-foreground hover:bg-warning-soft',
-  danger: 'border-danger/30 bg-danger-soft text-foreground hover:bg-danger-soft',
-  success: 'border-success/30 bg-success-soft text-foreground hover:bg-success-soft',
+    'bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+  accent: 'bg-accent-soft text-foreground hover:bg-accent-soft',
+  warning: 'bg-warning-soft text-foreground hover:bg-warning-soft',
+  danger: 'bg-danger-soft text-foreground hover:bg-danger-soft',
+  success: 'bg-success-soft text-foreground hover:bg-success-soft',
 };
 
 /** Cor do ícone por tom (o texto mantém contraste AA sobre o fundo suave). */
@@ -74,7 +74,7 @@ const TONE_ICON: Record<GoalTone, string> = {
  * `aria-label`/tooltip completos; rounds/detalhes ficam no popover.
  */
 const ICON_PILL_CLASS_NAME =
-  'flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
+  'flex size-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
 
 /** Short attention label for the pill's `title` (pause/block reason). */
 function statusHint(
@@ -275,8 +275,8 @@ export function GoalControls({
             className={cn(
               ICON_PILL_CLASS_NAME,
               goalIntent
-                ? 'border-accent/40 bg-accent-soft'
-                : 'border-border bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+                ? ' bg-accent-soft'
+                : ' bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
             )}
           >
             <Target
@@ -352,7 +352,7 @@ export function GoalControls({
             {confirmComplete ? (
               <div
                 role="status"
-                className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-2.5 py-2"
+                className="flex flex-col gap-2 rounded-lg bg-surface px-2.5 py-2"
               >
                 <p className="text-[12px] leading-relaxed text-foreground">
                   {t('goal.confirmBody')}

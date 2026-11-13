@@ -133,7 +133,7 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
         >
           {available.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-10 text-center">
-              <span className="flex size-10 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-surface-hover text-foreground-muted">
                 <MessageSquarePlus aria-hidden className="size-5" strokeWidth={1.75} />
               </span>
               <p className="text-[13px] font-medium text-foreground">{t('addChat.empty.title')}</p>
@@ -164,8 +164,8 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
                       disabled={busyId !== null}
                       onClick={() => void handleAdd(conversation)}
                       className={cn(
-                        'flex w-full min-w-0 items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5 text-left',
-                        'transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover',
+                        'flex w-full min-w-0 items-center gap-2.5 rounded-xl bg-surface px-3 py-2.5 text-left',
+                        'transition-colors duration-150 hover:bg-surface-hover',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                         'disabled:cursor-not-allowed disabled:opacity-60',
                       )}
@@ -201,7 +201,7 @@ export function AddChatSessionDialog({ open, onOpenChange, onAdded }: AddChatSes
           {error ? (
             <p
               role="alert"
-              className="mt-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] leading-relaxed text-danger"
+              className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-[12px] leading-relaxed text-danger"
             >
               {error}
             </p>

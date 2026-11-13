@@ -41,7 +41,7 @@ function ChangeBlock({ change }: { change: AgentChange }) {
   const after = changeValue(change.after, t);
   const long = before.length > 160 || after.length > 160;
   return (
-    <div className="rounded-xl border border-border bg-surface/50 p-3">
+    <div className="rounded-xl bg-surface p-3">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
         {change.label}
       </p>
@@ -191,7 +191,7 @@ export function AgentRevisionDialog({
                   key={key}
                   type="button"
                   onClick={() => setPrompt(example)}
-                  className="max-w-full rounded-full border border-border bg-surface-raised px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:border-border-strong hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                  className="max-w-full rounded-full bg-surface-hover px-2.5 py-1 text-left text-[11px] text-foreground-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
                   <span className="line-clamp-1">{example}</span>
                 </button>
@@ -202,7 +202,7 @@ export function AgentRevisionDialog({
           {error ? (
             <p
               role="alert"
-              className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+              className="rounded-lg bg-danger-soft px-3 py-2 text-[12px] text-danger"
             >
               {error}
             </p>
@@ -210,7 +210,7 @@ export function AgentRevisionDialog({
 
           {revision ? (
             revision.changes.length === 0 ? (
-              <p className="rounded-xl border border-border bg-surface-raised px-3 py-4 text-center text-[12px] text-foreground-muted">
+              <p className="rounded-xl bg-surface-hover px-3 py-4 text-center text-[12px] text-foreground-muted">
                 {t('revision.noChanges')}
               </p>
             ) : (

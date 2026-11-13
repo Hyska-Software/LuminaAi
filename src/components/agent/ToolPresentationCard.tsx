@@ -227,7 +227,7 @@ function DegradedPresentation({ kind }: { kind?: string }) {
   return (
     <p
       role="status"
-      className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-relaxed text-foreground-muted"
+      className="rounded-lg bg-surface px-3 py-2 text-[12px] leading-relaxed text-foreground-muted"
     >
       {kind === 'plan'
         ? t('presentation.degraded.plan')
@@ -325,7 +325,7 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       return (
         <div
           className={cn(
-            'rounded-lg border border-border bg-surface px-3 py-2 text-[12px] text-foreground-muted',
+            'rounded-lg bg-surface px-3 py-2 text-[12px] text-foreground-muted',
             className,
           )}
         >
@@ -347,7 +347,7 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       const count = files.length;
       return (
         <div
-          className={cn('rounded-lg border border-border bg-surface px-3 py-2 text-[12px]', className)}
+          className={cn('rounded-lg bg-surface px-3 py-2 text-[12px]', className)}
         >
           <p className="font-medium text-foreground">
             {t('presentation.changes.count', { count })}
@@ -381,7 +381,7 @@ function PresentationContent({ presentation, className }: ToolPresentationCardPr
       ].filter(Boolean);
       return (
         <div
-          className={cn('rounded-lg border border-border bg-surface px-3 py-2 text-[12px]', className)}
+          className={cn('rounded-lg bg-surface px-3 py-2 text-[12px]', className)}
         >
           <p className="font-medium text-foreground">
             {t('presentation.subagent.title', { type: label })}
@@ -416,7 +416,7 @@ function FileChangeCard({
   const hasDiff = Boolean(diff.trim());
   const verb = changeVerb(change);
   return (
-    <div className={cn('rounded-lg border border-border bg-surface', className)}>
+    <div className={cn('rounded-lg bg-surface', className)}>
       <button
         type="button"
         aria-expanded={open}

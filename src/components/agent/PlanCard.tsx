@@ -153,7 +153,7 @@ export function PlanCard({
     return (
       <div
         className={cn(
-          'flex flex-col gap-2 rounded-xl border border-border bg-surface px-3 py-2',
+          'flex flex-col gap-2 rounded-xl bg-surface px-3 py-2',
           className,
         )}
       >
@@ -218,7 +218,7 @@ export function PlanCard({
       aria-busy={busy || undefined}
       onKeyDown={handleKeyDown}
       className={cn(
-        'flex flex-col gap-3 rounded-xl border border-border bg-surface p-3',
+        'flex flex-col gap-3 rounded-xl bg-surface p-3',
         className,
       )}
     >
@@ -248,7 +248,7 @@ export function PlanCard({
       </header>
 
       {persistedFeedback ? (
-        <div className="flex flex-col gap-0.5 rounded-lg border border-border bg-background px-2 py-1.5">
+        <div className="flex flex-col gap-0.5 rounded-lg bg-background px-2 py-1.5">
           <p className="text-[11px] font-medium text-foreground-muted">{t('plan.previousFeedback')}</p>
           <p className="min-w-0 break-words text-[12px] leading-relaxed text-foreground-muted">
             {persistedFeedback}
@@ -337,7 +337,7 @@ export function PlanCard({
           ) : null}
 
           {feedbackOpen ? (
-            <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-2">
+            <div className="flex flex-col gap-2 rounded-lg bg-background p-2">
               <label htmlFor={feedbackId} className="text-[11px] font-medium text-foreground-muted">
                 {t('plan.feedbackLabel')}
               </label>

@@ -88,7 +88,7 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
     <form
       aria-label={t('askUser.aria')}
       onSubmit={submit}
-      className={cn('flex flex-col gap-3 rounded-xl border border-border bg-surface p-3', className)}
+      className={cn('flex flex-col gap-3 rounded-xl bg-surface p-3', className)}
     >
       <header className="flex items-center gap-2">
         <MessageCircleQuestion aria-hidden className="size-4 shrink-0 text-accent" />
@@ -116,10 +116,10 @@ export function AskUserCard({ questions, onSubmit, onSkip, className }: AskUserC
                     key={option.label}
                     htmlFor={inputId}
                     className={cn(
-                      'flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[12px] leading-relaxed transition-colors',
-                      'border-border bg-background hover:bg-surface-hover',
+                      'flex cursor-pointer items-start gap-2 rounded-lg px-2.5 py-2 text-[12px] leading-relaxed transition-colors',
+                      'bg-background hover:bg-surface-hover',
                       'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/40',
-                      checked && 'border-accent/50 bg-accent-soft/40',
+                      checked && 'bg-accent-soft/40',
                     )}
                   >
                     <input

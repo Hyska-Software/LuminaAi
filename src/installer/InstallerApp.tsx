@@ -159,7 +159,7 @@ export function InstallerApp({ api = tauriInstallerApi }: { api?: typeof tauriIn
         onLanguageChange={changeLanguage}
         onClose={closeWindow}
       >
-        <div className="mx-auto max-w-lg rounded-2xl border border-danger/30 bg-danger-soft p-6">
+        <div className="mx-auto max-w-lg rounded-2xl bg-danger-soft p-6">
           <AlertTriangle className="mb-3 size-6 text-danger" />
           <h1 className="text-lg font-semibold text-foreground">{t('errors.loadTitle')}</h1>
           <p className="mt-2 text-sm leading-relaxed text-foreground-muted">{loadError}</p>
@@ -418,10 +418,10 @@ function InstallerShell({
                   <li key={screen} className="flex items-center gap-3 rounded-lg px-2 py-2">
                     <span
                       className={cn(
-                        'flex size-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
-                        done && 'border-accent/40 bg-accent-soft text-accent',
-                        active && !done && 'border-accent bg-accent text-accent-foreground',
-                        !active && !done && 'border-border text-foreground-subtle',
+                        'flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold',
+                        done && ' bg-accent-soft text-accent',
+                        active && !done && ' bg-accent text-accent-foreground',
+                        !active && !done && ' text-foreground-subtle',
                       )}
                     >
                       {done ? <Check className="size-3.5" strokeWidth={2.4} /> : index + 1}
@@ -440,7 +440,7 @@ function InstallerShell({
             </ol>
           </nav>
 
-          <div className="mt-auto rounded-xl border border-border bg-surface-raised p-3.5">
+          <div className="mt-auto rounded-xl bg-surface-hover p-3.5">
             <div className="flex items-start gap-2.5">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" strokeWidth={1.9} />
               <div>
@@ -500,11 +500,11 @@ function SelectCard({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'flex w-full items-start gap-3.5 rounded-xl border p-4 text-left transition-colors duration-150',
+        'flex w-full items-start gap-3.5 rounded-xl p-4 text-left transition-colors duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         selected
-          ? 'border-accent/60 bg-accent-soft'
-          : 'border-border bg-surface-raised hover:border-border-strong hover:bg-surface-hover',
+          ? ' bg-accent-soft'
+          : ' bg-surface-hover hover:bg-surface-active',
         disabled && 'cursor-not-allowed opacity-60',
       )}
     >
@@ -522,8 +522,8 @@ function SelectCard({
       </span>
       <span
         className={cn(
-          'ml-auto mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border',
-          selected ? 'border-accent bg-accent text-accent-foreground' : 'border-border-strong',
+          'ml-auto mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full ',
+          selected ? ' bg-accent text-accent-foreground' : '',
         )}
         aria-hidden="true"
       >
@@ -556,12 +556,12 @@ function InstallerCheckbox({
     >
       <span
         className={cn(
-          'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border',
+          'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded ',
           checked
             ? tone === 'danger'
-              ? 'border-danger bg-danger text-accent-foreground'
-              : 'border-accent bg-accent text-accent-foreground'
-            : 'border-border-strong bg-surface-raised',
+              ? ' bg-danger text-accent-foreground'
+              : ' bg-accent text-accent-foreground'
+            : ' bg-surface-hover',
         )}
       >
         {checked ? <Check className="size-2.5" strokeWidth={3} /> : null}
@@ -588,7 +588,7 @@ function OptionRow({
   description: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-5 rounded-xl border border-border bg-surface-raised px-4 py-3.5">
+    <div className="flex items-center justify-between gap-5 rounded-xl bg-surface-hover px-4 py-3.5">
       <div className="min-w-0">
         <p className="text-sm font-medium text-foreground">{title}</p>
         <p className="mt-0.5 text-[12px] leading-relaxed text-foreground-muted">{description}</p>
@@ -600,7 +600,7 @@ function OptionRow({
         aria-label={title}
         onClick={() => onChange(!checked)}
         className={cn(
-          'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-2 border-transparent transition-colors duration-150',
+          'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border-transparent transition-colors duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           checked ? 'bg-accent' : 'bg-border-strong',
         )}
@@ -659,7 +659,7 @@ function WelcomeScreen({ context, onContinue }: { context: InstallerContext; onC
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-surface-raised p-5">
+      <div className="rounded-2xl bg-surface-hover p-5">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-foreground">
@@ -706,7 +706,7 @@ function WelcomeScreen({ context, onContinue }: { context: InstallerContext; onC
       </div>
 
       {context.existing ? (
-        <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-[12.5px] text-foreground-muted">
+        <div className="mt-4 rounded-xl bg-surface px-4 py-3 text-[12.5px] text-foreground-muted">
           {t('welcome.keepData')}
         </div>
       ) : null}
@@ -776,7 +776,7 @@ function ScopeScreen({
       </div>
 
       {state.draft.scope === 'machine' && !context.isAdmin ? (
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3">
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-warning-soft px-4 py-3">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-warning" />
           <p className="text-[12.5px] leading-relaxed text-foreground-muted">
             {t('scope.elevateWarning')}
@@ -785,7 +785,7 @@ function ScopeScreen({
       ) : null}
 
       {context.conflicting ? (
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3">
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-danger-soft px-4 py-3">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="text-[12.5px] leading-relaxed text-foreground-muted">
             <p className="font-medium text-danger">{t('scope.conflicting.title')}</p>
@@ -842,7 +842,7 @@ function LocationScreen({
         description={t('location.description')}
       />
 
-      <div className="rounded-2xl border border-border bg-surface-raised p-5">
+      <div className="rounded-2xl bg-surface-hover p-5">
         <label htmlFor="install-path" className="mb-2 block text-[12.5px] font-medium text-foreground">
           {t('location.label')}
         </label>
@@ -931,7 +931,7 @@ function OptionsScreen({
       />
 
       {context.conflicting ? (
-        <div className="mb-4 flex items-start gap-3 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3.5">
+        <div className="mb-4 flex items-start gap-3 rounded-xl bg-danger-soft px-4 py-3.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
           <div className="text-[12.5px] leading-relaxed text-foreground-muted">
             <p className="font-medium text-danger">{t('options.conflicting.title')}</p>
@@ -947,7 +947,7 @@ function OptionsScreen({
       ) : null}
 
       {context.appRunning ? (
-        <div className="mb-4 flex items-start gap-3 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3.5">
+        <div className="mb-4 flex items-start gap-3 rounded-xl bg-warning-soft px-4 py-3.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <div className="min-w-0 flex-1">
             <p className="text-[12.5px] font-medium text-foreground">{t('options.running.title')}</p>
@@ -982,7 +982,7 @@ function OptionsScreen({
         />
       </div>
 
-      <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3">
+      <div className="mt-4 rounded-xl bg-surface px-4 py-3">
         <div className="flex items-start gap-2.5">
           <HardDrive className="mt-0.5 size-4 shrink-0 text-foreground-subtle" />
           <div className="text-[12px] leading-relaxed text-foreground-muted">
@@ -1039,7 +1039,7 @@ function ProgressScreen({
         description={t('progress.description')}
       />
 
-      <div className="rounded-2xl border border-border bg-surface-raised p-5">
+      <div className="rounded-2xl bg-surface-hover p-5">
         <div className="flex items-center justify-between gap-4">
           <p className="text-sm font-medium text-foreground" aria-live="polite">
             {state.progressMessage || t('progress.preparing')}
@@ -1060,12 +1060,12 @@ function ProgressScreen({
             <li key={step.id} className="flex items-start gap-3">
               <span
                 className={cn(
-                  'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border',
-                  step.status === 'done' && 'border-success/40 bg-success-soft text-success',
-                  step.status === 'running' && 'border-accent/40 bg-accent-soft text-accent',
-                  step.status === 'error' && 'border-danger/40 bg-danger-soft text-danger',
-                  step.status === 'skipped' && 'border-border bg-surface text-foreground-subtle',
-                  step.status === 'pending' && 'border-border bg-surface text-foreground-subtle',
+                  'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full ',
+                  step.status === 'done' && ' bg-success-soft text-success',
+                  step.status === 'running' && ' bg-accent-soft text-accent',
+                  step.status === 'error' && ' bg-danger-soft text-danger',
+                  step.status === 'skipped' && ' bg-surface text-foreground-subtle',
+                  step.status === 'pending' && ' bg-surface text-foreground-subtle',
                 )}
               >
                 {step.status === 'done' ? <Check className="size-3" strokeWidth={2.5} /> : null}
@@ -1091,7 +1091,7 @@ function ProgressScreen({
           ))}
         </ol>
 
-        <details className="group mt-5 rounded-lg border border-border bg-surface">
+        <details className="group mt-5 rounded-lg bg-surface">
           <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 text-[12px] font-medium text-foreground-muted hover:text-foreground">
             <span className="flex items-center gap-2">
               <FileText className="size-3.5" />
@@ -1216,7 +1216,7 @@ function UninstallIntroScreen({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-surface-raised p-5">
+      <div className="rounded-2xl bg-surface-hover p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-sm font-medium text-foreground">
@@ -1249,7 +1249,7 @@ function UninstallIntroScreen({
         </div>
 
         <div className="mt-4 space-y-2.5">
-          <div className="flex items-start gap-2.5 rounded-lg border border-success/25 bg-success-soft px-3.5 py-3">
+          <div className="flex items-start gap-2.5 rounded-lg bg-success-soft px-3.5 py-3">
             <ShieldCheck className="mt-0.5 size-4 shrink-0 text-success" strokeWidth={1.9} />
             <div className="min-w-0">
               <p className="text-[12.5px] font-medium text-foreground">{t('uninstallIntro.keepsTitle')}</p>
@@ -1261,7 +1261,7 @@ function UninstallIntroScreen({
               </p>
             </div>
           </div>
-          <div className="flex items-start gap-2.5 rounded-lg border border-border bg-surface px-3.5 py-3">
+          <div className="flex items-start gap-2.5 rounded-lg bg-surface px-3.5 py-3">
             <Trash2 className="mt-0.5 size-4 shrink-0 text-foreground-subtle" strokeWidth={1.9} />
             <div className="min-w-0">
               <p className="text-[12.5px] font-medium text-foreground">{t('uninstallIntro.removesTitle')}</p>
@@ -1277,7 +1277,7 @@ function UninstallIntroScreen({
       </div>
 
       {context.dataPaths.length ? (
-        <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3">
+        <div className="mt-4 rounded-xl bg-surface px-4 py-3">
           <p className="text-[12px] font-medium text-foreground">{t('uninstall.dataTitle')}</p>
           <ul className="mt-1.5 space-y-1">
             {context.dataPaths.map((path) => (
@@ -1325,7 +1325,7 @@ function UninstallScreen({
         description={t('uninstall.description')}
       />
 
-      <div className="rounded-2xl border border-border bg-surface-raised p-5">
+      <div className="rounded-2xl bg-surface-hover p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-foreground">Zylara {context.existing?.version ?? context.version}</p>
@@ -1346,7 +1346,7 @@ function UninstallScreen({
           description={t('uninstall.purge.description')}
         />
         {state.draft.purgeData ? (
-          <div className="mt-2 flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger-soft px-3.5 py-3">
+          <div className="mt-2 flex items-start gap-2.5 rounded-lg bg-danger-soft px-3.5 py-3">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
             <p className="text-[12px] leading-relaxed text-foreground-muted">
               {t('uninstall.purgeWarning')}
@@ -1356,14 +1356,14 @@ function UninstallScreen({
       </div>
 
       {context.appRunning ? (
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3">
+        <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-warning-soft px-4 py-3">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <p className="text-[12px] leading-relaxed text-foreground-muted">{t('uninstall.runningNote')}</p>
         </div>
       ) : null}
 
       {context.dataPaths.length ? (
-        <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3">
+        <div className="mt-4 rounded-xl bg-surface px-4 py-3">
           <p className="text-[12px] font-medium text-foreground">{t('uninstall.dataTitle')}</p>
           <ul className="mt-1.5 space-y-1">
             {context.dataPaths.map((path) => (
@@ -1387,7 +1387,7 @@ function UninstallScreen({
         </div>
       ) : null}
 
-      <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-[12px] leading-relaxed text-foreground-muted">
+      <div className="mt-4 rounded-xl bg-surface px-4 py-3 text-[12px] leading-relaxed text-foreground-muted">
         {state.draft.purgeData
           ? confirming
             ? t('uninstall.infoConfirm')
@@ -1437,7 +1437,7 @@ function ErrorScreen({
         description={t('errorScreen.description')}
       />
 
-      <div className="rounded-2xl border border-danger/30 bg-danger-soft p-5">
+      <div className="rounded-2xl bg-danger-soft p-5">
         <div className="flex items-start gap-3">
           <AlertTriangle className="mt-0.5 size-5 shrink-0 text-danger" />
           <div className="min-w-0">
@@ -1450,7 +1450,7 @@ function ErrorScreen({
       </div>
 
       {state.outcome?.logPath || state.logLines.length ? (
-        <details className="mt-4 rounded-xl border border-border bg-surface-raised">
+        <details className="mt-4 rounded-xl bg-surface-hover">
           <summary className="cursor-pointer list-none px-4 py-3 text-[12px] font-medium text-foreground-muted hover:text-foreground">
             {t('errorScreen.technical')}
           </summary>

@@ -25,7 +25,7 @@ export function MentionChips({ mentions, onRemove, className }: MentionChipsProp
         <div
           key={mention.path}
           className={cn(
-            'flex max-w-72 items-center gap-1.5 rounded-xl border border-border bg-surface py-1 pl-1.5 pr-0.5',
+            'flex max-w-72 items-center gap-1.5 rounded-xl bg-surface py-1 pl-1.5 pr-0.5',
           )}
         >
           <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">

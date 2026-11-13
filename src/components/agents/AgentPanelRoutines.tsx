@@ -157,7 +157,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="flex flex-col gap-3 p-3">
-        <section className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section className="rounded-xl bg-surface-hover p-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <CalendarClock className="size-4 text-accent" />
@@ -199,7 +199,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
         </section>
 
         {error ? (
-          <p className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[11px] text-danger">
+          <p className="rounded-xl bg-danger-soft px-3 py-2 text-[11px] text-danger">
             {error}
           </p>
         ) : null}
@@ -214,7 +214,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                 <Loader2 className="size-4 animate-spin text-foreground-muted" />
               </div>
             ) : runs.length === 0 ? (
-              <p className="rounded-lg border border-border bg-surface-raised/40 px-3 py-3 text-[11px] text-foreground-muted">
+              <p className="rounded-lg bg-surface-hover px-3 py-3 text-[11px] text-foreground-muted">
                 {t('panelRoutines.noRuns')}
               </p>
             ) : (
@@ -225,7 +225,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                     key={run.id}
                     type="button"
                     onClick={() => run.conversationId && openThread(run.conversationId)}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-surface-raised px-2.5 py-2 text-left hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    className="flex items-center gap-2 rounded-lg bg-surface-hover px-2.5 py-2 text-left hover:bg-surface-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
                     <ScrollText className="size-3.5 shrink-0 text-foreground-muted" />
                     <span className="min-w-0 flex-1">
@@ -252,7 +252,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
               <Loader2 className="size-5 animate-spin text-foreground-muted" />
             </div>
           ) : routines.length === 0 ? (
-            <p className="rounded-xl border border-border bg-surface-raised/40 px-3 py-6 text-center text-[12px] text-foreground-muted">
+            <p className="rounded-xl bg-surface-hover px-3 py-6 text-center text-[12px] text-foreground-muted">
               {t('panelRoutines.empty', { name: agent.name })}
             </p>
           ) : (
@@ -264,7 +264,7 @@ export function AgentPanelRoutines({ context }: { context: AgentPanelContext }) 
                 <article
                   key={routine.id}
                   className={cn(
-                    'rounded-xl border border-border bg-surface-raised/40 p-3',
+                    'rounded-xl bg-surface-hover p-3',
                     !routine.enabled && 'opacity-70',
                   )}
                 >

@@ -387,7 +387,7 @@ export function LibraryView() {
           aria-live="polite"
           className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm"
         >
-          <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-accent/60 bg-surface-raised px-10 py-8 text-center shadow-lg">
+          <div className="flex flex-col items-center gap-2 rounded-2xl border-dashed bg-surface-raised px-10 py-8 text-center shadow-lg">
             <Upload aria-hidden className="size-6 text-accent" />
             <p className="text-[13px] font-medium text-foreground">
               {t('library:view.dropTitle')}

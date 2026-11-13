@@ -97,7 +97,7 @@ function SamplesTable({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
   const { t } = useTranslation('agents');
   if (diagnostics.samples.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-surface px-4 py-5 text-center">
+      <div className="rounded-xl bg-surface px-4 py-5 text-center">
         <p className="text-[12px] font-medium text-foreground">
           {t('cache.diagnostics.empty.title')}
         </p>
@@ -112,7 +112,7 @@ function SamplesTable({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
   const rows = [...diagnostics.samples].reverse();
   return (
     <>
-      <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+      <div className="max-h-64 overflow-y-auto rounded-lg ">
         <table className="w-full border-collapse text-left text-[11px]">
           <caption className="sr-only">{t('cache.diagnostics.tableCaption')}</caption>
           <thead className="sticky top-0 bg-surface">
@@ -185,7 +185,7 @@ function BreaksSection({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
         </p>
       ) : (
         <div className="flex flex-col gap-1.5">
-          <div className="rounded-lg border border-border bg-surface px-3 py-2">
+          <div className="rounded-lg bg-surface px-3 py-2">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
               <span className="font-medium text-foreground">{last.label}</span>
               <span className="tabular-nums text-foreground-subtle">
@@ -202,7 +202,7 @@ function BreaksSection({ diagnostics }: { diagnostics: CacheDiagnosticsView }) {
             ) : null}
           </div>
           {previous.length > 0 ? (
-            <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border">
+            <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg ">
               {previous.map((entry, index) => (
                 <li
                   key={`${entry.at}-${entry.step}-${index}`}
@@ -343,7 +343,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4">
           {emptyConversation ? (
-            <div className="rounded-xl border border-border bg-surface px-4 py-5 text-center">
+            <div className="rounded-xl bg-surface px-4 py-5 text-center">
               <p className="text-[12px] font-medium text-foreground">
                 {t('cache.diagnostics.noConversation.title')}
               </p>
@@ -364,7 +364,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
               {t('cache.diagnostics.loading')}
             </div>
           ) : error && !diagnostics.hasData ? (
-            <div className="rounded-xl border border-danger/30 bg-danger-soft p-3">
+            <div className="rounded-xl bg-danger-soft p-3">
               <p className="text-[12px] font-medium text-foreground">
                 {t('cache.diagnostics.loadError')}
               </p>
@@ -386,7 +386,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
               {error ? (
                 <div
                   role="status"
-                  className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[11px] text-foreground-muted"
+                  className="flex flex-wrap items-center gap-2 rounded-lg bg-warning-soft px-3 py-2 text-[11px] text-foreground-muted"
                 >
                   {t('cache.diagnostics.staleBackend')}
                   <button
@@ -400,7 +400,7 @@ export function CacheDiagnosticsDialog({ open, onOpenChange }: CacheDiagnosticsD
               ) : null}
 
               {!diagnostics.hasData ? (
-                <div className="rounded-xl border border-border bg-surface px-4 py-5 text-center">
+                <div className="rounded-xl bg-surface px-4 py-5 text-center">
                   <p className="text-[12px] font-medium text-foreground">
                     {t('cache.diagnostics.empty.title')}
                   </p>

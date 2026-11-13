@@ -111,12 +111,12 @@ export function WelcomeScreen() {
                 ease: EASE_OUT_SOFT,
               }}
               className={
-                'group flex items-start gap-3 rounded-2xl border border-border bg-surface px-4 py-3.5 text-left ' +
-                'transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover ' +
+                'group flex items-start gap-3 rounded-2xl bg-surface px-4 py-3.5 text-left ' +
+                'transition-colors duration-150 hover:bg-surface-hover ' +
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40'
               }
             >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-raised text-foreground-muted transition-colors duration-150 group-hover:text-accent">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-hover text-foreground-muted transition-colors duration-150 group-hover:text-accent">
                 <Icon className="size-4" />
               </span>
               <span className="min-w-0">

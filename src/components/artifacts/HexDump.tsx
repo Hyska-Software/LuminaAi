@@ -108,7 +108,7 @@ export function HexDump({ base64, bytes, maxBytes, label, className }: HexDumpPr
 
   if (!lines.length) {
     return (
-      <p className={cn('rounded-lg border border-border bg-surface px-3 py-2 text-[11px] text-foreground-subtle', className)}>
+      <p className={cn('rounded-lg bg-surface px-3 py-2 text-[11px] text-foreground-subtle', className)}>
         {t('artifacts:hexdump.empty')}
       </p>
     );
@@ -120,7 +120,7 @@ export function HexDump({ base64, bytes, maxBytes, label, className }: HexDumpPr
       aria-label={label ?? t('artifacts:hexdump.defaultLabel')}
       data-testid="hexdump"
       className={cn(
-        'overflow-auto rounded-lg border border-border bg-surface p-2 font-mono text-[11px] leading-relaxed',
+        'overflow-auto rounded-lg bg-surface p-2 font-mono text-[11px] leading-relaxed',
         className,
       )}
     >

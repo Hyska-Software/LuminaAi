@@ -474,7 +474,7 @@ function WorkspaceRow({
           {workspace.trusted === false ? (
             <span
               title={t('code:sidebar.workspace.untrustedTitle')}
-              className="shrink-0 rounded border border-warning/30 bg-warning-soft px-1 text-[9.5px] font-medium uppercase tracking-wide text-warning"
+              className="shrink-0 rounded bg-warning-soft px-1 text-[9.5px] font-medium uppercase tracking-wide text-warning"
             >
               {t('code:sidebar.workspace.readOnlyBadge')}
             </span>

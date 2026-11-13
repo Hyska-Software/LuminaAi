@@ -688,7 +688,7 @@ export function ModelPill({
       <PopoverAnchor asChild>
         <div
           className={cn(
-            'no-drag inline-flex h-8 min-w-0 items-stretch overflow-hidden rounded-full border border-border bg-surface-raised',
+            'no-drag inline-flex h-8 min-w-0 items-stretch overflow-hidden rounded-full bg-surface-hover',
             'text-[13px] font-medium text-foreground transition-colors duration-150',
             'focus-within:ring-2 focus-within:ring-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-background',
             disabled && 'pointer-events-none opacity-60',
@@ -894,7 +894,7 @@ export function ModelPill({
                 onMouseLeave={scheduleDetailsHide}
                 className={cn(
                   'absolute z-30 w-[17rem] max-h-[min(20rem,calc(100dvh-4rem))] overflow-y-auto overscroll-contain',
-                  'rounded-xl border border-border bg-surface-raised shadow-xl',
+                  'rounded-xl bg-surface-raised shadow-xl',
                 )}
               >
                 <ModelDetailPanel

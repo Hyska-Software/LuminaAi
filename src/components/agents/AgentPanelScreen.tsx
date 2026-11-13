@@ -339,7 +339,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
             </div>
           </div>
 
-          <div className={cn('relative overflow-hidden rounded-xl border border-border bg-background', localExpanded && preview?.backend === 'local' && 'fixed inset-2 z-[100] flex flex-col shadow-2xl')}>
+          <div className={cn('relative overflow-hidden rounded-xl bg-background', localExpanded && preview?.backend === 'local' && 'fixed inset-2 z-[100] flex flex-col shadow-2xl')}>
             {!conversation ? (
               <div className="flex aspect-video flex-col items-center justify-center gap-2 p-5 text-center">
                 <Monitor className="size-6 text-foreground-subtle" />
@@ -505,11 +505,11 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
                     if (entry.id !== 'cloud') void selectEnvironment(entry.id);
                   }}
                   className={cn(
-                    'flex min-h-16 items-start gap-2 rounded-xl border p-2.5 text-left transition-colors',
+                    'flex min-h-16 items-start gap-2 rounded-xl p-2.5 text-left transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
                     selected
-                      ? 'border-accent/50 bg-accent-soft/50'
-                      : 'border-border bg-surface-raised/40 hover:bg-surface-hover',
+                      ? ' bg-accent-soft/50'
+                      : ' bg-surface-hover hover:bg-surface-active',
                     disabled && 'cursor-default opacity-60',
                   )}
                 >
@@ -533,7 +533,7 @@ export function AgentPanelScreen({ context }: { context: AgentPanelContext }) {
           </div>
         </section>
 
-        <section aria-labelledby="agent-routines-summary" className="rounded-xl border border-border bg-surface-raised/40 p-3">
+        <section aria-labelledby="agent-routines-summary" className="rounded-xl bg-surface-hover p-3">
           <button
             type="button"
             onClick={() => setAgentPanelTab('routines')}

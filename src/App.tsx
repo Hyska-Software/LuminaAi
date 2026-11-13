@@ -583,7 +583,7 @@ export default function App() {
         toastOptions={{
           classNames: {
             toast:
-              'rounded-xl border border-border bg-surface-raised text-foreground shadow-lg text-[13px]',
+              'rounded-xl bg-surface-raised text-foreground shadow-lg text-[13px]',
             description: 'text-foreground-muted',
           },
         }}

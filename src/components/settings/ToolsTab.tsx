@@ -248,7 +248,7 @@ export function ToolsTab() {
         </SettingRow>
 
         <SettingsBlock>
-          <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
+          <div className="flex gap-2.5 rounded-xl bg-warning-soft p-3">
             <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
             <p className="text-[11px] leading-relaxed text-warning">
               <Trans
@@ -401,7 +401,7 @@ export function ToolsTab() {
               />
             </SettingRow>
             <SettingsBlock>
-              <div className="flex gap-2.5 rounded-xl border border-warning/30 bg-warning-soft p-3">
+              <div className="flex gap-2.5 rounded-xl bg-warning-soft p-3">
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
                 <p className="text-[11px] leading-relaxed text-warning">
                   <Trans
@@ -495,7 +495,7 @@ export function ToolsTab() {
         {codeDefaultPermissionMode === 'autonomous' ? (
           <p
             role="status"
-            className="mb-3 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-[11.5px] leading-relaxed text-warning"
+            className="mb-3 rounded-lg bg-warning-soft px-3 py-2 text-[11.5px] leading-relaxed text-warning"
           >
             {codeT(AUTONOMOUS_MODE_WARNING_KEY)}
           </p>
@@ -535,7 +535,7 @@ export function ToolsTab() {
 
         {environmentError ? (
           <SettingsBlock>
-            <div className="flex flex-col items-start gap-2 rounded-xl border border-danger/30 bg-danger-soft p-3">
+            <div className="flex flex-col items-start gap-2 rounded-xl bg-danger-soft p-3">
               <div className="flex gap-2.5">
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
                 <div className="min-w-0 flex-1">
@@ -619,7 +619,7 @@ export function ToolsTab() {
                     <p className="text-[11px] text-foreground-subtle">
                       {t('tools.environment.packages.installHint')}
                     </p>
-                    <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-2 py-1.5">
+                    <div className="flex items-center gap-2 rounded-lg bg-surface px-2 py-1.5">
                       <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-[11px] text-foreground-muted">
                         {environment.installHint}
                       </code>

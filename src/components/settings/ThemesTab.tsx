@@ -179,15 +179,15 @@ export function ThemesTab() {
         </div>
 
         {!ready ? (
-          <div className="flex items-center justify-center rounded-xl border border-border bg-surface/50 py-10">
+          <div className="flex items-center justify-center rounded-xl bg-surface py-10">
             <Spinner label={t('themes.loading')} />
           </div>
         ) : (
-          <div className="rounded-xl border border-border bg-surface/50 p-3">
+          <div className="rounded-xl bg-surface p-3">
             {error ? (
               <div
                 role="alert"
-                className="mb-3 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2.5"
+                className="mb-3 rounded-lg bg-danger-soft px-3 py-2.5"
               >
                 <p className="text-[13px] font-medium text-foreground">{t('themes.loadFailed')}</p>
                 <p className="mt-0.5 break-words text-[11px] leading-relaxed text-foreground-muted">
@@ -218,14 +218,14 @@ export function ThemesTab() {
                     key={entry.id}
                     data-theme-id={entry.id}
                     className={cn(
-                      'flex min-w-0 flex-col gap-3 rounded-xl border p-3 transition-colors',
+                      'flex min-w-0 flex-col gap-3 rounded-xl p-3 transition-colors',
                       active
-                        ? 'border-accent bg-accent-soft/30'
-                        : 'border-border bg-surface-raised hover:border-border-strong',
+                        ? ' bg-accent-soft/30'
+                        : ' bg-surface-hover ',
                     )}
                   >
                     <div
-                      className="relative h-24 overflow-hidden rounded-lg border border-border bg-surface"
+                      className="relative h-24 overflow-hidden rounded-lg bg-surface"
                       aria-hidden
                     >
                       {entry.id === BUILTIN_THEME_ID ? (

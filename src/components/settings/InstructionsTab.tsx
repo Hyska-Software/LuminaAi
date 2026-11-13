@@ -108,7 +108,7 @@ export function InstructionsTab() {
         </SettingsBlock>
       </SettingsSection>
 
-      <p className="rounded-xl border border-border bg-surface px-4 py-3 text-[11px] leading-relaxed text-foreground-muted">
+      <p className="rounded-xl bg-surface px-4 py-3 text-[11px] leading-relaxed text-foreground-muted">
         {t('instructions.footer')}
       </p>
     </div>

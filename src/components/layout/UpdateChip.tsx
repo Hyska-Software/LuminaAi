@@ -24,12 +24,10 @@ import { UpdatePopoverBody } from './UpdatePanel';
 type Tone = 'accent' | 'neutral' | 'success' | 'danger';
 
 const TONES: Record<Tone, string> = {
-  accent:
-    'border-accent/30 bg-accent-soft text-accent hover:border-accent/50',
-  neutral:
-    'border-border bg-surface-raised text-foreground-muted hover:border-border-strong hover:text-foreground',
-  success: 'border-success/30 bg-success-soft text-success hover:border-success/50',
-  danger: 'border-danger/30 bg-danger-soft text-danger hover:border-danger/50',
+  accent: 'bg-accent-soft text-accent',
+  neutral: 'bg-surface-hover text-foreground-muted hover:text-foreground',
+  success: 'bg-success-soft text-success',
+  danger: 'bg-danger-soft text-danger',
 };
 
 export function UpdateChip() {
@@ -121,7 +119,7 @@ export function UpdateChip() {
           aria-haspopup="dialog"
           aria-expanded={open}
           className={cn(
-            'no-drag relative flex h-7 shrink-0 items-center gap-1.5 overflow-hidden rounded-full border px-2.5',
+            'no-drag relative flex h-7 shrink-0 items-center gap-1.5 overflow-hidden rounded-full px-2.5',
             'text-[11.5px] font-medium leading-none tracking-tight transition-colors duration-150',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             'motion-reduce:transition-none',

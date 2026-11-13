@@ -130,7 +130,7 @@ export function LibraryCard({ artifact, ...actions }: LibraryCardProps) {
   const origin = libraryArtifactOrigin(artifact);
 
   return (
-    <li className="group relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-surface-raised transition-colors duration-150 hover:border-border-strong focus-within:border-border-strong">
+    <li className="group relative flex min-w-0 flex-col overflow-hidden rounded-xl bg-surface-hover transition-colors duration-150 ">
       <button
         type="button"
         onClick={actions.onOpen}
@@ -193,7 +193,7 @@ export function LibraryRow({ artifact, ...actions }: LibraryCardProps) {
   const origin = libraryArtifactOrigin(artifact);
 
   return (
-    <li className="group relative flex min-w-0 items-center gap-2 rounded-xl border border-border bg-surface-raised px-2 py-2 transition-colors duration-150 hover:border-border-strong focus-within:border-border-strong">
+    <li className="group relative flex min-w-0 items-center gap-2 rounded-xl bg-surface-hover px-2 py-2 transition-colors duration-150 ">
       <button
         type="button"
         onClick={actions.onOpen}
@@ -243,7 +243,7 @@ export function LibraryCardSkeleton() {
   return (
     <li
       aria-hidden
-      className="flex h-52 flex-col overflow-hidden rounded-xl border border-border bg-surface-raised"
+      className="flex h-52 flex-col overflow-hidden rounded-xl bg-surface-hover"
     >
       <span className="mx-3 mt-3 h-4 w-2/3 rounded bg-surface-hover animate-pulse motion-reduce:animate-none" />
       <span className="mx-3 mt-3 h-24 rounded-lg bg-surface-hover animate-pulse motion-reduce:animate-none" />

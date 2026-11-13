@@ -41,7 +41,7 @@ function ArchivedAgentHome({ agent }: { agent: Agent }) {
   return (
     <div className="flex h-full min-h-0 items-center justify-center overflow-y-auto px-6 py-10">
       <div className="w-full max-w-md text-center">
-        <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-border bg-surface-raised text-foreground-muted">
+        <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-surface-hover text-foreground-muted">
           <MessagesSquare className="size-6" />
         </div>
         <h1 className="mt-5 text-xl font-semibold tracking-tight">{agent.name}</h1>

@@ -199,10 +199,11 @@ describe('ContextMeter — faixas e compactação', () => {
     ).toBe('78% do contexto usado — atenção');
   });
 
-  it('faixa compactando (>=90) aplica anel danger e borda de alerta', async () => {
+  it('faixa compactando (>=90) aplica anel danger e preenchimento de alerta', async () => {
     const { container } = render(<ContextMeter stats={makeStats({ percent: 94 })} />);
     const button = trigger(94);
-    expect(button.className).toContain('border-danger/40');
+    expect(button.className).toContain('bg-danger-soft');
+    expect(button.className).toContain('text-danger');
 
     const arc = container.querySelectorAll('circle')[1];
     expect(arc?.getAttribute('class') ?? '').toContain('text-danger');

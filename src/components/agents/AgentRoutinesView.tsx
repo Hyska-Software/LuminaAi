@@ -166,7 +166,7 @@ function RoutineRow({
   const meta = routine.lastStatus ? ROUTINE_STATUS_META[routine.lastStatus] : null;
   const agentName = agent?.name ?? t('routinesView.removedAgent');
   return (
-    <article className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised/50 px-3 py-2.5">
+    <article className="flex items-center gap-3 rounded-xl bg-surface-hover px-3 py-2.5">
       <AgentAvatar size="sm" avatar={agent?.avatar ?? DEFAULT_AGENT_AVATAR} />
       <button
         type="button"
@@ -466,7 +466,7 @@ export function AgentRoutinesView() {
   const renderMonth = () => (
     <section
       aria-label={t('routinesView.monthCalendarAria', { range: rangeLabel('month', anchor) })}
-      className="overflow-hidden rounded-2xl border border-border bg-border"
+      className="overflow-hidden rounded-2xl bg-border"
     >
       <div className="grid grid-cols-7 gap-px bg-border">
         {weekdayHeaders().map((label) => (
@@ -540,7 +540,7 @@ export function AgentRoutinesView() {
   const renderWeek = () => (
     <section
       aria-label={t('routinesView.weekCalendarAria', { range: rangeLabel('week', anchor) })}
-      className="overflow-hidden rounded-2xl border border-border bg-border"
+      className="overflow-hidden rounded-2xl bg-border"
     >
       <div className="grid grid-cols-7 gap-px bg-border">
         {days.map((day, index) => (
@@ -589,7 +589,7 @@ export function AgentRoutinesView() {
   const renderDay = () => {
     const entries = calendar.get(days[0]?.key ?? '') ?? [];
     return (
-      <section className="rounded-2xl border border-border bg-surface-raised/40 p-2">
+      <section className="rounded-2xl bg-surface-hover p-2">
         {entries.length === 0 ? (
           <p className="px-3 py-8 text-center text-[12px] text-foreground-subtle">
             {t('routinesView.noRoutinesForDay')}
@@ -789,7 +789,7 @@ export function AgentRoutinesView() {
           {error ? (
             <div
               role="alert"
-              className="mb-4 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+              className="mb-4 rounded-xl bg-danger-soft px-3 py-2 text-[12px] text-danger"
             >
               <p className="font-medium">{t('routinesView.loadError')}</p>
               <p className="mt-0.5 text-[11px] opacity-80">{error}</p>
@@ -829,7 +829,7 @@ export function AgentRoutinesView() {
                   </span>
                 </div>
                 {rowRoutines.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-border px-4 py-8 text-center">
+                  <div className="rounded-2xl border-dashed px-4 py-8 text-center">
                     <p className="text-[13px] font-medium text-foreground">
                       {t('routinesView.emptyTitle')}
                     </p>

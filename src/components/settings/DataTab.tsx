@@ -60,7 +60,7 @@ export function DataTab() {
           </Button>
         </SettingRow>
         <SettingRow vertical label={t('data.storage.location')}>
-          <code className="block w-full truncate rounded-lg border border-border bg-surface px-2.5 py-1.5 font-mono text-[11px] text-foreground-muted">
+          <code className="block w-full truncate rounded-lg bg-surface px-2.5 py-1.5 font-mono text-[11px] text-foreground-muted">
             {appInfo?.dataDir ?? '—'}
           </code>
         </SettingRow>
@@ -82,7 +82,7 @@ export function DataTab() {
               </Button>
             </div>
           ) : (
-            <div className="rounded-xl border border-danger/30 bg-danger-soft p-3.5">
+            <div className="rounded-xl bg-danger-soft p-3.5">
               <div className="flex gap-2.5">
                 <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0 text-danger" />
                 <div className="min-w-0 flex-1">

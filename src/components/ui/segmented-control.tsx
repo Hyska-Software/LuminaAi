@@ -45,7 +45,7 @@ export function SegmentedControl({
       aria-label={ariaLabel}
       orientation="horizontal"
       className={cn(
-        'inline-flex items-center gap-0.5 rounded-xl border border-border bg-surface p-0.5',
+        'inline-flex items-center gap-0.5 rounded-xl bg-surface p-0.5',
         fullWidth && 'flex w-full',
         className,
       )}

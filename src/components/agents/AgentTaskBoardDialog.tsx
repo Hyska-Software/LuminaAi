@@ -198,7 +198,7 @@ export function AgentTaskBoardDialog({
           </Button>
         </div>
         {error ? (
-          <p className="rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger">
+          <p className="rounded-xl bg-danger-soft px-3 py-2 text-[12px] text-danger">
             {error}
           </p>
         ) : null}
@@ -209,7 +209,7 @@ export function AgentTaskBoardDialog({
               <section
                 key={column.id}
                 aria-labelledby={`task-column-${column.id}`}
-                className="flex max-h-[min(18rem,50vh)] min-h-32 flex-col gap-2 rounded-xl border border-border bg-surface/60 p-2"
+                className="flex max-h-[min(18rem,50vh)] min-h-32 flex-col gap-2 rounded-xl bg-surface p-2"
               >
                 <h3
                   id={`task-column-${column.id}`}
@@ -228,7 +228,7 @@ export function AgentTaskBoardDialog({
                     return (
                       <article
                         key={task.id}
-                        className="min-w-0 rounded-lg border border-border bg-surface-raised p-2 shadow-sm"
+                        className="min-w-0 rounded-lg bg-surface-raised p-2 shadow-sm"
                       >
                         <button
                           type="button"

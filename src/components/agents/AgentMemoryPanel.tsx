@@ -171,7 +171,7 @@ export function AgentMemoryPanel({
 
   return (
     <div className={cn('space-y-3', className)}>
-      <div className="flex gap-1 rounded-lg border border-border bg-surface/50 p-1" role="tablist">
+      <div className="flex gap-1 rounded-lg bg-surface p-1" role="tablist">
         <button
           type="button"
           role="tab"
@@ -204,14 +204,14 @@ export function AgentMemoryPanel({
             {t('memory.shared.description')}
           </p>
           {shared.length === 0 ? (
-            <p className="rounded-xl border border-border bg-surface/50 p-3 text-[12px] text-foreground-muted">
+            <p className="rounded-xl bg-surface p-3 text-[12px] text-foreground-muted">
               {t('memory.shared.empty')}
             </p>
           ) : (
             shared.map((memory) => (
               <div
                 key={memory.id}
-                className="flex items-start gap-2 rounded-xl border border-border bg-surface/50 p-2.5"
+                className="flex items-start gap-2 rounded-xl bg-surface p-2.5"
               >
                 <div className="min-w-0 flex-1">
                   <p className="text-[12px] leading-relaxed text-foreground">{memory.content}</p>
@@ -247,7 +247,7 @@ export function AgentMemoryPanel({
         ) : null}
       </div>
 
-      <div className="space-y-2 rounded-xl border border-border bg-surface/50 p-3">
+      <div className="space-y-2 rounded-xl bg-surface p-3">
         <div className="flex items-center gap-2">
           <NativeSelect
             value={draftKind}
@@ -303,7 +303,7 @@ export function AgentMemoryPanel({
           {memories.map((memory) => (
             <li
               key={memory.id}
-              className="rounded-xl border border-border bg-surface/50 p-3"
+              className="rounded-xl bg-surface p-3"
             >
               <div className="flex items-start gap-2">
                 <span className="mt-0.5 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium text-accent">
@@ -364,7 +364,7 @@ export function AgentMemoryPanel({
       )}
 
       {!memoryEnabled && memories.length > 0 ? (
-        <p className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-[11px] text-foreground-muted">
+        <p className="rounded-lg bg-surface-hover px-3 py-2 text-[11px] text-foreground-muted">
           {t('memory.disabledFootnote')}
         </p>
       ) : null}

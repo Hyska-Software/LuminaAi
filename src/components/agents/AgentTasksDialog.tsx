@@ -191,11 +191,11 @@ export function AgentTasksDialog({
               </Button>
             </div>
             {error ? (
-              <p className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[12px] text-danger">
+              <p className="rounded-lg bg-danger-soft px-3 py-2 text-[12px] text-danger">
                 {error}
               </p>
             ) : tasks.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-[12px] text-foreground-subtle">
+              <p className="rounded-xl border-dashed px-3 py-6 text-center text-[12px] text-foreground-subtle">
                 {t('tasks.emptyHint')}
               </p>
             ) : (
@@ -204,7 +204,7 @@ export function AgentTasksDialog({
                 return (
                 <article
                   key={task.id}
-                  className="rounded-xl border border-border bg-surface/50 p-3"
+                  className="rounded-xl bg-surface p-3"
                 >
                   <div className="flex items-start gap-2">
                     <span className={cn('mt-0.5 size-2 shrink-0 rounded-full bg-current', taskTone(task.status))} />
@@ -276,7 +276,7 @@ export function AgentTasksDialog({
             )}
           </section>
 
-          <section className="space-y-3 rounded-xl border border-border bg-surface/50 p-4">
+          <section className="space-y-3 rounded-xl bg-surface p-4">
             <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground-subtle">
               {t('tasks.newTask')}
             </h3>

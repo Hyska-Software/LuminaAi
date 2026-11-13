@@ -95,7 +95,7 @@ function BinaryFallbackCard({
 
   return (
     <div className={cn('flex h-full items-center justify-center p-6', className)}>
-      <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-2xl border border-border bg-surface-raised p-6 text-center">
+      <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-2xl bg-surface-hover p-6 text-center">
         <span className={cn('flex size-12 items-center justify-center rounded-xl', meta.tone)}>
           <FileQuestion aria-hidden className="size-6" strokeWidth={1.8} />
         </span>
@@ -152,7 +152,7 @@ function BinaryArtifactPreview({
 
   return (
     <div className={cn('flex h-full flex-col items-center gap-3 overflow-auto p-4', className)}>
-      <div className="flex w-full max-w-md shrink-0 flex-col items-center gap-3 rounded-2xl border border-border bg-surface-raised p-6 text-center">
+      <div className="flex w-full max-w-md shrink-0 flex-col items-center gap-3 rounded-2xl bg-surface-hover p-6 text-center">
         <span className={cn('flex size-12 items-center justify-center rounded-xl', meta.tone)}>
           <FileQuestion aria-hidden className="size-6" strokeWidth={1.8} />
         </span>
@@ -197,7 +197,7 @@ function BinaryArtifactPreview({
             aria-controls={hexdumpId}
             onClick={() => setExpanded((value) => !value)}
             className={cn(
-              'flex w-full items-center gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2 text-left transition-colors duration-150',
+              'flex w-full items-center gap-2 rounded-lg bg-surface-hover px-3 py-2 text-left transition-colors duration-150',
               'hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
               'motion-reduce:transition-none',
             )}

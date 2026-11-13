@@ -214,7 +214,7 @@ export function ChatView({ welcome }: { welcome?: ReactNode } = {}) {
             onClick={() => scrollToBottom(reduceMotion ? 'auto' : 'smooth')}
             aria-label={t('chatView.jumpToLatest')}
             className={cn(
-              'pointer-events-auto flex size-9 items-center justify-center rounded-full border border-border',
+              'pointer-events-auto flex size-9 items-center justify-center rounded-full ',
               'bg-surface-raised text-foreground-muted shadow-md',
               'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',

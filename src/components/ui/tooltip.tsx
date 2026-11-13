@@ -52,7 +52,7 @@ export function Tooltip({
             sideOffset={sideOffset}
             collisionPadding={8}
             className={cn(
-              'z-[70] max-w-64 select-none rounded-lg border border-border bg-surface-raised px-2.5 py-1.5',
+              'z-[70] max-w-64 select-none rounded-lg bg-surface-raised px-2.5 py-1.5',
               'text-xs leading-relaxed text-foreground shadow-lg',
               'data-[state=delayed-open]:animate-fade-in data-[state=instant-open]:animate-fade-in motion-reduce:animate-none',
               className,

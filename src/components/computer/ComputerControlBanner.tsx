@@ -47,7 +47,7 @@ export function ComputerControlBanner({
   return (
     <div
       role="status"
-      className="fixed bottom-4 left-4 z-50 flex max-w-sm items-center gap-3 rounded-2xl border border-warning/40 bg-surface-raised px-3 py-2.5 shadow-lg"
+      className="fixed bottom-4 left-4 z-50 flex max-w-sm items-center gap-3 rounded-2xl bg-surface-raised px-3 py-2.5 shadow-lg"
     >
       <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-warning-soft text-warning">
         <MonitorStop className="size-4" />

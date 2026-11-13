@@ -14,7 +14,7 @@ export function Kbd({ children, className, title }: KbdProps) {
     <kbd
       title={title}
       className={cn(
-        'inline-flex h-5 min-w-5 select-none items-center justify-center rounded border border-border bg-surface px-1.5',
+        'inline-flex h-5 min-w-5 select-none items-center justify-center rounded bg-surface-hover px-1.5',
         'font-mono text-[11px] font-medium leading-none text-foreground-subtle',
         className,
       )}

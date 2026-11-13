@@ -58,7 +58,7 @@ const PERMISSION_ORDER: PermissionMode[] = ['read_only', 'review', 'edit', 'auto
 
 /** Estilo base dos pills de sessão (tokens do design system). */
 const PILL_CLASS_NAME =
-  'flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 text-[12.5px] font-medium text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
+  'flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
 
 /**
  * Toggle do modo Plano **somente ícone** (pedido de produto): mesma geometria
@@ -66,7 +66,7 @@ const PILL_CLASS_NAME =
  * por cor + `aria-pressed`/`aria-label`/tooltip.
  */
 const PLAN_ICON_BUTTON_CLASS_NAME =
-  'flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
+  'flex size-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-60';
 
 const PLAN_TITLE_ON_KEY = 'session.planTitleOn';
 const PLAN_TITLE_OFF_KEY = 'session.planTitleOff';
@@ -218,8 +218,8 @@ export function CodeSessionControls({
           className={cn(
             PLAN_ICON_BUTTON_CLASS_NAME,
             planMode
-              ? 'border-accent/40 bg-accent-soft'
-              : 'border-border bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
+              ? 'bg-accent-soft'
+              : 'bg-transparent text-foreground-muted hover:bg-surface-hover hover:text-foreground',
           )}
         >
           <ListChecks

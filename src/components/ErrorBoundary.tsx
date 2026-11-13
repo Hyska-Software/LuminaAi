@@ -39,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!this.state.error) return this.props.children;
     return (
       <div className="flex h-full w-full items-center justify-center bg-background p-8">
-        <div className="w-full max-w-md rounded-2xl border border-border bg-surface-raised p-6 shadow-lg">
+        <div className="w-full max-w-md rounded-2xl bg-surface-raised p-6 shadow-lg">
           <div className="mb-4 flex size-10 items-center justify-center rounded-xl bg-danger-soft text-danger">
             <AlertTriangle className="size-5" />
           </div>
@@ -62,7 +62,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               onClick={() => this.setState({ error: null })}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-border px-3.5 text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-hover"
+              className="inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-sm font-medium text-foreground-muted transition-colors hover:bg-surface-hover"
             >
               {t('common:actions.retry')}
             </button>

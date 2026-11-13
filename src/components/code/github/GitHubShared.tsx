@@ -84,7 +84,7 @@ export function GitHubErrorState({ message, onRetry, className }: GitHubErrorSta
     <div
       role="alert"
       className={cn(
-        'flex flex-col items-start gap-2 rounded-xl border border-danger/40 bg-danger-soft px-3 py-2.5',
+        'flex flex-col items-start gap-2 rounded-xl bg-danger-soft px-3 py-2.5',
         className,
       )}
     >
@@ -117,7 +117,7 @@ export function GitHubEmptyState({ icon = 'search', title, description }: GitHub
   const Icon = icon === 'merge' ? GitPullRequest : icon === 'issue' ? CircleDot : Search;
   return (
     <div className="flex flex-col items-center justify-center gap-2 px-6 py-10 text-center">
-      <span className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface-hover text-foreground-muted">
+      <span className="flex size-9 items-center justify-center rounded-xl bg-surface-hover text-foreground-muted">
         <Icon aria-hidden className="size-4" strokeWidth={1.75} />
       </span>
       <p className="max-w-96 text-[13px] font-medium text-foreground">{title}</p>
@@ -220,7 +220,7 @@ export function GitHubLabelChips({
         <span
           key={label.name}
           title={label.description ?? label.name}
-          className="inline-flex h-[18px] max-w-32 items-center truncate rounded-full border border-border px-1.5 text-[10px] font-medium text-foreground-muted"
+          className="inline-flex h-[18px] max-w-32 items-center truncate rounded-full px-1.5 text-[10px] font-medium text-foreground-muted"
           style={
             label.color
               ? { borderColor: `#${label.color}`, backgroundColor: `#${label.color}22` }
@@ -329,8 +329,8 @@ export function GitHubMultiPicker({
                   >
                     <span
                       className={cn(
-                        'flex size-4 shrink-0 items-center justify-center rounded border border-border',
-                        active && 'border-accent bg-accent-soft text-accent',
+                        'flex size-4 shrink-0 items-center justify-center rounded ',
+                        active && ' bg-accent-soft text-accent',
                       )}
                     >
                       {active ? <Check aria-hidden className="size-3" strokeWidth={2.5} /> : null}
@@ -449,7 +449,7 @@ export function GitHubComments({
                 comment.author.login.toLowerCase() === currentLogin.toLowerCase(),
             );
             return (
-              <li key={comment.id} className="rounded-xl border border-border bg-surface p-3">
+              <li key={comment.id} className="rounded-xl bg-surface p-3">
                 <div className="flex min-w-0 items-center gap-2 text-[11px] text-foreground-subtle">
                   <span className="font-medium text-foreground-muted">{comment.author.login}</span>
                   <span className="shrink-0">{formatGitHubDate(comment.createdAt)}</span>
@@ -492,7 +492,7 @@ export function GitHubComments({
                 </div>
 
                 {confirmingDelete === comment.id ? (
-                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-danger/40 bg-danger-soft px-2.5 py-2 text-[11px] text-foreground">
+                  <div className="mt-2 flex items-center gap-2 rounded-lg bg-danger-soft px-2.5 py-2 text-[11px] text-foreground">
                     <span className="min-w-0 flex-1">{t('github.comments.confirmDelete')}</span>
                     <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(null)}>
                       {t('github.cancel')}
