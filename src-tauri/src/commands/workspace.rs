@@ -72,6 +72,7 @@ pub(crate) fn project_info(root: &Path) -> ProjectInfo {
                 command: check.command,
             })
             .collect(),
+        checked_ecosystems: profile.checked_ecosystems,
     }
 }
 
@@ -965,6 +966,7 @@ mod tests {
         assert_eq!(info.kind, "rust");
         assert!(!info.checks.is_empty());
         assert!(info.checks.iter().any(|check| check.command.contains("cargo")));
+        assert_eq!(info.checked_ecosystems, vec!["rust"]);
     }
 
     #[test]

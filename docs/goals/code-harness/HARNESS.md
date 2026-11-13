@@ -151,6 +151,55 @@ Crash no meio: ao abrir a conversa, um turno sem `turn/ended` vira mensagem `sta
   ("outra sessão está editando src/app.ts").
 - Aprovações são por turno (broker), nunca globais.
 
+### 3.5 Completion gate (parada verificada)
+
+Uma resposta final sem tool calls só encerra o turno se o trabalho estiver comprovadamente
+fechado. O gate (`harness/completion.rs`) roda apenas em turnos Code top-level (`turnKind=user`,
+`delegationDepth=0`); Chat, subagentes e rodadas de objetivo mantêm a própria semântica de parada.
+
+**Evidência acumulada por turno** (`TurnProgress::observe`):
+- `file_change` → mutação + ecossistema do path (`.ts/.tsx/.js` = node, `.rs` = rust, `.py` =
+  python, `.go` = go, `.cs/.csproj` = dotnet; manifestos por nome). Edições só de documentação
+  (`*.md`, `*.txt`, …) contam como mutação mas não invalidam um check aprovado.
+- `run_checks`/`run_command` de verificação → recibo com exit code, contagem de mutações no
+  momento e **cobertura por ecossistema** (o `run_checks` publica `check`/`command`/`ecosystem`
+  na presentation; `run_command` é classificado pelo comando — `cargo check`, `pnpm typecheck`,
+  `pytest`, `go test`, `dotnet build`, …). Um check de uma linguagem não cobre outra.
+- `todo_write`/`submit_plan` → marcador na contagem de mutações daquele momento.
+- `task` com `worker` → mutação (o filho edita fora do journal) e exige verificação posterior.
+
+**Decisão de parada**, nesta ordem: pergunta pulada sem trabalho novo → aceita; plano submetido
+sem edições posteriores → aceita; modo Plano sem plano → continua; todo pendente/em andamento →
+continua; último check do turno falhou → continua; algum ecossistema alterado sem check aprovado
+depois da última edição → continua; worker sem check posterior → continua; mutações sem
+`todo_write` → continua; resposta final declara trabalho parcial/não verificado → continua.
+Perguntas de Code sem mutação não passam pela auditoria de texto (podem descrever código
+existente).
+
+A auditoria de texto cobre adjetivos de incompletude em inglês/pt-BR/es ("not verified",
+"não implementado", "pendente", "parcial", "incomplete", …) e respeita negações ("nenhum item
+pendente", "no pending work"). Ela existe para o caso em que o modelo marca todos os todos como
+concluídos e ainda assim termina com um relatório parcial.
+
+Cada rejeição injeta uma mensagem `[completion-gate]` (user, transitória) e mantém a resposta
+rejeitada no histórico do turno, nunca na mensagem final nem no replay. O limite é
+`MAX_STOP_CONTINUATIONS` (4); se o orçamento de passos acabar ou o limite for atingido, o turno
+fecha como `incomplete` (badge na UI) e `turn/ended` grava `status`, `incompleteReason` e
+`stopContinuations`.
+
+**Ecossistemas verificáveis**: `workspace::project::detect` lê o manifesto raiz (contrato
+`kind/name/checks` da UI) e soma manifestos aninhados até 2 níveis (sem
+`node_modules`/`target`/dotfiles), produzindo `ProjectInfo.checkedEcosystems`. Num app Tauri com
+`package.json` na raiz e `src-tauri/Cargo.toml`, editar `src/app.tsx` e `src-tauri/src/lib.rs`
+exige um check Node **e** um check Rust depois das respectivas últimas edições. O prompt lista os
+ecossistemas aninhados e o `run_checks` continua rodando apenas os checks do manifesto raiz;
+checks aninhados vão por `run_command` com `workdir`.
+
+**Limite explícito**: o harness não julga se uma feature está semanticamente completa. Ele
+garante que (a) não há todo aberto, ledger ausente, check falhando ou ecossistema alterado sem
+verificação posterior, e (b) a resposta final não admite trabalho pendente enquanto ainda há
+trabalho executável. Bloqueios reais devem virar `ask_user` ou uma falha declarada com evidência.
+
 ## 4. Perfis de turno
 
 ```rust

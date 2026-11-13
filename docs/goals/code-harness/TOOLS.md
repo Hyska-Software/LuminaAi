@@ -378,6 +378,10 @@ M  src/app.ts           (staged)
   primeiro (teste) quando omitido; ids/labels aparecem no contexto do projeto do prompt.
 - Reutiliza o pipeline do `run_command` (política, aprovação, streaming de `ToolProgress`, spill);
   o resultado é prefixado com `[check: <label>]` e contém exit code/saída.
+- A `presentation` inclui `check` (id), `command` (comando real) e `ecosystem` (`node`/`rust`/
+  `python`/`go`/`dotnet`); o completion gate usa esses campos para exigir um check aprovado por
+  ecossistema alterado. Checks de manifestos aninhados (ex.: `src-tauri/Cargo.toml`) não entram
+  no `run_checks` do manifesto raiz — rode-os com `run_command` + `workdir`.
 - **Política**: `Shell` (aprovada no modo Editar; destrutivo continua pedindo). Sem manifesto
   detectado → `NO_CHECKS`; id inválido → `CHECK_NOT_FOUND`.
 - **Testes**: sem checks, modo Plano (deny), execução real de `npm run test` (pulado sem shell).

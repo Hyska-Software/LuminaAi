@@ -2013,6 +2013,11 @@ pub struct ProjectInfo {
     pub name: Option<String>,
     #[serde(default)]
     pub checks: Vec<ProjectCheckInfo>,
+    /// Ecosystems with at least one detected check, including nested manifests
+    /// (e.g. `src-tauri/Cargo.toml` in a Tauri workspace). The completion gate
+    /// requires a passing check for each changed ecosystem.
+    #[serde(default)]
+    pub checked_ecosystems: Vec<String>,
 }
 
 /// Estado do workspace para o header/painel (`get_workspace_context`).

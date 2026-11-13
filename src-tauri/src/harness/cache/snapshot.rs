@@ -194,6 +194,7 @@ pub fn code_config_hash(
                     "command": check.command,
                 }))
                 .collect::<Vec<_>>(),
+            "checkedEcosystems": project.checked_ecosystems,
         })
     });
     let canonical = json!({
@@ -450,6 +451,7 @@ mod tests {
                 label: "Testes".to_string(),
                 command: "pnpm test".to_string(),
             }],
+            checked_ecosystems: vec!["node".to_string()],
         };
         let base = code_config_hash(
             &model(),
@@ -505,6 +507,7 @@ mod tests {
             kind: "rust".to_string(),
             name: None,
             checks: Vec::new(),
+            checked_ecosystems: Vec::new(),
         };
         assert_ne!(
             base,

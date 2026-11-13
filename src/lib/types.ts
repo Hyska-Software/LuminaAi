@@ -323,6 +323,8 @@ export interface ProjectInfo {
   kind: string;
   name?: string | null;
   checks: ProjectCheckInfo[];
+  /** Ecosystems with detected checks, including nested manifests (e.g. rust in src-tauri). */
+  checkedEcosystems?: string[];
 }
 
 export interface WorkspaceContext {

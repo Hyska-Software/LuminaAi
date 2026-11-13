@@ -2268,6 +2268,16 @@ async fn run_checks(ctx: &ToolCtx, args: &Value) -> ToolOutcome {
         "timeout_ms": timeout,
     });
     let mut outcome = run_command(ctx, &command_args).await;
+    if let Some(Value::Object(presentation)) = outcome.presentation.as_mut() {
+        presentation.insert("check".into(), Value::String(check.id.clone()));
+        presentation.insert("command".into(), Value::String(check.command.clone()));
+        if let Some(ecosystem) = crate::workspace::project::ecosystem_for_check_id(&check.id) {
+            presentation.insert(
+                "ecosystem".into(),
+                Value::String(ecosystem.to_string()),
+            );
+        }
+    }
     if !outcome.is_error {
         let label = check.label.clone();
         let head = format!("[check: {label}]\n");
@@ -5261,6 +5271,10 @@ mod tests {
         assert!(!outcome.is_error, "{}", outcome.content);
         assert!(outcome.content.contains("[check:"), "{}", outcome.content);
         assert!(outcome.content.contains("exit code: 0"), "{}", outcome.content);
+        let presentation = outcome.presentation.expect("presentation do check");
+        assert_eq!(presentation["check"], "npm:test");
+        assert_eq!(presentation["command"], "npm run test");
+        assert_eq!(presentation["ecosystem"], "node");
     }
     #[tokio::test]
     async fn task_without_runner_is_an_actionable_error() {

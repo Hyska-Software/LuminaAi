@@ -134,6 +134,7 @@ fn project_info(profile: &crate::workspace::project::ProjectProfile) -> ProjectI
                 command: check.command.clone(),
             })
             .collect(),
+        checked_ecosystems: profile.checked_ecosystems.clone(),
     }
 }
 

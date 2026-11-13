@@ -28,7 +28,7 @@ use super::goal::{GOAL_BLOCKED_STREAK, GOAL_MAX_OBJECTIVE_CHARS};
 
 /// Version of the Code prompt layout (part of the `prompt_snapshots` identity).
 /// Bump whenever the stable prompt text changes.
-pub const PROMPT_VERSION: u32 = 12;
+pub const PROMPT_VERSION: u32 = 13;
 
 /// Orientação de uma ferramenta habilitada no turno (gerada pelo registry).
 #[derive(Debug, Clone, Copy)]
@@ -224,6 +224,12 @@ fn autonomy_section() -> &'static str {
           what is missing and what you attempted.\n\
      - A status update is not a final answer. If executable work remains and nothing blocks it, \
        continue.\n\
+     - Before you end the turn, every ecosystem you changed that has a detected check \
+       (including checks in nested manifests such as `src-tauri/Cargo.toml`) must have a \
+       passing check after its last edit. A check for one language does not cover another.\n\
+     - Never end with a report that the work is partial, pending or unverified while executable \
+       work remains. If a user decision blocks you, ask with `ask_user`; if a hard failure \
+       blocks you, state the exact blocker and the evidence.\n\
      - Never claim a command, test or build passed unless you ran it in this turn and saw the \
        exit code.\n\
      - Leave the workspace consistent: do not stop with code that you know does not compile.\n"
@@ -348,6 +354,21 @@ fn workspace_section(ctx: &CodeContext) -> String {
             for check in &project.checks {
                 out.push_str(&format!("  - {}: `{}`\n", check.label, check.command));
             }
+        }
+        let nested: Vec<&str> = project
+            .checked_ecosystems
+            .iter()
+            .map(String::as_str)
+            .filter(|ecosystem| *ecosystem != project.kind.as_str())
+            .collect();
+        if !nested.is_empty() {
+            out.push_str(&format!(
+                "- Nested verification ecosystems: `{}`. Each changed ecosystem needs its own \
+                 passing check after its last edit; a check for one language does not cover \
+                 another. `run_checks` only runs the root manifest — run nested checks with \
+                 `run_command` and the matching `workdir`.\n",
+                nested.join("`, `")
+            ));
         }
     }
     out
@@ -858,6 +879,7 @@ mod tests {
                     label: "Testes".into(),
                     command: "npm test".into(),
                 }],
+                checked_ecosystems: vec!["node".into()],
             }),
             agents_md: Some("# Projeto\n\nRode `pnpm test` antes de commitar.".into()),
             tree: Some("src/\ndocs/".into()),
@@ -899,6 +921,23 @@ mod tests {
             tokens: 0,
             cost: 0.0,
         }
+    }
+
+    #[test]
+    fn prompt_lists_nested_verification_ecosystems() {
+        let mut context = ctx();
+        if let Some(project) = context.project.as_mut() {
+            project.checked_ecosystems = vec!["node".into(), "rust".into()];
+        }
+        let prompt = build_system_prompt(&model(), &context, &[], "Windows", "2026-10-27", "pt-BR");
+        assert!(
+            prompt.contains("Nested verification ecosystems: `rust`"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("A check for one language does not cover another"),
+            "{prompt}"
+        );
     }
 
     #[test]

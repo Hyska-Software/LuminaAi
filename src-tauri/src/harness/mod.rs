@@ -2877,16 +2877,24 @@ pub async fn run_turn(
     let stop_guard = profile == TurnProfile::Code
         && options.delegation_depth == 0
         && payload.turn_kind == TurnKind::User;
-    let project_has_checks = code_context
+    let checked_ecosystems: Vec<completion::Ecosystem> = code_context
         .as_ref()
         .and_then(|context| context.project.as_ref())
-        .is_some_and(|project| !project.checks.is_empty());
+        .map(|project| {
+            project
+                .checked_ecosystems
+                .iter()
+                .filter_map(|id| completion::Ecosystem::from_id(id))
+                .collect()
+        })
+        .unwrap_or_default();
     let todo_tool_available = tool_definitions
         .iter()
         .any(|tool| tool.name == "todo_write");
     let mut stop_progress = completion::TurnProgress::default();
     let mut stop_continuations = 0u32;
     let mut stop_incomplete: Option<completion::ContinueReason> = None;
+    let mut budget_exhausted = false;
     // Anti-loop: assinatura do lote de tool calls do passo anterior e quantas
     // vezes o mesmo lote se repetiu em passos consecutivos.
     let mut repeat_signature: Option<String> = None;
@@ -3355,9 +3363,10 @@ pub async fn run_turn(
                 let decision = completion::decide(completion::StopEvidence {
                     todos: &todos,
                     progress: &stop_progress,
-                    project_has_checks,
+                    checked_ecosystems: &checked_ecosystems,
                     todo_tool_available,
                     plan_mode: observed_plan_mode,
+                    final_text: step_text.as_str(),
                 });
                 if let completion::StopDecision::Continue(reason) = decision {
                     if options
@@ -3562,6 +3571,7 @@ pub async fn run_turn(
         {
             // Force the final-answer pass below instead of ending the turn with
             // only intermediate narration.
+            budget_exhausted = true;
             break;
         }
 
@@ -3736,6 +3746,31 @@ pub async fn run_turn(
                 state: forced_state,
                 call_ids: Vec::new(),
             });
+        }
+    }
+
+    // Budget exhaustion is not a successful stop: the loop could not continue
+    // working even though the gate would have rejected the stop. Keep the
+    // honest `incomplete` status (the forced answer still summarizes what was
+    // done). Without this, a turn that runs out of steps while todos/checks are
+    // still open would be persisted as complete.
+    if stop_guard
+        && budget_exhausted
+        && stop_incomplete.is_none()
+        && !cancelled
+        && turn_failure.is_none()
+    {
+        let todos = code::session::todos(&deps.db, &conversation.id).unwrap_or_default();
+        let decision = completion::decide(completion::StopEvidence {
+            todos: &todos,
+            progress: &stop_progress,
+            checked_ecosystems: &checked_ecosystems,
+            todo_tool_available,
+            plan_mode: observed_plan_mode,
+            final_text: full_text.as_str(),
+        });
+        if let completion::StopDecision::Continue(reason) = decision {
+            stop_incomplete = Some(reason);
         }
     }
 
@@ -3941,12 +3976,17 @@ pub async fn run_turn(
         } else {
             "done"
         };
+        let mut ended = serde_json::json!({ "status": turn_status, "usage": usage });
+        if let Some(reason) = stop_incomplete.as_ref() {
+            ended["incompleteReason"] = Value::String(reason.code().to_string());
+            ended["stopContinuations"] = serde_json::json!(stop_continuations);
+        }
         if let Err(error) = code::session::append(
             &deps.db,
             &conversation.id,
             Some(&tool_turn_id),
             code::session::KIND_TURN_ENDED,
-            &serde_json::json!({ "status": turn_status, "usage": usage }),
+            &ended,
         ) {
             eprintln!("zylara: falha ao registrar fim do turno Code: {error:#}");
         }
@@ -9700,6 +9740,103 @@ mod agent_loop_tests {
         .expect("turn/ended persistido");
         assert!(
             ended.payload.contains("\"status\":\"incomplete\""),
+            "{}",
+            ended.payload
+        );
+
+        let _ = workspace_dir;
+    }
+
+    /// A step-budget stop is not a successful stop: if the gate would reject
+    /// the stop (pending todos here), the forced wrap-up must leave the message
+    /// as `incomplete` instead of pretending the work is done.
+    #[tokio::test]
+    async fn code_turn_marks_incomplete_when_the_step_budget_ends_with_open_work() {
+        let temp = TempDb::new();
+        let workspace_dir =
+            std::env::temp_dir().join(format!("zylara-budget-gate-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(workspace_dir.join("src")).expect("criar src");
+        let workspace = temp
+            .db
+            .create_workspace("demo", &workspace_dir.to_string_lossy())
+            .expect("workspace");
+        temp.db
+            .set_workspace_trusted(&workspace.id, true)
+            .expect("confiar");
+        let conversation = temp
+            .db
+            .create_conversation_with_mode(
+                "Sessão de código",
+                "opencode-go",
+                "deepseek-v4.1-flash",
+                crate::domain::CONVERSATION_MODE_CODE,
+            )
+            .expect("conversa code");
+        temp.db
+            .set_conversation_workspace(&conversation.id, Some(&workspace.id))
+            .expect("vincular workspace");
+
+        let pending = serde_json::json!({
+            "todos": [{ "content": "Implementar o renderer", "status": "pending" }]
+        })
+        .to_string();
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let requests = requests.clone();
+            let step = step.clone();
+            Arc::new(move |request, sink| {
+                requests
+                    .lock()
+                    .expect("requests lock")
+                    .push(request.clone());
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let pending = pending.clone();
+                Box::pin(async move {
+                    if current == 0 {
+                        tool_call_json_stream(&sink, "call-todo", "todo_write", &pending);
+                    } else {
+                        text_stream(&sink, "Resumo do que foi feito.");
+                    }
+                    Ok(())
+                })
+            })
+        };
+
+        let mut harness = deps(temp.db.clone(), streamer);
+        harness.observed = Some(Arc::new(code::observed::ObservedFiles::new()));
+        let (channel, _events) = channel();
+        let mut payload = payload(&conversation, 1);
+        payload.profile = TurnProfile::Code;
+        payload.options.max_steps = Some(1);
+        payload.content = "Implemente o renderer.".to_string();
+
+        let result = run_turn(
+            harness,
+            payload,
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turno code completo");
+
+        assert_eq!(
+            requests.lock().expect("requests lock").len(),
+            2,
+            "todo no único passo + resposta final forçada"
+        );
+        assert_eq!(result.assistant_message.status, MessageStatus::Incomplete);
+        assert_eq!(result.assistant_message.content, "Resumo do que foi feito.");
+        let ended = code::session::latest_event(
+            &temp.db,
+            &conversation.id,
+            code::session::KIND_TURN_ENDED,
+        )
+        .expect("evento do turno")
+        .expect("turn/ended persistido");
+        assert!(
+            ended.payload.contains("\"incompleteReason\":\"pending_todos\""),
             "{}",
             ended.payload
         );
