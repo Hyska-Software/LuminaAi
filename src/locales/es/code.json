@@ -569,7 +569,9 @@
       "untrustedTitle": "Carpeta no confiable — el agente está en modo lectura",
       "readOnlyBadge": "Lectura",
       "sessionsAria": "Sesiones de {{name}}",
-      "emptySessions": "Todavía no hay sesiones — usa “Nueva sesión” en el menú del espacio de trabajo."
+      "emptySessions": "Todavía no hay sesiones — usa “Nueva sesión” en el menú del espacio de trabajo.",
+      "loadMore_one": "Mostrar {{count}} sesión más",
+      "loadMore_other": "Mostrar {{count}} sesiones más"
     },
     "renameWorkspace": {
       "title": "Renombrar espacio de trabajo",

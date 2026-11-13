@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import {
   ChevronDown,
@@ -121,6 +121,9 @@ function SidebarAction({
     </button>
   );
 }
+
+/** Sessions rendered per workspace before the "show more" control (WORKBENCH §3). */
+const SESSIONS_PAGE_SIZE = 10;
 
 interface SessionRowProps {
   conversation: Conversation;
@@ -335,6 +338,10 @@ interface WorkspaceRowProps {
   active: boolean;
   expanded: boolean;
   activeConversationId: string | null;
+  /** Rows rendered for this workspace before the "show more" control. */
+  sessionLimit: number;
+  /** Reveals the next page of sessions. */
+  onLoadMore: () => void;
   sortable: SortableListApi;
   sessionsDisabled: boolean;
   onReorderSessions: (ids: string[]) => void;
@@ -360,6 +367,8 @@ function WorkspaceRow({
   active,
   expanded,
   activeConversationId,
+  sessionLimit,
+  onLoadMore,
   sortable,
   sessionsDisabled,
   onReorderSessions,
@@ -382,6 +391,21 @@ function WorkspaceRow({
   const Icon = workspaceIcon(workspace);
   const branch = workspace.git?.branch;
   const canExpand = sessions.length > 0;
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const sessionsListId = useId();
+  const activeIndex = activeConversationId
+    ? sessions.findIndex((conversation) => conversation.id === activeConversationId)
+    : -1;
+  /** The active session is always revealed, even past the current page. */
+  const visibleCount = Math.min(sessions.length, Math.max(sessionLimit, activeIndex + 1));
+  const visibleSessions = sessions.slice(0, visibleCount);
+  const hiddenCount = sessions.length - visibleCount;
+
+  const handleLoadMore = () => {
+    onLoadMore();
+    // The control unmounts on the last page: keep keyboard focus inside the group.
+    if (hiddenCount <= SESSIONS_PAGE_SIZE) toggleRef.current?.focus();
+  };
 
   return (
     <div
@@ -390,6 +414,7 @@ function WorkspaceRow({
     >
       <div className="group flex h-8 min-w-0 items-center gap-0.5 rounded-lg pr-0.5">
         <button
+          ref={toggleRef}
           type="button"
           aria-label={
             canExpand
@@ -475,36 +500,63 @@ function WorkspaceRow({
       </div>
 
       {expanded && canExpand ? (
-        <SortableList
-          ids={sessions.map((conversation) => conversation.id)}
-          label={t('code:sidebar.workspace.sessionsAria', { name: workspace.name })}
-          itemLabel={(id) => sessions.find((conversation) => conversation.id === id)?.title ?? id}
-          disabled={sessionsDisabled}
-          onReorder={onReorderSessions}
-        >
-          {(sessionSortable) => (
-            <div
-              ref={sessionSortable.containerRef}
-              className="mb-1 ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-border pl-1.5"
+        <div className="mb-1 ml-4 mt-0.5 border-l border-border pl-1.5">
+          <SortableList
+            ids={visibleSessions.map((conversation) => conversation.id)}
+            label={t('code:sidebar.workspace.sessionsAria', { name: workspace.name })}
+            itemLabel={(id) => sessions.find((conversation) => conversation.id === id)?.title ?? id}
+            disabled={sessionsDisabled}
+            // Rows hidden by the page limit keep their relative order after the
+            // reordered window, so the persisted positions never collide.
+            onReorder={(ids) =>
+              onReorderSessions([
+                ...ids,
+                ...sessions.slice(visibleSessions.length).map((conversation) => conversation.id),
+              ])
+            }
+          >
+            {(sessionSortable) => (
+              <div
+                ref={sessionSortable.containerRef}
+                id={sessionsListId}
+                className="flex flex-col gap-0.5"
+              >
+                {visibleSessions.map((conversation) => (
+                  <SessionRow
+                    key={conversation.id}
+                    conversation={conversation}
+                    active={conversation.id === activeConversationId}
+                    shared={conversation.codeLinked === true}
+                    sortable={sessionSortable}
+                    onSelect={() => onOpenConversation(conversation)}
+                    onTogglePin={() => onSessionPin(conversation)}
+                    onStartRename={() => onSessionRename(conversation)}
+                    onExport={() => onSessionExport(conversation)}
+                    onRemoveFromCode={() => onSessionRemoveFromCode(conversation)}
+                    onDelete={() => onSessionDelete(conversation)}
+                  />
+                ))}
+              </div>
+            )}
+          </SortableList>
+          {hiddenCount > 0 ? (
+            <button
+              type="button"
+              aria-controls={sessionsListId}
+              onClick={handleLoadMore}
+              className={cn(
+                'mt-0.5 flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-[11.5px]',
+                'text-foreground-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
+              )}
             >
-              {sessions.map((conversation) => (
-                <SessionRow
-                  key={conversation.id}
-                  conversation={conversation}
-                  active={conversation.id === activeConversationId}
-                  shared={conversation.codeLinked === true}
-                  sortable={sessionSortable}
-                  onSelect={() => onOpenConversation(conversation)}
-                  onTogglePin={() => onSessionPin(conversation)}
-                  onStartRename={() => onSessionRename(conversation)}
-                  onExport={() => onSessionExport(conversation)}
-                  onRemoveFromCode={() => onSessionRemoveFromCode(conversation)}
-                  onDelete={() => onSessionDelete(conversation)}
-                />
-              ))}
-            </div>
-          )}
-        </SortableList>
+              <ChevronDown aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+              <span className="min-w-0 truncate">
+                {t('code:sidebar.workspace.loadMore', { count: hiddenCount })}
+              </span>
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {expanded && !canExpand ? (
@@ -724,6 +776,8 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
   const [renameSessionBusy, setRenameSessionBusy] = useState(false);
   const [deleteSessionTarget, setDeleteSessionTarget] = useState<Conversation | null>(null);
   const [deleteSessionBusy, setDeleteSessionBusy] = useState(false);
+  /** Extra session pages revealed per workspace ("show more" under the group). */
+  const [sessionPages, setSessionPages] = useState<Record<string, number>>({});
 
   /* Ações da sessão (mesmo menu das conversas no layout Chat). */
   const handleSessionPin = (conversation: Conversation) => {
@@ -780,6 +834,13 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
     } finally {
       setDeleteSessionBusy(false);
     }
+  };
+
+  const handleLoadMoreSessions = (workspaceId: string) => {
+    setSessionPages((current) => ({
+      ...current,
+      [workspaceId]: (current[workspaceId] ?? 1) + 1,
+    }));
   };
 
   const codeConversations = useMemo(
@@ -1246,6 +1307,12 @@ export function CodeSidebar({ className, onClose }: CodeSidebarProps) {
                         active={workspace.id === activeWorkspaceId}
                         expanded={isExpanded(workspace.id)}
                         activeConversationId={activeId}
+                        sessionLimit={
+                          normalizedQuery
+                            ? Number.POSITIVE_INFINITY
+                            : (sessionPages[workspace.id] ?? 1) * SESSIONS_PAGE_SIZE
+                        }
+                        onLoadMore={() => handleLoadMoreSessions(workspace.id)}
                         sortable={sortable}
                         sessionsDisabled={hasWorkspaceFilters}
                         onReorderSessions={(ids) =>

@@ -569,7 +569,9 @@
       "untrustedTitle": "Untrusted folder — the agent is read-only",
       "readOnlyBadge": "Read-only",
       "sessionsAria": "Sessions of {{name}}",
-      "emptySessions": "No sessions yet — use “New session” in the workspace menu."
+      "emptySessions": "No sessions yet — use “New session” in the workspace menu.",
+      "loadMore_one": "Show {{count}} more session",
+      "loadMore_other": "Show {{count}} more sessions"
     },
     "renameWorkspace": {
       "title": "Rename workspace",

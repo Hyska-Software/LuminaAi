@@ -569,7 +569,9 @@
       "untrustedTitle": "Pasta não confiável — o agente está em modo leitura",
       "readOnlyBadge": "Leitura",
       "sessionsAria": "Sessões de {{name}}",
-      "emptySessions": "Nenhuma sessão ainda — use “Nova sessão” no menu do workspace."
+      "emptySessions": "Nenhuma sessão ainda — use “Nova sessão” no menu do workspace.",
+      "loadMore_one": "Mostrar mais {{count}} sessão",
+      "loadMore_other": "Mostrar mais {{count}} sessões"
     },
     "renameWorkspace": {
       "title": "Renomear workspace",

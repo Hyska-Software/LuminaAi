@@ -138,6 +138,19 @@ function renderSidebar(onClose?: () => void) {
   return render(onClose ? <CodeSidebar onClose={onClose} /> : <CodeSidebar />);
 }
 
+/** `count` Code sessions of one workspace, in a deterministic manual order. */
+function codeSessions(count: number, workspaceId = 'ws-1'): Conversation[] {
+  return Array.from({ length: count }, (_, index) =>
+    conversation({
+      id: `c-${index + 1}`,
+      title: `Sessão ${index + 1}`,
+      workspaceId,
+      sortOrder: index,
+      updatedAt: index + 1,
+    }),
+  );
+}
+
 /** Radix DropdownMenu opens on pointerdown, not click (see other tests). */
 function openMenu(trigger: HTMLElement): void {
   fireEvent.pointerDown(trigger, { button: 0, pointerType: 'mouse' });
@@ -552,6 +565,75 @@ describe('CodeSidebar — Workspaces reais', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tentar novamente' }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'zylara-core' })).toBeTruthy());
+  });
+});
+
+describe('CodeSidebar — limite de sessões por workspace', () => {
+  it('mostra 10 sessões e carrega o restante pelo botão do grupo', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({ conversations: codeSessions(14) });
+    renderSidebar();
+
+    expect(await screen.findByRole('button', { name: 'Sessão 1' })).toBeTruthy();
+    expect(screen.queryAllByRole('button', { name: /^Sessão \d+$/ })).toHaveLength(10);
+    expect(screen.queryByRole('button', { name: 'Sessão 11' })).toBeNull();
+    // The header badge keeps showing the whole workspace count.
+    expect(screen.getByRole('button', { name: 'zylara-core' }).textContent).toContain('14');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar mais 4 sessões' }));
+
+    expect(screen.queryAllByRole('button', { name: /^Sessão \d+$/ })).toHaveLength(14);
+    expect(screen.getByRole('button', { name: 'Sessão 14' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Mostrar mais/ })).toBeNull();
+    // The control unmounts on the last page, so focus stays inside the group.
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Recolher sessões de zylara-core' }),
+    );
+  });
+
+  it('revela a sessão ativa mesmo quando ela está fora da primeira página', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({ conversations: codeSessions(16), activeId: 'c-13' });
+    renderSidebar();
+
+    const active = await screen.findByRole('button', { name: 'Sessão 13' });
+    expect(active.getAttribute('aria-current')).toBe('true');
+    expect(screen.queryAllByRole('button', { name: /^Sessão \d+$/ })).toHaveLength(13);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar mais 3 sessões' }));
+
+    expect(screen.queryAllByRole('button', { name: /^Sessão \d+$/ })).toHaveLength(16);
+  });
+
+  it('a busca mostra todas as sessões do workspace, sem o limite de 10', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({ conversations: codeSessions(14) });
+    renderSidebar();
+    await screen.findByRole('button', { name: 'Sessão 1' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pesquisar workspaces' }));
+    fireEvent.change(screen.getByRole('textbox', { name: /Pesquisar workspaces/ }), {
+      target: { value: 'zylara' },
+    });
+
+    expect(screen.queryAllByRole('button', { name: /^Sessão \d+$/ })).toHaveLength(14);
+    expect(screen.queryByRole('button', { name: /Mostrar mais/ })).toBeNull();
+  });
+
+  it('reordenar com o limite ativo persiste a ordem completa do grupo', async () => {
+    mocks.listWorkspaces.mockResolvedValue([workspace()]);
+    useChatStore.setState({ conversations: codeSessions(12) });
+    renderSidebar();
+
+    await screen.findByRole('button', { name: 'Sessão 1' });
+    // The sidebar remounts once while the workspaces finish loading: re-query the live row.
+    const first = screen.getByRole('button', { name: 'Sessão 1' });
+    fireEvent.keyDown(first, { key: 'ArrowDown', altKey: true });
+
+    await waitFor(() => expect(mocks.reorderConversations).toHaveBeenCalledTimes(1));
+    const ids = mocks.reorderConversations.mock.calls[0]?.[0] as string[];
+    expect(ids).toHaveLength(12);
+    expect(ids.slice(0, 3)).toEqual(['c-2', 'c-1', 'c-3']);
   });
 });
 
