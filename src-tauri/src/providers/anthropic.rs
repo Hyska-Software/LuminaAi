@@ -41,7 +41,7 @@ pub(crate) async fn stream(
         return Ok(());
     };
     let mut handler = Handler::new(sink, request.config.provider_id.clone());
-    let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
+    let outcome = sse::stream_sse(response, &request.cancel, &request.timeouts, |event, data| {
         handler.on_event(event, data)
     })
     .await;
@@ -50,6 +50,11 @@ pub(crate) async fn stream(
     }
     if request.cancel.is_cancelled() {
         return Ok(());
+    }
+    if !handler.completed {
+        return Err(ProviderError::StreamInterrupted(
+            "stream ended without message_stop".to_string(),
+        ));
     }
     handler.finish()
 }
@@ -272,6 +277,8 @@ struct Handler<'a> {
     /// Um novo bloco de texto começou depois de outro texto; o separador entra
     /// no primeiro delta para não sobrar quando o bloco vier vazio.
     pending_text_break: bool,
+    /// `message_stop` arrived; the Messages API reached its end.
+    completed: bool,
 }
 
 impl<'a> Handler<'a> {
@@ -288,6 +295,7 @@ impl<'a> Handler<'a> {
             has_usage: false,
             has_text: false,
             pending_text_break: false,
+            completed: false,
         }
     }
 
@@ -463,13 +471,11 @@ impl<'a> Handler<'a> {
                     self.merge_usage(usage);
                 }
             }
-            "message_stop" => {}
+            "message_stop" => self.completed = true,
             "ping" => {}
             "error" => {
                 let detail = value.get("error").cloned().unwrap_or_else(|| value.clone());
-                return Err(anyhow::Error::new(ProviderError::Other(format!(
-                    "erro do provedor: {detail}"
-                ))));
+                return Err(anyhow::Error::new(ProviderError::from_stream_error(&detail)));
             }
             _ => {}
         }
@@ -644,6 +650,7 @@ mod tests {
             max_output_tokens: Some(64),
             temperature: Some(0.5),
             cache_plan: None,
+            timeouts: crate::providers::StreamTimeouts::default(),
             cancel: CancellationToken::new(),
         }
     }

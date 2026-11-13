@@ -15,49 +15,45 @@ export const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
 
 export type TurnErrorKind = 'plan-limit' | 'plan-not-eligible' | 'auth-required';
 
-const PLAN_LIMIT_CODES = new Set(['subscription_sharing_usage_limit_exceeded']);
+const PLAN_LIMIT_CODES: Record<string, true> = {
+  subscription_sharing_usage_limit_exceeded: true,
+  // Neutral code emitted for `ProviderError::PlanLimit`; the raw provider code
+  // still wins when present, but this covers providers without a structured
+  // body.
+  plan_limit: true,
+};
 
-/** Neutral fallback code sent when the raw provider code is absent. */
-const NEUTRAL_RATE_LIMIT_CODE = 'rate_limited';
+const PLAN_NOT_ELIGIBLE_CODES: Record<string, true> = {
+  subscription_sharing_user_not_eligible: true,
+  plan_not_eligible: true,
+};
 
-const PLAN_NOT_ELIGIBLE_CODES = new Set([
-  'subscription_sharing_user_not_eligible',
-  'plan_not_eligible',
-]);
-
-const AUTH_REQUIRED_CODES = new Set([
-  'auth_required',
-  'missing_credentials',
-  'subscription_sharing_invalid_user',
-]);
+const AUTH_REQUIRED_CODES: Record<string, true> = {
+  auth_required: true,
+  missing_credentials: true,
+  subscription_sharing_invalid_user: true,
+};
 
 export interface TurnErrorContext {
-  /**
-   * True when the active provider is signed in with ChatGPT plan usage. The
-   * neutral `rate_limited` code only becomes a plan-limit banner in that case;
-   * for API-key providers it is a transient rate limit (toast/message card).
-   */
+  /** Kept for API compatibility; the banner no longer depends on the route. */
   planProvider?: boolean;
 }
 
 /**
  * Maps a turn error code to the banner the chat should show.
- * Unrelated failures (unsupported preview fields, transport errors) return
- * `null`: they already surface through the message error card and the toast,
- * and must not be presented as a plan/quota state.
+ * Unrelated failures (transient rate limits, unsupported preview fields,
+ * transport errors) return `null`: they already surface through the message
+ * error card and the toast, and must not be presented as a plan/quota state.
  */
 export function turnErrorKind(
   code?: string | null,
-  context: TurnErrorContext = {},
+  _context: TurnErrorContext = {},
 ): TurnErrorKind | null {
   const normalized = code?.trim();
   if (!normalized) return null;
-  if (PLAN_LIMIT_CODES.has(normalized)) return 'plan-limit';
-  if (normalized === NEUTRAL_RATE_LIMIT_CODE) {
-    return context.planProvider ? 'plan-limit' : null;
-  }
-  if (PLAN_NOT_ELIGIBLE_CODES.has(normalized)) return 'plan-not-eligible';
-  if (AUTH_REQUIRED_CODES.has(normalized)) return 'auth-required';
+  if (PLAN_LIMIT_CODES[normalized]) return 'plan-limit';
+  if (PLAN_NOT_ELIGIBLE_CODES[normalized]) return 'plan-not-eligible';
+  if (AUTH_REQUIRED_CODES[normalized]) return 'auth-required';
   return null;
 }
 

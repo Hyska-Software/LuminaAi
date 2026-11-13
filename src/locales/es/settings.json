@@ -161,6 +161,46 @@
   },
   "providers": {
     "securityNote": "Las claves de API (OpenCode/Anthropic/Google) y la sesión de ChatGPT se guardan solo en el backend (<code>secrets.json</code> en app-data) y nunca se exponen a la interfaz. También detectamos las variables de entorno de los proveedores y el inicio de sesión existente de OpenCode CLI.",
+    "resilience": {
+      "title": "Confiabilidad",
+      "description": "Tiempos límite y reintentos automáticos compartidos por todos los proveedores. El reintento solo ocurre antes de que cualquier texto o tool call llegue a la pantalla.",
+      "headers": {
+        "label": "Timeout de cabeceras (s)",
+        "description": "Espera máxima entre conectar y recibir las cabeceras de respuesta del proveedor."
+      },
+      "firstEvent": {
+        "label": "Timeout del primer token (s)",
+        "description": "Espera máxima del primer evento con salida del modelo."
+      },
+      "idle": {
+        "label": "Timeout de inactividad (s)",
+        "description": "Separación máxima entre dos eventos con salida una vez iniciado el stream."
+      },
+      "total": {
+        "label": "Timeout total del stream (s)",
+        "description": "Tope absoluto de una solicitud; 0 desactiva el tope."
+      },
+      "maxRetries": {
+        "label": "Reintentos por paso",
+        "description": "Intentos extra después de la primera solicitud (0 desactiva el reintento automático)."
+      },
+      "baseDelay": {
+        "label": "Backoff base (ms)",
+        "description": "Retardo inicial del backoff exponencial con jitter."
+      },
+      "maxDelay": {
+        "label": "Backoff máximo (ms)",
+        "description": "Tope de un único retardo de reintento."
+      },
+      "maxElapsed": {
+        "label": "Presupuesto de reintento (ms)",
+        "description": "Espera total permitida para los reintentos de un paso; 0 significa ilimitado."
+      },
+      "afterCap": {
+        "label": "Retry-After máximo (ms)",
+        "description": "Mayor espera solicitada por el proveedor que aceptamos; por encima, el error vuelve con la espera solicitada."
+      }
+    },
     "storeErrorTitle": "La última acción falló",
     "dismiss": "Descartar",
     "secretsErrorTitle": "No se pudo leer el archivo de secretos",

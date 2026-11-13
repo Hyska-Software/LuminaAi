@@ -41,7 +41,7 @@ export interface StreamingState {
   conversationId: string;
   assistantId: string;
   userMessageId: string | null;
-  phase: 'starting' | 'reasoning' | 'text' | 'tool';
+  phase: 'starting' | 'reasoning' | 'text' | 'tool' | 'retrying';
   step: number;
   startedAt: number;
   /** `user` (turno do usuário) ou `goal_round` (rodada automática do objetivo). */
@@ -50,6 +50,13 @@ export interface StreamingState {
   subagents?: Record<string, SubagentLiveState>;
   /** Queue item that started this turn; re-enqueued on TURN_BUSY. */
   queuedItem?: MessageQueueItem;
+  /** Last retry notification of this turn (shown in the live status). */
+  retry?: {
+    attempt: number;
+    maxAttempts: number;
+    delayMs: number;
+    reason: 'transient' | 'auth_refresh';
+  };
 }
 
 interface ChatState {
@@ -807,6 +814,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           usage: final.usage ?? message.usage,
           toolCalls: final.toolCalls.length ? final.toolCalls : message.toolCalls,
           citations: final.citations.length ? final.citations : message.citations,
+          error: final.error ?? message.error,
         };
       });
     };
@@ -893,6 +901,21 @@ export const useChatStore = create<ChatState>()((set, get) => {
             trace: [...(message.trace ?? []), { toolCalls: 0 }],
           }));
           patchStream(context.conversationId, (stream) => ({ ...stream, step: event.step }));
+          break;
+        case 'retrying':
+          // A transient failure with no output yet: keep the same timeline
+          // step and surface the wait in the live status.
+          flush();
+          patchStream(context.conversationId, (stream) => ({
+            ...stream,
+            phase: 'retrying',
+            retry: {
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              delayMs: event.delayMs,
+              reason: event.reason,
+            },
+          }));
           break;
         case 'reasoning_delta':
           reasoningBuffer += event.delta;
@@ -1109,6 +1132,15 @@ export const useChatStore = create<ChatState>()((set, get) => {
           patchMessage(context.conversationId, context.assistantId, (message) => ({
             ...message,
             status: message.content ? 'complete' : 'error',
+            // The backend persists the same payload in `messages.error`; keep
+            // the in-memory row in sync even if `MessageUpdated` was lost.
+            error: message.error ?? {
+              message: event.message,
+              code: event.code ?? null,
+              hint: event.hint ?? null,
+              retryable: event.retryable ?? false,
+              attempts: event.attempts ?? 0,
+            },
           }));
           const queuedItem = get().streamsByConversation[context.conversationId]?.queuedItem;
           setStream(context.conversationId, null);
@@ -1116,7 +1148,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           // thread the user is reading; it still gets the toast below.
           if (get().activeId === context.conversationId) {
             set({
-              error: event.message,
+              error: event.hint ?? event.message,
               errorCode: event.code ?? null,
               errorHint: event.hint ?? null,
             });
@@ -1128,6 +1160,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
           toast.error(t('chat:toasts.responseFailed'), {
             description: event.hint ?? event.message,
           });
+          // The failed turn persisted the user message and the error row; keep
+          // the sidebar preview/count in sync.
+          void refreshList();
           if (event.code === 'TURN_BUSY' && queuedItem) {
             useMessageQueueStore.getState().enqueueFront(queuedItem);
             useMessageQueueStore.getState().pause(context.conversationId, true);
@@ -1319,10 +1354,15 @@ export const useChatStore = create<ChatState>()((set, get) => {
         });
       }
       if (result.error) {
+        const description = result.error.hint ?? result.error.message;
         if (get().activeId === context.conversationId) {
-          set({ error: result.error });
+          set({
+            error: description,
+            errorCode: result.error.code ?? null,
+            errorHint: result.error.hint ?? null,
+          });
         }
-        toast.error(t('chat:toasts.responseError'), { description: result.error });
+        toast.error(t('chat:toasts.responseError'), { description });
       }
       void refreshList();
       // Authoritative reconciliation: even if an `artifact_created` event was
@@ -1876,6 +1916,19 @@ export const useChatStore = create<ChatState>()((set, get) => {
           // it in the composer so the locked pill shows the right model.
           syncSelectionToConversation(detail.conversation, detail.messages.length);
           syncCodeSession(detail.conversation);
+          // Rehydrate the banner from the persisted failure of the last
+          // assistant message (the live event is gone after a reload).
+          if (get().activeId === id) {
+            const failed = [...detail.messages]
+              .reverse()
+              .find((message) => message.role === 'assistant' && message.error);
+            const persisted = failed?.error ?? null;
+            set({
+              error: persisted ? (persisted.hint ?? persisted.message) : null,
+              errorCode: persisted?.code ?? null,
+              errorHint: persisted?.hint ?? null,
+            });
+          }
         } else {
           set({ loadingConversationId: null });
         }
@@ -2853,6 +2906,18 @@ export const useChatStore = create<ChatState>()((set, get) => {
         case 'step_started':
           patchStream(conversationId, (current) => ({ ...current, step: event.step }));
           break;
+        case 'retrying':
+          patchStream(conversationId, (current) => ({
+            ...current,
+            phase: 'retrying',
+            retry: {
+              attempt: event.attempt,
+              maxAttempts: event.maxAttempts,
+              delayMs: event.delayMs,
+              reason: event.reason,
+            },
+          }));
+          break;
         case 'reasoning_delta':
           patchStream(conversationId, (current) => ({ ...current, phase: 'reasoning' }));
           patchMessage(conversationId, assistantId, (message) => ({
@@ -2990,13 +3055,20 @@ export const useChatStore = create<ChatState>()((set, get) => {
           patchMessage(conversationId, assistantId, (message) => ({
             ...message,
             status: message.content ? 'complete' : 'error',
+            error: message.error ?? {
+              message: event.message,
+              code: event.code ?? null,
+              hint: event.hint ?? null,
+              retryable: event.retryable ?? false,
+              attempts: event.attempts ?? 0,
+            },
           }));
           if (get().streamsByConversation[conversationId]?.turnId === turnId) {
             setStream(conversationId, null);
           }
           if (get().activeId === conversationId) {
             set({
-              error: event.message,
+              error: event.hint ?? event.message,
               errorCode: event.code ?? null,
               errorHint: event.hint ?? null,
             });

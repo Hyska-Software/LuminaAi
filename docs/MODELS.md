@@ -238,6 +238,36 @@ O gateway não expõe thought parts separados para o Gemini 4 Argon; o raciocín
 - `anthropic`: `message_start`, `content_block_start/delta/stop` (`text_delta`, `thinking_delta`, `signature_delta`, `input_json_delta`), `message_delta` (usage + stop_reason), `message_stop`.
 - `google`: `:streamGenerateContent?alt=sse`; chunks com `candidates[0].content.parts` (`text`, `functionCall` com `args` já em objeto, `thoughtSignature`).
 
+## Erros, timeouts e retry
+
+Cada protocolo só é considerado completo quando chega o **sinal terminal** do provedor:
+
+| Protocolo | Sinal terminal |
+| --- | --- |
+| `openai-chat` | `choices[].finish_reason` não nulo **ou** `data: [DONE]` |
+| `openai-responses` | `response.completed` ou `response.incomplete` |
+| `anthropic` | `message_stop` |
+| `google` | chunk com `finishReason` não vazio |
+
+EOF antes do sinal vira `ProviderError::StreamInterrupted` (nunca uma resposta truncada
+marcada como completa). Erros dentro do stream usam a mesma classificação HTTP
+(`from_stream_error`), incluindo `overloaded_error`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE`,
+`server_error` e `rate_limit_exceeded`.
+
+Timeouts por request (settings `provider*`): headers 120 s, primeiro evento 180 s, idle 120 s
+e teto total 30 min (0 desliga). `connect_timeout` continua 20 s no client compartilhado.
+
+Retry global (todos os provedores): até 3 tentativas extras com backoff exponencial e jitter
+(800 ms base, teto 20 s, orçamento total 90 s), honrando `Retry-After`/`retry-after-ms`/
+`x-ratelimit-reset-*` até 60 s. Só repete quando o attempt **não emitiu texto, reasoning nem
+tool calls**; retry após saída parcial duplicaria o stream e cobraria o input novamente. 401
+com bearer renova o OAuth uma vez fora do orçamento. Erros permanentes (400 de contrato,
+cota do plano, inelegibilidade, rota não suportada) nunca repetem.
+
+Falhas terminais ficam em `messages.error` (código, dica, `retryable`, `attempts`,
+`retryAfterMs`) e sobrevivem ao reload; falhas antes do primeiro request (credencial/modelo/
+protocolo) persistem a mensagem do usuário e a bolha de erro em turnos novos.
+
 ## Usage
 
 - chat: `usage.completion_tokens_details.reasoning_tokens`.

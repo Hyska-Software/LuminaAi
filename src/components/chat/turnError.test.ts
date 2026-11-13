@@ -35,10 +35,14 @@ describe('turnErrorKind', () => {
     expect(turnErrorKind('  subscription_sharing_usage_limit_exceeded  ')).toBe('plan-limit');
   });
 
-  it('só trata rate_limited como limite quando o provedor ativo usa o plano', () => {
+  it('classifica o limite neutro do plano como plan-limit', () => {
+    expect(turnErrorKind('plan_limit')).toBe('plan-limit');
+  });
+
+  it('não trata um 429 transitório como limite do plano', () => {
     expect(turnErrorKind('rate_limited')).toBeNull();
     expect(turnErrorKind('rate_limited', { planProvider: false })).toBeNull();
-    expect(turnErrorKind('rate_limited', { planProvider: true })).toBe('plan-limit');
+    expect(turnErrorKind('rate_limited', { planProvider: true })).toBeNull();
   });
 
   it('classifica inelegibilidade com e sem o código cru', () => {

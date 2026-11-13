@@ -10,7 +10,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::providers::{self, CompletionRequest, HistoryMessage, ProviderEvent};
+use crate::providers::{
+    self, CompletionRequest, HistoryMessage, ProviderError, ProviderEvent, StreamTimeouts,
+};
 
 use super::{provider_config, resolve_credential, resolve_model, resolve_protocols, HarnessDeps};
 
@@ -18,6 +20,7 @@ use super::{provider_config, resolve_credential, resolve_model, resolve_protocol
 pub struct BatchRequest<'a> {
     pub provider_id: &'a str,
     pub model_id: &'a str,
+    pub timeouts: StreamTimeouts,
     pub system_prompt: &'a str,
     pub user_text: &'a str,
     pub max_output_tokens: u32,
@@ -61,40 +64,97 @@ pub async fn complete_text(
         cancel: cancel.clone(),
         // F4b: plano de cache explícito preenchido no wiring da F4.
         cache_plan: None,
+        timeouts: request.timeouts,
     };
 
-    let text = Arc::new(Mutex::new(String::new()));
-    let (sink, mut events) = tokio::sync::mpsc::unbounded_channel::<ProviderEvent>();
-    let reader = {
-        let text = text.clone();
-        tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
-                if let ProviderEvent::TextDelta(delta) = event {
-                    text.lock().push_str(&delta);
+    let completion = Arc::new(completion);
+    let request_for_attempt = {
+        let completion = completion.clone();
+        move || (*completion).clone()
+    };
+    collect_with_retry(deps, request_for_attempt).await
+}
+
+/// Retry policy for auxiliary (non-turn) completions: fewer attempts than a
+/// user turn because these calls are optional or run under a prompt-cache
+/// prefix that should not wait minutes.
+fn auxiliary_retry_policy() -> providers::retry::RetryPolicy {
+    providers::retry::RetryPolicy {
+        max_retries: 2,
+        ..Default::default()
+    }
+}
+
+/// Runs one provider completion, retrying transient failures only when no text
+/// was collected (a retry after partial text would duplicate the summary).
+async fn collect_with_retry<F>(
+    deps: &HarnessDeps,
+    mut build: F,
+) -> anyhow::Result<String>
+where
+    F: FnMut() -> CompletionRequest,
+{
+    let policy = auxiliary_retry_policy();
+    let mut failures = 0u32;
+    let mut elapsed = std::time::Duration::ZERO;
+    loop {
+        let request = build();
+        let text = Arc::new(Mutex::new(String::new()));
+        let (sink, mut events) = tokio::sync::mpsc::unbounded_channel::<ProviderEvent>();
+        let reader = {
+            let text = text.clone();
+            tokio::spawn(async move {
+                while let Some(event) = events.recv().await {
+                    if let ProviderEvent::TextDelta(delta) = event {
+                        text.lock().push_str(&delta);
+                    }
                 }
+            })
+        };
+        let result = match &deps.streamer {
+            Some(streamer) => streamer(request, sink).await,
+            None => providers::stream_completion(&deps.http, request, sink).await,
+        };
+        match result {
+            Ok(()) => {
+                reader
+                    .await
+                    .map_err(|error| anyhow::anyhow!("leitor do batch falhou: {error}"))?;
+                let trimmed = text.lock().trim().to_string();
+                if trimmed.is_empty() {
+                    anyhow::bail!("o modelo não devolveu texto");
+                }
+                return Ok(trimmed);
             }
-        })
-    };
-
-    let result = match &deps.streamer {
-        Some(streamer) => streamer(completion, sink).await,
-        None => providers::stream_completion(&deps.http, completion, sink).await,
-    };
-    // Fecha o canal para o leitor terminar mesmo em erro (o stream pode ter
-    // enviado deltas parciais antes de falhar).
-    if let Err(error) = result {
-        reader.abort();
-        return Err(error);
+            Err(error) => {
+                // The stream may have sent partial deltas before failing; only
+                // retry when nothing was collected.
+                reader.abort();
+                let _ = reader.await;
+                let nothing_collected = text.lock().is_empty();
+                if nothing_collected {
+                    if let Some(provider_error) = error.downcast_ref::<ProviderError>() {
+                        failures += 1;
+                        match providers::retry::decide(
+                            &policy,
+                            provider_error,
+                            failures,
+                            elapsed,
+                            providers::retry::jitter_sample(),
+                        ) {
+                            providers::retry::RetryDecision::Retry { delay, .. } => {
+                                tokio::time::sleep(delay).await;
+                                elapsed = elapsed.saturating_add(delay);
+                                continue;
+                            }
+                            providers::retry::RetryDecision::Stop { .. } => {}
+                        }
+                    }
+                }
+                return Err(error);
+            }
+        }
     }
-    reader
-        .await
-        .map_err(|error| anyhow::anyhow!("leitor do batch falhou: {error}"))?;
-    let text = text.lock().clone();
-    let trimmed = text.trim().to_string();
-    if trimmed.is_empty() {
-        anyhow::bail!("o modelo não devolveu texto");
-    }
-    Ok(trimmed)
 }
 
 /// Executa uma completion **já montada** e devolve o texto final.
@@ -107,35 +167,12 @@ pub async fn complete_request(
     deps: &HarnessDeps,
     request: CompletionRequest,
 ) -> anyhow::Result<String> {
-    let text = Arc::new(Mutex::new(String::new()));
-    let (sink, mut events) = tokio::sync::mpsc::unbounded_channel::<ProviderEvent>();
-    let reader = {
-        let text = text.clone();
-        tokio::spawn(async move {
-            while let Some(event) = events.recv().await {
-                if let ProviderEvent::TextDelta(delta) = event {
-                    text.lock().push_str(&delta);
-                }
-            }
-        })
+    let request = Arc::new(request);
+    let request_for_attempt = {
+        let request = request.clone();
+        move || (*request).clone()
     };
-    let result = match &deps.streamer {
-        Some(streamer) => streamer(request, sink).await,
-        None => providers::stream_completion(&deps.http, request, sink).await,
-    };
-    if let Err(error) = result {
-        reader.abort();
-        return Err(error);
-    }
-    reader
-        .await
-        .map_err(|error| anyhow::anyhow!("leitor da completion falhou: {error}"))?;
-    let text = text.lock().clone();
-    let trimmed = text.trim().to_string();
-    if trimmed.is_empty() {
-        anyhow::bail!("o modelo não devolveu texto");
-    }
-    Ok(trimmed)
+    collect_with_retry(deps, request_for_attempt).await
 }
 
 #[cfg(test)]
@@ -181,6 +218,7 @@ mod tests {
             BatchRequest {
                 provider_id: "opencode-go",
                 model_id: "deepseek-v4.1-flash",
+                timeouts: StreamTimeouts::default(),
                 system_prompt: "Resuma.",
                 user_text: "conteúdo",
                 max_output_tokens: 256,
@@ -203,6 +241,7 @@ mod tests {
             BatchRequest {
                 provider_id: "opencode-go",
                 model_id: "deepseek-v4.1-flash",
+                timeouts: StreamTimeouts::default(),
                 system_prompt: "Resuma.",
                 user_text: "conteúdo",
                 max_output_tokens: 256,

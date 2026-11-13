@@ -246,6 +246,23 @@ fn normalize_settings(mut settings: Settings) -> Settings {
         "panel" => "panel".into(),
         _ => "tab".into(),
     };
+    // Provider resilience: every value is clamped so the UI cannot park a turn.
+    settings.provider_headers_timeout_secs =
+        settings.provider_headers_timeout_secs.clamp(30, 600);
+    settings.provider_first_event_timeout_secs =
+        settings.provider_first_event_timeout_secs.clamp(30, 900);
+    settings.provider_idle_timeout_secs = settings.provider_idle_timeout_secs.clamp(15, 600);
+    settings.provider_total_timeout_secs =
+        settings.provider_total_timeout_secs.min(7_200);
+    settings.provider_max_retries = settings.provider_max_retries.min(8);
+    settings.provider_retry_base_delay_ms =
+        settings.provider_retry_base_delay_ms.clamp(100, 5_000);
+    settings.provider_retry_max_delay_ms =
+        settings.provider_retry_max_delay_ms.clamp(500, 60_000);
+    settings.provider_retry_max_elapsed_ms =
+        settings.provider_retry_max_elapsed_ms.min(600_000);
+    settings.provider_retry_after_cap_ms =
+        settings.provider_retry_after_cap_ms.clamp(1_000, 600_000);
     settings
 }
 

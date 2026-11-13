@@ -345,39 +345,83 @@ async fn fetch_remote_models(
     let mut any_models = false;
     for _ in 0..MAX_MODEL_PAGES {
         let (header_name, header_value) = provider.credential_header(&bearer);
-        let mut request = state
-            .http
-            .get(&url)
-            .header(header_name.as_str(), header_value.as_str())
-            .header("User-Agent", concat!("Zylara/", env!("CARGO_PKG_VERSION")))
-            .timeout(std::time::Duration::from_secs(25));
-        // Provider-declared headers (e.g. `anthropic-version`) are required by
-        // direct APIs even on the model-list endpoint.
-        for (name, value) in provider.static_headers() {
-            request = request.header(name, value);
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|error| format!("falha ao listar modelos de {}: {error}", provider.name))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
-            return Err(format!(
-                "{} respondeu {status} ao listar modelos: {}",
-                provider.name,
-                body.chars().take(300).collect::<String>()
-            ));
-        }
-        let document: Value = response
-            .json()
-            .await
-            .map_err(|error| {
+        // Model listing is idempotent: transient failures are retried with the
+        // same policy as completion requests (capped at two extra attempts).
+        let policy = crate::providers::retry::RetryPolicy {
+            max_retries: 2,
+            ..Default::default()
+        };
+        let mut attempt = 0u32;
+        let document: Value = loop {
+            attempt += 1;
+            let mut request = state
+                .http
+                .get(&url)
+                .header(header_name.as_str(), header_value.as_str())
+                .header("User-Agent", concat!("Zylara/", env!("CARGO_PKG_VERSION")))
+                .timeout(std::time::Duration::from_secs(25));
+            // Provider-declared headers (e.g. `anthropic-version`) are required
+            // by direct APIs even on the model-list endpoint.
+            for (name, value) in provider.static_headers() {
+                request = request.header(name, value);
+            }
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    if attempt <= policy.max_retries {
+                        tokio::time::sleep(crate::providers::retry::backoff_delay(
+                            &policy,
+                            attempt,
+                            crate::providers::retry::jitter_sample(),
+                        ))
+                        .await;
+                        continue;
+                    }
+                    return Err(format!(
+                        "falha ao listar modelos de {}: {error}",
+                        provider.name
+                    ));
+                }
+            };
+            let status = response.status();
+            if !status.is_success() {
+                let retry_after =
+                    crate::providers::retry::retry_after_from_headers(response.headers());
+                let body = response.text().await.unwrap_or_default();
+                let error = crate::providers::ProviderError::from_http_with_retry_after(
+                    status.as_u16(),
+                    &body,
+                    retry_after,
+                );
+                if attempt <= policy.max_retries && error.is_transient() {
+                    let delay = retry_after
+                        .filter(|delay| {
+                            crate::providers::retry::duration_ms(*delay)
+                                <= policy.retry_after_cap_ms
+                        })
+                        .unwrap_or_else(|| {
+                            crate::providers::retry::backoff_delay(
+                                &policy,
+                                attempt,
+                                crate::providers::retry::jitter_sample(),
+                            )
+                        });
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                return Err(format!(
+                    "{} respondeu {status} ao listar modelos: {}",
+                    provider.name,
+                    body.chars().take(300).collect::<String>()
+                ));
+            }
+            break response.json().await.map_err(|error| {
                 crate::i18n::t_args(
                     "models.errors.invalidResponse",
                     &[("provider", &provider.name), ("error", &error.to_string())],
                 )
             })?;
+        };
         let page = parse_remote_page(&document);
         any_models |= !page.models.is_empty();
         remote.extend(

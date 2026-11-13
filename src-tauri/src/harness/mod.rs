@@ -23,7 +23,7 @@ use crate::domain::{
 use crate::events::TurnEvent;
 use crate::providers::{
     self, CompletionRequest, EventSink, HistoryMessage, HistoryRole, HistoryToolCall, ImagePart,
-    ProviderConfig, ProviderError, ProviderEvent, ReasoningRequest, WireProtocol,
+    ProviderConfig, ProviderError, ProviderEvent, ReasoningRequest, StreamTimeouts, WireProtocol,
 };
 use crate::tools::{self, ToolOutcome, ToolRuntime};
 
@@ -447,6 +447,9 @@ fn auth_required_failure(error: &anyhow::Error, credential: &Credential) -> Turn
         } else {
             api_key_hint()
         }),
+        retryable: true,
+        retry_after_ms: None,
+        attempts: 0,
     }
 }
 
@@ -458,6 +461,12 @@ struct TurnFailure {
     /// transport-neutral app code (PLAN §2.3 + T4.4a contract).
     code: Option<String>,
     hint: Option<String>,
+    /// A manual retry may succeed.
+    retryable: bool,
+    /// Server-requested wait (ms) when the provider sent `Retry-After`.
+    retry_after_ms: Option<u64>,
+    /// Provider requests made by the failed step (0 = none attempted).
+    attempts: u32,
 }
 
 impl TurnFailure {
@@ -466,6 +475,28 @@ impl TurnFailure {
             message: message.into(),
             code: None,
             hint: None,
+            retryable: false,
+            retry_after_ms: None,
+            attempts: 0,
+        }
+    }
+
+    fn with_attempts(mut self, attempts: u32, retry_after: Option<std::time::Duration>) -> Self {
+        self.attempts = attempts;
+        if self.retry_after_ms.is_none() {
+            self.retry_after_ms = retry_after.map(providers::retry::duration_ms);
+        }
+        self
+    }
+
+    fn to_message_error(&self) -> crate::domain::MessageError {
+        crate::domain::MessageError {
+            message: self.message.clone(),
+            code: self.code.clone(),
+            hint: self.hint.clone(),
+            retryable: self.retryable,
+            retry_after_ms: self.retry_after_ms,
+            attempts: self.attempts,
         }
     }
 
@@ -494,6 +525,12 @@ impl TurnFailure {
             // is `subscription_sharing_*` on the OpenAI path.
             match neutral {
                 Some("rate_limited") => Some(crate::i18n::t("harness.hints.rateLimited")),
+                Some("timeout") => Some(crate::i18n::t("harness.hints.timeout")),
+                Some("network") => Some(crate::i18n::t("harness.hints.network")),
+                Some("stream_interrupted") => {
+                    Some(crate::i18n::t("harness.hints.streamInterrupted"))
+                }
+                Some("upstream_error") => Some(crate::i18n::t("harness.hints.upstreamError")),
                 Some("auth_required") => Some(if credential.is_bearer() {
                     reauth_hint()
                 } else {
@@ -510,14 +547,24 @@ impl TurnFailure {
                 Some("route_not_supported") => Some(crate::i18n::t(
                     "harness.hints.routeNotSupported",
                 )),
+                Some("insufficient_credit") => {
+                    Some(crate::i18n::t("harness.hints.insufficientCredit"))
+                }
                 _ => None,
             }
         };
+        let retryable = matches!(
+            error.retry_class(),
+            providers::RetryClass::Transient | providers::RetryClass::AuthRefresh
+        );
         Self {
             // Keep the provider error display (includes the raw `[code]`).
             message: format!("{error:#}"),
             code,
             hint,
+            retryable,
+            retry_after_ms: error.retry_after().map(providers::retry::duration_ms),
+            attempts: 0,
         }
     }
 }
@@ -681,6 +728,190 @@ async fn run_stream_attempt(
             attempt,
             error: anyhow!("falha interna no streaming: {join_error}"),
         },
+    }
+}
+
+/// Result of one step after all allowed attempts.
+struct StepRun {
+    outcome: AttemptOutcome,
+    /// Provider requests made (auth refresh included, cache fallback not).
+    attempts: u32,
+    /// Server-requested wait of the terminal failure, when any.
+    retry_after: Option<Duration>,
+}
+
+fn attempt_is_empty(attempt: &StepAttempt) -> bool {
+    attempt.text.is_empty() && attempt.reasoning.is_empty() && attempt.tool_calls.is_empty()
+}
+
+fn take_failed_attempt(outcome: AttemptOutcome) -> StepAttempt {
+    match outcome {
+        AttemptOutcome::Failed { attempt, .. } => attempt,
+        AttemptOutcome::Cancelled(attempt) => attempt,
+        AttemptOutcome::Completed(attempt) => attempt,
+    }
+}
+
+/// Runs one provider step with the shared retry policy.
+///
+/// Only failures that produced **no output for the UI** are repeated: a retry
+/// after partial text/tool calls would duplicate the stream and bill the input
+/// twice. A 401 with an OAuth bearer refreshes the credential once (it does not
+/// consume the transient retry budget); every other retry follows
+/// [`providers::retry::decide`], honoring `Retry-After` and the elapsed budget.
+async fn run_step_with_retry<F>(
+    deps: &HarnessDeps,
+    provider: &ProviderInfo,
+    credential: &mut Credential,
+    mut build: F,
+    on_event: &Arc<dyn EventEmitter>,
+    cancel: &CancellationToken,
+    on_partial: &(dyn Fn(&StepAttempt) + Send + Sync),
+    policy: &providers::retry::RetryPolicy,
+) -> StepRun
+where
+    F: FnMut(&Credential) -> CompletionRequest,
+{
+    let max_attempts = policy.max_attempts(credential.is_bearer());
+    let mut attempts = 0u32;
+    let mut transient_failures = 0u32;
+    let mut elapsed = Duration::ZERO;
+    let mut auth_refreshed = false;
+
+    loop {
+        attempts += 1;
+        let request = build(credential);
+        let outcome = run_stream_attempt(deps, request, on_event, cancel, on_partial).await;
+
+        // Read-only classification of the failure; the borrow ends before the
+        // outcome is moved into a return value.
+        enum Action {
+            Return,
+            AuthRefresh,
+            Retry { delay: Duration, reason: &'static str, code: Option<String> },
+            Cancelled,
+        }
+        let mut stop_retry_after: Option<Duration> = None;
+        let action = match &outcome {
+            AttemptOutcome::Failed { attempt, error } => {
+                let provider_error = error.downcast_ref::<ProviderError>();
+                if provider_error.is_some_and(|error| matches!(error, ProviderError::Cancelled)) {
+                    Action::Cancelled
+                } else if provider_error.is_some_and(ProviderError::is_auth_failure)
+                    && credential.is_bearer()
+                    && !auth_refreshed
+                {
+                    Action::AuthRefresh
+                } else if !attempt_is_empty(attempt) {
+                    // The user already saw this attempt: never repeat it.
+                    stop_retry_after = provider_error.and_then(ProviderError::retry_after);
+                    Action::Return
+                } else if let Some(provider_error) = provider_error {
+                    transient_failures += 1;
+                    let decision = providers::retry::decide(
+                        policy,
+                        provider_error,
+                        transient_failures,
+                        elapsed,
+                        providers::retry::jitter_sample(),
+                    );
+                    match decision {
+                        providers::retry::RetryDecision::Retry { delay, reason } => {
+                            Action::Retry {
+                                delay,
+                                reason: reason.as_str(),
+                                code: provider_error.code().map(str::to_string),
+                            }
+                        }
+                        providers::retry::RetryDecision::Stop { retry_after } => {
+                            stop_retry_after = retry_after
+                                .or_else(|| provider_error.retry_after());
+                            Action::Return
+                        }
+                    }
+                } else {
+                    Action::Return
+                }
+            }
+            _ => Action::Return,
+        };
+
+        match action {
+            Action::Return => {
+                return StepRun {
+                    outcome,
+                    attempts,
+                    retry_after: stop_retry_after,
+                }
+            }
+            Action::Cancelled => {
+                return StepRun {
+                    outcome: AttemptOutcome::Cancelled(take_failed_attempt(outcome)),
+                    attempts,
+                    retry_after: None,
+                }
+            }
+            Action::AuthRefresh => {
+                auth_refreshed = true;
+                emit(
+                    on_event,
+                    TurnEvent::Retrying {
+                        attempt: attempts + 1,
+                        max_attempts,
+                        delay_ms: 0,
+                        reason: providers::retry::RetryReason::AuthRefresh
+                            .as_str()
+                            .to_string(),
+                        code: None,
+                    },
+                );
+                match refresh_credential(deps, provider).await {
+                    Ok(refreshed) => {
+                        *credential = refreshed;
+                        continue;
+                    }
+                    Err(error) => {
+                        return StepRun {
+                            outcome: AttemptOutcome::Failed {
+                                attempt: StepAttempt::default(),
+                                error: anyhow::Error::new(auth_required_failure(
+                                    &error, credential,
+                                )),
+                            },
+                            attempts,
+                            retry_after: None,
+                        }
+                    }
+                }
+            }
+            Action::Retry {
+                delay,
+                reason,
+                code,
+            } => {
+                emit(
+                    on_event,
+                    TurnEvent::Retrying {
+                        attempt: attempts + 1,
+                        max_attempts,
+                        delay_ms: providers::retry::duration_ms(delay),
+                        reason: reason.to_string(),
+                        code,
+                    },
+                );
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        return StepRun {
+                            outcome: AttemptOutcome::Cancelled(StepAttempt::default()),
+                            attempts,
+                            retry_after: None,
+                        };
+                    }
+                    _ = tokio::time::sleep(delay) => {}
+                }
+                elapsed = elapsed.saturating_add(delay);
+            }
+        }
     }
 }
 
@@ -1725,6 +1956,16 @@ pub async fn run_turn(
                 }
             });
             let Some((fallback_provider_id, fallback_model_id)) = fallback else {
+                if payload.turn_kind == TurnKind::User && !payload.options.regenerate {
+                    return persist_route_failure(
+                        &deps,
+                        &payload,
+                        &conversation,
+                        &turn_id,
+                        route_failure(&primary_error),
+                        &on_event,
+                    );
+                }
                 return Err(primary_error);
             };
             match resolve_turn_route(&deps, &fallback_provider_id, &fallback_model_id).await {
@@ -1738,6 +1979,16 @@ pub async fn run_turn(
                     route
                 }
                 Err(fallback_error) => {
+                    if payload.turn_kind == TurnKind::User && !payload.options.regenerate {
+                        return persist_route_failure(
+                            &deps,
+                            &payload,
+                            &conversation,
+                            &turn_id,
+                            route_failure(&primary_error),
+                            &on_event,
+                        );
+                    }
                     return Err(anyhow!(
                         "{primary_error:#}; o modelo de reserva também falhou: {fallback_error:#}"
                     ));
@@ -1877,7 +2128,7 @@ pub async fn run_turn(
     let (user_message, mut assistant_message) = if options.regenerate {
         prepare_regenerate(&deps, &payload, &provider, &model)?
     } else {
-        prepare_new_turn(&deps, &payload, &provider, &model)?
+        prepare_new_turn(&deps, &payload, &provider.id, &model.id)?
     };
     // Partial snapshots are written while the turn streams so a closed window,
     // Stop or crash cannot discard what was already rendered.
@@ -2667,6 +2918,7 @@ pub async fn run_turn(
             temperature: None,
             cancel: cancel.clone(),
             cache_plan: None,
+            timeouts: StreamTimeouts::from_settings(&settings),
         };
         summary_template.cache_plan = cache_plan_for(
             &provider,
@@ -2765,6 +3017,7 @@ pub async fn run_turn(
                 temperature: None,
                 cancel: cancel.clone(),
                 cache_plan: None,
+                timeouts: StreamTimeouts::from_settings(&settings),
             };
             // F4: o resumo reusa o mesmo plano do request normal (mesmo
             // system/tools) — cache-safe também no write/read do provider.
@@ -2882,81 +3135,57 @@ pub async fn run_turn(
             step_context_stats = Some(stats);
         }
 
-        // One provider attempt may be retried once after a forced OAuth refresh
-        // (401 → force_refresh → same step again).
-        let mut auth_retried = false;
-        let mut stall_retried = false;
-        let outcome = loop {
-            let mut request = CompletionRequest {
-                config: provider_config(&provider, &model, &credential, &wire_session_id),
-                protocols: protocols.clone(),
-                history: history.clone(),
-                system_prompt: step_system_prompt.clone(),
-                tools: tool_definitions.clone(),
-                reasoning: reasoning.clone(),
-                max_output_tokens,
-                temperature: None,
-                cancel: cancel.clone(),
-                // F4: preenchido logo abaixo pelo helper (plan_with_caps).
-                cache_plan: None,
-            };
-            request.cache_plan =
-                cache_plan_for(&provider, &model, &protocols, &request, &settings.cache);
-            if !cache_plan_logged {
-                if let Some(plan) = request.cache_plan.as_ref() {
-                    log_cache_plan(
-                        protocols.first().map(WireProtocol::as_str).unwrap_or(""),
-                        plan,
-                    );
-                    cache_plan_logged = true;
-                }
-            }
-            let on_partial = |attempt: &StepAttempt| {
-                checkpoint.write_attempt(
-                    attempt,
-                    &full_reasoning,
-                    &trace,
-                    &all_tool_calls,
-                    &citations,
-                );
-            };
-            let outcome =
-                run_stream_attempt(&deps, request, &on_event, &cancel, &on_partial).await;
-            let (stall_retry, auth_retry) = match &outcome {
-                AttemptOutcome::Failed { attempt, error } => {
-                    let provider_error = error.downcast_ref::<ProviderError>();
-                    // A stall is only retried when the attempt produced nothing:
-                    // a retry after partial deltas would duplicate the UI stream.
-                    let stall = provider_error.is_some_and(ProviderError::is_stream_stall)
-                        && !stall_retried
-                        && attempt.text.is_empty()
-                        && attempt.reasoning.is_empty()
-                        && attempt.tool_calls.is_empty();
-                    let auth = provider_error.is_some_and(ProviderError::is_auth_failure)
-                        && credential.is_bearer()
-                        && !auth_retried;
-                    (stall, auth)
-                }
-                _ => (false, false),
-            };
-            if stall_retry {
-                stall_retried = true;
-                continue;
-            }
-            if !auth_retry {
-                break outcome;
-            }
-            auth_retried = true;
-            match refresh_credential(&deps, &provider).await {
-                Ok(refreshed) => credential = refreshed,
-                Err(error) => {
-                    break AttemptOutcome::Failed {
-                        attempt: StepAttempt::default(),
-                        error: anyhow::Error::new(auth_required_failure(&error, &credential)),
+        let retry_policy = providers::retry::RetryPolicy::from_settings(&settings);
+        let on_partial = |attempt: &StepAttempt| {
+            checkpoint.write_attempt(
+                attempt,
+                &full_reasoning,
+                &trace,
+                &all_tool_calls,
+                &citations,
+            );
+        };
+        let step_run = run_step_with_retry(
+            &deps,
+            &provider,
+            &mut credential,
+            |credential| {
+                let mut request = CompletionRequest {
+                    config: provider_config(&provider, &model, credential, &wire_session_id),
+                    protocols: protocols.clone(),
+                    history: history.clone(),
+                    system_prompt: step_system_prompt.clone(),
+                    tools: tool_definitions.clone(),
+                    reasoning: reasoning.clone(),
+                    max_output_tokens,
+                    temperature: None,
+                    cancel: cancel.clone(),
+                    // F4: preenchido logo abaixo pelo helper (plan_with_caps).
+                    cache_plan: None,
+                    timeouts: StreamTimeouts::from_settings(&settings),
+                };
+                request.cache_plan =
+                    cache_plan_for(&provider, &model, &protocols, &request, &settings.cache);
+                if !cache_plan_logged {
+                    if let Some(plan) = request.cache_plan.as_ref() {
+                        log_cache_plan(
+                            protocols.first().map(WireProtocol::as_str).unwrap_or(""),
+                            plan,
+                        );
+                        cache_plan_logged = true;
                     }
                 }
-            }
-        };
+                request
+            },
+            &on_event,
+            &cancel,
+            &on_partial,
+            &retry_policy,
+        )
+        .await;
+        let outcome = step_run.outcome;
+        let step_attempts = step_run.attempts;
+        let step_retry_after = step_run.retry_after;
 
         let (
             step_text,
@@ -3001,7 +3230,10 @@ pub async fn run_turn(
                 attempt.duration_ms,
                 attempt.raw_usage,
                 attempt.tool_calls,
-                Some(TurnFailure::from_anyhow(&error, &credential)),
+                Some(
+                    TurnFailure::from_anyhow(&error, &credential)
+                        .with_attempts(step_attempts, step_retry_after),
+                ),
             ),
         };
 
@@ -3076,6 +3308,10 @@ pub async fn run_turn(
 
         if let Some(failure) = failure {
             turn_failure = Some(failure);
+            // The text this failed step already streamed is what the user saw:
+            // keep it as the message content (the trace carries only reasoning,
+            // exactly like the final-answer branch, so nothing is duplicated).
+            full_text = step_text.trim().to_string();
             let mut failed: Vec<ToolCallRecord> = Vec::new();
             for call in streaming_calls
                 .into_iter()
@@ -3083,11 +3319,15 @@ pub async fn run_turn(
             {
                 let mut record = tool_call_record(call);
                 record.status = ToolCallStatus::Error;
-                record.result = Some("Interrompida por um erro do provedor.".to_string());
+                record.result = Some(
+                    "Tool call was not executed: the provider stream failed before the call \
+                     completed."
+                        .to_string(),
+                );
                 record.finished_at = Some(now_ms());
                 failed.push(record);
             }
-            push_trace_step(&mut trace, &step_reasoning, &step_text, step_duration, failed.len());
+            push_trace_step(&mut trace, &step_reasoning, "", step_duration, failed.len());
             // As chamadas que falharam continuam em `tool_calls`; o replay
             // precisa do assistant que as declara para não deixar o output órfão.
             replay_steps.push(ReplayStep {
@@ -3352,64 +3592,53 @@ pub async fn run_turn(
         // anterior como prefixo (0 quebra no tracker de cache).
         let mut forced_history = history.clone();
         forced_history.push(HistoryMessage::user(FORCED_WRAP_UP_MESSAGE));
-        // Same single 401 → refresh → retry rule for the forced final answer.
-        let mut forced_auth_retried = false;
-        let outcome = loop {
-            let mut forced_request = CompletionRequest {
-                config: provider_config(&provider, &model, &credential, &wire_session_id),
-                protocols: protocols.clone(),
-                history: forced_history.clone(),
-                system_prompt: forced_system_prompt.clone(),
-                tools: tool_definitions.clone(),
-                reasoning: reasoning.clone(),
-                max_output_tokens,
-                temperature: None,
-                cancel: cancel.clone(),
-                cache_plan: None,
-            };
-            // F4: mesmo plano do restante do turno (system/tools idênticos).
-            forced_request.cache_plan = cache_plan_for(
-                &provider,
-                &model,
-                &protocols,
-                &forced_request,
-                &settings.cache,
+        let retry_policy = providers::retry::RetryPolicy::from_settings(&settings);
+        let on_partial = |attempt: &StepAttempt| {
+            checkpoint.write_attempt(
+                attempt,
+                &full_reasoning,
+                &trace,
+                &all_tool_calls,
+                &citations,
             );
-            let on_partial = |attempt: &StepAttempt| {
-                checkpoint.write_attempt(
-                    attempt,
-                    &full_reasoning,
-                    &trace,
-                    &all_tool_calls,
-                    &citations,
-                );
-            };
-            let outcome =
-                run_stream_attempt(&deps, forced_request, &on_event, &cancel, &on_partial).await;
-            let retry = match &outcome {
-                AttemptOutcome::Failed { error, .. } => {
-                    error
-                        .downcast_ref::<ProviderError>()
-                        .is_some_and(ProviderError::is_auth_failure)
-                        && credential.is_bearer()
-                        && !forced_auth_retried
-                }
-                _ => false,
-            };
-            if !retry {
-                break outcome;
-            }
-            forced_auth_retried = true;
-            match refresh_credential(&deps, &provider).await {
-                Ok(refreshed) => credential = refreshed,
-                Err(error) => {
-                    break AttemptOutcome::Failed {
-                        attempt: StepAttempt::default(),
-                        error: anyhow::Error::new(auth_required_failure(&error, &credential)),
-                    }
-                }
-            }
         };
+        let forced_run = run_step_with_retry(
+            &deps,
+            &provider,
+            &mut credential,
+            |credential| {
+                let mut forced_request = CompletionRequest {
+                    config: provider_config(&provider, &model, credential, &wire_session_id),
+                    protocols: protocols.clone(),
+                    history: forced_history.clone(),
+                    system_prompt: forced_system_prompt.clone(),
+                    tools: tool_definitions.clone(),
+                    reasoning: reasoning.clone(),
+                    max_output_tokens,
+                    temperature: None,
+                    cancel: cancel.clone(),
+                    cache_plan: None,
+                    timeouts: StreamTimeouts::from_settings(&settings),
+                };
+                // F4: mesmo plano do restante do turno (system/tools idênticos).
+                forced_request.cache_plan = cache_plan_for(
+                    &provider,
+                    &model,
+                    &protocols,
+                    &forced_request,
+                    &settings.cache,
+                );
+                forced_request
+            },
+            &on_event,
+            &cancel,
+            &on_partial,
+            &retry_policy,
+        )
+        .await;
+        let outcome = forced_run.outcome;
+        let forced_attempts = forced_run.attempts;
+        let forced_retry_after = forced_run.retry_after;
 
         let mut forced_attempt = StepAttempt::default();
         let mut forced_failure: Option<TurnFailure> = None;
@@ -3428,7 +3657,8 @@ pub async fn run_turn(
             AttemptOutcome::Completed(attempt) => forced_attempt = attempt,
             AttemptOutcome::Failed { attempt, error } => {
                 forced_attempt = attempt;
-                let mut failure = TurnFailure::from_anyhow(&error, &credential);
+                let mut failure = TurnFailure::from_anyhow(&error, &credential)
+                    .with_attempts(forced_attempts, forced_retry_after);
                 if failure.code.is_none() {
                     failure.message =
                         format!("Falha ao gerar a resposta final: {}", failure.message);
@@ -3580,6 +3810,9 @@ pub async fn run_turn(
     assistant_message.reasoning =
         (!full_reasoning.trim().is_empty()).then(|| full_reasoning.clone());
     assistant_message.status = status;
+    assistant_message.error = turn_failure
+        .as_ref()
+        .map(TurnFailure::to_message_error);
     assistant_message.tool_calls = all_tool_calls.clone();
     assistant_message.citations = citations.clone();
     assistant_message.usage = Some(usage.clone());
@@ -3668,9 +3901,11 @@ pub async fn run_turn(
         user_message: user_message.clone(),
         assistant_message: assistant_message.clone(),
         usage: Some(usage.clone()),
-        // TurnResult keeps the plain message string; `TurnEvent::Error` carries
-        // the structured code/hint for the renderer.
-        error: turn_failure.as_ref().map(|failure| failure.message.clone()),
+        // Structured failure for the renderer; the message row persists the
+        // same payload, so reloading keeps the banner and the retry button.
+        error: turn_failure
+            .as_ref()
+            .map(TurnFailure::to_message_error),
         conversation: updated_conversation,
     };
 
@@ -3750,6 +3985,8 @@ pub async fn run_turn(
                 message: failure.message.clone(),
                 code: failure.code.clone(),
                 hint: failure.hint.clone(),
+                retryable: failure.retryable,
+                attempts: failure.attempts,
             },
         );
     } else {
@@ -3771,24 +4008,101 @@ pub async fn run_turn(
 fn prepare_new_turn(
     deps: &HarnessDeps,
     payload: &TurnPayload,
-    provider: &ProviderInfo,
-    model: &ModelInfo,
+    provider_id: &str,
+    model_id: &str,
 ) -> anyhow::Result<(ChatMessage, ChatMessage)> {
     let mut user_message = ChatMessage::user(&payload.conversation_id, payload.content.clone());
     // Origem honesta: rodada de objetivo não se disfarça de mensagem do usuário
     // (persistido em `messages.origin`; a UI renderiza um divisor próprio).
     user_message.origin = payload.turn_kind;
-    user_message.model_id = Some(model.id.clone());
-    user_message.provider_id = Some(provider.id.clone());
+    user_message.model_id = Some(model_id.to_string());
+    user_message.provider_id = Some(provider_id.to_string());
     user_message.attachments = resolve_attachment_infos(&deps.db, &payload.attachment_ids);
     deps.db.insert_message(&user_message)?;
 
     let mut assistant_message = ChatMessage::assistant(&payload.conversation_id);
-    assistant_message.model_id = Some(model.id.clone());
-    assistant_message.provider_id = Some(provider.id.clone());
+    assistant_message.model_id = Some(model_id.to_string());
+    assistant_message.provider_id = Some(provider_id.to_string());
     deps.db.insert_message(&assistant_message)?;
 
     Ok((user_message, assistant_message))
+}
+
+/// Classifies a route failure (credential/model/protocol) for persistence.
+fn route_failure(error: &anyhow::Error) -> TurnFailure {
+    if let Some(credential) = error.downcast_ref::<CredentialError>() {
+        // A missing/expired credential is fixable by the user: retryable.
+        return TurnFailure {
+            message: credential.message.clone(),
+            code: Some(credential.code.to_string()),
+            hint: credential.hint.clone(),
+            retryable: true,
+            retry_after_ms: None,
+            attempts: 0,
+        };
+    }
+    TurnFailure::plain(format!("{error:#}"))
+}
+
+/// Persists a turn that failed **before** the first provider request (missing
+/// credential, unknown model, no usable protocol) instead of dropping it.
+///
+/// The user message and the failed assistant row survive a reload; the
+/// renderer receives `TurnStarted` + `MessageUpdated` + `Error` and can offer
+/// the same next action as a mid-stream failure.
+fn persist_route_failure(
+    deps: &HarnessDeps,
+    payload: &TurnPayload,
+    conversation: &Conversation,
+    turn_id: &str,
+    failure: TurnFailure,
+    on_event: &Arc<dyn EventEmitter>,
+) -> anyhow::Result<TurnResult> {
+    let (user_message, mut assistant_message) = prepare_new_turn(
+        deps,
+        payload,
+        &payload.provider_id,
+        &payload.model_id,
+    )?;
+    assistant_message.status = MessageStatus::Error;
+    assistant_message.error = Some(failure.to_message_error());
+    deps.db.update_message(&assistant_message)?;
+
+    emit(
+        on_event,
+        TurnEvent::TurnStarted {
+            turn_id: turn_id.to_string(),
+            user_message_id: user_message.id.clone(),
+            assistant_message_id: assistant_message.id.clone(),
+        },
+    );
+    emit(
+        on_event,
+        TurnEvent::MessageUpdated {
+            message: assistant_message.clone(),
+        },
+    );
+    emit(
+        on_event,
+        TurnEvent::Error {
+            message: failure.message.clone(),
+            code: failure.code.clone(),
+            hint: failure.hint.clone(),
+            retryable: failure.retryable,
+            attempts: failure.attempts,
+        },
+    );
+    let updated_conversation = deps
+        .db
+        .get_conversation(&payload.conversation_id)?
+        .or_else(|| Some(conversation.clone()));
+    Ok(TurnResult {
+        user_message,
+        assistant_message,
+        usage: None,
+        error: Some(failure.to_message_error()),
+        conversation: updated_conversation,
+    })
 }
 
 fn prepare_regenerate(
@@ -4212,8 +4526,20 @@ fn build_history(
                 groups.push((Some(message.id.clone()), ordinal, vec![history_message]));
             }
             MessageRole::Assistant => {
-                // Ignore placeholders left behind by an interrupted run.
-                if message.status == MessageStatus::Streaming && message.content.is_empty() {
+                // Ignore placeholders left behind by an interrupted run and
+                // empty failure rows (nothing to replay; adapters would skip
+                // them anyway, but the context estimate should not count them).
+                if (message.status == MessageStatus::Streaming
+                    || message.status == MessageStatus::Error)
+                    && message.content.trim().is_empty()
+                    && message
+                        .reasoning
+                        .as_deref()
+                        .unwrap_or_default()
+                        .trim()
+                        .is_empty()
+                    && message.tool_calls.is_empty()
+                {
                     continue;
                 }
                 let pruned = if message.tool_calls.is_empty() {
@@ -6896,7 +7222,7 @@ mod agent_loop_tests {
 
         assert_eq!(result.assistant_message.status, MessageStatus::Error);
         assert!(result.assistant_message.content.is_empty());
-        let error = result.error.expect("error message");
+        let error = result.error.expect("error message").message;
         assert!(error.contains("gateway indisponível"), "got {error}");
     }
 
@@ -7797,6 +8123,184 @@ mod agent_loop_tests {
     }
 
     #[tokio::test]
+    async fn transient_failure_without_output_is_retried_and_succeeds() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, sink| {
+                let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                Box::pin(async move {
+                    if call == 1 {
+                        return Err(anyhow::Error::new(ProviderError::Transient {
+                            status: Some(503),
+                            code: None,
+                            message: "unavailable".to_string(),
+                            retry_after: None,
+                        }));
+                    }
+                    emit(&sink, ProviderEvent::TextDelta("resposta ok".to_string()));
+                    Ok(())
+                })
+            })
+        };
+        let mut settings = Settings::default();
+        settings.provider_retry_base_delay_ms = 1;
+        settings.provider_retry_max_delay_ms = 1;
+        settings.provider_retry_max_elapsed_ms = 10;
+        let (channel, events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            settings,
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves");
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(result.error.is_none());
+        assert_eq!(result.assistant_message.status, MessageStatus::Complete);
+        assert_eq!(result.assistant_message.content, "resposta ok");
+        assert!(has_event(&events, "retrying"));
+        assert!(has_event(&events, "done"));
+    }
+
+    #[tokio::test]
+    async fn transient_failures_exhaust_the_retry_budget() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, _sink| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    Err(anyhow::Error::new(ProviderError::Transient {
+                        status: Some(502),
+                        code: None,
+                        message: "bad gateway".to_string(),
+                        retry_after: None,
+                    }))
+                })
+            })
+        };
+        let mut settings = Settings::default();
+        settings.provider_max_retries = 2;
+        settings.provider_retry_base_delay_ms = 1;
+        settings.provider_retry_max_delay_ms = 1;
+        settings.provider_retry_max_elapsed_ms = 10;
+        let (channel, _events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            settings,
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            3,
+            "first attempt + two retries"
+        );
+        let error = result.error.expect("structured error");
+        assert_eq!(error.attempts, 3);
+        assert!(error.retryable);
+        assert_eq!(result.assistant_message.status, MessageStatus::Error);
+        assert_eq!(
+            result
+                .assistant_message
+                .error
+                .as_ref()
+                .map(|error| error.attempts),
+            Some(3)
+        );
+    }
+
+    #[tokio::test]
+    async fn permanent_failure_is_not_retried() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, _sink| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    Err(anyhow::Error::new(ProviderError::BadRequest(
+                        "invalid field".to_string(),
+                    )))
+                })
+            })
+        };
+        let (channel, _events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let error = result.error.expect("structured error");
+        assert!(!error.retryable);
+        assert_eq!(error.attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn long_retry_after_is_surfaced_without_waiting() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let streamer: ProviderStreamer = {
+            let calls = calls.clone();
+            Arc::new(move |_request, _sink| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    Err(anyhow::Error::new(ProviderError::RateLimited {
+                        message: "wait".to_string(),
+                        retry_after: Some(std::time::Duration::from_secs(600)),
+                    }))
+                })
+            })
+        };
+        let (channel, _events) = channel();
+        let result = run_turn(
+            deps(temp.db.clone(), streamer),
+            payload(&conversation, 2),
+            Settings::default(),
+            channel,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let error = result.error.expect("structured error");
+        assert_eq!(error.retry_after_ms, Some(600_000));
+    }
+
+    #[tokio::test]
     async fn stream_stall_after_partial_output_is_not_retried() {
         let temp = TempDb::new();
         let conversation = temp
@@ -7877,7 +8381,11 @@ mod agent_loop_tests {
             "only one retry after the 401"
         );
         assert_eq!(result.assistant_message.status, MessageStatus::Error);
-        let message = result.error.clone().unwrap_or_default();
+        let message = result
+            .error
+            .clone()
+            .map(|error| error.message)
+            .unwrap_or_default();
         assert!(message.contains("não autorizado"), "{message}");
         let event = error_event(&events).expect("error event");
         assert_eq!(event["code"], serde_json::json!("auth_required"));
@@ -7953,7 +8461,11 @@ mod agent_loop_tests {
         .expect("turn resolves with an error payload");
 
         assert_eq!(result.assistant_message.status, MessageStatus::Error);
-        let message = result.error.clone().unwrap_or_default();
+        let message = result
+            .error
+            .clone()
+            .map(|error| error.message)
+            .unwrap_or_default();
         assert!(message.contains("usage limit exceeded"), "{message}");
         let event = error_event(&events).expect("error event");
         assert_eq!(
@@ -8023,7 +8535,7 @@ mod agent_loop_tests {
     }
 
     #[tokio::test]
-    async fn missing_credential_fails_before_persisting_the_user_message() {
+    async fn missing_credential_persists_the_user_message_with_a_structured_error() {
         let temp = TempDb::new();
         let conversation = temp
             .db
@@ -8041,8 +8553,8 @@ mod agent_loop_tests {
         let mut harness = oauth_deps(temp.db.clone(), streamer);
         harness.credential_override = None;
         harness.api_key_override = None;
-        let (channel, _events) = channel();
-        let error = run_turn(
+        let (channel, events) = channel();
+        let result = run_turn(
             harness,
             oauth_payload(&conversation, "gpt-6.1-sol"),
             Settings::default(),
@@ -8050,33 +8562,42 @@ mod agent_loop_tests {
             CancellationToken::new(),
         )
         .await
-        .expect_err("a turn without a credential must fail before persisting");
+        .expect("a persisted failure resolves with an error payload");
 
-        let typed = error
-            .downcast_ref::<CredentialError>()
-            .expect("typed credential error");
-        assert_eq!(typed.code, "missing_credentials");
+        assert_eq!(result.assistant_message.status, MessageStatus::Error);
+        let error = result.error.expect("structured error");
+        assert_eq!(error.code.as_deref(), Some("missing_credentials"));
+        assert!(error.retryable);
+        assert_eq!(error.attempts, 0);
         assert!(
-            typed
+            error
                 .hint
                 .as_deref()
                 .unwrap_or_default()
                 .contains("ChatGPT"),
             "hint deve oferecer login: {:?}",
-            typed.hint
+            error.hint
         );
         assert_eq!(
             calls.load(std::sync::atomic::Ordering::SeqCst),
             0,
             "nenhum request ao provedor sem credencial"
         );
-        assert!(
-            temp.db
-                .list_messages(&conversation.id)
-                .expect("messages")
-                .is_empty(),
-            "nenhuma mensagem pode ser persistida sem credencial"
+        let messages = temp.db.list_messages(&conversation.id).expect("messages");
+        assert_eq!(messages.len(), 2, "user + assistant error row");
+        assert_eq!(messages[0].role, MessageRole::User);
+        assert_eq!(messages[1].status, MessageStatus::Error);
+        assert_eq!(
+            messages[1]
+                .error
+                .as_ref()
+                .and_then(|error| error.code.as_deref()),
+            Some("missing_credentials")
         );
+        let event = error_event(&events).expect("error event");
+        assert_eq!(event["code"], serde_json::json!("missing_credentials"));
+        assert_eq!(event["retryable"], serde_json::json!(true));
+        assert!(has_event(&events, "turn_started"));
     }
 
     /* ---------------------------------------------------------------- */
@@ -12597,6 +13118,7 @@ mod agent_loop_tests {
                 tools: &normal_request.tools,
                 cut,
                 cache_plan: normal_request.cache_plan.clone(),
+                timeouts: normal_request.timeouts,
                 max_output_tokens: 1_200,
             },
         )

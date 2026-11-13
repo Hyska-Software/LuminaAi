@@ -26,6 +26,7 @@ import type {
   ProviderAuthStatus,
   ProviderInfo,
   ProviderKeyStatus,
+  Settings,
 } from '@/lib/types';
 import { useAppStore } from '@/lib/store';
 import {
@@ -40,11 +41,38 @@ import {
   Input,
   Spinner,
 } from '@/components/ui';
-import { SettingsBlock, SettingsSection } from './shared';
+import { SettingRow, SettingsBlock, SettingsSection } from './shared';
 
 type TestState =
   | { status: 'ok'; latencyMs: number | null; models: number }
   | { status: 'error'; message: string };
+
+/** Numeric inputs of the provider-resilience settings. */
+interface ResilienceValues {
+  headersTimeout: number;
+  firstEventTimeout: number;
+  idleTimeout: number;
+  totalTimeout: number;
+  maxRetries: number;
+  baseDelay: number;
+  maxDelay: number;
+  maxElapsed: number;
+  afterCap: number;
+}
+
+function resilienceFrom(settings: Settings): ResilienceValues {
+  return {
+    headersTimeout: settings.providerHeadersTimeoutSecs ?? 120,
+    firstEventTimeout: settings.providerFirstEventTimeoutSecs ?? 180,
+    idleTimeout: settings.providerIdleTimeoutSecs ?? 120,
+    totalTimeout: settings.providerTotalTimeoutSecs ?? 1_800,
+    maxRetries: settings.providerMaxRetries ?? 3,
+    baseDelay: settings.providerRetryBaseDelayMs ?? 800,
+    maxDelay: settings.providerRetryMaxDelayMs ?? 20_000,
+    maxElapsed: settings.providerRetryMaxElapsedMs ?? 90_000,
+    afterCap: settings.providerRetryAfterCapMs ?? 60_000,
+  };
+}
 
 /** ChatGPT usage dashboard (also the OpenAI provider console URL). */
 const CHATGPT_USAGE_URL = 'https://chatgpt.com/settings/usage';
@@ -192,6 +220,28 @@ export function ProvidersTab() {
   const awaitChatGptLogin = useAppStore((state) => state.awaitChatGptLogin);
   const cancelChatGptLogin = useAppStore((state) => state.cancelChatGptLogin);
   const signOutProvider = useAppStore((state) => state.signOutProvider);
+  const settings = useAppStore((state) => state.settings);
+  const saveSettings = useAppStore((state) => state.saveSettings);
+  const [resilience, setResilience] = useState<ResilienceValues>(() =>
+    resilienceFrom(settings),
+  );
+
+  useEffect(
+    () => setResilience(resilienceFrom(settings)),
+    [settings],
+  );
+
+  const updateResilience = (
+    key: keyof ResilienceValues,
+    value: number,
+    min: number,
+    max: number,
+    patch: (clamped: number) => Partial<Settings>,
+  ) => {
+    const clamped = Math.max(min, Math.min(max, Math.round(value) || min));
+    setResilience((current) => ({ ...current, [key]: clamped }));
+    void saveSettings(patch(clamped));
+  };
 
   const providerList: ProviderInfo[] = storeProviders.length ? storeProviders : catalogProviders();
 
@@ -1004,6 +1054,270 @@ export function ProvidersTab() {
           ? renderChatGptCard(provider)
           : renderApiKeyCard(provider),
       )}
+
+      <SettingsSection
+        title={t('providers.resilience.title')}
+        description={t('providers.resilience.description')}
+      >
+        <SettingsBlock>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.headers.label')}
+            description={t('providers.resilience.headers.description')}
+          >
+            <Input
+              type="number"
+              min={30}
+              max={600}
+              value={resilience.headersTimeout}
+              aria-label={t('providers.resilience.headers.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  headersTimeout: Number(event.target.value) || 30,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'headersTimeout',
+                  resilience.headersTimeout,
+                  30,
+                  600,
+                  (value) => ({ providerHeadersTimeoutSecs: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.firstEvent.label')}
+            description={t('providers.resilience.firstEvent.description')}
+          >
+            <Input
+              type="number"
+              min={30}
+              max={900}
+              value={resilience.firstEventTimeout}
+              aria-label={t('providers.resilience.firstEvent.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  firstEventTimeout: Number(event.target.value) || 30,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'firstEventTimeout',
+                  resilience.firstEventTimeout,
+                  30,
+                  900,
+                  (value) => ({ providerFirstEventTimeoutSecs: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.idle.label')}
+            description={t('providers.resilience.idle.description')}
+          >
+            <Input
+              type="number"
+              min={15}
+              max={600}
+              value={resilience.idleTimeout}
+              aria-label={t('providers.resilience.idle.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  idleTimeout: Number(event.target.value) || 15,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'idleTimeout',
+                  resilience.idleTimeout,
+                  15,
+                  600,
+                  (value) => ({ providerIdleTimeoutSecs: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.total.label')}
+            description={t('providers.resilience.total.description')}
+          >
+            <Input
+              type="number"
+              min={0}
+              max={7200}
+              value={resilience.totalTimeout}
+              aria-label={t('providers.resilience.total.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  totalTimeout: Number(event.target.value) || 0,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'totalTimeout',
+                  resilience.totalTimeout,
+                  0,
+                  7_200,
+                  (value) => ({ providerTotalTimeoutSecs: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.maxRetries.label')}
+            description={t('providers.resilience.maxRetries.description')}
+          >
+            <Input
+              type="number"
+              min={0}
+              max={8}
+              value={resilience.maxRetries}
+              aria-label={t('providers.resilience.maxRetries.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  maxRetries: Number(event.target.value) || 0,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'maxRetries',
+                  resilience.maxRetries,
+                  0,
+                  8,
+                  (value) => ({ providerMaxRetries: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.baseDelay.label')}
+            description={t('providers.resilience.baseDelay.description')}
+          >
+            <Input
+              type="number"
+              min={100}
+              max={5_000}
+              step={100}
+              value={resilience.baseDelay}
+              aria-label={t('providers.resilience.baseDelay.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  baseDelay: Number(event.target.value) || 100,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'baseDelay',
+                  resilience.baseDelay,
+                  100,
+                  5_000,
+                  (value) => ({ providerRetryBaseDelayMs: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.maxDelay.label')}
+            description={t('providers.resilience.maxDelay.description')}
+          >
+            <Input
+              type="number"
+              min={500}
+              max={60_000}
+              step={500}
+              value={resilience.maxDelay}
+              aria-label={t('providers.resilience.maxDelay.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  maxDelay: Number(event.target.value) || 500,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'maxDelay',
+                  resilience.maxDelay,
+                  500,
+                  60_000,
+                  (value) => ({ providerRetryMaxDelayMs: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.maxElapsed.label')}
+            description={t('providers.resilience.maxElapsed.description')}
+          >
+            <Input
+              type="number"
+              min={0}
+              max={600_000}
+              step={1_000}
+              value={resilience.maxElapsed}
+              aria-label={t('providers.resilience.maxElapsed.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  maxElapsed: Number(event.target.value) || 0,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'maxElapsed',
+                  resilience.maxElapsed,
+                  0,
+                  600_000,
+                  (value) => ({ providerRetryMaxElapsedMs: value }),
+                )
+              }
+            />
+          </SettingRow>
+          <SettingRow
+            vertical
+            label={t('providers.resilience.afterCap.label')}
+            description={t('providers.resilience.afterCap.description')}
+          >
+            <Input
+              type="number"
+              min={1_000}
+              max={600_000}
+              step={1_000}
+              value={resilience.afterCap}
+              aria-label={t('providers.resilience.afterCap.label')}
+              onChange={(event) =>
+                setResilience((current) => ({
+                  ...current,
+                  afterCap: Number(event.target.value) || 1_000,
+                }))
+              }
+              onBlur={() =>
+                updateResilience(
+                  'afterCap',
+                  resilience.afterCap,
+                  1_000,
+                  600_000,
+                  (value) => ({ providerRetryAfterCapMs: value }),
+                )
+              }
+            />
+          </SettingRow>
+        </SettingsBlock>
+      </SettingsSection>
 
       <p className="text-[11px] leading-relaxed text-foreground-subtle">
         {t('providers.privacyFooter')}

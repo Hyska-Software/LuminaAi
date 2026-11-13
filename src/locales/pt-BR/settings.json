@@ -161,6 +161,46 @@
   },
   "providers": {
     "securityNote": "As chaves de API (OpenCode/Anthropic/Google) e a sessão do ChatGPT são gravadas apenas no backend (<code>secrets.json</code> no app-data) e nunca são expostas à interface. Também detectamos as variáveis de ambiente dos provedores e o login existente do OpenCode CLI.",
+    "resilience": {
+      "title": "Confiabilidade",
+      "description": "Timeouts e retentativas automáticas compartilhados por todos os provedores. O retry só acontece antes de qualquer texto ou tool call chegar à tela.",
+      "headers": {
+        "label": "Timeout dos headers (s)",
+        "description": "Espera máxima entre conectar e receber os headers de resposta do provedor."
+      },
+      "firstEvent": {
+        "label": "Timeout do primeiro token (s)",
+        "description": "Espera máxima pelo primeiro evento com saída do modelo."
+      },
+      "idle": {
+        "label": "Timeout de ociosidade (s)",
+        "description": "Gap máximo entre dois eventos com saída depois que o stream começou."
+      },
+      "total": {
+        "label": "Timeout total do stream (s)",
+        "description": "Teto absoluto de um request; 0 desliga o teto."
+      },
+      "maxRetries": {
+        "label": "Retentativas por passo",
+        "description": "Tentativas extras depois do primeiro request (0 desliga o retry automático)."
+      },
+      "baseDelay": {
+        "label": "Backoff base (ms)",
+        "description": "Atraso inicial do backoff exponencial com jitter."
+      },
+      "maxDelay": {
+        "label": "Backoff máximo (ms)",
+        "description": "Teto de um único atraso de retry."
+      },
+      "maxElapsed": {
+        "label": "Orçamento de retry (ms)",
+        "description": "Espera total permitida para os retries de um passo; 0 significa ilimitado."
+      },
+      "afterCap": {
+        "label": "Retry-After máximo (ms)",
+        "description": "Maior espera pedida pelo provedor que aceitamos; acima disso o erro volta com a espera solicitada."
+      }
+    },
     "storeErrorTitle": "A última ação falhou",
     "dismiss": "Dispensar",
     "secretsErrorTitle": "Não foi possível ler o arquivo de segredos",

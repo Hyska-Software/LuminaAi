@@ -36,7 +36,7 @@ pub(crate) async fn stream(
         return Ok(());
     };
     let mut handler = Handler::new(sink, request.config.provider_id.clone());
-    let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
+    let outcome = sse::stream_sse(response, &request.cancel, &request.timeouts, |event, data| {
         handler.on_event(event, data)
     })
     .await;
@@ -45,6 +45,11 @@ pub(crate) async fn stream(
     }
     if request.cancel.is_cancelled() {
         return Ok(());
+    }
+    if handler.finish_reason.is_none() {
+        return Err(ProviderError::StreamInterrupted(
+            "stream ended without finishReason".to_string(),
+        ));
     }
     handler.finish()
 }
@@ -301,9 +306,7 @@ impl<'a> Handler<'a> {
             return Ok(());
         };
         if let Some(error) = value.get("error") {
-            return Err(anyhow::Error::new(ProviderError::Other(format!(
-                "erro do provedor: {error}"
-            ))));
+            return Err(anyhow::Error::new(ProviderError::from_stream_error(error)));
         }
         if let Some(usage) = value.get("usageMetadata").filter(|usage| !usage.is_null()) {
             self.raw_usage = Some(usage.clone());
@@ -655,6 +658,7 @@ mod tests {
             max_output_tokens: Some(64),
             temperature: None,
             cache_plan: None,
+            timeouts: crate::providers::StreamTimeouts::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
         }
     }

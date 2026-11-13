@@ -930,6 +930,7 @@ pub async fn suggest_commit_message(
     let request = crate::harness::batch::BatchRequest {
         provider_id: &settings.default_provider,
         model_id: &settings.default_model,
+        timeouts: crate::providers::StreamTimeouts::from_settings(&settings),
         system_prompt: &system_prompt,
         user_text: &user_text,
         max_output_tokens: 200,

@@ -24,6 +24,19 @@ pub enum TurnEvent {
     },
     /// A new model round started (step 1 = first completion, 2+ = after tools).
     StepStarted { step: u32 },
+    /// The step is being retried after a transient provider failure (or after
+    /// an OAuth refresh). No new timeline step is created; the renderer shows
+    /// the wait in the live status.
+    Retrying {
+        /// Attempt about to start (1-based).
+        attempt: u32,
+        max_attempts: u32,
+        delay_ms: u64,
+        /// `transient` | `auth_refresh`
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<String>,
+    },
     /// Reasoning / thinking stream delta.
     ReasoningDelta { delta: String },
     ReasoningDone,
@@ -78,6 +91,12 @@ pub enum TurnEvent {
         /// seu plano ChatGPT"), separate from the raw provider message.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hint: Option<String>,
+        /// A manual retry may succeed (transient/network/timeout/auth).
+        #[serde(default)]
+        retryable: bool,
+        /// Provider requests made by the failed step (0 = none attempted).
+        #[serde(default)]
+        attempts: u32,
     },
 
     /* ------------------------------------------------------------------ */

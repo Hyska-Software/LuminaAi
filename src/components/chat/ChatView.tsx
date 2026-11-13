@@ -27,7 +27,9 @@ function lastAssistantFailed(messages: ChatMessage[]): boolean {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.role !== 'assistant') continue;
-    return message.status === 'error';
+    // Partial text + failure keeps `status = complete`; the persisted error is
+    // the authoritative signal.
+    return message.status === 'error' || message.error != null;
   }
   return false;
 }

@@ -126,7 +126,6 @@ pub async fn run_turn(
         refresh_override: None,
         model_source: None,
     };
-    let events = on_event.clone();
     let emitter = Arc::new(PersistingEmitter {
         db: state.db.clone(),
         app: app.clone(),
@@ -137,9 +136,16 @@ pub async fn run_turn(
     });
     let result = harness::run_turn(deps, payload.clone(), settings, emitter, cancel).await;
     state.finish_turn(&turn_id);
+    // `run_turn` returns `Ok` for failures that were already persisted (with a
+    // structured `MessageError`); `Err` is reserved for preflight refusals that
+    // must not create a transcript row.
+    let completed = result
+        .as_ref()
+        .map(|turn| turn.assistant_message.error.is_none())
+        .unwrap_or(false);
     let _ = state.db.end_computer_session(
         &payload.conversation_id,
-        if result.is_ok() { "completed" } else { "failed" },
+        if completed { "completed" } else { "failed" },
         crate::domain::now_ms(),
     );
     // Keep the reattach table bounded; terminal turns older than 24h are not
@@ -149,19 +155,7 @@ pub async fn run_turn(
         .prune_turn_events(crate::domain::now_ms() - 24 * 60 * 60 * 1000);
     match result {
         Ok(value) => Ok(value),
-        Err(error) => {
-            // A turn that fails before the first provider call (missing/expired
-            // credential) persists nothing, so the renderer only learns about it
-            // through this error event; surface the actionable code/hint.
-            if let Some(credential) = error.downcast_ref::<harness::CredentialError>() {
-                let _ = events.send(TurnEvent::Error {
-                    message: credential.message.clone(),
-                    code: Some(credential.code.to_string()),
-                    hint: credential.hint.clone(),
-                });
-            }
-            Err(format!("{error:#}"))
-        }
+        Err(error) => Err(format!("{error:#}")),
     }
 }
 

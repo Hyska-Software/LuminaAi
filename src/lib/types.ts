@@ -1135,6 +1135,19 @@ export interface CacheStatsView {
   recent?: CacheSample[];
 }
 
+/** Terminal failure persisted on an assistant message. */
+export interface MessageError {
+  message: string;
+  code?: string | null;
+  hint?: string | null;
+  /** A manual retry may succeed (transient/network/timeout/auth). */
+  retryable: boolean;
+  /** Provider-requested wait (`Retry-After`). */
+  retryAfterMs?: number | null;
+  /** Provider requests made by the failed step (0 = none attempted). */
+  attempts: number;
+}
+
 export interface ChatMessage {
   id: string;
   conversationId: string;
@@ -1158,6 +1171,8 @@ export interface ChatMessage {
    * objetivo). Só tem significado em mensagens de usuário.
    */
   origin?: TurnKind;
+  /** Terminal failure persisted by the harness (survives reloads). */
+  error?: MessageError | null;
 }
 
 /** Origem de uma sessão: o layout onde ela foi criada. */
@@ -1833,13 +1848,21 @@ export interface TurnResult {
   userMessage: ChatMessage;
   assistantMessage: ChatMessage;
   usage?: UsageInfo | null;
-  error?: string | null;
+  error?: MessageError | null;
   conversation?: Conversation | null;
 }
 
 export type TurnEvent =
   | { type: 'turn_started'; turnId: string; userMessageId: string; assistantMessageId: string }
   | { type: 'step_started'; step: number }
+  | {
+      type: 'retrying';
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      reason: 'transient' | 'auth_refresh';
+      code?: string;
+    }
   | { type: 'reasoning_delta'; delta: string }
   | { type: 'reasoning_done' }
   | { type: 'text_delta'; delta: string }
@@ -1863,7 +1886,7 @@ export type TurnEvent =
   | { type: 'title_updated'; conversationId: string; title: string }
   | { type: 'done'; result: TurnResult }
   | { type: 'cancelled' }
-  | { type: 'error'; message: string; code?: string; hint?: string }
+  | { type: 'error'; message: string; code?: string; hint?: string; retryable?: boolean; attempts?: number }
   /* -------- harness de código (docs/goals/code-harness/HARNESS.md §12) -------- */
   | { type: 'approval_requested'; approval: ApprovalRequest }
   | { type: 'approval_resolved'; approvalId: string; decision: ApprovalDecision; scope?: ApprovalScope }
@@ -2246,6 +2269,22 @@ export interface Settings {
   diffOpenMode?: 'tab' | 'panel';
   /** Preferências de cache de prompt (backend sempre envia). */
   cache?: CacheSettings;
+  /** Deadline entre conexão e headers da resposta, em segundos. */
+  providerHeadersTimeoutSecs?: number;
+  /** Deadline do primeiro evento SSE com dados, em segundos. */
+  providerFirstEventTimeoutSecs?: number;
+  /** Gap máximo entre eventos SSE com dados, em segundos. */
+  providerIdleTimeoutSecs?: number;
+  /** Deadline absoluto do stream, em segundos (0 desliga). */
+  providerTotalTimeoutSecs?: number;
+  /** Tentativas extras após a primeira (0 desliga o retry automático). */
+  providerMaxRetries?: number;
+  providerRetryBaseDelayMs?: number;
+  providerRetryMaxDelayMs?: number;
+  /** Orçamento de espera dos retries de um passo (0 = sem teto). */
+  providerRetryMaxElapsedMs?: number;
+  /** Maior espera aceita de `Retry-After` antes de devolver o erro. */
+  providerRetryAfterCapMs?: number;
 }
 
 export interface ProviderKeyStatus {

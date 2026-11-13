@@ -576,6 +576,7 @@ async fn execute_routine_inner(
             Some(
                 result
                     .error
+                    .map(|error| error.hint.unwrap_or(error.message))
                     .unwrap_or_else(|| "a rotina foi cancelada".to_string()),
             ),
         ),

@@ -719,9 +719,12 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
                 }
                 if result.error.is_some() || result.assistant_message.status == MessageStatus::Error
                 {
-                    worker_error = result.error.or_else(|| {
-                        Some(crate::i18n::t("tasks.errors.turnFailed"))
-                    });
+                    worker_error = result
+                        .error
+                        .map(|error| error.hint.unwrap_or(error.message))
+                        .or_else(|| {
+                            Some(crate::i18n::t("tasks.errors.turnFailed"))
+                        });
                     break;
                 }
                 turns_run += 1;

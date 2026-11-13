@@ -62,13 +62,13 @@ describe('TurnErrorBanner', () => {
     expect(within(alert).getByText(/pode ser do plano ou deste app/i)).toBeTruthy();
   });
 
-  it('trata rate_limited como limite só quando o provedor ativo usa o plano', () => {
+  it('trata o código neutro plan_limit como cota e rate_limited como transitório', () => {
     const { rerender } = render(
       <TurnErrorBanner code="rate_limited" onOpenProviders={vi.fn()} />,
     );
     expect(screen.queryByRole('alert')).toBeNull();
 
-    rerender(<TurnErrorBanner code="rate_limited" planProvider onOpenProviders={vi.fn()} />);
+    rerender(<TurnErrorBanner code="plan_limit" onOpenProviders={vi.fn()} />);
     expect(screen.getByText(i18n.t(PLAN_LIMIT_TITLE))).toBeTruthy();
   });
 

@@ -2530,6 +2530,7 @@ mod tests {
             max_output_tokens: Some(2_048),
             temperature: None,
             cache_plan: None,
+            timeouts: crate::providers::StreamTimeouts::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
         }
     }
@@ -3150,6 +3151,7 @@ mod tests {
             max_output_tokens: Some(64),
             temperature: None,
             cache_plan: None,
+            timeouts: crate::providers::StreamTimeouts::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
         }
     }

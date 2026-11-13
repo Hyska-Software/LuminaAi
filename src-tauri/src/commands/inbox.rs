@@ -197,6 +197,7 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
         Ok(result) => {
             let error = result
                 .error
+                .map(|error| error.hint.unwrap_or(error.message))
                 .unwrap_or_else(|| "turno sem resposta".to_string());
             fail(error);
         }

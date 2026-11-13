@@ -42,15 +42,21 @@ pub(crate) async fn stream(
         return Ok(());
     };
     let mut handler = Handler::new(sink, request.config.provider_id.clone());
-    let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
+    let outcome = sse::stream_sse(response, &request.cancel, &request.timeouts, |event, data| {
         handler.on_event(event, data)
     })
     .await;
-    if let Err(error) = outcome {
-        return Err(to_provider_error(error));
-    }
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => return Err(to_provider_error(error)),
+    };
     if request.cancel.is_cancelled() {
         return Ok(());
+    }
+    if !handler.completed && !outcome.done_sentinel {
+        return Err(ProviderError::StreamInterrupted(
+            "stream ended without finish_reason or [DONE]".to_string(),
+        ));
     }
     handler.finish()
 }
@@ -333,6 +339,8 @@ struct Handler<'a> {
     /// Verbatim final usage block (safe excerpt is emitted as `UsageRaw`).
     raw_usage: Option<Value>,
     tools: BTreeMap<usize, ChatToolCall>,
+    /// A choice reported `finish_reason`; the protocol reached its end.
+    completed: bool,
 }
 
 impl<'a> Handler<'a> {
@@ -343,6 +351,7 @@ impl<'a> Handler<'a> {
             usage: None,
             raw_usage: None,
             tools: BTreeMap::new(),
+            completed: false,
         }
     }
 
@@ -352,9 +361,7 @@ impl<'a> Handler<'a> {
             return Ok(());
         };
         if let Some(error) = value.get("error") {
-            return Err(anyhow::Error::new(ProviderError::Other(format!(
-                "erro do provedor: {error}"
-            ))));
+            return Err(anyhow::Error::new(ProviderError::from_stream_error(error)));
         }
         if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
             self.raw_usage = Some(usage.clone());
@@ -364,6 +371,12 @@ impl<'a> Handler<'a> {
             return Ok(());
         };
         for choice in choices {
+            if choice
+                .get("finish_reason")
+                .is_some_and(|reason| !reason.is_null())
+            {
+                self.completed = true;
+            }
             if let Some(delta) = choice.get("delta") {
                 if let Some(text) = delta.get("content").and_then(Value::as_str) {
                     if !text.is_empty() {
@@ -635,6 +648,7 @@ mod tests {
             max_output_tokens: Some(64),
             temperature: None,
             cache_plan: None,
+            timeouts: crate::providers::StreamTimeouts::default(),
             cancel: tokio_util::sync::CancellationToken::new(),
         }
     }

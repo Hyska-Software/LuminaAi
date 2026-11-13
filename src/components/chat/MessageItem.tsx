@@ -27,7 +27,10 @@ import { MessageArtifacts } from './MessageArtifacts';
  */
 const KEY_ERROR_PATTERN =
   /(chave de api|api[ _-]?key|401|unauthorized|no configurad|credencial|credenciales)/i;
-const KEY_ERROR_CODES = new Set(['missing_credentials', 'auth_required']);
+const KEY_ERROR_CODES: Record<string, true> = {
+  missing_credentials: true,
+  auth_required: true,
+};
 
 /** Entrance animation shared by every message (DESIGN §11: fade-in-up 260ms). */
 const MESSAGE_MOTION = {
@@ -78,7 +81,7 @@ interface MessageItemProps {
   /** Audit/subagent views hide edit/regenerate/feedback actions. */
   readOnly?: boolean;
   /** Streaming phase owned by the caller (global chat or a subagent tab). */
-  streamPhase?: 'starting' | 'reasoning' | 'text' | 'tool' | null;
+  streamPhase?: 'starting' | 'reasoning' | 'text' | 'tool' | 'retrying' | null;
   /** Turn start timestamp owned by the caller (used by AgentSteps). */
   streamStartedAt?: number | null;
 }
@@ -198,6 +201,10 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   const errorCode = useChatStore((state) => state.errorCode);
 
   const phase = streamPhase;
+  const retryInfo = useChatStore((state) => {
+    const stream = state.streamsByConversation[message.conversationId];
+    return stream?.assistantId === message.id ? (stream.retry ?? null) : null;
+  });
   const startedAt = streamStartedAt;
   const anyStreaming = useChatStore((state) => state.streaming !== null);
   const showTokenUsage = useAppStore((state) => state.settings.showTokenUsage);
@@ -239,7 +246,8 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   const toolCalls = message.toolCalls ?? [];
   const reasoning = message.reasoning?.trim() ?? '';
   const reasoningActive = isStreaming && phase === 'reasoning';
-  const awaitingText = isStreaming && !message.content && !reasoning && toolCalls.length === 0;
+  const awaitingText =
+    isStreaming && phase !== 'retrying' && !message.content && !reasoning && toolCalls.length === 0;
   const showCaret = isStreaming && phase === 'text' && message.content.length > 0;
   const messageArtifacts = useMemo(
     () => artifacts.filter((artifact) => artifact.messageId === message.id),
@@ -251,9 +259,17 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
     usage?.totalTokens ??
     ((usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0) || null);
   const model = modelLabel(message);
+  const failure = message.error ?? null;
+  const failed = message.status === 'error' || failure !== null;
+  const failureText = failure
+    ? (failure.hint ?? failure.message)
+    : message.content;
+  const canRetry = failure ? failure.retryable : true;
+  const keyErrorCode = failure?.code ?? errorCode;
   const isKeyError =
-    message.status === 'error' &&
-    (KEY_ERROR_CODES.has(errorCode ?? '') || KEY_ERROR_PATTERN.test(message.content ?? ''));
+    (message.status === 'error' || failure !== null) &&
+    (KEY_ERROR_CODES[keyErrorCode ?? ''] ||
+      KEY_ERROR_PATTERN.test(failure?.message ?? message.content ?? ''));
 
   const regenerate = () => {
     window.dispatchEvent(new CustomEvent('zylara:scroll-bottom'));
@@ -290,24 +306,51 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           </div>
         ) : null}
 
-        {message.status === 'error' ? (
+        {isStreaming && phase === 'retrying' ? (
+          <div className="flex items-center gap-2 py-1 text-[13px] text-foreground-subtle">
+            <Spinner size="xs" />
+            <span>
+              {retryInfo?.reason === 'auth_refresh'
+                ? t('message.retryAuth')
+                : t('message.retrying', {
+                    attempt: retryInfo?.attempt ?? 1,
+                    maxAttempts: retryInfo?.maxAttempts ?? 1,
+                    seconds: Math.max(1, Math.round((retryInfo?.delayMs ?? 0) / 1000)),
+                  })}
+            </span>
+          </div>
+        ) : null}
+
+        {failed ? (
           <div role="alert" className="mt-2 rounded-xl border border-border bg-danger-soft p-3">
             <div className="flex items-start gap-2">
               <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium text-foreground">{t('message.failedTitle')}</p>
-                {message.content ? (
+                {failureText ? (
                   <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] text-foreground-muted">
-                    {message.content}
+                    {failureText}
                   </p>
                 ) : (
                   <p className="mt-1 text-[12.5px] text-foreground-muted">{t('message.failedHint')}</p>
                 )}
+                {(failure?.attempts ?? 0) > 1 ? (
+                  <p className="mt-1 text-[11.5px] text-foreground-subtle">
+                    {t('message.attempts', { count: failure?.attempts })}
+                  </p>
+                ) : null}
                 {!readOnly ? (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <Button variant="secondary" size="sm" onClick={regenerate} disabled={anyStreaming}>
-                      {t('common:actions.retry')}
-                    </Button>
+                    {canRetry ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={regenerate}
+                        disabled={anyStreaming}
+                      >
+                        {t('common:actions.retry')}
+                      </Button>
+                    ) : null}
                     {isKeyError ? (
                       <Button
                         variant="ghost"

@@ -273,6 +273,7 @@ impl EventEmitter for SubagentForwarder {
 fn forwardable_event(event: &TurnEvent) -> Option<TurnEvent> {
     match event {
         TurnEvent::StepStarted { .. }
+        | TurnEvent::Retrying { .. }
         | TurnEvent::ReasoningDelta { .. }
         | TurnEvent::ReasoningDone
         | TurnEvent::TextDelta { .. }
@@ -604,7 +605,8 @@ async fn run_child(
             return Err(error);
         }
     };
-    if let Some(error) = result.error.as_deref() {
+    if let Some(error) = result.error.as_ref() {
+        let message = error.hint.clone().unwrap_or_else(|| error.message.clone());
         emit_finished(
             &progress,
             &request.task_call_id,
@@ -612,9 +614,9 @@ async fn run_child(
             "error",
             result.usage.clone(),
             duration_ms,
-            Some(error.to_string()),
+            Some(message.clone()),
         );
-        anyhow::bail!("subagente falhou: {error}");
+        anyhow::bail!("subagente falhou: {message}");
     }
     match result.assistant_message.status {
         // Subagents do not run the completion gate; a usable report stays a

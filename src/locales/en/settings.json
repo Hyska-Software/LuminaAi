@@ -161,6 +161,46 @@
   },
   "providers": {
     "securityNote": "API keys (OpenCode/Anthropic/Google) and the ChatGPT session are stored only in the backend (<code>secrets.json</code> in app-data) and are never exposed to the interface. We also detect the providers' environment variables and an existing OpenCode CLI login.",
+    "resilience": {
+      "title": "Reliability",
+      "description": "Deadlines and automatic retries shared by every provider. Retries only happen before any text or tool call reaches the screen.",
+      "headers": {
+        "label": "Response headers timeout (s)",
+        "description": "Maximum wait between connecting and receiving the provider's response headers."
+      },
+      "firstEvent": {
+        "label": "First token timeout (s)",
+        "description": "Maximum wait for the first streamed event with model output."
+      },
+      "idle": {
+        "label": "Stream idle timeout (s)",
+        "description": "Maximum gap between two events with output once the stream started."
+      },
+      "total": {
+        "label": "Total stream timeout (s)",
+        "description": "Absolute cap for one request; 0 disables the cap."
+      },
+      "maxRetries": {
+        "label": "Retries per step",
+        "description": "Extra attempts after the first request (0 disables automatic retries)."
+      },
+      "baseDelay": {
+        "label": "Base backoff (ms)",
+        "description": "Starting delay of the exponential backoff with jitter."
+      },
+      "maxDelay": {
+        "label": "Maximum backoff (ms)",
+        "description": "Upper bound of a single retry delay."
+      },
+      "maxElapsed": {
+        "label": "Retry budget (ms)",
+        "description": "Total wait allowed for retries of one step; 0 means unlimited."
+      },
+      "afterCap": {
+        "label": "Maximum Retry-After (ms)",
+        "description": "Longest server-requested wait accepted; above it the error is shown with the requested wait."
+      }
+    },
     "storeErrorTitle": "The last action failed",
     "dismiss": "Dismiss",
     "secretsErrorTitle": "Could not read the secrets file",

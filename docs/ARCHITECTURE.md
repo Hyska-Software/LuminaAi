@@ -319,6 +319,24 @@ Fatos descobertos por sondagem (ver `docs/MODELS.md`):
 
 `providers::stream_completion` percorre `model.protocols` em ordem. Se o gateway responder `ModelProtocolUnsupported`, tenta o próximo. Erros de parâmetro de raciocínio são reenviados uma vez sem o parâmetro (auto-healing).
 
+### Retry, timeouts e stream truncado
+
+`ProviderError` classifica a falha (transitória, refresh de auth ou permanente) e cada
+`CompletionRequest` carrega `StreamTimeouts` (headers, primeiro evento, idle e total),
+construído pelas settings `provider*`. `providers::sse` impõe os deadlines e cada adapter
+exige o sinal terminal do protocolo (`finish_reason`/`[DONE]`, `response.completed`,
+`message_stop`, `finishReason`); EOF antes disso vira `StreamInterrupted`, nunca uma resposta
+truncada salva como completa.
+
+O retry vive no harness (`run_step_with_retry`): só repete quando o attempt não emitiu texto,
+reasoning nem tool calls; 401 com bearer renova a credencial uma vez fora do orçamento de
+retries; `Retry-After` é honrado até o teto configurado. Cada espera emite
+`TurnEvent::Retrying` (fase `retrying` na UI) e cancelamento vence o sleep. Falhas terminais
+são persistidas em `messages.error` (`MessageError`: mensagem, código, dica, `retryable`,
+`attempts`, `retryAfterMs`), então o banner e o botão de retry sobrevivem a reloads; falhas
+antes do primeiro request (credencial/modelo/protocolo) também persistem usuário + bolha de
+erro para turnos novos.
+
 ## 8. Harness
 
 `harness::run_turn` executa:

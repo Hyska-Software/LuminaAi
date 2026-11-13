@@ -12,9 +12,11 @@ pub mod google;
 pub mod openai_chat;
 pub mod openai_responses;
 pub mod reasoning;
+pub mod retry;
 pub mod sse;
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -22,6 +24,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{ModelInfo, ProviderAuth, RequestProfile};
 use crate::domain::UsageInfo;
+
+pub use retry::RetryClass;
 
 /* ------------------------------------------------------------------ */
 /* Protocol                                                            */
@@ -277,6 +281,69 @@ impl ReasoningRequest {
     }
 }
 
+/// Deadline that expired while waiting for one provider request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutPhase {
+    /// Connection opened but the response headers never arrived.
+    Headers,
+    /// Headers arrived but the first SSE event with data never did.
+    FirstEvent,
+    /// The stream went silent after it started.
+    Idle,
+    /// The absolute stream deadline configured for the request expired.
+    Total,
+}
+
+impl TimeoutPhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Headers => "headers",
+            Self::FirstEvent => "first event",
+            Self::Idle => "idle",
+            Self::Total => "total",
+        }
+    }
+}
+
+/// Per-request deadlines applied to every provider protocol.
+///
+/// `connect_timeout` stays on the shared HTTP client (20 s): the client is also
+/// used by web tools, and reqwest only accepts a connect timeout when the
+/// client is built. Everything else is enforced per request here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamTimeouts {
+    pub headers: Duration,
+    pub first_event: Duration,
+    pub idle: Duration,
+    /// `None` disables the absolute stream cap.
+    pub total: Option<Duration>,
+}
+
+impl Default for StreamTimeouts {
+    fn default() -> Self {
+        Self {
+            headers: Duration::from_secs(120),
+            first_event: Duration::from_secs(180),
+            idle: Duration::from_secs(120),
+            total: Some(Duration::from_secs(1_800)),
+        }
+    }
+}
+
+impl StreamTimeouts {
+    pub fn from_settings(settings: &crate::domain::Settings) -> Self {
+        Self {
+            headers: Duration::from_secs(u64::from(settings.provider_headers_timeout_secs)),
+            first_event: Duration::from_secs(u64::from(
+                settings.provider_first_event_timeout_secs,
+            )),
+            idle: Duration::from_secs(u64::from(settings.provider_idle_timeout_secs)),
+            total: (settings.provider_total_timeout_secs > 0)
+                .then(|| Duration::from_secs(u64::from(settings.provider_total_timeout_secs))),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
     pub config: ProviderConfig,
@@ -295,6 +362,8 @@ pub struct CompletionRequest {
     /// as it was before F4; the harness owns the decision (capabilities +
     /// settings + request index), the provider layer only lowers it.
     pub cache_plan: Option<cache::CachePlan>,
+    /// Deadlines for the HTTP handshake and the SSE stream.
+    pub timeouts: StreamTimeouts,
     pub cancel: CancellationToken,
 }
 
@@ -454,6 +523,8 @@ const CODE_USER_NOT_ELIGIBLE: &str = "subscription_sharing_user_not_eligible";
 const CODE_USAGE_LIMIT_EXCEEDED: &str = "subscription_sharing_usage_limit_exceeded";
 /// Raw provider code for "this route/method is not supported".
 const CODE_ROUTE_NOT_SUPPORTED: &str = "subscription_sharing_route_not_supported";
+/// Raw provider code for a request field the preview route rejects.
+const CODE_UNSUPPORTED_CAPABILITY: &str = "subscription_sharing_unsupported_capability";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
@@ -461,18 +532,44 @@ pub enum ProviderError {
     UnsupportedProtocol(String),
     #[error("unauthorized: {0}")]
     Unauthorized(String),
-    #[error("rate limited: {0}")]
-    RateLimited(String),
+    #[error("rate limited: {message}")]
+    RateLimited {
+        message: String,
+        retry_after: Option<Duration>,
+    },
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("insufficient credit: {0}")]
+    InsufficientCredit(String),
     #[error("network error: {0}")]
     Network(String),
+    /// A deadline expired before/while the provider responded.
+    #[error("request timed out ({}): {detail}", .phase.as_str())]
+    Timeout {
+        phase: TimeoutPhase,
+        detail: String,
+    },
+    /// The SSE body ended (or failed) before the protocol's terminal signal.
+    #[error("stream interrupted: {0}")]
+    StreamInterrupted(String),
     /// The SSE stream produced no model event before the first-event/idle
-    /// deadline. Retriable once when the attempt has no partial output.
+    /// deadline. Retryable when the attempt has no partial output.
     #[error("stream stalled: {0}")]
     StreamStalled(String),
+    /// Provider-side failure that is safe to retry (5xx, 408, 409, 425, 429
+    /// without a plan/quota code, transient in-stream error).
+    #[error("upstream error: {message}")]
+    Transient {
+        status: Option<u16>,
+        code: Option<String>,
+        message: String,
+        retry_after: Option<Duration>,
+    },
     #[error("provider error: {0}")]
     Other(String),
+    /// The harness dropped the event channel because the turn was cancelled.
+    #[error("turn cancelled")]
+    Cancelled,
     /// The ChatGPT-plan allowance is exhausted (429
     /// `subscription_sharing_usage_limit_exceeded`): pause plan requests and
     /// offer the "Gerenciar uso" action — never auto-retry/log in a loop.
@@ -501,8 +598,18 @@ pub enum ProviderError {
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
 impl ProviderError {
-    /// Build a typed error from an HTTP status + response body.
+    /// Build a typed error from an HTTP status + response body (no headers).
     pub fn from_http(status: u16, body: &str) -> Self {
+        Self::from_http_with_retry_after(status, body, None)
+    }
+
+    /// Build a typed error from an HTTP status, response body and the
+    /// server-requested wait (`Retry-After` family of headers).
+    pub fn from_http_with_retry_after(
+        status: u16,
+        body: &str,
+        retry_after: Option<Duration>,
+    ) -> Self {
         let lower = body.to_lowercase();
         if lower.contains("modelprotocolunsupported")
             || lower.contains("does not support this protocol")
@@ -511,24 +618,27 @@ impl ProviderError {
         }
         let structured = StructuredError::from_body(body);
         let code = structured.code.as_deref();
+        let excerpt = error_excerpt(body);
         match status {
-            // The plan route answers 400 with a structured code when the
-            // request carries a field/tool/model the preview does not accept.
+            // Only the known preview-contract code is a capability error. A
+            // generic 400 with a structured `code` is still a bad request:
+            // misclassifying it hides the real provider message and blocks the
+            // cache/plan fallbacks that key off `BadRequest`.
             400 => {
-                if code.is_some() {
+                if code == Some(CODE_UNSUPPORTED_CAPABILITY) {
                     Self::UnsupportedCapability(structured)
                 } else {
-                    Self::BadRequest(body.to_string())
+                    Self::BadRequest(excerpt)
                 }
             }
             401 => {
                 if code == Some(CODE_INVALID_USER) {
                     Self::AuthRequired(structured)
                 } else {
-                    Self::Unauthorized(body.to_string())
+                    Self::Unauthorized(excerpt)
                 }
             }
-            402 => Self::BadRequest(format!("saldo/créditos insuficientes: {body}")),
+            402 => Self::InsufficientCredit(format!("saldo/créditos insuficientes: {excerpt}")),
             403 => match code {
                 Some(CODE_USER_NOT_ELIGIBLE) => Self::PlanNotEligible(structured),
                 Some(CODE_ROUTE_NOT_SUPPORTED) => Self::RouteNotSupported(structured),
@@ -536,17 +646,25 @@ impl ProviderError {
                 // `chatpass_v2_invalid_authorization_context`): the account has
                 // no usable plan grant; do not silently switch billing.
                 Some(code) if code.starts_with("chatpass_v2_") => Self::PlanNotEligible(structured),
-                _ => Self::Unauthorized(body.to_string()),
+                _ => Self::Unauthorized(excerpt),
             },
             429 => {
                 if code == Some(CODE_USAGE_LIMIT_EXCEEDED) {
                     Self::PlanLimit(structured)
                 } else {
-                    Self::RateLimited(body.to_string())
+                    Self::RateLimited {
+                        message: excerpt,
+                        retry_after,
+                    }
                 }
             }
-            _ if (500..600).contains(&status) => Self::Other(body.to_string()),
-            _ => Self::Other(body.to_string()),
+            408 | 409 | 425 | 500..=599 => Self::Transient {
+                status: Some(status),
+                code: Some(code.unwrap_or_default().to_string()).filter(|code| !code.is_empty()),
+                message: excerpt,
+                retry_after,
+            },
+            _ => Self::Other(excerpt),
         }
     }
 
@@ -556,37 +674,52 @@ impl ProviderError {
     /// started, so these must map exactly like their HTTP counterparts.
     pub(crate) fn from_stream_error(value: &Value) -> Self {
         let structured = StructuredError::from_value(value);
-        match structured.code.as_deref() {
+        // Google reports the machine code in `error.status`
+        // (`RESOURCE_EXHAUSTED`, `UNAVAILABLE`, …); other providers use
+        // `error.code`.
+        let stream_code = structured.code.as_deref().or_else(|| {
+            value
+                .pointer("/error/status")
+                .or_else(|| value.get("status"))
+                .and_then(Value::as_str)
+                .filter(|status| !status.trim().is_empty())
+        });
+        match stream_code {
             Some(CODE_USAGE_LIMIT_EXCEEDED) | Some("insufficient_quota") => {
                 Self::PlanLimit(structured)
             }
             Some(CODE_USER_NOT_ELIGIBLE) => Self::PlanNotEligible(structured),
             Some(CODE_INVALID_USER) => Self::AuthRequired(structured),
-            Some("subscription_sharing_unsupported_capability") => {
-                Self::UnsupportedCapability(structured)
-            }
+            Some(CODE_UNSUPPORTED_CAPABILITY) => Self::UnsupportedCapability(structured),
             Some(CODE_ROUTE_NOT_SUPPORTED) => Self::RouteNotSupported(structured),
+            Some(code) if is_transient_stream_code(code) => Self::Transient {
+                status: None,
+                code: Some(code.to_string()),
+                message: structured.message.clone(),
+                retry_after: None,
+            },
             _ => Self::Other(format!("resposta falhou: {value}")),
         }
     }
 
-    /// Transport-neutral app code for `TurnEvent::Error.code` (see PLAN §2.3:
-    /// `auth_required`, `rate_limited`, `plan_not_eligible`,
-    /// `unsupported_capability`). The raw provider code is available through
-    /// [`Self::provider_code`] when the UI needs the exact
-    /// `subscription_sharing_*` value.
+    /// Transport-neutral app code for `TurnEvent::Error.code` / `MessageError`.
+    /// The raw provider code is available through [`Self::provider_code`] when
+    /// the UI needs the exact `subscription_sharing_*` value.
     pub fn code(&self) -> Option<&'static str> {
         match self {
             Self::Unauthorized(_) | Self::AuthRequired(_) => Some("auth_required"),
-            Self::RateLimited(_) | Self::PlanLimit(_) => Some("rate_limited"),
+            Self::RateLimited { .. } => Some("rate_limited"),
+            Self::PlanLimit(_) => Some("plan_limit"),
             Self::PlanNotEligible(_) => Some("plan_not_eligible"),
             Self::UnsupportedCapability(_) => Some("unsupported_capability"),
             Self::RouteNotSupported(_) => Some("route_not_supported"),
-            Self::UnsupportedProtocol(_)
-            | Self::BadRequest(_)
-            | Self::Network(_)
-            | Self::StreamStalled(_)
-            | Self::Other(_) => None,
+            Self::BadRequest(_) => Some("bad_request"),
+            Self::InsufficientCredit(_) => Some("insufficient_credit"),
+            Self::Network(_) => Some("network"),
+            Self::Timeout { .. } | Self::StreamStalled(_) => Some("timeout"),
+            Self::StreamInterrupted(_) => Some("stream_interrupted"),
+            Self::Transient { .. } => Some("upstream_error"),
+            Self::UnsupportedProtocol(_) | Self::Other(_) | Self::Cancelled => None,
         }
     }
 
@@ -598,6 +731,7 @@ impl ProviderError {
             | Self::UnsupportedCapability(error)
             | Self::AuthRequired(error)
             | Self::RouteNotSupported(error) => error.code.as_deref(),
+            Self::Transient { code, .. } => code.as_deref(),
             _ => None,
         }
     }
@@ -610,6 +744,42 @@ impl ProviderError {
         }
     }
 
+    /// Retry category of this failure.
+    pub fn retry_class(&self) -> RetryClass {
+        match self {
+            Self::Unauthorized(_) | Self::AuthRequired(_) => RetryClass::AuthRefresh,
+            Self::RateLimited { .. }
+            | Self::Network(_)
+            | Self::Timeout { .. }
+            | Self::StreamInterrupted(_)
+            | Self::StreamStalled(_)
+            | Self::Transient { .. } => RetryClass::Transient,
+            Self::UnsupportedProtocol(_)
+            | Self::BadRequest(_)
+            | Self::InsufficientCredit(_)
+            | Self::Other(_)
+            | Self::Cancelled
+            | Self::PlanLimit(_)
+            | Self::PlanNotEligible(_)
+            | Self::UnsupportedCapability(_)
+            | Self::RouteNotSupported(_) => RetryClass::Permanent,
+        }
+    }
+
+    /// Server-requested wait carried by the failure, when any.
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::RateLimited { retry_after, .. } | Self::Transient { retry_after, .. } => {
+                *retry_after
+            }
+            _ => None,
+        }
+    }
+
+    pub fn is_transient(&self) -> bool {
+        self.retry_class() == RetryClass::Transient
+    }
+
     /// 401-class failure: the harness may refresh an OAuth bearer and retry
     /// exactly once before asking for a new login.
     pub fn is_auth_failure(&self) -> bool {
@@ -617,7 +787,7 @@ impl ProviderError {
     }
 
     /// The stream watchdog aborted the attempt before the model produced any
-    /// output. The harness retries once when the attempt is still empty.
+    /// output. The harness retries when the attempt is still empty.
     pub fn is_stream_stall(&self) -> bool {
         matches!(self, Self::StreamStalled(_))
     }
@@ -633,6 +803,57 @@ impl ProviderError {
     }
 }
 
+/// Cap and clean an HTTP error body before it reaches the UI/database.
+///
+/// HTML error pages (proxies, CDNs) are reduced to their text content; JSON and
+/// plain text are only truncated. The provider message never dumps a full page
+/// into the chat.
+pub(crate) fn error_excerpt(body: &str) -> String {
+    const MAX_CHARS: usize = 2_000;
+    let trimmed = body.trim();
+    let looks_html = trimmed.starts_with('<')
+        && (trimmed.to_ascii_lowercase().contains("<html")
+            || trimmed.to_ascii_lowercase().contains("<!doctype"));
+    let mut out = String::with_capacity(trimmed.len().min(MAX_CHARS));
+    if looks_html {
+        let mut inside_tag = false;
+        for ch in trimmed.chars() {
+            match ch {
+                '<' => inside_tag = true,
+                '>' => {
+                    inside_tag = false;
+                    out.push(' ');
+                }
+                _ if !inside_tag => out.push(ch),
+                _ => {}
+            }
+        }
+    } else {
+        out.push_str(trimmed);
+    }
+    let collapsed = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    collapsed.chars().take(MAX_CHARS).collect()
+}
+
+/// Provider codes that mean "try again" when they arrive inside a stream.
+fn is_transient_stream_code(code: &str) -> bool {
+    matches!(
+        code,
+        "server_error"
+            | "internal_error"
+            | "api_error"
+            | "overloaded_error"
+            | "rate_limit_error"
+            | "rate_limit_exceeded"
+            | "timeout"
+            | "unavailable"
+            | "UNAVAILABLE"
+            | "INTERNAL"
+            | "DEADLINE_EXCEEDED"
+            | "RESOURCE_EXHAUSTED"
+    )
+}
+
 /* ------------------------------------------------------------------ */
 /* Shared plumbing for the protocol adapters                           */
 /* ------------------------------------------------------------------ */
@@ -644,11 +865,8 @@ pub(crate) fn endpoint(base_url: &str, path: &str) -> String {
 /// Send one provider event, failing when the harness dropped the receiver
 /// (turn cancelled / aborted).
 pub(crate) fn emit(sink: &EventSink, event: ProviderEvent) -> anyhow::Result<()> {
-    sink.send(event).map_err(|_| {
-        anyhow::Error::new(ProviderError::Other(
-            "canal de eventos fechado (turno cancelado?)".to_string(),
-        ))
-    })
+    sink.send(event)
+        .map_err(|_| anyhow::Error::new(ProviderError::Cancelled))
 }
 
 /// Emit the canonical prefix digest of one wire request.
@@ -719,19 +937,53 @@ pub(crate) async fn send_stream(
     }
     let response = tokio::select! {
         _ = request.cancel.cancelled() => return Ok(None),
-        result = builder.json(body).send() => result.map_err(|error| {
-            ProviderError::Network(format!("falha ao conectar no provedor: {error}"))
-        })?,
+        result = tokio::time::timeout(request.timeouts.headers, builder.json(body).send()) => match result {
+            Err(_) => {
+                return Err(ProviderError::Timeout {
+                    phase: TimeoutPhase::Headers,
+                    detail: format!(
+                        "sem resposta de {} em {} s",
+                        request.config.provider_name,
+                        request.timeouts.headers.as_secs()
+                    ),
+                });
+            }
+            Ok(Err(error)) => return Err(classify_transport_error(error)),
+            Ok(Ok(response)) => response,
+        },
     };
     let status = response.status();
     if !status.is_success() {
+        let retry_after = retry::retry_after_from_headers(response.headers());
         let body_text = tokio::select! {
             _ = request.cancel.cancelled() => return Ok(None),
-            text = response.text() => text.unwrap_or_default(),
+            text = tokio::time::timeout(Duration::from_secs(15), response.text()) => match text {
+                Ok(text) => text.unwrap_or_default(),
+                Err(_) => String::new(),
+            },
         };
-        return Err(ProviderError::from_http(status.as_u16(), &body_text));
+        return Err(ProviderError::from_http_with_retry_after(
+            status.as_u16(),
+            &body_text,
+            retry_after,
+        ));
     }
     Ok(Some(response))
+}
+
+/// Classify a transport failure: timeouts are retryable timeouts, everything
+/// else is a network failure (also retryable, but keeps the underlying detail).
+fn classify_transport_error(error: reqwest::Error) -> ProviderError {
+    if error.is_timeout() {
+        return ProviderError::Timeout {
+            phase: TimeoutPhase::Headers,
+            detail: format!("falha ao conectar no provedor: {error}"),
+        };
+    }
+    if error.is_connect() {
+        return ProviderError::Network(format!("falha ao conectar no provedor: {error}"));
+    }
+    ProviderError::Network(format!("falha na conexão com o provedor: {error}"))
 }
 
 /// Wire fields added by the explicit cache mechanisms. A request-shape
@@ -1132,6 +1384,7 @@ mod smoke {
             max_output_tokens: Some(4_096),
             temperature: None,
             cache_plan: None,
+            timeouts: StreamTimeouts::default(),
             cancel,
         };
         let http = reqwest::Client::builder()
@@ -1596,6 +1849,7 @@ mod smoke {
             max_output_tokens: Some(1_024),
             temperature: None,
             cache_plan: None,
+            timeouts: StreamTimeouts::default(),
             cancel: cancel.clone(),
         };
         let http = reqwest::Client::builder()
@@ -1906,6 +2160,7 @@ mod smoke {
             max_output_tokens: Some(64),
             temperature: None,
             cache_plan: None,
+            timeouts: StreamTimeouts::default(),
             cancel: CancellationToken::new(),
         };
         let (sink, mut events) = tokio::sync::mpsc::unbounded_channel();
@@ -2079,9 +2334,10 @@ mod tests {
             )),
             "erro de rede nunca vira fallback de cache"
         );
-        assert!(!is_cache_capability_error(&ProviderError::RateLimited(
-            "slow down".to_string()
-        )));
+        assert!(!is_cache_capability_error(&ProviderError::RateLimited {
+            message: "slow down".to_string(),
+            retry_after: None,
+        }));
     }
 
     /* ------------------ cache digest emission (F0a) ------------------ */
@@ -2135,6 +2391,7 @@ mod tests {
                 max_output_tokens: Some(64),
                 temperature: None,
                 cache_plan: None,
+                timeouts: StreamTimeouts::default(),
                 cancel: CancellationToken::new(),
             };
             request.cancel.cancel();
@@ -2379,7 +2636,7 @@ mod tests {
         );
         assert!(matches!(error, ProviderError::PlanLimit(_)), "{error:?}");
         assert!(error.is_plan_limit());
-        assert_eq!(error.code(), Some("rate_limited"));
+        assert_eq!(error.code(), Some("plan_limit"));
         assert_eq!(
             error.provider_code(),
             Some("subscription_sharing_usage_limit_exceeded")
@@ -2388,10 +2645,11 @@ mod tests {
 
         // A plain 429 stays a transport-level rate limit.
         let error = ProviderError::from_http(429, r#"{"detail":"slow down"}"#);
-        assert!(matches!(error, ProviderError::RateLimited(_)), "{error:?}");
+        assert!(matches!(error, ProviderError::RateLimited { .. }), "{error:?}");
         assert!(!error.is_plan_limit());
         assert_eq!(error.code(), Some("rate_limited"));
         assert_eq!(error.provider_code(), None);
+        assert!(error.is_transient());
     }
 
     #[test]
@@ -2479,15 +2737,26 @@ mod tests {
             503,
             r#"{"error":{"code":"subscription_sharing_usage_unavailable","message":"try later"}}"#,
         );
-        assert!(matches!(error, ProviderError::Other(_)));
+        assert!(matches!(error, ProviderError::Transient { .. }));
+        assert!(error.is_transient());
+        assert_eq!(error.code(), Some("upstream_error"));
         assert!(error
             .to_string()
             .contains("subscription_sharing_usage_unavailable"));
-        assert_eq!(error.code(), None);
 
         let error = ProviderError::from_http(402, "sem saldo");
-        assert!(matches!(error, ProviderError::BadRequest(_)));
+        assert!(matches!(error, ProviderError::InsufficientCredit(_)));
+        assert_eq!(error.code(), Some("insufficient_credit"));
         assert!(error.to_string().contains("saldo/créditos insuficientes"));
+
+        // A generic 400 with a structured code is not a capability error.
+        let error = ProviderError::from_http(
+            400,
+            r#"{"error":{"code":"invalid_request_error","message":"bad field"}}"#,
+        );
+        assert!(matches!(error, ProviderError::BadRequest(_)));
+        assert_eq!(error.code(), Some("bad_request"));
+        assert!(!error.is_transient());
     }
 
     #[test]

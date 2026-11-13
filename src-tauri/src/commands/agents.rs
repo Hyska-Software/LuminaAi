@@ -518,6 +518,9 @@ pub async fn suggest_agent(
         harness::batch::BatchRequest {
             provider_id: &provider_id,
             model_id: &model_id,
+            timeouts: crate::providers::StreamTimeouts::from_settings(
+                &crate::config::load_settings(&app),
+            ),
             system_prompt: &system,
             user_text: &user,
             max_output_tokens: 2_048,
@@ -686,6 +689,9 @@ pub async fn revise_agent(
         harness::batch::BatchRequest {
             provider_id: &provider_id,
             model_id: &model_id,
+            timeouts: crate::providers::StreamTimeouts::from_settings(
+                &crate::config::load_settings(&app),
+            ),
             system_prompt: &system,
             user_text: &user,
             max_output_tokens: 2_048,

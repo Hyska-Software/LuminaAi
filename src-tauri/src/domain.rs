@@ -539,6 +539,29 @@ pub struct TraceStep {
     pub tool_calls: u32,
 }
 
+/// Structured failure persisted on the assistant message.
+///
+/// It survives reloads so the thread can explain what happened, offer the
+/// right next action (retry vs. open providers vs. manage usage) and tell the
+/// renderer whether a manual retry can succeed. Retrying itself is decided by
+/// the backend; this type only describes the terminal failure.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageError {
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// A new request by the user may succeed (transient/network/timeout/auth).
+    pub retryable: bool,
+    /// The provider asked for an explicit wait (`Retry-After`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
+    /// Provider requests made by the failed step (0 = none was attempted).
+    pub attempts: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
@@ -578,6 +601,9 @@ pub struct ChatMessage {
     /// do objetivo). Só tem significado em mensagens de usuário.
     #[serde(default)]
     pub origin: TurnKind,
+    /// Terminal failure of the turn that produced this assistant message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<MessageError>,
 }
 
 impl ChatMessage {
@@ -599,6 +625,7 @@ impl ChatMessage {
             provider_state: None,
             trace: Vec::new(),
             origin: TurnKind::User,
+            error: None,
         }
     }
 
@@ -620,6 +647,7 @@ impl ChatMessage {
             provider_state: None,
             trace: Vec::new(),
             origin: TurnKind::User,
+            error: None,
         }
     }
 
@@ -641,6 +669,7 @@ impl ChatMessage {
             provider_state: None,
             trace: Vec::new(),
             origin: TurnKind::User,
+            error: None,
         }
     }
 }
@@ -817,7 +846,7 @@ pub struct TurnResult {
     #[serde(default)]
     pub usage: Option<UsageInfo>,
     #[serde(default)]
-    pub error: Option<String>,
+    pub error: Option<MessageError>,
     #[serde(default)]
     pub conversation: Option<Conversation>,
 }
@@ -1440,6 +1469,23 @@ pub struct Settings {
     pub diff_open_mode: String,
     /// Preferências de cache de prompt (medidor/indicador e parâmetros por provedor).
     pub cache: CacheSettings,
+    /* ---- resiliência de requests aos provedores ---- */
+    /// Deadline between connection open and response headers, in seconds.
+    pub provider_headers_timeout_secs: u32,
+    /// Deadline for the first SSE event carrying model output, in seconds.
+    pub provider_first_event_timeout_secs: u32,
+    /// Maximum gap between two SSE events with data, in seconds.
+    pub provider_idle_timeout_secs: u32,
+    /// Absolute stream deadline in seconds (0 disables the cap).
+    pub provider_total_timeout_secs: u32,
+    /// Extra attempts after the first one (0 disables automatic retries).
+    pub provider_max_retries: u32,
+    pub provider_retry_base_delay_ms: u32,
+    pub provider_retry_max_delay_ms: u32,
+    /// Wall-clock budget for retry sleeps of one step (0 = unlimited).
+    pub provider_retry_max_elapsed_ms: u32,
+    /// Longest server-requested wait (`Retry-After`) accepted before surfacing.
+    pub provider_retry_after_cap_ms: u32,
 }
 
 impl Default for Settings {
@@ -1509,6 +1555,15 @@ impl Default for Settings {
             trust_workspaces_by_default: false,
             diff_open_mode: "tab".into(),
             cache: CacheSettings::default(),
+            provider_headers_timeout_secs: 120,
+            provider_first_event_timeout_secs: 180,
+            provider_idle_timeout_secs: 120,
+            provider_total_timeout_secs: 1_800,
+            provider_max_retries: 3,
+            provider_retry_base_delay_ms: 800,
+            provider_retry_max_delay_ms: 20_000,
+            provider_retry_max_elapsed_ms: 90_000,
+            provider_retry_after_cap_ms: 60_000,
         }
     }
 }

@@ -8,13 +8,14 @@
 //!
 //! `stream_sse` reads the response body incrementally, honours the turn's
 //! [`CancellationToken`] between chunks and reports transport failures as
-//! `anyhow` errors (the adapters turn them into `ProviderError::Network`).
+//! typed [`ProviderError`]s.
 //!
 //! It also owns the stream watchdog: the first model event must arrive within
-//! [`FIRST_EVENT_TIMEOUT`] and every subsequent gap without a data event is
-//! capped by [`IDLE_TIMEOUT`]. Keep-alive comments (`:`) and events without
-//! `data` do not reset the deadline — a gateway that only pings must not keep a
-//! dead stream parked indefinitely.
+//! `timeouts.first_event`, every subsequent gap without a data event is capped
+//! by `timeouts.idle`, and an optional absolute `timeouts.total` caps the whole
+//! stream. Keep-alive comments (`:`) and events without `data` do not reset the
+//! deadline — a gateway that only pings must not keep a dead stream parked
+//! indefinitely.
 
 use std::time::Duration;
 
@@ -23,22 +24,28 @@ use futures_util::StreamExt;
 use tokio::time::{timeout, Instant};
 use tokio_util::sync::CancellationToken;
 
-use super::ProviderError;
+use super::{ProviderError, StreamTimeouts, TimeoutPhase};
 
-/// Deadline for the first SSE event carrying model output.
-const FIRST_EVENT_TIMEOUT: Duration = Duration::from_secs(180);
-/// Maximum gap between two model events after the stream started.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Result of one completed SSE read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SseOutcome {
+    /// The OpenAI-style `data: [DONE]` sentinel was received.
+    pub done_sentinel: bool,
+}
 
-fn stalled(first_event: bool) -> anyhow::Error {
-    let (phase, seconds) = if first_event {
-        ("first event", FIRST_EVENT_TIMEOUT.as_secs())
-    } else {
-        ("idle", IDLE_TIMEOUT.as_secs())
-    };
+fn stalled(phase: TimeoutPhase, limit: Duration) -> anyhow::Error {
     anyhow::Error::new(ProviderError::StreamStalled(format!(
-        "no model event within {seconds} s ({phase})"
+        "no model event within {} s ({})",
+        limit.as_secs(),
+        phase.as_str()
     )))
+}
+
+fn total_expired(limit: Duration) -> anyhow::Error {
+    anyhow::Error::new(ProviderError::Timeout {
+        phase: TimeoutPhase::Total,
+        detail: format!("stream exceeded the {} s total deadline", limit.as_secs()),
+    })
 }
 
 /// Incremental SSE parser. Public within the crate so it can be unit tested by
@@ -181,8 +188,9 @@ impl SseDecoder {
 pub async fn stream_sse<F>(
     response: reqwest::Response,
     cancel: &CancellationToken,
+    timeouts: &StreamTimeouts,
     mut on_event: F,
-) -> anyhow::Result<()>
+) -> anyhow::Result<SseOutcome>
 where
     F: FnMut(Option<&str>, &str) -> anyhow::Result<()>,
 {
@@ -190,27 +198,51 @@ where
     let mut stream = response.bytes_stream();
     let mut first_event = true;
     let mut last_progress = Instant::now();
+    let started = Instant::now();
     loop {
-        let limit = if first_event {
-            FIRST_EVENT_TIMEOUT
+        let phase = if first_event {
+            TimeoutPhase::FirstEvent
         } else {
-            IDLE_TIMEOUT
+            TimeoutPhase::Idle
         };
-        let remaining = limit.saturating_sub(last_progress.elapsed());
+        let phase_limit = if first_event {
+            timeouts.first_event
+        } else {
+            timeouts.idle
+        };
+        let mut remaining = phase_limit.saturating_sub(last_progress.elapsed());
+        let mut exhausted_total = None;
+        if let Some(total) = timeouts.total {
+            let total_remaining = total.saturating_sub(started.elapsed());
+            if total_remaining <= remaining {
+                remaining = total_remaining;
+                exhausted_total = Some(total);
+            }
+        }
         if remaining.is_zero() {
-            return Err(stalled(first_event));
+            return Err(match exhausted_total {
+                Some(total) => total_expired(total),
+                None => stalled(phase, phase_limit),
+            });
         }
         let next = tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
+            _ = cancel.cancelled() => return Ok(SseOutcome { done_sentinel: false }),
             next = timeout(remaining, stream.next()) => match next {
                 Ok(next) => next,
-                Err(_) => return Err(stalled(first_event)),
+                Err(_) => {
+                    return Err(match exhausted_total {
+                        Some(total) => total_expired(total),
+                        None => stalled(phase, phase_limit),
+                    });
+                }
             },
         };
         match next {
             None => break,
             Some(Err(error)) => {
-                return Err(anyhow::Error::new(error).context("erro de rede ao ler o stream SSE"));
+                return Err(anyhow::Error::new(ProviderError::StreamInterrupted(
+                    format!("erro de rede ao ler o stream SSE: {error}"),
+                )));
             }
             Some(Ok(chunk)) => {
                 // Only a dispatched event with data counts as progress; keep-alives
@@ -223,7 +255,7 @@ where
                     on_event(event, data)
                 };
                 if decoder.push(&chunk, &mut on_data)? {
-                    return Ok(());
+                    return Ok(SseOutcome { done_sentinel: true });
                 }
             }
         }
@@ -236,26 +268,29 @@ where
         on_event(event, data)
     };
     decoder.finish(&mut on_data)?;
-    Ok(())
+    Ok(SseOutcome {
+        done_sentinel: false,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{stalled, ProviderError, SseDecoder};
+    use super::{stalled, ProviderError, SseDecoder, TimeoutPhase};
 
     #[test]
     fn stall_error_is_typed_and_phase_labeled() {
-        for first_event in [true, false] {
-            let error = stalled(first_event);
+        for (phase, label) in [
+            (TimeoutPhase::FirstEvent, "first event"),
+            (TimeoutPhase::Idle, "idle"),
+        ] {
+            let error = stalled(phase, std::time::Duration::from_secs(42));
             let provider = error
                 .downcast_ref::<ProviderError>()
                 .expect("stall must stay a typed ProviderError");
             assert!(provider.is_stream_stall());
             let message = provider.to_string();
-            assert!(
-                message.contains(if first_event { "first event" } else { "idle" }),
-                "{message}"
-            );
+            assert!(message.contains(label), "{message}");
+            assert!(message.contains("42"), "{message}");
         }
     }
 

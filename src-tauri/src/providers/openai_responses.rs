@@ -44,7 +44,7 @@ pub(crate) async fn stream(
         return Ok(());
     };
     let mut handler = Handler::new(sink, request.config.provider_id.clone());
-    let outcome = sse::stream_sse(response, &request.cancel, |event, data| {
+    let outcome = sse::stream_sse(response, &request.cancel, &request.timeouts, |event, data| {
         handler.on_event(event, data)
     })
     .await;
@@ -53,6 +53,11 @@ pub(crate) async fn stream(
     }
     if request.cancel.is_cancelled() {
         return Ok(());
+    }
+    if !handler.completed {
+        return Err(ProviderError::StreamInterrupted(
+            "stream ended without response.completed".to_string(),
+        ));
     }
     handler.finish()
 }
@@ -291,6 +296,8 @@ struct Handler<'a> {
     output: Option<Value>,
     tools: Vec<ResponsesTool>,
     item_to_index: HashMap<String, usize>,
+    /// `response.completed`/`response.incomplete` arrived.
+    completed: bool,
 }
 
 impl<'a> Handler<'a> {
@@ -306,6 +313,7 @@ impl<'a> Handler<'a> {
             output: None,
             tools: Vec::new(),
             item_to_index: HashMap::new(),
+            completed: false,
         }
     }
 
@@ -338,7 +346,10 @@ impl<'a> Handler<'a> {
             "response.function_call_arguments.delta" => self.on_arguments_delta(&value)?,
             "response.function_call_arguments.done" => self.on_arguments_done(&value)?,
             "response.output_item.done" => self.on_item_done(&value)?,
-            "response.completed" | "response.incomplete" => self.on_completed(&value)?,
+            "response.completed" | "response.incomplete" => {
+                self.completed = true;
+                self.on_completed(&value)?;
+            }
             "response.failed" => {
                 let detail = value
                     .pointer("/response/error")
@@ -748,6 +759,7 @@ mod tests {
             max_output_tokens: Some(2_048),
             temperature: Some(0.3),
             cache_plan: None,
+            timeouts: crate::providers::StreamTimeouts::default(),
             cancel: CancellationToken::new(),
         }
     }

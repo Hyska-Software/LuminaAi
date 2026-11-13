@@ -28,7 +28,7 @@ use crate::harness::{
     load_surface_items, mcp_tools_prompt_section, provider_config, resolve_credential,
     resolve_model, resolve_protocols, supports_images, EventEmitter, HarnessDeps,
 };
-use crate::providers::{CompletionRequest, HistoryMessage, HistoryRole};
+use crate::providers::{CompletionRequest, HistoryMessage, HistoryRole, StreamTimeouts};
 
 use crate::harness::code::session;
 
@@ -472,6 +472,8 @@ pub struct ManualSummaryRequest<'a> {
     pub cut: usize,
     /// Plano de cache do request normal (F4); reusado no request de resumo.
     pub cache_plan: Option<crate::providers::cache::CachePlan>,
+    /// Deadlines do request de resumo (settings do app).
+    pub timeouts: StreamTimeouts,
     pub max_output_tokens: u32,
 }
 
@@ -579,6 +581,7 @@ pub async fn summarize_manual(
         temperature: None,
         cancel: CancellationToken::new(),
         cache_plan: request.cache_plan.clone(),
+        timeouts: request.timeouts,
     };
     finish_manual_summary(
         deps,
@@ -789,6 +792,7 @@ pub async fn summarize_manual_for_conversation(
         temperature: None,
         cancel: CancellationToken::new(),
         cache_plan: None,
+        timeouts: StreamTimeouts::from_settings(&settings),
     };
     completion.cache_plan =
         cache_plan_for(&provider, &model, &protocols, &completion, &settings.cache);

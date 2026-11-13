@@ -204,8 +204,8 @@ describe('ChatView — banners de erro do turno (T4.4a)', () => {
     expect(mocks.openExternalUrl).toHaveBeenCalledWith('https://chatgpt.com/settings/usage');
   });
 
-  it('trata rate_limited como limite quando o provedor ativo usa o plano', () => {
-    seed({ errorCode: 'rate_limited' });
+  it('trata o código neutro plan_limit como limite do plano', () => {
+    seed({ errorCode: 'plan_limit' });
 
     render(<ChatView />);
     expect(screen.getByText('Limite de uso atingido')).toBeTruthy();

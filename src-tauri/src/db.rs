@@ -27,9 +27,9 @@ use crate::computer::{ComputerActionRecord, ComputerSession};
 use crate::domain::{
     conversation_mode_or_default, now_ms, ApprovalDecision, ApprovalRule, ApprovalScope, Artifact,
     ArtifactKind, AttachmentInfo, CacheBreakReason, CacheSample, CacheState, ChatMessage,
-    Conversation, ConversationDetail, FileChangeKind, LibraryArtifact, MessageRole, MessageStatus,
-    PermissionMode, SegmentDigest, ToolCallRecord, ToolCallStatus, TurnKind, UsageInfo, Workspace,
-    CONVERSATION_MODE_AGENT, CONVERSATION_MODE_CHAT, CONVERSATION_MODE_CODE,
+    Conversation, ConversationDetail, FileChangeKind, LibraryArtifact, MessageError, MessageRole,
+    MessageStatus, PermissionMode, SegmentDigest, ToolCallRecord, ToolCallStatus, TurnKind,
+    UsageInfo, Workspace, CONVERSATION_MODE_AGENT, CONVERSATION_MODE_CHAT, CONVERSATION_MODE_CODE,
 };
 
 /* ------------------------------------------------------------------ */
@@ -70,7 +70,7 @@ const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_op
 
 const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, reasoning, status, \
      tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, \
-     trace, origin";
+     trace, origin, error";
 
 const ATTACHMENT_COLUMNS: &str = "id, name, mime_type, size, kind, text, page_count, \
      width, height, file_path, created_at";
@@ -1183,6 +1183,12 @@ fn migrate_messages_schema(conn: &Connection) -> Result<()> {
         "messages",
         "origin",
         "ALTER TABLE messages ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'",
+    )?;
+    ensure_column(
+        conn,
+        "messages",
+        "error",
+        "ALTER TABLE messages ADD COLUMN error TEXT",
     )
 }
 
@@ -2294,6 +2300,7 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<ChatMessage> {
         provider_state: decode_opt_value(row.get(12)?),
         trace: decode_json(&row.get::<_, String>(14)?),
         origin: turn_kind_from_str(&origin),
+        error: decode_opt::<crate::domain::MessageError>(row.get(16)?),
     })
 }
 
@@ -2349,6 +2356,7 @@ struct MessageColumns {
     usage: Option<String>,
     provider_state: Option<String>,
     trace: String,
+    error: Option<String>,
 }
 
 fn serialize_message(message: &ChatMessage) -> Result<MessageColumns> {
@@ -2363,6 +2371,7 @@ fn serialize_message(message: &ChatMessage) -> Result<MessageColumns> {
             .map(encode_json)
             .transpose()?,
         trace: encode_json(&message.trace)?,
+        error: message.error.as_ref().map(encode_json).transpose()?,
     })
 }
 
@@ -2374,8 +2383,8 @@ fn insert_message_row(
     conn.execute(
         "INSERT INTO messages (id, conversation_id, role, content, reasoning, status, \
          tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, \
-         created_at, trace, origin) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+         created_at, trace, origin, error) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             &message.id,
             &message.conversation_id,
@@ -2393,6 +2402,7 @@ fn insert_message_row(
             message.created_at,
             &cols.trace,
             turn_kind_to_str(message.origin),
+            &cols.error,
         ],
     )
     .with_context(|| format!("falha ao inserir mensagem {}", message.id))?;
@@ -2409,7 +2419,7 @@ fn update_message_row(
             "UPDATE messages SET role = ?2, content = ?3, reasoning = ?4, status = ?5, \
              tool_calls = ?6, citations = ?7, attachments = ?8, model_id = ?9, \
              provider_id = ?10, usage = ?11, provider_state = ?12, created_at = ?13, \
-             trace = ?14, origin = ?15 \
+             trace = ?14, origin = ?15, error = ?16 \
              WHERE id = ?1",
             params![
                 &message.id,
@@ -2427,6 +2437,7 @@ fn update_message_row(
                 message.created_at,
                 &cols.trace,
                 turn_kind_to_str(message.origin),
+                &cols.error,
             ],
         )
         .with_context(|| format!("falha ao atualizar mensagem {}", message.id))?;
@@ -9727,6 +9738,22 @@ mod tests {
         assert_eq!(stored.provider_state, assistant.provider_state);
         assert_eq!(stored.trace, assistant.trace, "trace survives updates");
 
+        // Structured failure survives every write/read path.
+        assistant.error = Some(MessageError {
+            message: "stream ended without finish_reason".to_string(),
+            code: Some("stream_interrupted".to_string()),
+            hint: Some("tente novamente".to_string()),
+            retryable: true,
+            retry_after_ms: Some(1_500),
+            attempts: 3,
+        });
+        db.update_message(&assistant).expect("update with error");
+        let stored = db
+            .get_message(&assistant.id)
+            .expect("get message")
+            .expect("present");
+        assert_eq!(stored.error, assistant.error);
+
         // update_message creates the row when it does not exist yet.
         let mut orphan = assistant_message(&conversation.id, 3_000);
         orphan.content = "recurso".to_string();
@@ -9765,6 +9792,10 @@ mod tests {
             .query_row("SELECT trace FROM messages WHERE id = 'm1'", [], |row| row.get(0))
             .expect("trace column");
         assert_eq!(trace, "[]");
+        let error: Option<String> = conn
+            .query_row("SELECT error FROM messages WHERE id = 'm1'", [], |row| row.get(0))
+            .expect("error column");
+        assert_eq!(error, None);
 
         // Opening the same database again is a no-op.
         Db::init_connection(&conn).expect("idempotent migration");

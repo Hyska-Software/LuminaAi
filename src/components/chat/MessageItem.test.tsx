@@ -290,3 +290,49 @@ describe('MessageItem — execução separada por resposta', () => {
     expect(screen.queryByRole('button', { name: /Trabalhou por/ })).toBeNull();
   });
 });
+
+describe('MessageItem — falha persistida', () => {
+  it('mostra o texto parcial, a dica e o retry quando o erro é transitório', () => {
+    renderMessage(
+      message({
+        id: 'a-fail',
+        role: 'assistant',
+        content: 'Resposta parcial',
+        status: 'complete',
+        error: {
+          message: 'stream interrupted',
+          code: 'stream_interrupted',
+          hint: 'O stream terminou antes da resposta completa; tente novamente.',
+          retryable: true,
+          attempts: 3,
+        },
+      }),
+    );
+
+    expect(screen.getByText('Resposta parcial')).toBeTruthy();
+    expect(screen.getByText(/O stream terminou antes da resposta completa/i)).toBeTruthy();
+    expect(screen.getByText(/Falhou após 3 tentativas/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeTruthy();
+  });
+
+  it('esconde o retry quando a falha é permanente', () => {
+    renderMessage(
+      message({
+        id: 'a-fail',
+        role: 'assistant',
+        content: '',
+        status: 'error',
+        error: {
+          message: 'quota',
+          code: 'plan_limit',
+          hint: 'Limite de uso atingido.',
+          retryable: false,
+          attempts: 1,
+        },
+      }),
+    );
+
+    expect(screen.getByText('Limite de uso atingido.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Tentar novamente' })).toBeNull();
+  });
+});
