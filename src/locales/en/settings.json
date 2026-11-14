@@ -161,6 +161,24 @@
   },
   "providers": {
     "securityNote": "API keys (OpenCode/Anthropic/Google) and the ChatGPT session are stored only in the backend (<code>secrets.json</code> in app-data) and are never exposed to the interface. We also detect the providers' environment variables and an existing OpenCode CLI login.",
+    "list": {
+      "popular": "Popular providers",
+      "more": "See more providers",
+      "connect": "Connect",
+      "manage": "Manage",
+      "recommended": "Recommended"
+    },
+    "connect": {
+      "title": "Connect {{name}}",
+      "manageTitle": "Manage {{name}}",
+      "keyIntro": "Enter your API key to connect your {{name}} account and use its models in Zylara.",
+      "continue": "Continue"
+    },
+    "more": {
+      "title": "See more providers",
+      "description": "New providers show up here as soon as they are supported.",
+      "empty": "More providers coming soon"
+    },
     "resilience": {
       "title": "Reliability",
       "description": "Deadlines and automatic retries shared by every provider. Retries only happen before any text or tool call reaches the screen.",
@@ -303,11 +321,11 @@
     },
     "privacyFooter": "Zylara does not send your credentials to any server of its own: requests go straight to the chosen provider. When you remove a key saved in Settings, detection via environment/CLI applies again, if present. Signing out of ChatGPT revokes the refresh token and keeps only the account registration for the next connection.",
     "description": {
-      "opencode-go": "OpenCode Go subscription — high-performance open models with monthly limits.",
-      "opencode-zen": "OpenCode Console (pay-as-you-go) — curated catalog of models from multiple providers.",
-      "openai": "OpenAI models using your account's ChatGPT plan (Sign in with ChatGPT) or a platform API key.",
-      "anthropic": "Claude models through the official Anthropic API — per-token billing on your account (pay-as-you-go).",
-      "gemini": "Gemini models through the official Google API — per-token billing on your account (Gemini Developer API)."
+      "opencode-go": "OpenCode subscription with monthly limits — no per-token billing.",
+      "opencode-zen": "Pay-as-you-go catalog with curated models from several providers.",
+      "openai": "ChatGPT plan sign-in or an OpenAI API key.",
+      "anthropic": "Direct Claude access with an Anthropic API key.",
+      "gemini": "Gemini models with a Google AI Studio API key."
     },
     "notes": {
       "opencode-go": {

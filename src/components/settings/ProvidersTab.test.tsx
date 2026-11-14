@@ -50,7 +50,12 @@ vi.mock('sonner', () => ({
 // Imported after the mocks above.
 import { ProvidersTab } from '@/components/settings/ProvidersTab';
 import { catalog } from '@/lib/catalog';
-import type { LoginChallenge, ProviderAuthStatus, ProviderKeyStatus } from '@/lib/types';
+import type {
+  LoginChallenge,
+  ProviderAuthStatus,
+  ProviderInfo,
+  ProviderKeyStatus,
+} from '@/lib/types';
 import { useAppStore } from '@/lib/store';
 
 afterEach(() => cleanup());
@@ -103,18 +108,30 @@ function settingsView(keys: ProviderKeyStatus[], auth: ProviderAuthStatus[] = []
   return { settings: useAppStore.getState().settings, keys, auth };
 }
 
-function providerSection(name: string): HTMLElement {
-  const heading = screen.getByRole('heading', { level: 3, name });
-  return heading.closest('section') as HTMLElement;
+/** The Connect/Manage button of a provider row (exact accessible name). */
+function rowButton(name: string): HTMLElement {
+  const button =
+    screen.queryByRole('button', { name: `Conectar ${name}` }) ??
+    screen.queryByRole('button', { name: `Gerenciar ${name}` });
+  if (!button) throw new Error(`provider row not found: ${name}`);
+  return button;
 }
 
-function openAiSection(): HTMLElement {
-  return providerSection('OpenAI (ChatGPT)');
+function providerRow(name: string): HTMLElement {
+  return rowButton(name).closest('li') as HTMLElement;
+}
+
+/** Opens the configuration modal of a provider row. */
+async function openConfig(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(rowButton(name));
+  return screen.findByRole('dialog', {
+    name: new RegExp(`(Conectar|Gerenciar) ${name.replace(/[()]/g, '\\$&')}`),
+  });
 }
 
 async function renderTab() {
   render(<ProvidersTab />);
-  return screen.getByRole('heading', { level: 3, name: 'OpenAI (ChatGPT)' });
+  return screen.findByRole('heading', { level: 3, name: 'Provedores populares' });
 }
 
 beforeEach(() => {
@@ -157,9 +174,58 @@ beforeEach(() => {
   });
 });
 
-describe('ProvidersTab — cards de provedor', () => {
-  it('mantém o comportamento de API key do Go e do Zen', async () => {
-    // O Zen fica sem chave para exercitar o placeholder do OpenCode Console.
+describe('ProvidersTab — lista de provedores', () => {
+  it('lista os provedores populares com ícone, descrição, status e botão', async () => {
+    await renderTab();
+
+    for (const name of ['OpenCode Go', 'OpenCode Zen', 'OpenAI (ChatGPT)', 'Anthropic', 'Google Gemini']) {
+      expect(providerRow(name)).toBeTruthy();
+    }
+
+    // Recommended provider: chip + OpenCode glyph + configured chip.
+    const go = providerRow('OpenCode Go');
+    expect(within(go).getByText('Recomendado')).toBeTruthy();
+    expect(within(go).getByTitle('OpenCode')).toBeTruthy();
+    expect(within(go).getByText('Configurada')).toBeTruthy();
+
+    // Short catalog copy doubles as the row subtitle.
+    expect(within(providerRow('Anthropic')).getByText(/Acesso direto aos modelos Claude/)).toBeTruthy();
+    expect(
+      within(providerRow('Google Gemini')).getByText(/Modelos Gemini com uma API key/),
+    ).toBeTruthy();
+
+    // Unconfigured providers show only the Connect action (no status chip).
+    const openai = providerRow('OpenAI (ChatGPT)');
+    expect(within(openai).getByRole('button', { name: 'Conectar OpenAI (ChatGPT)' })).toBeTruthy();
+    expect(within(openai).queryByText('Chave ausente')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Ver mais provedores' })).toBeTruthy();
+  });
+
+  it('abre o modal ao clicar em Conectar e salva a API key', async () => {
+    useAppStore.setState({
+      keys: [
+        { providerId: GO, hasKey: false, source: 'none' },
+        ZEN_KEY,
+        OPENAI_NO_KEY,
+        ANTHROPIC_NO_KEY,
+      ],
+    });
+    await renderTab();
+    const user = userEvent.setup();
+
+    const dialog = await openConfig(user, 'OpenCode Go');
+    const input = within(dialog).getByLabelText('API key de OpenCode Go') as HTMLInputElement;
+    expect(input.placeholder).toBe('Colar API key do OpenCode Console…');
+
+    await user.type(input, 'sk-go-nova');
+    await user.click(within(dialog).getByRole('button', { name: 'Continuar' }));
+
+    await waitFor(() => {
+      expect(mocks.setProviderKey).toHaveBeenCalledWith(GO, 'sk-go-nova');
+    });
+  });
+
+  it('Enter no campo salva a chave e o placeholder pede substituição quando já existe uma', async () => {
     useAppStore.setState({
       keys: [
         GO_KEY,
@@ -171,47 +237,82 @@ describe('ProvidersTab — cards de provedor', () => {
     await renderTab();
     const user = userEvent.setup();
 
-    const go = providerSection('OpenCode Go');
-    const zen = providerSection('OpenCode Zen');
-
-    // Both keep the exact API-key form (no ChatGPT flow inside them).
-    expect(within(go).getByLabelText('API key de OpenCode Go')).toBeTruthy();
-    expect(within(zen).getByLabelText('API key de OpenCode Zen')).toBeTruthy();
-    expect(within(go).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
-    expect(within(zen).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
-    expect(within(go).getByText('Configurada')).toBeTruthy();
-    // Com chave salva o campo pede substituição; sem chave cita o console do OpenCode.
-    expect(
-      (within(go).getByLabelText('API key de OpenCode Go') as HTMLInputElement).placeholder,
-    ).toBe('Colar nova chave para substituir…');
-    expect(
-      (within(zen).getByLabelText('API key de OpenCode Zen') as HTMLInputElement).placeholder,
-    ).toBe('Colar API key do OpenCode Console…');
-
-    const input = within(go).getByLabelText('API key de OpenCode Go');
-    await user.type(input, 'sk-go-nova');
-    await user.click(within(go).getByRole('button', { name: 'Salvar' }));
+    const dialog = await openConfig(user, 'OpenCode Zen');
+    const input = within(dialog).getByLabelText('API key de OpenCode Zen') as HTMLInputElement;
+    expect(input.placeholder).toBe('Colar API key do OpenCode Console…');
+    await user.type(input, 'sk-zen-nova{Enter}');
 
     await waitFor(() => {
-      expect(mocks.setProviderKey).toHaveBeenCalledWith(GO, 'sk-go-nova');
+      expect(mocks.setProviderKey).toHaveBeenCalledWith(ZEN, 'sk-zen-nova');
     });
+
+    // Close the current modal before opening another provider's configuration.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    // With a saved key the field switches to the "replace" hint.
+    const goDialog = await openConfig(user, 'OpenCode Go');
+    const goInput = within(goDialog).getByLabelText('API key de OpenCode Go') as HTMLInputElement;
+    expect(goInput.placeholder).toBe('Colar nova chave para substituir…');
+  });
+
+  it('modal do Anthropic: console, remoção e teste de conexão, sem fluxo ChatGPT', async () => {
+    mocks.validateProvider.mockResolvedValue({
+      providerId: ANTHROPIC,
+      ok: true,
+      latencyMs: 8,
+      models: 14,
+    });
+    await renderTab();
+    const user = userEvent.setup();
+
+    const dialog = await openConfig(user, 'Anthropic');
+    expect(within(dialog).getByText(/conectar sua conta Anthropic/)).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Console' }));
+    expect(mocks.openExternal).toHaveBeenCalledWith('https://platform.claude.com/settings/keys');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Testar conexão' }));
+    await waitFor(() => expect(mocks.validateProvider).toHaveBeenCalledWith(ANTHROPIC));
+    expect(await within(dialog).findByText(/Conectado · 8 ms · 14 modelos/)).toBeTruthy();
+  });
+
+  it('modal mostra a chave mascarada e permite removê-la', async () => {
+    useAppStore.setState({
+      keys: [
+        GO_KEY,
+        ZEN_KEY,
+        OPENAI_NO_KEY,
+        { providerId: ANTHROPIC, hasKey: true, source: 'settings', masked: 'sk-ant-…9999' },
+      ],
+    });
+    await renderTab();
+    const user = userEvent.setup();
+
+    const dialog = await openConfig(user, 'Anthropic');
+    expect(within(dialog).getByText('sk-ant-…9999')).toBeTruthy();
+    expect(within(dialog).getByText(/env:/)).toBeTruthy();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Remover' }));
+    await waitFor(() => expect(mocks.setProviderKey).toHaveBeenCalledWith(ANTHROPIC, null));
   });
 
   it('OpenAI sem login oferece Continuar com ChatGPT e a alternativa de API key', async () => {
     await renderTab();
     const user = userEvent.setup();
-    const section = openAiSection();
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
 
-    expect(within(section).getByRole('button', { name: /Continuar com ChatGPT/ })).toBeTruthy();
-    expect(within(section).getByText(/o limite é compartilhado/i)).toBeTruthy();
-    expect(within(section).queryByLabelText('API key de OpenAI (ChatGPT)')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: /Continuar com ChatGPT/ })).toBeTruthy();
+    expect(within(dialog).getByText(/o limite é compartilhado/i)).toBeTruthy();
+    expect(within(dialog).queryByLabelText('API key de OpenAI (ChatGPT)')).toBeNull();
 
-    await user.click(within(section).getByRole('button', { name: 'Usar API key' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Usar API key' }));
 
-    const input = within(section).getByLabelText('API key de OpenAI (ChatGPT)') as HTMLInputElement;
+    const input = within(dialog).getByLabelText('API key de OpenAI (ChatGPT)') as HTMLInputElement;
     expect(input.placeholder).toBe('Colar API key da OpenAI…');
     await user.type(input, 'sk-openai-123');
-    await user.click(within(section).getByRole('button', { name: 'Salvar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Salvar' }));
 
     await waitFor(() => {
       expect(mocks.setProviderKey).toHaveBeenCalledWith(OPENAI, 'sk-openai-123');
@@ -226,27 +327,28 @@ describe('ProvidersTab — cards de provedor', () => {
     await renderTab();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    await user.click(within(dialog).getByRole('button', { name: /Continuar com ChatGPT/ }));
 
-    await screen.findByText('Aguardando o navegador…');
+    await within(dialog).findByText('Aguardando o navegador…');
     expect(mocks.openaiLoginStart).toHaveBeenCalledWith(OPENAI, false);
     expect(useAppStore.getState().loginChallenge?.attemptId).toBe('attempt-1');
-    expect(screen.queryByText('O navegador não abriu automaticamente')).toBeNull();
+    expect(within(dialog).queryByText('O navegador não abriu automaticamente')).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: /Copiar link/ }));
+    await user.click(within(dialog).getByRole('button', { name: /Copiar link/ }));
     expect(mocks.copyText).toHaveBeenCalledWith(CHALLENGE.authUrl);
-    expect(await screen.findByRole('button', { name: /Link copiado/ })).toBeTruthy();
+    expect(await within(dialog).findByRole('button', { name: /Link copiado/ })).toBeTruthy();
 
     // The raw URL stays available even when the clipboard is unavailable.
-    await user.click(screen.getByText('Mostrar link de login'));
-    expect(screen.getByText(CHALLENGE.authUrl)).toBeTruthy();
+    await user.click(within(dialog).getByText('Mostrar link de login'));
+    expect(within(dialog).getByText(CHALLENGE.authUrl)).toBeTruthy();
 
-    await user.click(screen.getByRole('button', { name: /Abrir novamente/ }));
+    await user.click(within(dialog).getByRole('button', { name: /Abrir novamente/ }));
     expect(mocks.openExternal).toHaveBeenCalledWith(CHALLENGE.authUrl);
 
-    await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
     await waitFor(() => expect(mocks.openaiLoginCancel).toHaveBeenCalledWith('attempt-1'));
-    await waitFor(() => expect(screen.queryByText('Aguardando o navegador…')).toBeNull());
+    await waitFor(() => expect(within(dialog).queryByText('Aguardando o navegador…')).toBeNull());
   });
 
   it('quando o navegador não abre, avisa e prioriza o link copiável', async () => {
@@ -259,16 +361,17 @@ describe('ProvidersTab — cards de provedor', () => {
     await renderTab();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    await user.click(within(dialog).getByRole('button', { name: /Continuar com ChatGPT/ }));
 
-    expect(await screen.findByText('O navegador não abriu automaticamente')).toBeTruthy();
-    expect(screen.getByText(/xdg-open/)).toBeTruthy();
+    expect(await within(dialog).findByText('O navegador não abriu automaticamente')).toBeTruthy();
+    expect(within(dialog).getByText(/xdg-open/)).toBeTruthy();
     // The copy button becomes the primary action in this state.
     expect(
-      (screen.getByRole('button', { name: /Copiar link/ }) as HTMLButtonElement).className,
+      (within(dialog).getByRole('button', { name: /Copiar link/ }) as HTMLButtonElement).className,
     ).toContain('bg-foreground');
 
-    await user.click(screen.getByRole('button', { name: /Copiar link/ }));
+    await user.click(within(dialog).getByRole('button', { name: /Copiar link/ }));
     expect(mocks.copyText).toHaveBeenCalledWith(CHALLENGE.authUrl);
   });
 
@@ -279,12 +382,13 @@ describe('ProvidersTab — cards de provedor', () => {
     await renderTab();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
-    await screen.findByText('Aguardando o navegador…');
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    await user.click(within(dialog).getByRole('button', { name: /Continuar com ChatGPT/ }));
+    await within(dialog).findByText('Aguardando o navegador…');
 
-    await user.click(screen.getByRole('button', { name: /Copiar link/ }));
-    expect(screen.getByRole('button', { name: /Copiar link/ })).toBeTruthy();
-    expect(screen.getByText('Aguardando o navegador…')).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: /Copiar link/ }));
+    expect(within(dialog).getByRole('button', { name: /Copiar link/ })).toBeTruthy();
+    expect(within(dialog).getByText('Aguardando o navegador…')).toBeTruthy();
     expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
       'Não foi possível copiar o link',
       expect.anything(),
@@ -297,22 +401,25 @@ describe('ProvidersTab — cards de provedor', () => {
     mocks.openaiAuthStatus.mockResolvedValue([]);
     await renderTab();
     const user = userEvent.setup();
-    const section = openAiSection();
 
-    expect(within(section).getByText('user@example.com')).toBeTruthy();
-    expect(within(section).getByText('Plano ChatGPT')).toBeTruthy();
-    expect(within(section).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
+    // The list row reflects the connected account.
+    const row = providerRow('OpenAI (ChatGPT)');
+    expect(within(row).getByText('Plano ChatGPT')).toBeTruthy();
+
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    expect(within(dialog).getAllByText('user@example.com').length).toBeGreaterThan(0);
+    expect(within(dialog).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
 
     // Collapsible account details (masked ids/scopes/expiry — never tokens).
-    await user.click(within(section).getByText('Detalhes da conta'));
-    expect(within(section).getByText('oaiapp_…1234')).toBeTruthy();
-    expect(within(section).getByText('urn:uuid:…5678')).toBeTruthy();
-    expect(within(section).getByText(/chatgpt\.tokens\.use\.direct/)).toBeTruthy();
+    await user.click(within(dialog).getByText('Detalhes da conta'));
+    expect(within(dialog).getByText('oaiapp_…1234')).toBeTruthy();
+    expect(within(dialog).getByText('urn:uuid:…5678')).toBeTruthy();
+    expect(within(dialog).getByText(/chatgpt\.tokens\.use\.direct/)).toBeTruthy();
 
-    await user.click(within(section).getByRole('button', { name: /Gerenciar uso/ }));
+    await user.click(within(dialog).getByRole('button', { name: /Gerenciar uso/ }));
     expect(mocks.openExternal).toHaveBeenCalledWith('https://chatgpt.com/settings/usage');
 
-    await user.click(within(section).getByRole('button', { name: 'Sair' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Sair' }));
     await waitFor(() => expect(mocks.openaiSignOut).toHaveBeenCalledWith(OPENAI));
   });
 
@@ -324,10 +431,12 @@ describe('ProvidersTab — cards de provedor', () => {
     mocks.openaiLoginWait.mockReturnValue(new Promise(() => {}));
     await renderTab();
     const user = userEvent.setup();
-    const section = openAiSection();
 
-    expect(within(section).getByText(/uso do plano ChatGPT não está ativado/i)).toBeTruthy();
-    await user.click(within(section).getByRole('button', { name: 'Ativar uso do plano' }));
+    expect(within(providerRow('OpenAI (ChatGPT)')).getByText('Plano não ativado')).toBeTruthy();
+
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    expect(within(dialog).getByText(/uso do plano ChatGPT não está ativado/i)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Ativar uso do plano' }));
 
     await waitFor(() => expect(mocks.openaiLoginStart).toHaveBeenCalledWith(OPENAI, true));
   });
@@ -340,10 +449,12 @@ describe('ProvidersTab — cards de provedor', () => {
     mocks.openaiLoginWait.mockReturnValue(new Promise(() => {}));
     await renderTab();
     const user = userEvent.setup();
-    const section = openAiSection();
 
-    expect(within(section).getByText('Sessão do ChatGPT expirada')).toBeTruthy();
-    await user.click(within(section).getByRole('button', { name: 'Conectar novamente' }));
+    expect(within(providerRow('OpenAI (ChatGPT)')).getByText('Sessão expirada')).toBeTruthy();
+
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    expect(within(dialog).getByText('Sessão do ChatGPT expirada')).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Conectar novamente' }));
 
     await waitFor(() => expect(mocks.openaiLoginStart).toHaveBeenCalledWith(OPENAI, false));
   });
@@ -355,13 +466,17 @@ describe('ProvidersTab — cards de provedor', () => {
     await renderTab();
     const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    await user.click(within(dialog).getByRole('button', { name: /Continuar com ChatGPT/ }));
 
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText('Você está usando seu plano ChatGPT')).toBeTruthy();
-    await user.click(within(dialog).getByRole('button', { name: 'Entendi' }));
+    const notice = await screen.findByRole('dialog', { name: 'Você está usando seu plano ChatGPT' });
+    await user.click(within(notice).getByRole('button', { name: 'Entendi' }));
 
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Você está usando seu plano ChatGPT' }),
+      ).toBeNull(),
+    );
     expect(window.localStorage.getItem('zylara.openaiPlanNoticeShown')).toBe('1');
 
     // A fresh mount reads the persisted flag and never shows the notice again.
@@ -373,9 +488,12 @@ describe('ProvidersTab — cards de provedor', () => {
       keys: defaultKeys(),
     });
     render(<ProvidersTab />);
-    await second.click(screen.getByRole('button', { name: /Continuar com ChatGPT/ }));
+    const secondDialog = await openConfig(second, 'OpenAI (ChatGPT)');
+    await second.click(within(secondDialog).getByRole('button', { name: /Continuar com ChatGPT/ }));
     await waitFor(() => expect(mocks.openaiLoginStart).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(
+      screen.queryByRole('dialog', { name: 'Você está usando seu plano ChatGPT' }),
+    ).toBeNull();
   });
 
   it('não renderiza material de credencial mesmo se o status trouxer campos extras', async () => {
@@ -390,7 +508,8 @@ describe('ProvidersTab — cards de provedor', () => {
     await renderTab();
     const user = userEvent.setup();
 
-    await user.click(within(openAiSection()).getByText('Detalhes da conta'));
+    const dialog = await openConfig(user, 'OpenAI (ChatGPT)');
+    await user.click(within(dialog).getByText('Detalhes da conta'));
 
     const text = document.body.textContent ?? '';
     expect(text).not.toContain('eyJhbGciOiJIUzI1NiJ9');
@@ -398,46 +517,6 @@ describe('ProvidersTab — cards de provedor', () => {
     expect(text).not.toContain('id-secret');
     expect(text).not.toContain('snake-secret');
     expect(text).toContain('oaiapp_…1234');
-  });
-
-  it('card Anthropic permanece só API key (sem ChatGPT) e usa o console da Anthropic', async () => {
-    mocks.validateProvider.mockResolvedValue({
-      providerId: ANTHROPIC,
-      ok: true,
-      latencyMs: 8,
-      models: 14,
-    });
-    await renderTab();
-    const user = userEvent.setup();
-    const section = providerSection('Anthropic');
-
-    // Generic API-key card: provider metadata only, no ChatGPT account UI.
-    expect(within(section).getByText(/API oficial da Anthropic/)).toBeTruthy();
-    expect(within(section).queryByRole('button', { name: /Continuar com ChatGPT/ })).toBeNull();
-    expect(within(section).queryByText(/ChatGPT/)).toBeNull();
-    expect(within(section).queryByText('Plano ChatGPT')).toBeNull();
-    expect(within(section).getByText('Chave ausente')).toBeTruthy();
-
-    const input = within(section).getByLabelText('API key de Anthropic') as HTMLInputElement;
-    expect(input.placeholder).toBe('Colar API key da Anthropic (sk-ant-…)…');
-
-    // Console button opens the provider's own console (not the OpenCode one).
-    await user.click(within(section).getByRole('button', { name: 'Console' }));
-    expect(mocks.openExternal).toHaveBeenCalledWith('https://platform.claude.com/settings/keys');
-
-    // Saving stores the key under the anthropic provider id.
-    await user.type(input, 'sk-ant-api03-teste-1234567890');
-    await user.click(within(section).getByRole('button', { name: 'Salvar' }));
-    await waitFor(() =>
-      expect(mocks.setProviderKey).toHaveBeenCalledWith(
-        ANTHROPIC,
-        'sk-ant-api03-teste-1234567890',
-      ),
-    );
-
-    // "Testar conexão" validates the anthropic provider.
-    await user.click(within(section).getByRole('button', { name: 'Testar conexão' }));
-    await waitFor(() => expect(mocks.validateProvider).toHaveBeenCalledWith(ANTHROPIC));
   });
 
   it('mostra o aviso de secrets.json inválido sem ação destrutiva', async () => {
@@ -463,5 +542,60 @@ describe('ProvidersTab — cards de provedor', () => {
     await user.click(screen.getByRole('button', { name: 'Dispensar' }));
     expect(useAppStore.getState().error).toBeNull();
     await waitFor(() => expect(screen.queryByText('A última ação falhou')).toBeNull());
+  });
+});
+
+describe('ProvidersTab — Ver mais provedores', () => {
+  it('mostra o estado vazio enquanto não há outros provedores', async () => {
+    await renderTab();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Ver mais provedores' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Ver mais provedores' });
+    expect(within(dialog).getByText('Mais provedores em breve')).toBeTruthy();
+    expect(
+      within(dialog).getByText(/Novos provedores aparecem aqui assim que forem suportados/),
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole('listitem')).toBeNull();
+  });
+
+  it('lista provedores futuros, com fallback de iniciais, e abre o modal de configuração', async () => {
+    const future: ProviderInfo = {
+      ...catalog.providers[1],
+      id: 'openrouter',
+      name: 'OpenRouter',
+      shortName: 'OpenRouter',
+      description: 'Modelos agregados de vários provedores.',
+      consoleUrl: 'https://openrouter.ai/keys',
+      authEnv: 'OPENROUTER_API_KEY',
+      notes: [],
+      models: [],
+    };
+    useAppStore.setState({ providers: [...catalog.providers, future] });
+    await renderTab();
+    const user = userEvent.setup();
+
+    // Curated providers stay in the popular list only.
+    expect(screen.queryByRole('button', { name: 'Conectar OpenRouter' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Ver mais provedores' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Ver mais provedores' });
+    expect(within(dialog).queryByText('Mais provedores em breve')).toBeNull();
+
+    const row = within(dialog).getByRole('listitem');
+    expect(within(row).getByText('OpenRouter')).toBeTruthy();
+    // No bundled brand mark: falls back to the provider initials.
+    expect(within(row).getByText('OP')).toBeTruthy();
+
+    await user.click(within(row).getByRole('button', { name: 'Conectar OpenRouter' }));
+
+    const config = await screen.findByRole('dialog', { name: 'Conectar OpenRouter' });
+    await user.type(
+      within(config).getByLabelText('API key de OpenRouter'),
+      'sk-or-123',
+    );
+    await user.click(within(config).getByRole('button', { name: 'Continuar' }));
+    await waitFor(() => expect(mocks.setProviderKey).toHaveBeenCalledWith('openrouter', 'sk-or-123'));
   });
 });

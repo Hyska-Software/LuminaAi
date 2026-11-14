@@ -161,6 +161,24 @@
   },
   "providers": {
     "securityNote": "Las claves de API (OpenCode/Anthropic/Google) y la sesión de ChatGPT se guardan solo en el backend (<code>secrets.json</code> en app-data) y nunca se exponen a la interfaz. También detectamos las variables de entorno de los proveedores y el inicio de sesión existente de OpenCode CLI.",
+    "list": {
+      "popular": "Proveedores populares",
+      "more": "Ver más proveedores",
+      "connect": "Conectar",
+      "manage": "Gestionar",
+      "recommended": "Recomendado"
+    },
+    "connect": {
+      "title": "Conectar {{name}}",
+      "manageTitle": "Gestionar {{name}}",
+      "keyIntro": "Introduce tu clave de API para conectar tu cuenta de {{name}} y usar sus modelos en Zylara.",
+      "continue": "Continuar"
+    },
+    "more": {
+      "title": "Ver más proveedores",
+      "description": "Los nuevos proveedores aparecen aquí en cuanto estén disponibles.",
+      "empty": "Más proveedores muy pronto"
+    },
     "resilience": {
       "title": "Confiabilidad",
       "description": "Tiempos límite y reintentos automáticos compartidos por todos los proveedores. El reintento solo ocurre antes de que cualquier texto o tool call llegue a la pantalla.",
@@ -303,11 +321,11 @@
     },
     "privacyFooter": "Zylara no envía tus credenciales a ningún servidor propio: las solicitudes van directamente al proveedor elegido. Al eliminar una clave guardada en la configuración, la detección por entorno/CLI vuelve a aplicarse si existe. Salir de ChatGPT revoca el token de actualización y conserva solo el registro de la cuenta para la próxima conexión.",
     "description": {
-      "opencode-go": "Suscripción OpenCode Go: modelos abiertos de alto rendimiento con límites mensuales.",
-      "opencode-zen": "OpenCode Console (pay-as-you-go): catálogo curado de modelos de varios proveedores.",
-      "openai": "Modelos de OpenAI usando el plan de ChatGPT de tu cuenta (Sign in with ChatGPT) o una clave de API de la plataforma.",
-      "anthropic": "Modelos Claude mediante la API oficial de Anthropic: facturación por token en tu cuenta (pay-as-you-go).",
-      "gemini": "Modelos Gemini mediante la API oficial de Google: facturación por token en tu cuenta (Gemini Developer API)."
+      "opencode-go": "Suscripción de OpenCode con límites mensuales, sin cobro por token.",
+      "opencode-zen": "Catálogo pay-as-you-go con modelos seleccionados de varios proveedores.",
+      "openai": "Inicio de sesión con el plan ChatGPT o una clave de API de OpenAI.",
+      "anthropic": "Acceso directo a los modelos Claude con una clave de API de Anthropic.",
+      "gemini": "Modelos Gemini con una clave de API de Google AI Studio."
     },
     "notes": {
       "opencode-go": {
