@@ -53,6 +53,7 @@
     "notUseful": "Resposta não útil",
     "cancelled": "Cancelado",
     "incomplete": "Parou com trabalho pendente",
+    "resume": "Continuar",
     "tokens": "{{tokens}} tokens",
     "tokensAndDuration": "{{tokens}} tokens · {{duration}}"
   },
@@ -474,6 +475,7 @@
     "threadBusyHint": "A mensagem voltou para a fila; retome quando o turno atual terminar.",
     "goalRoundFailed": "Não foi possível iniciar a rodada do objetivo",
     "messageFailed": "Não foi possível concluir a mensagem",
+    "resumeFailed": "Não foi possível continuar este turno",
     "queuePaused": "A fila está pausada: restaure o agente para continuar",
     "interruptFailed": "Não foi possível interromper a resposta atual",
     "selectAgentToStart": "Selecione um agente para iniciar a conversa",

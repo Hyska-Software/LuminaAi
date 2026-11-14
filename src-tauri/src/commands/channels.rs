@@ -478,6 +478,7 @@ pub async fn post_agent_channel_message(
             turn_kind: TurnKind::User,
             goal_request: false,
             turn_id: Some(turn_id),
+            resume_assistant_message_id: None,
         };
         match harness::run_turn(
             deps.clone(),

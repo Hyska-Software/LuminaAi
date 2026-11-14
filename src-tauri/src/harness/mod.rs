@@ -17,8 +17,8 @@ use crate::db::{CacheStateRecord, Db, StoredAttachment, UsageLogCache};
 use crate::domain::{
     now_ms, AttachmentInfo, CacheBreakReason, CacheSample, CacheSettings, ChatMessage, Citation,
     Conversation, MessageRole, MessageStatus, PrefixDigest, ReasoningMode, ReasoningSelection,
-    Settings, ToolCallRecord, ToolCallStatus, ToolImageRef, TraceStep, TurnKind, TurnOptions,
-    TurnPayload, TurnProfile, TurnResult, UsageInfo,
+    ResumeReason, ResumeState, Settings, ToolCallRecord, ToolCallStatus, ToolImageRef, TraceStep,
+    TurnKind, TurnOptions, TurnPayload, TurnProfile, TurnResult, UsageInfo,
 };
 use crate::events::TurnEvent;
 use crate::providers::{
@@ -2097,10 +2097,25 @@ pub async fn run_turn(
     }
 
     /* ---------------------------------------------------------------- */
-    /* 2. Effective turn options                                         */
+    /* 2. Effective turn options (and the resume point, when continuing) */
     /* ---------------------------------------------------------------- */
 
+    // Resolved before the options: a resumed turn keeps the capabilities and the
+    // reasoning selection it had when it stopped.
+    let resume_point = match payload.resume_assistant_message_id.as_deref() {
+        Some(assistant_id) => Some(prepare_resume(&deps, &payload, assistant_id)?),
+        None => None,
+    };
+    let resume_state: Option<ResumeState> = resume_point.as_ref().map(|(_, _, state)| state.clone());
     let mut options = payload.options.clone();
+    // A resumed turn keeps the capabilities the user had when it stopped: the
+    // renderer sends the live settings, the point is authoritative for the
+    // public switches (the global gates below still apply on top of them).
+    if let Some(state) = resume_state.as_ref() {
+        options.web_search = state.options.web_search;
+        options.create_files = state.options.create_files;
+        options.run_code = state.options.run_code;
+    }
     options.web_search = options.web_search && settings.web_search_enabled;
     options.create_files = options.create_files && settings.file_creation_enabled;
     // `run_code` is opt-in: the turn option is further gated by the global
@@ -2125,10 +2140,14 @@ pub async fn run_turn(
     /*    the assistant placeholder.                                     */
     /* ---------------------------------------------------------------- */
 
-    let (user_message, mut assistant_message) = if options.regenerate {
-        prepare_regenerate(&deps, &payload, &provider, &model)?
-    } else {
-        prepare_new_turn(&deps, &payload, &provider.id, &model.id)?
+    let (user_message, mut assistant_message) = match resume_point.as_ref() {
+        // Continuing an interrupted turn: the same assistant row (and therefore
+        // the same tool-call cards) receives the new steps.
+        Some((user_message, assistant_message, _)) => {
+            (user_message.clone(), assistant_message.clone())
+        }
+        None if options.regenerate => prepare_regenerate(&deps, &payload, &provider, &model)?,
+        None => prepare_new_turn(&deps, &payload, &provider.id, &model.id)?,
     };
     // Partial snapshots are written while the turn streams so a closed window,
     // Stop or crash cannot discard what was already rendered.
@@ -2137,7 +2156,7 @@ pub async fn run_turn(
     emit(
         &on_event,
         TurnEvent::TurnStarted {
-            turn_id,
+            turn_id: turn_id.clone(),
             user_message_id: user_message.id.clone(),
             assistant_message_id: assistant_message.id.clone(),
         },
@@ -2706,7 +2725,13 @@ pub async fn run_turn(
             history.push(render_surface_item(&item));
         }
     }
-    let reasoning = reasoning_request(payload.reasoning.as_ref(), &model);
+    let reasoning = reasoning_request(
+        resume_state
+            .as_ref()
+            .and_then(|state| state.reasoning.as_ref())
+            .or(payload.reasoning.as_ref()),
+        &model,
+    );
     let max_output_tokens = Some(model.max_output.clamp(1_024, 32_768));
 
     let agent_hooks: Option<Arc<dyn crate::tools::AgentHooks>> = deps
@@ -2847,17 +2872,28 @@ pub async fn run_turn(
     /* 5. Agent loop                                                     */
     /* ---------------------------------------------------------------- */
 
-    let mut step_number = 0u32;
-    let mut full_text = String::new();
-    let mut full_reasoning = String::new();
-    let mut trace: Vec<TraceStep> = Vec::new();
-    let mut all_tool_calls: Vec<ToolCallRecord> = Vec::new();
-    let mut citations: Vec<Citation> = Vec::new();
-    let mut total_usage = UsageInfo::default();
+    let mut step_number = resume_state.as_ref().map_or(0, |state| state.step);
+    // A resumed turn starts from the persisted row: the loop keeps working on
+    // the very same message, so the UI shows the same cards and the model gets
+    // the same context (plus the steps appended to `history` below).
+    let mut full_text = assistant_message.content.clone();
+    let mut full_reasoning = assistant_message.reasoning.clone().unwrap_or_default();
+    let mut trace: Vec<TraceStep> = assistant_message.trace.clone();
+    let mut all_tool_calls: Vec<ToolCallRecord> = assistant_message.tool_calls.clone();
+    let mut citations: Vec<Citation> = assistant_message.citations.clone();
+    let mut total_usage = assistant_message.usage.clone().unwrap_or_default();
     // Replay por passo: um bloco por resposta do provedor (com as tool calls do
     // passo), para que o próximo turno reconstrua o turno multi-step inteiro.
-    let mut replay_steps: Vec<ReplayStep> = Vec::new();
-    let mut tool_images_this_turn = 0usize;
+    // Num turno retomado ele começa com os passos já persistidos.
+    let mut replay_steps: Vec<ReplayStep> = assistant_message
+        .provider_state
+        .as_ref()
+        .and_then(parse_provider_state_v2)
+        .unwrap_or_default();
+    let mut tool_images_this_turn: usize = all_tool_calls
+        .iter()
+        .map(|call| call.images.len())
+        .sum();
     let mut cancelled = false;
     let mut turn_failure: Option<TurnFailure> = None;
     // Estado de modo observado pelo loop: comparado a cada passo para avisar a
@@ -2892,7 +2928,9 @@ pub async fn run_turn(
         .iter()
         .any(|tool| tool.name == "todo_write");
     let mut stop_progress = completion::TurnProgress::default();
-    let mut stop_continuations = 0u32;
+    let mut stop_continuations = resume_state
+        .as_ref()
+        .map_or(0, |state| state.stop_continuations);
     let mut stop_incomplete: Option<completion::ContinueReason> = None;
     let mut budget_exhausted = false;
     // Anti-loop: assinatura do lote de tool calls do passo anterior e quantas
@@ -2907,6 +2945,30 @@ pub async fn run_turn(
     let mut last_usage_cache: Option<TurnUsageCache> = None;
     // Log resumido do plano de cache (uma linha por turno, F4).
     let mut cache_plan_logged = false;
+
+    // Ponto de retomada: existe enquanto o turno está vivo (o app pode fechar no
+    // meio de qualquer passo) e é limpo quando o turno conclui. Num turno
+    // retomado ele começa do ponto anterior, preservando a intenção original
+    // (kind, perfil, opções e raciocínio).
+    let mut resume_checkpoint = match resume_state.clone() {
+        Some(state) => {
+            ResumeCheckpoint::new(deps.db.clone(), assistant_message.id.clone(), state)
+        }
+        None => {
+            let mut state = ResumeState::new(turn_id.clone(), ResumeReason::Running);
+            state.turn_kind = payload.turn_kind;
+            state.profile = profile;
+            state.options = options.clone();
+            state.reasoning = payload.reasoning.clone();
+            ResumeCheckpoint::new(deps.db.clone(), assistant_message.id.clone(), state)
+        }
+    };
+    resume_checkpoint.save(
+        step_number,
+        ResumeReason::Running,
+        None,
+        stop_continuations,
+    );
 
     // F2c: compactação cache-safe do **Chat** antes do loop (uma tentativa por
     // turno — nada de loop infinito). Reusa system prompt + tools + histórico
@@ -3001,6 +3063,25 @@ pub async fn run_turn(
                 Some(new_seq),
             );
         }
+    }
+
+    // Turno retomado: devolve ao modelo a cauda que ele já tinha produzido
+    // (um assistant por passo, seguido dos resultados das tools). É o mesmo
+    // formato que o loop em memória usa entre passos, então o contexto do
+    // request continua idêntico ao do passo interrompido.
+    if resume_state.is_some() && !replay_steps.is_empty() {
+        let tail = resume_history_tail(
+            &assistant_message,
+            &replay_steps,
+            &provider,
+            &model,
+            supports_images,
+        );
+        for _ in 0..tail.len() {
+            history_anchors.push(0);
+        }
+        history.extend(tail);
+        debug_assert_tool_results_are_paired(&history);
     }
 
     while options
@@ -3564,6 +3645,15 @@ pub async fn run_turn(
             &all_tool_calls,
             &citations,
         );
+        // Step finished (request + tool batch): the resume point moves forward,
+        // so a crash from here on continues at the next step instead of
+        // re-running this one.
+        resume_checkpoint.save(
+            step_number,
+            ResumeReason::Running,
+            None,
+            stop_continuations,
+        );
 
         if options
             .max_steps
@@ -3845,6 +3935,32 @@ pub async fn run_turn(
     assistant_message.reasoning =
         (!full_reasoning.trim().is_empty()).then(|| full_reasoning.clone());
     assistant_message.status = status;
+    // A turn that completed has nothing to continue; every other ending keeps
+    // an exact resume point (step + options + reason) next to the partial
+    // transcript, so the user continues at the same step instead of from zero.
+    if cancelled || turn_failure.is_some() || stop_incomplete.is_some() {
+        let reason = if cancelled {
+            ResumeReason::Cancelled
+        } else if turn_failure.is_some() {
+            ResumeReason::ProviderError
+        } else {
+            ResumeReason::Incomplete
+        };
+        let detail = if cancelled {
+            None
+        } else if let Some(failure) = turn_failure.as_ref() {
+            Some(failure.message.clone())
+        } else {
+            stop_incomplete
+                .as_ref()
+                .map(|reason| reason.code().to_string())
+        };
+        resume_checkpoint.save(step_number, reason, detail, stop_continuations);
+        assistant_message.resume_state = Some(resume_checkpoint.state().clone());
+    } else {
+        resume_checkpoint.clear();
+        assistant_message.resume_state = None;
+    }
     assistant_message.error = turn_failure
         .as_ref()
         .map(TurnFailure::to_message_error);
@@ -4051,6 +4167,9 @@ fn prepare_new_turn(
     provider_id: &str,
     model_id: &str,
 ) -> anyhow::Result<(ChatMessage, ChatMessage)> {
+    // A new message closes the previous turn: only the newest turn can be
+    // resumed, so older points would inject history out of order.
+    let _ = deps.db.clear_resume_states(&payload.conversation_id);
     let mut user_message = ChatMessage::user(&payload.conversation_id, payload.content.clone());
     // Origem honesta: rodada de objetivo não se disfarça de mensagem do usuário
     // (persistido em `messages.origin`; a UI renderiza um divisor próprio).
@@ -4106,6 +4225,16 @@ fn persist_route_failure(
     )?;
     assistant_message.status = MessageStatus::Error;
     assistant_message.error = Some(failure.to_message_error());
+    // Nothing was sent, but the turn keeps its intent: once the credential is
+    // fixed the same message can continue from step 0 with the same options.
+    let mut resume = ResumeState::new(turn_id, ResumeReason::Route);
+    resume.turn_kind = payload.turn_kind;
+    resume.profile = payload.profile;
+    resume.reasoning = payload.reasoning.clone();
+    resume.options = payload.options.clone();
+    resume.detail = Some(failure.message.clone());
+    resume.updated_at = now_ms();
+    assistant_message.resume_state = Some(resume);
     deps.db.update_message(&assistant_message)?;
 
     emit(
@@ -4151,6 +4280,9 @@ fn prepare_regenerate(
     provider: &ProviderInfo,
     model: &ModelInfo,
 ) -> anyhow::Result<(ChatMessage, ChatMessage)> {
+    // Everything after the user message is dropped below, so the resume points
+    // of the discarded tail die with it.
+    let _ = deps.db.clear_resume_states(&payload.conversation_id);
     let messages = deps.db.list_messages(&payload.conversation_id)?;
     let last_user_index = messages
         .iter()
@@ -4170,6 +4302,153 @@ fn prepare_regenerate(
     deps.db.insert_message(&assistant_message)?;
 
     Ok((user_message, assistant_message))
+}
+
+/// Loads the assistant row that owns a resume point and prepares it to continue.
+///
+/// Strict by design: the row must belong to the conversation, be the newest
+/// message (a later message would break the model context), carry a point
+/// written by this version of the app and come from a user turn — goal rounds
+/// keep their own pause/resume flow (`update_goal`).
+fn prepare_resume(
+    deps: &HarnessDeps,
+    payload: &TurnPayload,
+    assistant_id: &str,
+) -> anyhow::Result<(ChatMessage, ChatMessage, ResumeState)> {
+    let messages = deps.db.list_messages(&payload.conversation_id)?;
+    let position = messages
+        .iter()
+        .position(|message| message.id == assistant_id)
+        .ok_or_else(|| anyhow!(crate::i18n::t("turn.errors.resumeUnavailable")))?;
+    if messages[position].role != MessageRole::Assistant {
+        return Err(anyhow!(crate::i18n::t("turn.errors.resumeUnavailable")));
+    }
+    if position + 1 != messages.len() {
+        return Err(anyhow!(crate::i18n::t("turn.errors.resumeNotLast")));
+    }
+    let state = messages[position]
+        .resume_state
+        .clone()
+        .filter(ResumeState::is_resumable)
+        .ok_or_else(|| {
+            // A goal round has its own resume (the goal card); anything else
+            // without a resumable point was already completed or replaced.
+            let key = if messages[position]
+                .resume_state
+                .as_ref()
+                .is_some_and(|state| state.turn_kind == TurnKind::GoalRound)
+            {
+                "turn.errors.resumeGoalRound"
+            } else {
+                "turn.errors.resumeUnavailable"
+            };
+            anyhow!(crate::i18n::t(key))
+        })?;
+    let user_message = messages[..position]
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::User)
+        .cloned()
+        .ok_or_else(|| anyhow!(crate::i18n::t("turn.errors.resumeUnavailable")))?;
+    // The row goes back to `streaming` so a reload during the resumed turn shows
+    // it live again. Model/provider stay untouched on purpose: the replay
+    // decision of this turn compares them with the current route.
+    let mut resumed = messages[position].clone();
+    resumed.status = MessageStatus::Streaming;
+    resumed.error = None;
+    deps.db.update_message(&resumed)?;
+    Ok((user_message, resumed, state))
+}
+
+/// History tail of a resumed turn: the assistant/tool-result blocks the model
+/// had already produced, in the same order the live loop built them.
+///
+/// The raw per-step payload is only replayed when the message was produced by
+/// the same provider/model; otherwise the neutral form (text + calls + results)
+/// is used, exactly like `build_history` does for older turns.
+fn resume_history_tail(
+    message: &ChatMessage,
+    steps: &[ReplayStep],
+    provider: &ProviderInfo,
+    model: &ModelInfo,
+    supports_images: bool,
+) -> Vec<HistoryMessage> {
+    // A failed request that streamed nothing leaves an empty replay step: it has
+    // no text, no calls and no state, so it must not become an empty assistant
+    // message in the request (providers reject it).
+    if steps.iter().all(ReplayStep::is_empty) && message.tool_calls.is_empty() {
+        return Vec::new();
+    }
+    let same_route = message.provider_id.as_deref() == Some(provider.id.as_str())
+        && message.model_id.as_deref() == Some(model.id.as_str());
+    if same_route {
+        return replay_steps_history(message, steps, &HashMap::new(), supports_images);
+    }
+    let mut assistant = HistoryMessage::assistant(message.content.clone());
+    assistant.reasoning = message
+        .reasoning
+        .clone()
+        .filter(|reasoning| !reasoning.trim().is_empty());
+    assistant.tool_calls = message.tool_calls.iter().map(history_tool_call).collect();
+    let mut group = vec![assistant];
+    for call in &message.tool_calls {
+        group.push(tool_result_message(call, None, supports_images));
+    }
+    group
+}
+
+/// Keeps the resume point of the live turn up to date.
+///
+/// The point is written at every step boundary, so an app close or crash never
+/// loses more than the step in flight; the terminal path of the turn rewrites
+/// it with the real reason (or clears it when the turn completed).
+struct ResumeCheckpoint {
+    db: Arc<Db>,
+    message_id: String,
+    state: ResumeState,
+}
+
+impl ResumeCheckpoint {
+    fn new(db: Arc<Db>, message_id: String, state: ResumeState) -> Self {
+        Self {
+            db,
+            message_id,
+            state,
+        }
+    }
+
+    fn state(&self) -> &ResumeState {
+        &self.state
+    }
+
+    /// Snapshot of the loop position. `detail` is the user-facing explanation
+    /// (provider message) shown next to the Continue action.
+    fn save(
+        &mut self,
+        step: u32,
+        reason: ResumeReason,
+        detail: Option<String>,
+        stop_continuations: u32,
+    ) {
+        self.state.step = step;
+        self.state.reason = reason;
+        self.state.detail = detail;
+        self.state.stop_continuations = stop_continuations;
+        self.state.updated_at = now_ms();
+        if let Err(error) = self
+            .db
+            .save_resume_state(&self.message_id, Some(&self.state))
+        {
+            eprintln!("zylara: falha ao salvar o ponto de retomada do turno: {error:#}");
+        }
+    }
+
+    /// Finished turn: nothing left to continue.
+    fn clear(&self) {
+        if let Err(error) = self.db.save_resume_state(&self.message_id, None) {
+            eprintln!("zylara: falha ao limpar o ponto de retomada do turno: {error:#}");
+        }
+    }
 }
 
 /// Best-effort snapshot of the assistant row while the turn streams. A failed
@@ -4721,6 +5000,11 @@ fn replay_steps_history(
     let mut group: Vec<HistoryMessage> = Vec::new();
 
     for step in steps {
+        // Empty envelope blocks (a request that streamed nothing) carry no
+        // information and would render as an empty assistant turn.
+        if step.is_empty() {
+            continue;
+        }
         let mut assistant = HistoryMessage::assistant(step.text.clone());
         assistant.reasoning = (!step.reasoning.trim().is_empty()).then(|| step.reasoning.clone());
         assistant.provider_state = step.state.clone();
@@ -6105,6 +6389,7 @@ mod agent_loop_tests {
             turn_kind: crate::domain::TurnKind::User,
             goal_request: false,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
+            resume_assistant_message_id: None,
         }
     }
 
@@ -6134,6 +6419,7 @@ mod agent_loop_tests {
             turn_kind: crate::domain::TurnKind::User,
             goal_request: false,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
+            resume_assistant_message_id: None,
         }
     }
 
@@ -6250,6 +6536,7 @@ mod agent_loop_tests {
             turn_kind: crate::domain::TurnKind::User,
             goal_request: false,
             turn_id: Some(uuid::Uuid::new_v4().to_string()),
+            resume_assistant_message_id: None,
         }
     }
 
@@ -6402,6 +6689,7 @@ mod agent_loop_tests {
                 turn_kind: crate::domain::TurnKind::User,
                 goal_request: false,
                 turn_id: Some(uuid::Uuid::new_v4().to_string()),
+                resume_assistant_message_id: None,
             },
             Settings::default(),
             channel,
@@ -6459,7 +6747,7 @@ mod agent_loop_tests {
             conversation_id: conversation.id.clone(), content: "Hello".into(), attachment_ids: Vec::new(),
             provider_id: conversation.provider_id, model_id: conversation.model_id, reasoning: None,
             options: TurnOptions::default(), profile: TurnProfile::Chat, turn_kind: TurnKind::User,
-            goal_request: false, turn_id: None,
+            goal_request: false, turn_id: None, resume_assistant_message_id: None,
         }, Settings::default(), channel, CancellationToken::new()).await.expect("agent turn");
         let definitions = definitions.lock().expect("lock");
         assert!(definitions.iter().any(|name| name == "computer_screenshot"));
@@ -6747,6 +7035,7 @@ mod agent_loop_tests {
                 turn_kind: crate::domain::TurnKind::User,
                 goal_request: false,
                 turn_id: Some(uuid::Uuid::new_v4().to_string()),
+                resume_assistant_message_id: None,
             },
             Settings::default(),
             channel,
@@ -7235,6 +7524,219 @@ mod agent_loop_tests {
             "list_skills não devolveu a skill externa: {output}"
         );
         assert!(output.contains("\"source\":\"codex\""));
+    }
+
+    /// A provider failure after a tool step persists the resume point on the
+    /// assistant row; `resumeAssistantMessageId` continues that same turn (same
+    /// message id, same cards) at the next step, with the tool results still in
+    /// the model context — no restart from the user message.
+    #[tokio::test]
+    async fn provider_failure_keeps_a_resume_point_and_resume_continues_the_same_message() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        // Step 1 asks for a tool; step 2 fails like an API error would.
+        let step = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let failing: ProviderStreamer = {
+            let step = step.clone();
+            Arc::new(move |_request, sink| {
+                let current = step.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async move {
+                    if current == 0 {
+                        tool_call_stream(&sink, "call-1", "list_skills");
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("gateway indisponível"))
+                    }
+                })
+            })
+        };
+        let (events_arc, _events) = channel();
+        let failed = run_turn(
+            deps(temp.db.clone(), failing),
+            payload(&conversation, 4),
+            Settings::default(),
+            events_arc,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn resolves with an error payload");
+
+        assert_eq!(failed.assistant_message.status, MessageStatus::Error);
+        let stored = temp
+            .db
+            .get_message(&failed.assistant_message.id)
+            .expect("read message")
+            .expect("stored message");
+        let point = stored
+            .resume_state
+            .clone()
+            .expect("resume point persisted on failure");
+        assert_eq!(point.step, 2, "o passo 2 é o que falhou");
+        assert_eq!(point.reason, ResumeReason::ProviderError);
+        assert_eq!(stored.tool_calls.len(), 1);
+        assert_eq!(stored.tool_calls[0].name, "list_skills");
+        let assistant_id = stored.id.clone();
+        let user_id = failed.user_message.id.clone();
+
+        // Resume: same row, next step, previous tool result in the request.
+        let requests: Arc<Mutex<Vec<CompletionRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let (events_arc, _events) = channel();
+        let mut resumed_payload = payload(&conversation, 4);
+        resumed_payload.resume_assistant_message_id = Some(assistant_id.clone());
+        let resumed = run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(requests.clone(), "Tudo pronto."),
+            ),
+            resumed_payload,
+            Settings::default(),
+            events_arc,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("resumed turn");
+
+        assert_eq!(resumed.assistant_message.id, assistant_id);
+        assert_eq!(resumed.assistant_message.status, MessageStatus::Complete);
+        assert!(
+            resumed.assistant_message.resume_state.is_none(),
+            "turno concluído não deixa ponto de retomada"
+        );
+        assert!(resumed.assistant_message.content.contains("Tudo pronto"));
+        assert_eq!(
+            resumed.assistant_message.tool_calls.len(),
+            1,
+            "as calls do passo anterior continuam na mesma mensagem"
+        );
+
+        // No new rows: the resume continued the interrupted turn.
+        let messages = temp.db.list_messages(&conversation.id).expect("messages");
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].id, user_id);
+        assert_eq!(messages[1].id, assistant_id);
+
+        // The request the model received carried the earlier tool call/result.
+        let requests = requests.lock().expect("requests lock");
+        let last = requests.last().expect("resume request");
+        assert!(
+            last.history.iter().any(|message| {
+                message.role == HistoryRole::Assistant
+                    && message
+                        .tool_calls
+                        .iter()
+                        .any(|call| call.name == "list_skills")
+            }),
+            "histórico retomado sem a tool call do passo anterior"
+        );
+        assert!(
+            last.history
+                .iter()
+                .any(|message| message.role == HistoryRole::Tool),
+            "histórico retomado sem o resultado da tool"
+        );
+    }
+
+    /// A new user message invalidates the older point: only the newest turn can
+    /// be resumed (otherwise the replay would be inserted out of order).
+    #[tokio::test]
+    async fn a_new_turn_clears_the_previous_resume_point() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let failing: ProviderStreamer = Arc::new(|_request, _sink| {
+            Box::pin(async move { Err(anyhow::anyhow!("gateway indisponível")) })
+        });
+        let (events_arc, _events) = channel();
+        let failed = run_turn(
+            deps(temp.db.clone(), failing),
+            payload(&conversation, 2),
+            Settings::default(),
+            events_arc,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("failed turn");
+        assert!(failed.assistant_message.resume_state.is_some());
+
+        let (events_arc, _events) = channel();
+        let next = run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(Arc::new(Mutex::new(Vec::new())), "Certo."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            events_arc,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("next turn");
+        assert_eq!(next.assistant_message.status, MessageStatus::Complete);
+
+        let stored = temp
+            .db
+            .get_message(&failed.assistant_message.id)
+            .expect("read message")
+            .expect("stored message");
+        assert!(
+            stored.resume_state.is_none(),
+            "um turno novo invalida o ponto do anterior"
+        );
+    }
+
+    /// Resuming something without a point (already finished, or a different
+    /// message) is refused before anything is persisted or sent.
+    #[tokio::test]
+    async fn resume_requires_a_stored_point() {
+        let temp = TempDb::new();
+        let conversation = temp
+            .db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+
+        let (events_arc, _events) = channel();
+        let done = run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(Arc::new(Mutex::new(Vec::new())), "Pronto."),
+            ),
+            payload(&conversation, 2),
+            Settings::default(),
+            events_arc,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("turn");
+
+        let (events_arc, _events) = channel();
+        let mut resume = payload(&conversation, 2);
+        resume.resume_assistant_message_id = Some(done.assistant_message.id.clone());
+        let error = run_turn(
+            deps(
+                temp.db.clone(),
+                capturing_streamer(Arc::new(Mutex::new(Vec::new())), "Nunca."),
+            ),
+            resume,
+            Settings::default(),
+            events_arc,
+            CancellationToken::new(),
+        )
+        .await
+        .expect_err("resume sem ponto é recusado");
+        assert!(
+            format!("{error:#}").to_lowercase().contains("resume"),
+            "erro inesperado: {error:#}"
+        );
+        // Nothing new was persisted by the refused resume.
+        let messages = temp.db.list_messages(&conversation.id).expect("messages");
+        assert_eq!(messages.len(), 2);
     }
 
     #[tokio::test]

@@ -683,6 +683,7 @@ async fn execute_task(app: &AppHandle, task: AgentTask) -> Result<(), String> {
             turn_kind: TurnKind::User,
             goal_request: false,
             turn_id: Some(task_turn_id.clone()),
+            resume_assistant_message_id: None,
         };
         let emitter = Arc::new(TaskEventEmitter {
             app: app.clone(),

@@ -337,6 +337,26 @@ são persistidas em `messages.error` (`MessageError`: mensagem, código, dica, `
 antes do primeiro request (credencial/modelo/protocolo) também persistem usuário + bolha de
 erro para turnos novos.
 
+### Turnos retomáveis (continuar do passo exato)
+
+Um turno que termina sem concluir (erro do provedor, rota sem credencial, Stop, app fechado
+ou gate de completion) guarda um **ponto de retomada** na própria mensagem assistant:
+`messages.resume_state` (`ResumeState`: `step`, motivo, `TurnOptions` e seleção de raciocínio
+do turno). O resto do estado já vive na linha — conteúdo, raciocínio, `trace`, tool calls com
+resultados, citações, usage e o envelope de replay por passo (`provider_state` v2) — então o
+ponto só carrega o metadado do loop. Ele é reescrito a cada passo (`ResumeCheckpoint`), limpo
+quando o turno conclui e invalidado quando a conversa recebe uma mensagem nova
+(`clear_resume_states`); no boot, `recover_interrupted_messages` mantém o ponto e só troca o
+motivo para `app_closed`.
+
+`run_turn` aceita `resumeAssistantMessageId`: em vez de criar usuário + bolha, recarrega a
+mesma linha (status volta a `streaming`), semeia o loop com o estado persistido, devolve ao
+modelo a cauda já produzida (`resume_history_tail`: um assistant por passo + resultados das
+tools; replay bruto só quando provedor/modelo continuam os mesmos) e continua em `step + 1`.
+O `turn_started` anuncia os **mesmos ids**, então o renderer mantém o mesmo transcript e os
+mesmos cards, e o botão **Continuar** (`chatStore.resumeMessage`) só dispara esse turno —
+`regenerate` continua existindo como ação separada, que descarta a resposta anterior.
+
 ## 8. Harness
 
 `harness::run_turn` executa:

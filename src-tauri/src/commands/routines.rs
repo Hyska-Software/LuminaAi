@@ -538,6 +538,7 @@ async fn execute_routine_inner(
         turn_kind: TurnKind::User,
         goal_request: false,
         turn_id: Some(turn_id),
+        resume_assistant_message_id: None,
     };
     let deps = HarnessDeps {
         app: Some(app.clone()),

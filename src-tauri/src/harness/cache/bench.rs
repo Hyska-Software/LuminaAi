@@ -313,6 +313,7 @@ fn benchmark_payload(
         turn_kind: crate::domain::TurnKind::User,
         goal_request: false,
         turn_id: None,
+        resume_assistant_message_id: None,
     }
 }
 

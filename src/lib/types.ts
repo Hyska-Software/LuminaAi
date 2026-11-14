@@ -1175,6 +1175,41 @@ export interface ChatMessage {
   origin?: TurnKind;
   /** Terminal failure persisted by the harness (survives reloads). */
   error?: MessageError | null;
+  /**
+   * Ponto de retomada do turno: presente quando ele parou sem concluir (erro do
+   * provedor, Stop, app fechado). A UI oferece **Continuar**, que retoma do
+   * mesmo passo nesta mesma mensagem.
+   */
+  resumeState?: ResumeState | null;
+}
+
+/** Motivo do ponto de retomada (espelha `domain::ResumeReason`). */
+export type ResumeReason =
+  | 'running'
+  | 'provider_error'
+  | 'route'
+  | 'cancelled'
+  | 'app_closed'
+  | 'incomplete';
+
+/**
+ * Metadado do loop interrompido. O conteúdo do turno (texto, raciocínio, trace,
+ * tool calls, uso e replay do provedor) já vive na própria mensagem.
+ */
+export interface ResumeState {
+  version: number;
+  turnId: string;
+  /** Último passo executado; a retomada continua em `step + 1`. */
+  step: number;
+  turnKind: TurnKind;
+  profile: TurnProfile;
+  reason: ResumeReason;
+  detail?: string | null;
+  reasoning?: ReasoningSelection | null;
+  /** Opções efetivas do turno interrompido (só as públicas). */
+  options: TurnOptions;
+  stopContinuations: number;
+  updatedAt: number;
 }
 
 /** Origem de uma sessão: o layout onde ela foi criada. */
@@ -1730,6 +1765,12 @@ export interface TurnPayload {
    */
   goalRequest?: boolean;
   turnId?: string | null;
+  /**
+   * Continua um turno interrompido em vez de começar outro: id da mensagem
+   * assistant que carrega o ponto de retomada. O backend reusa essa linha (mesmos
+   * cards de tool call) e retoma o loop no passo seguinte.
+   */
+  resumeAssistantMessageId?: string | null;
 }
 
 export interface ActiveTurnInfo {

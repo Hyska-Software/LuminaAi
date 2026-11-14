@@ -70,7 +70,7 @@ const WORKSPACE_COLUMNS: &str = "id, name, path, created_at, updated_at, last_op
 
 const MESSAGE_COLUMNS: &str = "id, conversation_id, role, content, reasoning, status, \
      tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, created_at, \
-     trace, origin, error";
+     trace, origin, error, resume_state";
 
 const ATTACHMENT_COLUMNS: &str = "id, name, mime_type, size, kind, text, page_count, \
      width, height, file_path, created_at";
@@ -454,7 +454,12 @@ CREATE TABLE IF NOT EXISTS messages (
   -- Origem do turno que gerou a mensagem: 'user' (default) ou 'goal_round'
   -- (rodada automática do objetivo no layout Code). Bancos legados viram
   -- 'user' — é o que o app mostrava até o sistema de objetivos.
-  origin          TEXT NOT NULL DEFAULT 'user'
+  origin          TEXT NOT NULL DEFAULT 'user',
+  -- Ponto de retomada do turno (JSON): preenchido quando o turno para sem
+  -- terminar (erro do provedor, Stop, app fechado, gate de completion). A
+  -- mensagem já guarda conteúdo/trace/tool calls/usage/replay; esta coluna
+  -- carrega só o metadado do loop (passo, opções, motivo).
+  resume_state    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS attachments (
@@ -1189,6 +1194,13 @@ fn migrate_messages_schema(conn: &Connection) -> Result<()> {
         "messages",
         "error",
         "ALTER TABLE messages ADD COLUMN error TEXT",
+    )?;
+    // Turnos retomáveis: ponto de retomada do turno interrompido.
+    ensure_column(
+        conn,
+        "messages",
+        "resume_state",
+        "ALTER TABLE messages ADD COLUMN resume_state TEXT",
     )
 }
 
@@ -2301,6 +2313,7 @@ fn message_from_row(row: &Row<'_>) -> rusqlite::Result<ChatMessage> {
         trace: decode_json(&row.get::<_, String>(14)?),
         origin: turn_kind_from_str(&origin),
         error: decode_opt::<crate::domain::MessageError>(row.get(16)?),
+        resume_state: decode_opt::<crate::domain::ResumeState>(row.get(17)?),
     })
 }
 
@@ -2357,6 +2370,7 @@ struct MessageColumns {
     provider_state: Option<String>,
     trace: String,
     error: Option<String>,
+    resume_state: Option<String>,
 }
 
 fn serialize_message(message: &ChatMessage) -> Result<MessageColumns> {
@@ -2372,6 +2386,7 @@ fn serialize_message(message: &ChatMessage) -> Result<MessageColumns> {
             .transpose()?,
         trace: encode_json(&message.trace)?,
         error: message.error.as_ref().map(encode_json).transpose()?,
+        resume_state: message.resume_state.as_ref().map(encode_json).transpose()?,
     })
 }
 
@@ -2383,8 +2398,8 @@ fn insert_message_row(
     conn.execute(
         "INSERT INTO messages (id, conversation_id, role, content, reasoning, status, \
          tool_calls, citations, attachments, model_id, provider_id, usage, provider_state, \
-         created_at, trace, origin, error) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+         created_at, trace, origin, error, resume_state) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
         params![
             &message.id,
             &message.conversation_id,
@@ -2403,6 +2418,7 @@ fn insert_message_row(
             &cols.trace,
             turn_kind_to_str(message.origin),
             &cols.error,
+            &cols.resume_state,
         ],
     )
     .with_context(|| format!("falha ao inserir mensagem {}", message.id))?;
@@ -2419,7 +2435,7 @@ fn update_message_row(
             "UPDATE messages SET role = ?2, content = ?3, reasoning = ?4, status = ?5, \
              tool_calls = ?6, citations = ?7, attachments = ?8, model_id = ?9, \
              provider_id = ?10, usage = ?11, provider_state = ?12, created_at = ?13, \
-             trace = ?14, origin = ?15, error = ?16 \
+             trace = ?14, origin = ?15, error = ?16, resume_state = ?17 \
              WHERE id = ?1",
             params![
                 &message.id,
@@ -2438,6 +2454,7 @@ fn update_message_row(
                 &cols.trace,
                 turn_kind_to_str(message.origin),
                 &cols.error,
+                &cols.resume_state,
             ],
         )
         .with_context(|| format!("falha ao atualizar mensagem {}", message.id))?;
@@ -2686,15 +2703,20 @@ impl Db {
     /// runs before any turn, so every leftover row is an interrupted turn. Keep
     /// the partial content, settle running tool calls and mark the message
     /// cancelled.
+    ///
+    /// A leftover row that has a resume point keeps it (the turn can continue
+    /// from the exact step it stopped at); only the reason is rewritten to
+    /// `app_closed` so the renderer explains what happened.
     fn recover_interrupted_messages(conn: &Connection) -> Result<()> {
-        let mut stmt =
-            conn.prepare("SELECT id, tool_calls FROM messages WHERE status = 'streaming'")?;
-        let rows: Vec<(String, String)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        let mut stmt = conn.prepare(
+            "SELECT id, tool_calls, resume_state FROM messages WHERE status = 'streaming'",
+        )?;
+        let rows: Vec<(String, String, Option<String>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
             .collect::<rusqlite::Result<_>>()?;
         drop(stmt);
         let now = now_ms();
-        for (id, raw) in rows {
+        for (id, raw, resume_state) in rows {
             let mut tool_calls: Vec<ToolCallRecord> = decode_json(&raw);
             let mut changed = false;
             for call in &mut tool_calls {
@@ -2706,9 +2728,18 @@ impl Db {
                 }
             }
             let raw = if changed { encode_json(&tool_calls)? } else { raw };
+            let resume_state = match decode_opt::<crate::domain::ResumeState>(resume_state) {
+                Some(mut state) => {
+                    state.reason = crate::domain::ResumeReason::AppClosed;
+                    state.updated_at = now;
+                    Some(encode_json(&state)?)
+                }
+                None => None,
+            };
             conn.execute(
-                "UPDATE messages SET status = 'cancelled', tool_calls = ?2 WHERE id = ?1",
-                params![id, raw],
+                "UPDATE messages SET status = 'cancelled', tool_calls = ?2, resume_state = ?3 \
+                 WHERE id = ?1",
+                params![id, raw, resume_state],
             )
             .context("falha ao reconciliar mensagem interrompida")?;
         }
@@ -7140,6 +7171,38 @@ impl Db {
         )
         .context("falha ao salvar checkpoint da mensagem")?;
         Ok(())
+    }
+
+    /// Writes (or clears) the resume point of one assistant message. Called at
+    /// every step boundary of a live turn and on every terminal path, so a
+    /// crash never loses more than the step in flight.
+    pub fn save_resume_state(
+        &self,
+        message_id: &str,
+        state: Option<&crate::domain::ResumeState>,
+    ) -> anyhow::Result<()> {
+        let raw = state.map(encode_json).transpose()?;
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE messages SET resume_state = ?2 WHERE id = ?1",
+            params![message_id, raw],
+        )
+        .context("falha ao salvar ponto de retomada do turno")?;
+        Ok(())
+    }
+
+    /// Drops every resume point of a conversation. Only the newest turn can be
+    /// resumed, so a new user message invalidates the older points.
+    pub fn clear_resume_states(&self, conversation_id: &str) -> anyhow::Result<usize> {
+        let conn = self.conn.lock();
+        let cleared = conn
+            .execute(
+                "UPDATE messages SET resume_state = NULL \
+                 WHERE conversation_id = ?1 AND resume_state IS NOT NULL",
+                params![conversation_id],
+            )
+            .context("falha ao limpar os pontos de retomada da conversa")?;
+        Ok(cleared)
     }
 
     /// Deletes `message_id` and every message after it (used by edit/regenerate).
@@ -13150,5 +13213,71 @@ mod tests {
             Some("Interrompida: o aplicativo foi fechado.")
         );
         assert!(stored.tool_calls[0].finished_at.is_some());
+    }
+
+    #[test]
+    fn resume_state_roundtrips_and_clears_with_the_conversation() {
+        let db = Db::open_in_memory().expect("open");
+        let conversation = db
+            .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+            .expect("conversation");
+        let mut message = ChatMessage::assistant(&conversation.id);
+        message.status = MessageStatus::Error;
+        let mut state = crate::domain::ResumeState::new("turn-1", crate::domain::ResumeReason::ProviderError);
+        state.step = 3;
+        state.detail = Some("gateway indisponível".to_string());
+        message.resume_state = Some(state);
+        db.insert_message(&message).expect("insert message");
+
+        let stored = db
+            .get_message(&message.id)
+            .expect("read message")
+            .expect("stored message");
+        let point = stored.resume_state.expect("resume point");
+        assert_eq!(point.step, 3);
+        assert_eq!(point.turn_id, "turn-1");
+        assert_eq!(point.detail.as_deref(), Some("gateway indisponível"));
+
+        assert_eq!(
+            db.clear_resume_states(&conversation.id).expect("clear"),
+            1
+        );
+        let cleared = db
+            .get_message(&message.id)
+            .expect("read message")
+            .expect("stored message");
+        assert!(cleared.resume_state.is_none());
+    }
+
+    #[test]
+    fn interrupted_streaming_message_keeps_its_resume_point() {
+        let dir = TempDir::new("zylara-interrupted-resume");
+        let path = dir.path.join("test.db");
+        let message_id = {
+            let db = Db::open(&path).expect("open");
+            let conversation = db
+                .create_conversation("Nova conversa", "opencode-go", "deepseek-v4.1-flash")
+                .expect("conversation");
+            let mut message = ChatMessage::assistant(&conversation.id);
+            message.content = "parcial".to_string();
+            let mut state =
+                crate::domain::ResumeState::new("turn-1", crate::domain::ResumeReason::Running);
+            state.step = 2;
+            message.resume_state = Some(state);
+            db.insert_message(&message).expect("insert message");
+            db.save_resume_state(&message.id, message.resume_state.as_ref())
+                .expect("save point");
+            message.id
+        };
+
+        let reopened = Db::open(&path).expect("reopen");
+        let stored = reopened
+            .get_message(&message_id)
+            .expect("read message")
+            .expect("stored message");
+        assert_eq!(stored.status, MessageStatus::Cancelled);
+        let point = stored.resume_state.expect("resume point survives the restart");
+        assert_eq!(point.step, 2);
+        assert_eq!(point.reason, crate::domain::ResumeReason::AppClosed);
     }
 }

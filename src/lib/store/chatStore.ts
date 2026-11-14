@@ -157,6 +157,12 @@ interface ChatState {
   /** Reloads a conversation's messages without touching an active stream. */
   reloadConversation: (conversationId: string) => Promise<void>;
   regenerate: () => Promise<void>;
+  /**
+   * Continues an interrupted turn from its resume point: the same assistant
+   * message keeps streaming (same tool-call cards) and the backend restarts the
+   * loop at the next step with the context it already had.
+   */
+  resumeMessage: (messageId: string) => Promise<boolean>;
   editAndResend: (messageId: string, content: string) => Promise<void>;
   stop: () => Promise<void>;
   /** Stops one conversation even when it is running in the background. */
@@ -549,6 +555,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
   };
 
   const replaceMessageId = (conversationId: string, fromId: string, toId: string) => {
+    // A resumed turn announces the id it already has (the same row keeps
+    // streaming), so there is nothing to remap.
+    if (fromId === toId) return;
     set((state) => {
       const list = state.messagesByConversation[conversationId];
       if (!list) return {};
@@ -562,6 +571,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
       };
     });
   };
+
+  /** Drops the resume point of a superseded turn (see `startTurn`). */
+  const dropResumeState = (message: ChatMessage): ChatMessage =>
+    message.resumeState ? { ...message, resumeState: null } : message;
 
   const pushMessage = (conversationId: string, message: ChatMessage) => {
     set((state) => {
@@ -1393,6 +1406,17 @@ export const useChatStore = create<ChatState>()((set, get) => {
         });
         return;
       }
+      // A refused resume must leave the interrupted turn readable: the point
+      // stays on the row, so the Continue action is still offered.
+      if (payload.resumeAssistantMessageId) {
+        patchMessage(context.conversationId, context.assistantId, (m) =>
+          m.status === 'streaming' ? { ...m, status: 'cancelled' } : m,
+        );
+        setStream(context.conversationId, null);
+        if (get().activeId === context.conversationId) set({ error: message });
+        toast.error(t('chat:toasts.resumeFailed'), { description: message });
+        return;
+      }
       // Rodada de objetivo que nem começou (preflight/harness recusou): não
       // deixa mensagens otimistas órfãs no transcript.
       if (context.removeOnFailure && !started) {
@@ -1524,7 +1548,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
     set((s) => ({
       messagesByConversation: {
         ...s.messagesByConversation,
-        [conversationId]: [...previous, userMessage, assistantMessage],
+        // Only the newest turn can be resumed: a new message drops the points of
+        // the older ones (same invariant as `clear_resume_states` in the DB).
+        [conversationId]: [
+          ...previous.map(dropResumeState),
+          userMessage,
+          assistantMessage,
+        ],
       },
       ...(clearPendingAttachments ? { pendingAttachments: [] } : {}),
       // Errors are per visible thread: a background turn must not clear the
@@ -2549,6 +2579,70 @@ export const useChatStore = create<ChatState>()((set, get) => {
         optimisticUserId: null,
         mode: 'regenerate',
       });
+    },
+
+    resumeMessage: async (messageId) => {
+      const state = get();
+      const conversationId = state.activeId;
+      if (!conversationId || selectActiveStream(state)) return false;
+      const messages = state.messagesByConversation[conversationId] ?? [];
+      const target = messages.find((message) => message.id === messageId);
+      const point = target?.resumeState ?? null;
+      if (!target || !point) return false;
+      const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+      const selection = lockedSelectionFor(state) ?? useAppStore.getState().selection;
+      const turnId = newId();
+      localTurnIds.add(turnId);
+      const stream: StreamingState = {
+        turnId,
+        conversationId,
+        // The interrupted row keeps streaming: same message, same cards.
+        assistantId: target.id,
+        userMessageId: lastUser?.id ?? null,
+        phase: 'starting',
+        step: point.step + 1,
+        startedAt: Date.now(),
+        turnKind: 'user',
+        subagents: {},
+      };
+      set((s) => ({
+        messagesByConversation: {
+          ...s.messagesByConversation,
+          [conversationId]: (s.messagesByConversation[conversationId] ?? []).map((message) =>
+            message.id === target.id
+              ? { ...message, status: 'streaming', error: null }
+              : message,
+          ),
+        },
+        streamsByConversation: { ...s.streamsByConversation, [conversationId]: stream },
+        streaming: stream,
+        error: null,
+        errorCode: null,
+        errorHint: null,
+      }));
+
+      const payload: TurnPayload = {
+        conversationId,
+        content: lastUser?.content ?? '',
+        attachmentIds: [],
+        providerId: target.providerId ?? selection.providerId,
+        modelId: target.modelId ?? selection.modelId,
+        reasoning: point.reasoning ?? selection.reasoning ?? null,
+        options: turnOptionsFromSettings(),
+        profile: turnProfileFor(get().conversations.find((entry) => entry.id === conversationId)),
+        turnKind: 'user',
+        turnId,
+        resumeAssistantMessageId: target.id,
+      };
+
+      void runTurn(payload, {
+        conversationId,
+        assistantId: target.id,
+        userMessageId: lastUser?.id ?? null,
+        optimisticUserId: null,
+        mode: 'new',
+      });
+      return true;
     },
 
     editAndResend: async (messageId, content) => {

@@ -53,6 +53,7 @@
     "notUseful": "Not helpful",
     "cancelled": "Cancelled",
     "incomplete": "Stopped with pending work",
+    "resume": "Continue",
     "tokens": "{{tokens}} tokens",
     "tokensAndDuration": "{{tokens}} tokens · {{duration}}"
   },
@@ -474,6 +475,7 @@
     "threadBusyHint": "The message returned to the queue; resume when the current turn finishes.",
     "goalRoundFailed": "Could not start the goal round",
     "messageFailed": "Could not complete the message",
+    "resumeFailed": "Could not continue this turn",
     "queuePaused": "The queue is paused: restore the agent to continue",
     "interruptFailed": "Could not interrupt the current response",
     "selectAgentToStart": "Select an agent to start the conversation",

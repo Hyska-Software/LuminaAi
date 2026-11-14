@@ -727,6 +727,125 @@ describe('chatStore.regenerate', () => {
   });
 });
 
+describe('chatStore.resumeMessage', () => {
+  const resumeState = {
+    version: 1,
+    turnId: 'turn-old',
+    step: 2,
+    turnKind: 'user' as const,
+    profile: 'chat' as const,
+    reason: 'provider_error' as const,
+    detail: 'gateway indisponível',
+    reasoning: null,
+    options: { webSearch: true, createFiles: true, runCode: true },
+    stopContinuations: 0,
+    updatedAt: 10,
+  };
+
+  it('continues the interrupted message at the next step without touching the transcript', async () => {
+    const interrupted = assistantMessage({
+      id: 'assistant-1',
+      content: 'Narração do passo 1',
+      status: 'error',
+      error: { message: 'gateway indisponível', retryable: true, attempts: 2 },
+      resumeState,
+      toolCalls: [
+        {
+          id: 'call-1',
+          name: 'list_skills',
+          arguments: '{}',
+          result: 'ok',
+          status: 'done' as const,
+        },
+      ],
+    });
+    useChatStore.setState({
+      conversations: [conversation({ messageCount: 2 })],
+      activeId: 'conv-1',
+      messagesByConversation: { 'conv-1': [userMessage(), interrupted] },
+      streamsByConversation: {},
+      streaming: null,
+      error: 'gateway indisponível',
+    });
+
+    let seen: TurnPayload | null = null;
+    mocks.api.runTurn.mockImplementation(
+      async (payload: TurnPayload, onEvent: (event: TurnEvent) => void) => {
+        seen = payload;
+        onEvent({
+          type: 'turn_started',
+          turnId: payload.turnId!,
+          userMessageId: 'user-1',
+          assistantMessageId: 'assistant-1',
+        });
+        onEvent({ type: 'step_started', step: 3 });
+        onEvent({ type: 'text_delta', delta: 'Concluído.' });
+        const final = assistantMessage({ id: 'assistant-1', content: 'Concluído.' });
+        const result = {
+          userMessage: userMessage(),
+          assistantMessage: final,
+          usage: null,
+          error: null,
+          conversation: conversation({ messageCount: 2 }),
+        };
+        onEvent({ type: 'message_updated', message: final });
+        onEvent({ type: 'done', result });
+        return result;
+      },
+    );
+
+    const started = await useChatStore.getState().resumeMessage('assistant-1');
+    expect(started).toBe(true);
+    await vi.waitFor(() => expect(useChatStore.getState().streaming).toBeNull());
+
+    // Same row, same tool cards: nothing was truncated or duplicated.
+    const messages = useChatStore.getState().messagesByConversation['conv-1'];
+    expect(messages).toHaveLength(2);
+    expect(messages[1].id).toBe('assistant-1');
+    expect(messages[1].content).toBe('Concluído.');
+    expect(mocks.api.truncateConversation).not.toHaveBeenCalled();
+
+    expect(seen).not.toBeNull();
+    expect(seen!.resumeAssistantMessageId).toBe('assistant-1');
+    expect(seen!.turnKind).toBe('user');
+    expect(seen!.content).toBe('Explique MCP');
+  });
+
+  it('does nothing without a resume point or while another turn streams', async () => {
+    useChatStore.setState({
+      conversations: [conversation({ messageCount: 2 })],
+      activeId: 'conv-1',
+      messagesByConversation: {
+        'conv-1': [userMessage(), assistantMessage({ id: 'assistant-1' })],
+      },
+      streamsByConversation: {},
+      streaming: null,
+    });
+    expect(await useChatStore.getState().resumeMessage('assistant-1')).toBe(false);
+
+    useChatStore.setState({
+      messagesByConversation: {
+        'conv-1': [
+          userMessage(),
+          assistantMessage({ id: 'assistant-1', resumeState }),
+        ],
+      },
+      streaming: {
+        turnId: 'turn-live',
+        conversationId: 'conv-1',
+        assistantId: 'assistant-1',
+        userMessageId: 'user-1',
+        phase: 'text',
+        step: 1,
+        startedAt: Date.now(),
+        turnKind: 'user',
+      },
+    });
+    expect(await useChatStore.getState().resumeMessage('assistant-1')).toBe(false);
+    expect(mocks.api.runTurn).not.toHaveBeenCalled();
+  });
+});
+
 describe('chatStore other actions', () => {
   it('stop() cancels the active turn', async () => {
     useChatStore.setState({

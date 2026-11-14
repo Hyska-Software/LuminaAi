@@ -562,6 +562,88 @@ pub struct MessageError {
     pub attempts: u32,
 }
 
+/// Why a turn stopped without finishing (and therefore keeps a resume point).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumeReason {
+    /// The turn is live at this step (used by the per-step snapshot).
+    Running,
+    /// The provider/stream failed (API error, timeout, quota, auth, upstream).
+    ProviderError,
+    /// The route never resolved: credential/model/protocol (nothing was sent).
+    Route,
+    /// The user pressed Stop.
+    Cancelled,
+    /// The process ended while the turn was streaming.
+    AppClosed,
+    /// The step budget ran out or the completion gate kept work open.
+    Incomplete,
+}
+
+/// State of one resumable point: the assistant message already holds the big
+/// parts of the turn (content, reasoning, trace, tool calls with their results,
+/// citations, usage and the per-step provider replay envelope). This envelope
+/// only carries the loop metadata needed to continue **at the same step** with
+/// the same options, so the provider sees the exact context it had before.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeState {
+    /// Envelope version (1). Unknown versions are treated as not resumable.
+    #[serde(default)]
+    pub version: u32,
+    /// Turn that produced the point (`turn_id` of the interrupted run).
+    pub turn_id: String,
+    /// Last agent-loop step that ran; resume continues at `step + 1`.
+    #[serde(default)]
+    pub step: u32,
+    /// Original turn kind. Goal rounds keep their own pause/resume flow.
+    #[serde(default)]
+    pub turn_kind: TurnKind,
+    #[serde(default)]
+    pub profile: TurnProfile,
+    pub reason: ResumeReason,
+    /// Human readable detail (provider message) for the banner/tooltip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Reasoning selection of the interrupted turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningSelection>,
+    /// Effective options of the interrupted turn (public bits only).
+    #[serde(default)]
+    pub options: TurnOptions,
+    /// Completion-gate continuations already consumed by the turn.
+    #[serde(default)]
+    pub stop_continuations: u32,
+    /// Last write.
+    #[serde(default)]
+    pub updated_at: i64,
+}
+
+impl ResumeState {
+    pub const VERSION: u32 = 1;
+
+    pub fn new(turn_id: impl Into<String>, reason: ResumeReason) -> Self {
+        Self {
+            version: Self::VERSION,
+            turn_id: turn_id.into(),
+            step: 0,
+            turn_kind: TurnKind::User,
+            profile: TurnProfile::Chat,
+            reason,
+            detail: None,
+            reasoning: None,
+            options: TurnOptions::default(),
+            stop_continuations: 0,
+            updated_at: now_ms(),
+        }
+    }
+
+    /// A point written by this version can drive a new loop.
+    pub fn is_resumable(&self) -> bool {
+        self.version == Self::VERSION && self.turn_kind != TurnKind::GoalRound
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
@@ -604,6 +686,11 @@ pub struct ChatMessage {
     /// Terminal failure of the turn that produced this assistant message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<MessageError>,
+    /// Resume point of a turn that stopped before finishing (provider error,
+    /// Stop, app close, completion gate). Cleared when a turn completes or when
+    /// a newer turn starts in the same conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_state: Option<ResumeState>,
 }
 
 impl ChatMessage {
@@ -626,6 +713,7 @@ impl ChatMessage {
             trace: Vec::new(),
             origin: TurnKind::User,
             error: None,
+            resume_state: None,
         }
     }
 
@@ -648,6 +736,7 @@ impl ChatMessage {
             trace: Vec::new(),
             origin: TurnKind::User,
             error: None,
+            resume_state: None,
         }
     }
 
@@ -670,6 +759,7 @@ impl ChatMessage {
             trace: Vec::new(),
             origin: TurnKind::User,
             error: None,
+            resume_state: None,
         }
     }
 }
@@ -836,6 +926,11 @@ pub struct TurnPayload {
     /// Client generated id used to cancel the stream.
     #[serde(default)]
     pub turn_id: Option<String>,
+    /// Continue an interrupted turn instead of starting a new one: the id of
+    /// the assistant message that owns the resume point. The turn reuses that
+    /// row (same tool-call cards) and restarts the loop at `step + 1`.
+    #[serde(default)]
+    pub resume_assistant_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

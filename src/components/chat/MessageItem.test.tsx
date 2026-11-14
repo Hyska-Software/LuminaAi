@@ -335,4 +335,52 @@ describe('MessageItem — falha persistida', () => {
     expect(screen.getByText('Limite de uso atingido.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Tentar novamente' })).toBeNull();
   });
+
+  it('oferece Continuar quando o turno guardou um ponto de retomada', () => {
+    useChatStore.setState({ streaming: null });
+    renderMessage(
+      message({
+        id: 'a-resume',
+        role: 'assistant',
+        content: 'Narração do passo 1',
+        status: 'error',
+        error: {
+          message: 'gateway indisponível',
+          code: 'upstream_error',
+          retryable: true,
+          attempts: 2,
+        },
+        resumeState: {
+          version: 1,
+          turnId: 'turn-1',
+          step: 2,
+          turnKind: 'user',
+          profile: 'chat',
+          reason: 'provider_error',
+          options: { webSearch: true, createFiles: true, runCode: true },
+          stopContinuations: 0,
+          updatedAt: 10,
+        },
+      }),
+    );
+
+    expect(screen.getByRole('button', { name: 'Continuar' })).toBeTruthy();
+    // Retry (regenerate) still exists, but Continue is the primary action.
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeTruthy();
+  });
+
+  it('não oferece Continuar sem ponto de retomada', () => {
+    useChatStore.setState({ streaming: null });
+    renderMessage(
+      message({
+        id: 'a-fail',
+        role: 'assistant',
+        content: 'Resposta parcial',
+        status: 'complete',
+        error: { message: 'quota', retryable: true, attempts: 1 },
+      }),
+    );
+
+    expect(screen.queryByRole('button', { name: 'Continuar' })).toBeNull();
+  });
 });

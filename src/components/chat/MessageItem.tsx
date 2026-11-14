@@ -276,6 +276,19 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
     void useChatStore.getState().regenerate();
   };
 
+  /* An interrupted turn keeps its resume point on the row: Continue restarts the
+     loop at the step it stopped, in this same message (same tool cards). */
+  const resumable = Boolean(message.resumeState) && !isStreaming && !readOnly;
+  const resume = () => {
+    window.dispatchEvent(new CustomEvent('zylara:scroll-bottom'));
+    void useChatStore.getState().resumeMessage(message.id);
+  };
+  const resumeAction = resumable ? (
+    <Button variant="primary" size="sm" onClick={resume} disabled={anyStreaming}>
+      {t('message.resume')}
+    </Button>
+  ) : null;
+
   return (
     <motion.div
       initial={reduceMotion ? false : MESSAGE_MOTION.initial}
@@ -341,6 +354,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
                 ) : null}
                 {!readOnly ? (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {resumeAction}
                     {canRetry ? (
                       <Button
                         variant="secondary"
@@ -376,14 +390,16 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
         {messageArtifacts.length > 0 ? <MessageArtifacts artifacts={messageArtifacts} /> : null}
 
         {message.status === 'cancelled' ? (
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge tone="neutral">{t('message.cancelled')}</Badge>
+            {resumeAction}
           </div>
         ) : null}
 
         {message.status === 'incomplete' ? (
-          <div className="mt-2">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <Badge tone="warning">{t('message.incomplete')}</Badge>
+            {resumeAction}
           </div>
         ) : null}
 

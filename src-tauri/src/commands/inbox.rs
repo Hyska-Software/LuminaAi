@@ -153,6 +153,7 @@ async fn deliver_inbox_item(app: AppHandle, item: AgentInboxItem) {
         turn_kind: TurnKind::User,
         goal_request: false,
         turn_id: Some(turn_id),
+        resume_assistant_message_id: None,
     };
     let result = harness::run_turn(deps, payload, settings, Arc::new(SilentEmitter), cancel).await;
     match result {
