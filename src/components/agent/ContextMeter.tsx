@@ -2,9 +2,10 @@ import { useId } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import type { SessionCostView } from '@/lib/sessionCost';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
 import type { ContextBreakdown, ContextStats } from '@/lib/types';
-import { cn, formatTokens } from '@/lib/utils';
+import { cn, formatCost, formatTokens } from '@/lib/utils';
 import { CacheChipSegment, CacheDiagnostics, cacheStateSentence } from './CacheHitChip';
 
 export interface ContextMeterProps {
@@ -15,6 +16,12 @@ export interface ContextMeterProps {
    * "sem amostras" enquanto o primeiro request não chega.
    */
   cache?: CacheConversationUi | null;
+  /**
+   * Session spending of every turn (subagents included), priced with the
+   * official catalog. `undefined`/`null` hides the cost segment (hosts that do
+   * not aggregate usage).
+   */
+  cost?: SessionCostView | null;
   /** Mensagens resumidas na última compactação (quando o host souber). */
   compacted?: number | null;
   className?: string;
@@ -110,16 +117,41 @@ function ContextRing({ percent, tier }: { percent: number; tier: Tier }) {
  * estado, última quebra, TTL e nº de amostras). Componente puro: os eventos
  * `context_stats`/`cache_stats` do backend atualizam os stores e o componente
  * rerenderiza no lugar (larguras animadas, valores tabulares, sem layout shift).
+ * The optional `cost` prop adds the session spending segment (USD, official
+ * catalog prices, subagents included) and its input/output/cache breakdown.
  */
-export function ContextMeter({ stats, cache, compacted, className }: ContextMeterProps) {
+export function ContextMeter({ stats, cache, cost, compacted, className }: ContextMeterProps) {
   const { t } = useTranslation('agents');
-  const cacheDescriptionId = useId();
+  const descriptionId = useId();
   const hasCache = cache !== undefined;
   const percent = clampPercent(stats.percent);
   const tier = tierFor(percent);
   const tierLabel = t(tier.labelKey as never);
   const compactedCount = compacted ?? stats.compacted ?? 0;
   const note = compactedCount > 0 ? t('context.compacted', { count: compactedCount }) : null;
+  const costLabel = cost ? (cost.priced ? formatCost(cost.totalUsd) : '—') : null;
+  const costRows = cost
+    ? [
+        { key: 'input' as const, label: t('context.cost.rows.input'), segment: cost.input },
+        { key: 'output' as const, label: t('context.cost.rows.output'), segment: cost.output },
+        { key: 'cacheRead' as const, label: t('context.cost.rows.cacheRead'), segment: cost.cacheRead },
+        {
+          key: 'cacheWrite' as const,
+          label: t('context.cost.rows.cacheWrite'),
+          segment: cost.cacheWrite,
+        },
+      ].filter((row) => row.segment.tokens > 0)
+    : [];
+  const description = [
+    hasCache ? cacheStateSentence(cache) : null,
+    cost
+      ? cost.priced
+        ? t('context.cost.aria', { cost: costLabel })
+        : t('context.cost.ariaUnpriced')
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const breakdown = stats.breakdown;
   const hasBreakdown = breakdown != null;
@@ -162,10 +194,10 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
         <button
           type="button"
           aria-label={t('context.usedAria', { percent })}
-          aria-describedby={hasCache ? cacheDescriptionId : undefined}
+          aria-describedby={description ? descriptionId : undefined}
           className={cn(
             'flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full px-2 text-[11px] font-medium tabular-nums',
-            hasCache ? 'min-w-[7rem]' : 'min-w-[4.25rem]',
+            hasCache || cost ? 'min-w-[7rem]' : 'min-w-[4.25rem]',
             'text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
             tier.key === 'critical' ? 'bg-danger-soft text-danger' : '',
@@ -175,13 +207,25 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
           <ContextRing percent={percent} tier={tier} />
           <span className="tabular-nums">{percent}%</span>
           <span className="sr-only"> — {tierLabel}</span>
-          {hasCache ? (
+          {hasCache ? <CacheChipSegment cache={cache} /> : null}
+          {cost ? (
             <>
-              <CacheChipSegment cache={cache} />
-              <span id={cacheDescriptionId} className="sr-only">
-                {cacheStateSentence(cache)}
+              <span aria-hidden className="h-3 w-px shrink-0 bg-border" />
+              <span
+                className={cn(
+                  'min-w-[2.75rem] shrink-0 text-right tabular-nums',
+                  !cost.priced && 'text-foreground-subtle',
+                )}
+                title={t('context.cost.title')}
+              >
+                {costLabel}
               </span>
             </>
+          ) : null}
+          {description ? (
+            <span id={descriptionId} className="sr-only">
+              {description}
+            </span>
           ) : null}
         </button>
       </PopoverTrigger>
@@ -246,6 +290,53 @@ export function ContextMeter({ stats, cache, compacted, className }: ContextMete
               </li>
             ))}
           </ul>
+
+          {cost ? (
+            <div className="flex flex-col gap-1 border-t border-border pt-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="min-w-0 text-[13px] font-semibold text-foreground">
+                  {t('context.cost.title')}
+                </p>
+                <p
+                  className={cn(
+                    'shrink-0 text-[11px] font-medium tabular-nums',
+                    cost.priced ? 'text-foreground' : 'text-foreground-subtle',
+                  )}
+                >
+                  {costLabel}
+                </p>
+              </div>
+              <ul aria-label={t('context.cost.breakdownAria')} className="flex flex-col gap-1">
+                {costRows.map((row) => (
+                  <li
+                    key={row.key}
+                    className="flex min-w-0 items-baseline justify-between gap-3 text-[11px] leading-snug"
+                  >
+                    <span className="min-w-0 truncate text-foreground-muted">{row.label}</span>
+                    <span className="shrink-0 tabular-nums text-foreground-muted">
+                      {t('context.cost.rowValue', {
+                        tokens: formatTokens(row.segment.tokens),
+                        cost: row.segment.priced ? formatCost(row.segment.usd) : '—',
+                      })}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {cost.subagents > 0 ? (
+                <p className="text-[10.5px] leading-snug text-foreground-subtle">
+                  {t('context.cost.subagents', { n: cost.subagents })}
+                </p>
+              ) : null}
+              {cost.unpriced ? (
+                <p className="text-[10.5px] leading-snug text-foreground-subtle">
+                  {t('context.cost.unpricedNote')}
+                </p>
+              ) : null}
+              <p className="text-[10.5px] leading-snug text-foreground-subtle">
+                {t('context.cost.note')}
+              </p>
+            </div>
+          ) : null}
 
           {hasCache ? (
             <div className="border-t border-border pt-2">

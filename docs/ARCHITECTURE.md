@@ -604,7 +604,9 @@ cache-first no composer). A verdade é o `usage` reportado pelo provedor:
   cauda, nunca no system prompt (o system precede o histórico nos 4 protocolos).
 - **Painel**: `ContextMeter` (Code) e `CacheHitChip` (Chat) mostram hit do último
   request, sessão ponderada, teto `P/(P+Δ)`, estado, última quebra, TTL, economia
-  estimada e “copiar usage bruto”. `Settings.cache` controla o indicador, o TTL
+  estimada e “copiar usage bruto”. O `ContextMeter` também mostra o custo da
+  sessão em USD (mensagens + subagentes, preços oficiais do catálogo por modelo)
+  com entrada, saída e cache no popover. `Settings.cache` controla o indicador, o TTL
   Anthropic e a retenção OpenAI.
 
 Plano/evidência: `docs/goals/prompt-cache/{PLAN,GOAL,EVIDENCE}.md`; pesquisa por

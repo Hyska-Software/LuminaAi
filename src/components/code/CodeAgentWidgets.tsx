@@ -6,7 +6,7 @@
  * envia as decisões pelo `api` — mantendo o `ChatView` livre de regras de
  * sessão (docs/goals/code-harness/WORKBENCH.md §5).
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -22,7 +22,8 @@ import {
 import { goalNeedsAttention } from '@/lib/goalRunner';
 import { t } from '@/lib/i18n';
 import { Button } from '@/components/ui';
-import { useAppStore, useCodeStore, useUiStore } from '@/lib/store';
+import { catalogCost, sessionCostFromMessages } from '@/lib/sessionCost';
+import { useAppStore, useChatStore, useCodeStore, useUiStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
 import type {
   ApprovalDecision,
@@ -260,15 +261,19 @@ export function CodeSessionCards({ conversationId }: { conversationId: string })
 }
 
 /**
- * Medidor do header: chip compacto com anel de contexto + `%` de cache.
+ * Medidor do header: chip compacto com anel de contexto + `%` de cache + custo
+ * da sessão (USD).
  *
  * O `cacheStore` é a fonte do cache (evento `cache_stats` por request +
  * restauração via `get_cache_stats`); `Settings.cache.showIndicator` só
- * esconde o indicador, a medição continua. Sem contexto (payload antigo ou
- * sessão sem snapshot) o chip cai para a variante cache-first. O container não
- * esconde mais o medidor abaixo de 1024px (`hidden lg:block` removido): o
- * requisito é mostrar em tempo real, então ele encolhe/reserva largura em vez
- * de sumir.
+ * esconde o indicador, a medição continua. O custo vem das mensagens
+ * persistidas (uso por turno já inclui os subagentes) e dos preços oficiais do
+ * catálogo (`catalogCost`), com o catálogo vivo do `appStore` na frente do
+ * snapshot embutido. Sem contexto (payload antigo ou sessão sem snapshot) o
+ * chip cai para a variante cache-first; sem uso cobrado o custo fica oculto. O
+ * container não esconde mais o medidor abaixo de 1024px (`hidden lg:block`
+ * removido): o requisito é mostrar em tempo real, então ele encolhe/reserva
+ * largura em vez de sumir.
  */
 export function CodeContextMeterChip({
   conversationId,
@@ -283,6 +288,15 @@ export function CodeContextMeterChip({
   const showCacheIndicator = useAppStore(
     (state) => state.settings.cache?.showIndicator !== false,
   );
+  const providers = useAppStore((state) => state.providers);
+  const messages = useChatStore((state) => state.messagesByConversation[conversationId]);
+  const cost = useMemo(
+    () =>
+      sessionCostFromMessages(messages, (providerId, modelId) =>
+        catalogCost(providers, providerId, modelId),
+      ),
+    [messages, providers],
+  );
   const cacheVisible = showCache && showCacheIndicator && cache != null;
 
   if (!stats) {
@@ -296,7 +310,7 @@ export function CodeContextMeterChip({
 
   return (
     <div className="hidden sm:block">
-      <ContextMeter stats={stats} cache={cacheVisible ? cache : undefined} />
+      <ContextMeter stats={stats} cache={cacheVisible ? cache : undefined} cost={cost} />
     </div>
   );
 }

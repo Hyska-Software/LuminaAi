@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { SessionCostView } from '@/lib/sessionCost';
 import type { CacheSample, CacheStats, ContextStats } from '@/lib/types';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
 import { ContextMeter } from './ContextMeter';
@@ -68,6 +69,21 @@ function makeCache(overrides: Partial<CacheConversationUi> = {}): CacheConversat
     samples: [makeCacheSample()],
     lastBreak: null,
     restored: true,
+    ...overrides,
+  };
+}
+
+function makeCost(overrides: Partial<SessionCostView> = {}): SessionCostView {
+  return {
+    input: { tokens: 4_000, usd: 0.0012, priced: true },
+    cacheRead: { tokens: 240_000, usd: 0.0014, priced: true },
+    cacheWrite: { tokens: 6_000, usd: 0.0008, priced: true },
+    output: { tokens: 12_000, usd: 0.0144, priced: true },
+    totalUsd: 0.0178,
+    totalTokens: 262_000,
+    subagents: 2,
+    priced: true,
+    unpriced: false,
     ...overrides,
   };
 }
@@ -420,6 +436,91 @@ describe('ContextMeter — cache de prompt compacto', () => {
     expect(trigger(55)).toBeTruthy();
     expect(screen.getByRole('dialog')).toBe(dialog);
     expect(within(dialog).getByText('41% de acerto')).toBeTruthy();
+  });
+});
+
+describe('ContextMeter — custo da sessão', () => {
+  it('mostra apenas o valor em dólar no chip e o descreve para leitores de tela', () => {
+    render(<ContextMeter stats={makeStats()} cost={makeCost()} />);
+
+    const button = trigger();
+    expect(button.textContent).toContain('$0.02');
+    expect(button.textContent).not.toContain('262K');
+    expect(cacheDescription(button)).toBe('Custo da sessão: $0.02');
+  });
+
+  it('mantém o description do cache e concatena o custo quando os dois existem', () => {
+    render(<ContextMeter stats={makeStats()} cache={makeCache()} cost={makeCost()} />);
+
+    const button = trigger();
+    expect(button.textContent).toContain('98%');
+    expect(button.textContent).toContain('$0.02');
+    expect(cacheDescription(button)).toBe(
+      'Cache de prompt: 98% de acerto — estável. Custo da sessão: $0.02',
+    );
+    expect(button.className).toContain('min-w-[7rem]');
+  });
+
+  it('abre o detalhamento por entrada, saída, cache hit e gravação', async () => {
+    render(<ContextMeter stats={makeStats()} cost={makeCost()} />);
+    const dialog = await openPopover();
+
+    expect(within(dialog).getByText('Custo da sessão')).toBeTruthy();
+    expect(within(dialog).getByText('$0.02')).toBeTruthy();
+    const list = within(dialog).getByRole('list', { name: 'Detalhamento do custo' });
+    const rows = Array.from(list.querySelectorAll('li'));
+    expect(rows.map((row) => row.firstElementChild?.textContent)).toEqual([
+      'Entrada',
+      'Saída',
+      'Cache hit',
+      'Gravação no cache',
+    ]);
+    expect(rows[0].textContent).toContain('4.0K · $0.0012');
+    expect(rows[1].textContent).toContain('12K · $0.01');
+    expect(rows[2].textContent).toContain('240K · $0.0014');
+    expect(rows[3].textContent).toContain('6.0K · $0.0008');
+    expect(within(dialog).getByText('Subagentes incluídos: 2')).toBeTruthy();
+    expect(
+      within(dialog).getByText('Preços oficiais de API do catálogo; assinaturas não são cobradas por token.'),
+    ).toBeTruthy();
+  });
+
+  it('sem preço no catálogo mostra — no chip e a nota no detalhamento', async () => {
+    render(
+      <ContextMeter
+        stats={makeStats()}
+        cost={makeCost({
+          input: { tokens: 100, usd: 0, priced: false },
+          cacheRead: { tokens: 0, usd: 0, priced: false },
+          cacheWrite: { tokens: 0, usd: 0, priced: false },
+          output: { tokens: 50, usd: 0, priced: false },
+          totalUsd: 0,
+          totalTokens: 150,
+          subagents: 0,
+          priced: false,
+          unpriced: true,
+        })}
+      />,
+    );
+
+    const button = trigger();
+    expect(button.textContent).toContain('—');
+    expect(cacheDescription(button)).toBe('Custo da sessão: sem preço no catálogo para este modelo');
+
+    const dialog = await openPopover();
+    expect(within(dialog).getByText('Custo da sessão')).toBeTruthy();
+    expect(
+      within(dialog).getByText('Alguns tokens não têm preço oficial no catálogo e não entram no total.'),
+    ).toBeTruthy();
+    expect(within(dialog).queryByText('Subagentes incluídos: 0')).toBeNull();
+  });
+
+  it('sem o prop cost o medidor continua igual (hosts antigos)', async () => {
+    render(<ContextMeter stats={makeStats()} />);
+    const dialog = await openPopover();
+
+    expect(within(dialog).queryByText('Custo da sessão')).toBeNull();
+    expect(trigger().getAttribute('aria-describedby')).toBeNull();
   });
 });
 

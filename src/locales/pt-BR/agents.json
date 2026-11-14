@@ -388,7 +388,23 @@
     "approxTokens": "aproximadamente {{tokens}} tokens",
     "outputCap": "Limite de saída: ~{{tokens}}",
     "compacted": "Contexto compactado · {{count}} mensagens resumidas",
-    "compacted_zero": "Contexto compactado · {{count}} mensagens resumidas"
+    "compacted_zero": "Contexto compactado · {{count}} mensagens resumidas",
+    "cost": {
+      "title": "Custo da sessão",
+      "aria": "Custo da sessão: {{cost}}",
+      "ariaUnpriced": "Custo da sessão: sem preço no catálogo para este modelo",
+      "breakdownAria": "Detalhamento do custo",
+      "rows": {
+        "input": "Entrada",
+        "output": "Saída",
+        "cacheRead": "Cache hit",
+        "cacheWrite": "Gravação no cache"
+      },
+      "rowValue": "{{tokens}} · {{cost}}",
+      "subagents": "Subagentes incluídos: {{n}}",
+      "unpricedNote": "Alguns tokens não têm preço oficial no catálogo e não entram no total.",
+      "note": "Preços oficiais de API do catálogo; assinaturas não são cobradas por token."
+    }
   },
   "goal": {
     "fallbackTitle": "Objetivo",

@@ -388,7 +388,23 @@
     "approxTokens": "approximately {{tokens}} tokens",
     "outputCap": "Output limit: ~{{tokens}}",
     "compacted": "Context compacted · {{count}} messages summarized",
-    "compacted_zero": "Context compacted · {{count}} messages summarized"
+    "compacted_zero": "Context compacted · {{count}} messages summarized",
+    "cost": {
+      "title": "Session cost",
+      "aria": "Session cost: {{cost}}",
+      "ariaUnpriced": "Session cost: no catalog price for this model",
+      "breakdownAria": "Cost breakdown",
+      "rows": {
+        "input": "Input",
+        "output": "Output",
+        "cacheRead": "Cache hit",
+        "cacheWrite": "Cache write"
+      },
+      "rowValue": "{{tokens}} · {{cost}}",
+      "subagents": "Subagents included: {{n}}",
+      "unpricedNote": "Some tokens have no official catalog price and are not included in the total.",
+      "note": "Official API prices from the catalog; subscriptions are not billed per token."
+    }
   },
   "goal": {
     "fallbackTitle": "Goal",

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
-import type { CacheStats, ContextStats } from '@/lib/types';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import type { CacheStats, ChatMessage, ContextStats, UsageInfo } from '@/lib/types';
 import type { CacheConversationUi } from '@/lib/store/cacheStore';
-import { emptyCodeSession, useAppStore, useCodeStore } from '@/lib/store';
+import { emptyCodeSession, useAppStore, useChatStore, useCodeStore } from '@/lib/store';
 import { useCacheStore } from '@/lib/store/cacheStore';
 import { CodeContextMeterChip } from './CodeAgentWidgets';
 
@@ -72,8 +72,33 @@ function seedCode(context: ContextStats | null): void {
   });
 }
 
+function assistantMessage(usage: UsageInfo, overrides: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: 'm-cost',
+    conversationId: CONVERSATION_ID,
+    role: 'assistant',
+    content: '',
+    status: 'complete',
+    toolCalls: [],
+    citations: [],
+    attachments: [],
+    providerId: 'opencode-go',
+    modelId: 'deepseek-v4.1-flash',
+    usage,
+    createdAt: 0,
+    ...overrides,
+  };
+}
+
+function seedMessages(messages: ChatMessage[]): void {
+  useChatStore.setState({
+    messagesByConversation: { [CONVERSATION_ID]: messages },
+  });
+}
+
 beforeEach(() => {
   useCodeStore.setState({ byConversation: {} });
+  useChatStore.setState({ messagesByConversation: {} });
   useCacheStore.getState().reset();
   setShowCacheIndicator(true);
 });
@@ -160,5 +185,76 @@ describe('CodeContextMeterChip — medidor do header Code', () => {
     setShowCacheIndicator(false);
     const { container } = render(<CodeContextMeterChip conversationId={CONVERSATION_ID} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it('mostra o custo da sessão com os preços do catálogo e o detalhamento', async () => {
+    seedCode(makeContext());
+    seedMessages([assistantMessage({ inputTokens: 1_000, outputTokens: 1_000 })]);
+    render(<CodeContextMeterChip conversationId={CONVERSATION_ID} />);
+
+    const button = screen.getByRole('button', { name: 'Contexto usado: 44%' });
+    // DeepSeek V4.1 Flash: $0.30/M input + $1.20/M output.
+    expect(button.textContent).toContain('$0.0015');
+    expect(button.getAttribute('aria-describedby')).toBeTruthy();
+
+    fireEvent.click(button);
+    const dialog = await screen.findByRole('dialog', { name: 'Detalhes do contexto' });
+    expect(within(dialog).getByText('Custo da sessão')).toBeTruthy();
+    expect(within(dialog).getByText('Entrada')).toBeTruthy();
+    expect(within(dialog).getByText('Saída')).toBeTruthy();
+    expect(within(dialog).getByText('1.0K · $0.0003')).toBeTruthy();
+    expect(within(dialog).getByText('1.0K · $0.0012')).toBeTruthy();
+    expect(
+      within(dialog).getByText('Preços oficiais de API do catálogo; assinaturas não são cobradas por token.'),
+    ).toBeTruthy();
+  });
+
+  it('inclui os subagentes no custo do turno', async () => {
+    seedCode(makeContext());
+    seedMessages([
+      assistantMessage(
+        { inputTokens: 1_000_000, outputTokens: 100_000 },
+        {
+          toolCalls: [
+            {
+              id: 'call-1',
+              name: 'task',
+              arguments: '{}',
+              status: 'done',
+              presentation: {
+                kind: 'subagent',
+                description: 'Scout',
+                subagentType: 'explore',
+                providerId: 'opencode-go',
+                modelId: 'deepseek-v4.1-flash',
+                usage: { inputTokens: 300_000, outputTokens: 50_000 },
+              },
+            },
+          ],
+        },
+      ),
+    ]);
+    render(<CodeContextMeterChip conversationId={CONVERSATION_ID} />);
+
+    const button = screen.getByRole('button', { name: 'Contexto usado: 44%' });
+    // 1M input + 100K output (parent turn already merged the child) priced once.
+    expect(button.textContent).toContain('$0.42');
+
+    fireEvent.click(button);
+    const dialog = await screen.findByRole('dialog', { name: 'Detalhes do contexto' });
+    expect(within(dialog).getByText('Subagentes incluídos: 1')).toBeTruthy();
+  });
+
+  it('showCache=false mantém o custo do Agentes ao lado do contexto', () => {
+    seedCode(makeContext());
+    seedMessages([assistantMessage({ inputTokens: 1_000, outputTokens: 1_000 })]);
+    useCacheStore.setState({ byConversation: { [CONVERSATION_ID]: makeCache() } });
+    render(<CodeContextMeterChip conversationId={CONVERSATION_ID} showCache={false} />);
+
+    const button = screen.getByRole('button', { name: 'Contexto usado: 44%' });
+    expect(button.textContent).toContain('44%');
+    expect(button.textContent).toContain('$0.0015');
+    expect(button.textContent).not.toContain('98%');
+    expect(button.getAttribute('aria-describedby')).toBeTruthy();
   });
 });
